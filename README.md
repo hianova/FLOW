@@ -167,6 +167,7 @@ make ebpf-pmu-test
 make lsp-test
 make jit-migration-test
 make bootstrap-sandbox-test
+make quantum-dimension-test
 make fuzz-test
 ```
 

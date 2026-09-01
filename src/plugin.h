@@ -23,13 +23,21 @@ typedef enum {
     FLOW_DIM_BOOLEAN     /* 0 or 1 */
 } FlowDimensionKind;
 
+/* Dimension Semantics: Physical Classification & Migration Class */
+typedef enum {
+    FLOW_DIM_CLASS_TACTILE_PARAM = 0,    /* Real-time parameter (0 migration penalty, no JIT reload needed) */
+    FLOW_DIM_CLASS_STRUCTURAL_JIT = 1    /* Structural gene (requires JIT recompilation & state migration) */
+} FlowDimensionClass;
+
 typedef struct {
     char name[FLOW_DIM_NAME_MAX];
     FlowDimensionKind kind;
+    FlowDimensionClass dim_class;
     uint64_t min_val;
     uint64_t max_val;
     uint64_t step;
     uint64_t default_val;
+    uint64_t base_migration_cost_ns;
 } FlowPlanDimension;
 
 typedef struct {

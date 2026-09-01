@@ -198,9 +198,9 @@ int flow_component_dimensions(const SemanticIR *ir, const Component *component,
     if (plugin != NULL && plugin->enumerate_dimensions != NULL)
         return plugin->enumerate_dimensions(ir, component, dims_out);
     dims_out->count = 3;
-    dims_out->dimensions[0] = (FlowPlanDimension){"capacity", FLOW_DIM_EXPONENT, 1, 26, 1, 12};
-    dims_out->dimensions[1] = (FlowPlanDimension){"threads", FLOW_DIM_LINEAR, 1, 64, 1, 1};
-    dims_out->dimensions[2] = (FlowPlanDimension){"shards", FLOW_DIM_LINEAR, 1, 32, 1, 1};
+    dims_out->dimensions[0] = (FlowPlanDimension){"capacity", FLOW_DIM_EXPONENT, FLOW_DIM_CLASS_STRUCTURAL_JIT, 1, 26, 1, 12, 500};
+    dims_out->dimensions[1] = (FlowPlanDimension){"threads", FLOW_DIM_LINEAR, FLOW_DIM_CLASS_STRUCTURAL_JIT, 1, 64, 1, 1, 200};
+    dims_out->dimensions[2] = (FlowPlanDimension){"shards", FLOW_DIM_LINEAR, FLOW_DIM_CLASS_STRUCTURAL_JIT, 1, 32, 1, 1, 200};
     return 1;
 }
 

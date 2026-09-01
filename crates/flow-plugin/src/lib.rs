@@ -21,14 +21,23 @@ pub enum FlowDimensionKind {
 }
 
 #[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum FlowDimensionClass {
+    TactileParam = 0,    // Real-time parameter (0 migration penalty, no JIT required)
+    StructuralJIT = 1,   // Structural gene (requires JIT compilation & state migration)
+}
+
+#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct FlowPlanDimension {
     pub name: [c_char; FLOW_DIM_NAME_MAX],
     pub kind: FlowDimensionKind,
+    pub dim_class: FlowDimensionClass,
     pub min_val: u64,
     pub max_val: u64,
     pub step: u64,
     pub default_val: u64,
+    pub base_migration_cost_ns: u64,
 }
 
 #[repr(C)]

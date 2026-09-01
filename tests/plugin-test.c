@@ -51,8 +51,8 @@ static int plugin_dimensions(const SemanticIR *ir, const Component *component,
     (void)component;
     if (dims_out == NULL) return 0;
     dims_out->count = 2;
-    dims_out->dimensions[0] = (FlowPlanDimension){"capacity", FLOW_DIM_EXPONENT, 1, 20, 1, 4};
-    dims_out->dimensions[1] = (FlowPlanDimension){"custom_batch", FLOW_DIM_LINEAR, 1, 128, 8, 16};
+    dims_out->dimensions[0] = (FlowPlanDimension){"capacity", FLOW_DIM_EXPONENT, FLOW_DIM_CLASS_STRUCTURAL_JIT, 1, 20, 1, 4, 200};
+    dims_out->dimensions[1] = (FlowPlanDimension){"custom_batch", FLOW_DIM_LINEAR, FLOW_DIM_CLASS_TACTILE_PARAM, 1, 128, 8, 16, 0};
     return 1;
 }
 
@@ -211,9 +211,9 @@ static int custom_tile_dimensions(const SemanticIR *ir, const Component *compone
     (void)ir;
     if (dims_out == NULL || component == NULL) return 0;
     dims_out->count = 3;
-    dims_out->dimensions[0] = (FlowPlanDimension){"tile", FLOW_DIM_LINEAR, 8, 64, 8, 16};
-    dims_out->dimensions[1] = (FlowPlanDimension){"batch", FLOW_DIM_LINEAR, 1, 1024, 16, 32};
-    dims_out->dimensions[2] = (FlowPlanDimension){"layout", FLOW_DIM_DISCRETE, 0, 1, 1, 0};
+    dims_out->dimensions[0] = (FlowPlanDimension){"tile", FLOW_DIM_LINEAR, FLOW_DIM_CLASS_TACTILE_PARAM, 8, 64, 8, 16, 0};
+    dims_out->dimensions[1] = (FlowPlanDimension){"batch", FLOW_DIM_LINEAR, FLOW_DIM_CLASS_TACTILE_PARAM, 1, 1024, 16, 32, 0};
+    dims_out->dimensions[2] = (FlowPlanDimension){"layout", FLOW_DIM_DISCRETE, FLOW_DIM_CLASS_STRUCTURAL_JIT, 0, 1, 1, 0, 300};
     return 1;
 }
 

@@ -496,37 +496,46 @@ double flow_bitspace_calculate_transition_penalty(const FlowTransitionCostModel 
     }
 
     int is_structural = 0;
-    /* Check 1: Component changed */
+    double dimension_migration_cost = 0.0;
+
+    /* Check 1: Component changed (Macro Structural Transition) */
     if (model->baseline_plan->component != candidate->component) {
         is_structural = 1;
-    }
+        dimension_migration_cost += 500.0;
+    } else {
+        /* Check 2: Inspect individual dimensions for Plugin-declared semantics */
+        for (size_t i = 0; i < candidate->dimension_set.count && i < candidate->assignment.count; ++i) {
+            uint64_t cand_val = candidate->assignment.values[i];
+            uint64_t base_val = 0;
+            int found_base = 0;
 
-    /* Check 2: Shard partition / thread count changed */
-    uint64_t base_threads = 1, cand_threads = 1;
-    for (size_t i = 0; i < model->baseline_plan->dimension_set.count; ++i) {
-        if (strcmp(model->baseline_plan->dimension_set.dimensions[i].name, "threads") == 0) {
-            base_threads = model->baseline_plan->assignment.values[i];
-            break;
+            for (size_t j = 0; j < model->baseline_plan->dimension_set.count; ++j) {
+                if (strcmp(model->baseline_plan->dimension_set.dimensions[j].name,
+                           candidate->dimension_set.dimensions[i].name) == 0) {
+                    base_val = model->baseline_plan->assignment.values[j];
+                    found_base = 1;
+                    break;
+                }
+            }
+
+            if (found_base && base_val != cand_val) {
+                const FlowPlanDimension *d = &candidate->dimension_set.dimensions[i];
+                if (d->dim_class == FLOW_DIM_CLASS_STRUCTURAL_JIT) {
+                    is_structural = 1;
+                    dimension_migration_cost += (d->base_migration_cost_ns > 0) ? (double)d->base_migration_cost_ns : 200.0;
+                }
+            }
         }
-    }
-    for (size_t i = 0; i < candidate->dimension_set.count; ++i) {
-        if (strcmp(candidate->dimension_set.dimensions[i].name, "threads") == 0) {
-            cand_threads = candidate->assignment.values[i];
-            break;
-        }
-    }
-    if (base_threads != cand_threads) {
-        is_structural = 1;
     }
 
     if (is_structural_out) *is_structural_out = is_structural;
 
     if (!is_structural) {
-        /* Pure parameter mutation: 0 transition penalty */
+        /* Pure tactile parameter mutation: 0 transition penalty */
         return 0.0;
     }
 
-    double jit_penalty = model->jit_penalty_energy > 0.0 ? model->jit_penalty_energy : 50.0;
+    double jit_penalty = (model->jit_penalty_energy > 0.0) ? model->jit_penalty_energy : (50.0 + dimension_migration_cost);
     double bw_cost_per_byte = model->bandwidth_cost_per_byte > 0.0 ? model->bandwidth_cost_per_byte : 0.0001;
     double total_migration_cost = jit_penalty + (double)model->live_state_bytes * bw_cost_per_byte;
 

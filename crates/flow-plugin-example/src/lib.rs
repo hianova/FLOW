@@ -55,28 +55,34 @@ unsafe extern "C" fn rust_plugin_enumerate_dims(_ir: *const c_void, _comp: *cons
 
     // Dim 0: vector_lanes (exponent 2..8 -> 4, 8, 16, 32.. 256)
     dims.dimensions[0].kind = FlowDimensionKind::Exponent;
+    dims.dimensions[0].dim_class = FlowDimensionClass::StructuralJIT;
     dims.dimensions[0].min_val = 2;
     dims.dimensions[0].max_val = 8;
     dims.dimensions[0].default_val = 4;
     dims.dimensions[0].step = 1;
+    dims.dimensions[0].base_migration_cost_ns = 300;
     let name0 = b"vector_lanes\0";
     ptr::copy_nonoverlapping(name0.as_ptr() as *const c_char, dims.dimensions[0].name.as_mut_ptr(), name0.len());
 
     // Dim 1: tile_size (linear 16..256 with step 16)
     dims.dimensions[1].kind = FlowDimensionKind::Linear;
+    dims.dimensions[1].dim_class = FlowDimensionClass::TactileParam;
     dims.dimensions[1].min_val = 16;
     dims.dimensions[1].max_val = 256;
     dims.dimensions[1].default_val = 64;
     dims.dimensions[1].step = 16;
+    dims.dimensions[1].base_migration_cost_ns = 0;
     let name1 = b"tile_size\0";
     ptr::copy_nonoverlapping(name1.as_ptr() as *const c_char, dims.dimensions[1].name.as_mut_ptr(), name1.len());
 
     // Dim 2: threads (linear 1..16)
     dims.dimensions[2].kind = FlowDimensionKind::Linear;
+    dims.dimensions[2].dim_class = FlowDimensionClass::StructuralJIT;
     dims.dimensions[2].min_val = 1;
     dims.dimensions[2].max_val = 16;
     dims.dimensions[2].default_val = 4;
     dims.dimensions[2].step = 1;
+    dims.dimensions[2].base_migration_cost_ns = 200;
     let name2 = b"threads\0";
     ptr::copy_nonoverlapping(name2.as_ptr() as *const c_char, dims.dimensions[2].name.as_mut_ptr(), name2.len());
 

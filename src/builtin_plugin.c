@@ -91,14 +91,14 @@ static int builtin_enumerate_dimensions(const SemanticIR *ir,
     (void)ir;
     if (dims_out == NULL || component == NULL) return 0;
     dims_out->count = 8;
-    dims_out->dimensions[0] = (FlowPlanDimension){"capacity", FLOW_DIM_EXPONENT, 1, 20, 1, 12};
-    dims_out->dimensions[1] = (FlowPlanDimension){"threads", FLOW_DIM_EXPONENT, 0, 6, 1, 0};
-    dims_out->dimensions[2] = (FlowPlanDimension){"shards", FLOW_DIM_EXPONENT, 0, 6, 1, 0};
-    dims_out->dimensions[3] = (FlowPlanDimension){"buffer_bytes", FLOW_DIM_LINEAR, 1024, 65536, 1024, 16384};
-    dims_out->dimensions[4] = (FlowPlanDimension){"initial_capacity", FLOW_DIM_EXPONENT, 1, 16, 1, 2};
-    dims_out->dimensions[5] = (FlowPlanDimension){"growth_percent", FLOW_DIM_LINEAR, 110, 200, 10, 150};
-    dims_out->dimensions[6] = (FlowPlanDimension){"batch_size", FLOW_DIM_LINEAR, 1024, 65536, 1024, 16384};
-    dims_out->dimensions[7] = (FlowPlanDimension){"arena_bytes", FLOW_DIM_LINEAR, 0, 1048576, 4096, 0};
+    dims_out->dimensions[0] = (FlowPlanDimension){"capacity", FLOW_DIM_EXPONENT, FLOW_DIM_CLASS_STRUCTURAL_JIT, 1, 20, 1, 12, 500};
+    dims_out->dimensions[1] = (FlowPlanDimension){"threads", FLOW_DIM_EXPONENT, FLOW_DIM_CLASS_STRUCTURAL_JIT, 0, 6, 1, 0, 200};
+    dims_out->dimensions[2] = (FlowPlanDimension){"shards", FLOW_DIM_EXPONENT, FLOW_DIM_CLASS_STRUCTURAL_JIT, 0, 6, 1, 0, 200};
+    dims_out->dimensions[3] = (FlowPlanDimension){"buffer_bytes", FLOW_DIM_LINEAR, FLOW_DIM_CLASS_TACTILE_PARAM, 1024, 65536, 1024, 16384, 0};
+    dims_out->dimensions[4] = (FlowPlanDimension){"initial_capacity", FLOW_DIM_EXPONENT, FLOW_DIM_CLASS_TACTILE_PARAM, 1, 16, 1, 2, 0};
+    dims_out->dimensions[5] = (FlowPlanDimension){"growth_percent", FLOW_DIM_LINEAR, FLOW_DIM_CLASS_TACTILE_PARAM, 110, 200, 10, 150, 0};
+    dims_out->dimensions[6] = (FlowPlanDimension){"batch_size", FLOW_DIM_LINEAR, FLOW_DIM_CLASS_TACTILE_PARAM, 1024, 65536, 1024, 16384, 0};
+    dims_out->dimensions[7] = (FlowPlanDimension){"arena_bytes", FLOW_DIM_LINEAR, FLOW_DIM_CLASS_TACTILE_PARAM, 0, 1048576, 4096, 0, 0};
     return 1;
 }
 
