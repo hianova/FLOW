@@ -45,6 +45,25 @@ typedef struct {
 } FlowSchema;
 
 typedef enum {
+    FLOW_LAYOUT_DEFAULT = 0,
+    FLOW_LAYOUT_AOS = 1,          /* Array of Structs */
+    FLOW_LAYOUT_SOA = 2,          /* Struct of Arrays */
+    FLOW_LAYOUT_COLUMNAR = 3      /* Columnar Partitioned */
+} FlowLayoutKind;
+
+typedef struct {
+    FlowLayoutKind source_layout;
+    FlowLayoutKind target_layout;
+    size_t state_bytes;
+    size_t column_count;
+    size_t modified_column_count;
+    double clone_cost_ns;
+    double transform_cost_ns;
+    double amortized_payback_ns_per_call;
+    double break_even_calls;
+} FlowMigrationCostModel;
+
+typedef enum {
     FLOW_MIGRATE_AUTO = 0,             /* Auto: snapshot if supported, else stop-the-world */
     FLOW_MIGRATE_SNAPSHOT_COW = 1,     /* Copy-on-write snapshot during concurrent writes */
     FLOW_MIGRATE_STOP_THE_WORLD = 2    /* Quiesced stop-the-world migration */
@@ -56,6 +75,7 @@ typedef struct FlowUnit {
     uint64_t constraint_hash;
     uint64_t capability_hash;
     const char *name;
+    FlowLayoutKind layout;
     int supports_snapshot_cow;
     int (*init)(void *host_context, void **state_out);
     int (*run)(void *host_context, void *state,

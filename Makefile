@@ -13,7 +13,7 @@ PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 INCLUDEDIR ?= $(PREFIX)/include/flow
 
-.PHONY: all clean test demos demo benchmark security-test reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test plugin-test reload-stress-test reload-stress-nightly self-host-check acceptance install uninstall fuzz-test fuzz ensemble-test smt-test mlir-llvm-test topology-test ebpf-pmu-test lsp-test
+.PHONY: all clean test demos demo benchmark security-test reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test plugin-test reload-stress-test reload-stress-nightly self-host-check acceptance install uninstall fuzz-test fuzz ensemble-test smt-test mlir-llvm-test topology-test ebpf-pmu-test lsp-test jit-migration-test
 
 all: $(FLOWC)
 
@@ -123,6 +123,10 @@ lsp-test: | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/lsp-test.c -o $(BUILD_DIR)/lsp-test -lm
 	$(BUILD_DIR)/lsp-test
 
+jit-migration-test: | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/jit-migration-test.c -o $(BUILD_DIR)/jit-migration-test -lm
+	$(BUILD_DIR)/jit-migration-test
+
 fuzz: | $(BUILD_DIR)
 	clang -std=c17 -O2 -fsanitize=fuzzer,address,undefined -DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/fuzz-test.c -o $(BUILD_DIR)/fuzzer-engine -lm
 	@echo "Running LLVM libFuzzer for 5 seconds..."
@@ -140,7 +144,7 @@ self-host-check: $(FLOWC)
 
 acceptance: test benchmark self-host-check security-test
 
-test: $(FLOWC) reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test bitspace-test plugin-test project-test abi-test vertical-slice-test reload-stress-test fuzz-test ensemble-test smt-test mlir-llvm-test topology-test ebpf-pmu-test lsp-test
+test: $(FLOWC) reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test bitspace-test plugin-test project-test abi-test vertical-slice-test reload-stress-test fuzz-test ensemble-test smt-test mlir-llvm-test topology-test ebpf-pmu-test lsp-test jit-migration-test
 	! grep -E -q 'heavy-tail|flip_bit_block|Black Swan' src/search.c README.md ACCEPTANCE.md
 	grep -E -q 'one chaotic 1-bit mutation' src/search.c
 	$(FLOWC) examples/rank.flow -o generated/rank.c

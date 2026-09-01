@@ -93,8 +93,9 @@ slice, compositional security gates, benchmarks, and the bootstrap regression ch
 
 ## Current State and Architecture Scope
 
-### Completed Capabilities
-
+- **In-Memory Zero-I/O JIT Engine (`src/jit.h`, `src/jit.c`)**: Synthesizes and loads executable machine code directly in-process from LLVM IR into executable pages, achieving sub-millisecond hot-swaps with zero disk I/O, and automatically registering JIT IP ranges `[start_ip, end_ip)` for eBPF PMU attribution.
+- **Smart State Layout Migration & Columnar Zero-Copy (`FLOW_LAYOUT_AOS`, `FLOW_LAYOUT_SOA`, `FLOW_LAYOUT_COLUMNAR`)**: High-performance dynamic transformation routines between Array-of-Structs and Struct-of-Arrays with partial columnar zero-copy pointer preservation for untouched fields.
+- **Migration Cost & Payback Amortization Model**: Evaluates live state transformation cost ($0.2\text{ns/byte}$) against steady-state gain to compute break-even horizons, preventing churn when migration overhead exceeds performance benefit.
 - **Lock-Free RCU Fast Path**: Read-side invocations (`flow_reload_call`) use atomic RCU epoch tracking with zero mutex locks on the common path. Test runs observe low single-digit overhead (~3–8% vs direct C call).
 - **Mode-Dispatched Migration & Live Journal**: Explicit branching across `FLOW_MIGRATE_AUTO`, `FLOW_MIGRATE_SNAPSHOT_COW`, and `FLOW_MIGRATE_STOP_THE_WORLD` with bounded live mutation journal logging and automatic fallback.
 - **eBPF Silicon-Grade Telemetry & Anti-Thrashing (`tools/flow_probe.bpf.c`)**: Instruction Pointer (IP) range attribution filtering (`[start_ip, end_ip)`) ensuring PMU hardware samples (L3 misses, IPC) reflect FLOW execution only. Employs Exponential Moving Average (EMA), anomaly streak confirmation, and exponential backoff cooldown to eliminate thrashing.
@@ -160,6 +161,7 @@ make mlir-llvm-test
 make topology-test
 make ebpf-pmu-test
 make lsp-test
+make jit-migration-test
 make fuzz-test
 ```
 
