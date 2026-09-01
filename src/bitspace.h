@@ -116,8 +116,26 @@ typedef struct {
 const char *flow_gate_failure_name(FlowGateFailureReason reason);
 void flow_search_heatmap_report(const FlowSearchHeatmap *heatmap, FILE *out);
 
+/* Transition Cost Model for Emergent Structural vs Parameter Decision-Making */
+typedef struct {
+    int has_active_baseline;
+    const FlowPlan *baseline_plan;
+    size_t live_state_bytes;
+    size_t horizon_calls;
+    double jit_penalty_energy;
+    double bandwidth_cost_per_byte;
+} FlowTransitionCostModel;
+
+double flow_bitspace_calculate_transition_penalty(const FlowTransitionCostModel *model,
+                                                  const FlowPlan *candidate,
+                                                  int *is_structural_out);
+
 int flow_bitspace_search(const FlowBitSpace *space, size_t iterations, uint32_t seed,
                          int measured, const FlowPlan *seed_plan, FlowBitSearchResult *result_out);
+
+int flow_bitspace_search_adaptive(const FlowBitSpace *space, size_t iterations, uint32_t seed,
+                                  int measured, const FlowTransitionCostModel *transition_model,
+                                  FlowBitSearchResult *result_out);
 
 int flow_bitspace_explain_seed(const FlowBitSpace *space, size_t iterations, uint32_t seed,
                                int measured, const FlowPlan *seed_plan, FILE *out);

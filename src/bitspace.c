@@ -487,8 +487,56 @@ static uint64_t flow_bitspace_default_genome(const FlowBitSpace *space) {
     return genome;
 }
 
-int flow_bitspace_search(const FlowBitSpace *space, size_t iterations, uint32_t seed,
-                         int measured, const FlowPlan *seed_plan, FlowBitSearchResult *result_out) {
+double flow_bitspace_calculate_transition_penalty(const FlowTransitionCostModel *model,
+                                                  const FlowPlan *candidate,
+                                                  int *is_structural_out) {
+    if (model == NULL || !model->has_active_baseline || model->baseline_plan == NULL || candidate == NULL) {
+        if (is_structural_out) *is_structural_out = 0;
+        return 0.0;
+    }
+
+    int is_structural = 0;
+    /* Check 1: Component changed */
+    if (model->baseline_plan->component != candidate->component) {
+        is_structural = 1;
+    }
+
+    /* Check 2: Shard partition / thread count changed */
+    uint64_t base_threads = 1, cand_threads = 1;
+    for (size_t i = 0; i < model->baseline_plan->dimension_set.count; ++i) {
+        if (strcmp(model->baseline_plan->dimension_set.dimensions[i].name, "threads") == 0) {
+            base_threads = model->baseline_plan->assignment.values[i];
+            break;
+        }
+    }
+    for (size_t i = 0; i < candidate->dimension_set.count; ++i) {
+        if (strcmp(candidate->dimension_set.dimensions[i].name, "threads") == 0) {
+            cand_threads = candidate->assignment.values[i];
+            break;
+        }
+    }
+    if (base_threads != cand_threads) {
+        is_structural = 1;
+    }
+
+    if (is_structural_out) *is_structural_out = is_structural;
+
+    if (!is_structural) {
+        /* Pure parameter mutation: 0 transition penalty */
+        return 0.0;
+    }
+
+    double jit_penalty = model->jit_penalty_energy > 0.0 ? model->jit_penalty_energy : 50.0;
+    double bw_cost_per_byte = model->bandwidth_cost_per_byte > 0.0 ? model->bandwidth_cost_per_byte : 0.0001;
+    double total_migration_cost = jit_penalty + (double)model->live_state_bytes * bw_cost_per_byte;
+
+    size_t horizon = model->horizon_calls > 0 ? model->horizon_calls : 1000;
+    return total_migration_cost / (double)horizon;
+}
+
+int flow_bitspace_search_adaptive(const FlowBitSpace *space, size_t iterations, uint32_t seed,
+                                  int measured, const FlowTransitionCostModel *transition_model,
+                                  FlowBitSearchResult *result_out) {
     if (space == NULL || result_out == NULL || space->candidate_count == 0) return 0;
     memset(result_out, 0, sizeof(*result_out));
     result_out->iterations = iterations == 0 ? 1 : iterations;
@@ -496,7 +544,9 @@ int flow_bitspace_search(const FlowBitSpace *space, size_t iterations, uint32_t 
     result_out->measured = measured;
 
     uint64_t rng = seed == 0 ? UINT64_C(0x123456789abcdef0) : (uint64_t)seed;
-    uint64_t current_genome = seed_plan != NULL ? seed_plan->genome : flow_bitspace_default_genome(space);
+    uint64_t current_genome = (transition_model != NULL && transition_model->has_active_baseline && transition_model->baseline_plan != NULL)
+                              ? transition_model->baseline_plan->genome
+                              : flow_bitspace_default_genome(space);
     FlowPlan current_plan;
 
     space->decode(space, current_genome, &current_plan);
@@ -545,6 +595,10 @@ int flow_bitspace_search(const FlowBitSpace *space, size_t iterations, uint32_t 
                 if (cand_plan.eval.benchmark_ns > 0) {
                     cand_plan.eval.energy += (double)cand_plan.eval.benchmark_ns / 1000.0;
                 }
+            }
+            /* Add Transition Penalty if Active Baseline exists */
+            if (transition_model != NULL && transition_model->has_active_baseline) {
+                cand_plan.eval.energy += flow_bitspace_calculate_transition_penalty(transition_model, &cand_plan, NULL);
             }
             pareto_update_bitspace(result_out, &cand_plan);
         }
@@ -597,6 +651,19 @@ int flow_bitspace_search(const FlowBitSpace *space, size_t iterations, uint32_t 
             (((double)best_plan.eval.memory_bytes - result_out->best_memory) / result_out->best_memory) * 100.0;
     }
     return best_plan.eval.hard_gate_passed ? 1 : 0;
+}
+
+int flow_bitspace_search(const FlowBitSpace *space, size_t iterations, uint32_t seed,
+                         int measured, const FlowPlan *seed_plan, FlowBitSearchResult *result_out) {
+    FlowTransitionCostModel model = {0};
+    if (seed_plan != NULL) {
+        model.has_active_baseline = 1;
+        model.baseline_plan = seed_plan;
+        model.live_state_bytes = 0;
+        model.horizon_calls = 1000;
+        model.jit_penalty_energy = 0.0;
+    }
+    return flow_bitspace_search_adaptive(space, iterations, seed, measured, &model, result_out);
 }
 
 int flow_bitspace_explain_seed(const FlowBitSpace *space, size_t iterations, uint32_t seed,
