@@ -130,12 +130,36 @@ double flow_bitspace_calculate_transition_penalty(const FlowTransitionCostModel 
                                                   const FlowPlan *candidate,
                                                   int *is_structural_out);
 
-/* Two-Tier Nested Chaos Engine (NP-Hard / Epistasis Saddle Point Solver) */
+/* Thermodynamic Boltzmann Probability-Biasing Chaos Configuration */
 typedef struct {
-    size_t macro_cycles;             /* Outer tier: Macro structural/phase cycles */
-    size_t micro_steps_per_cycle;    /* Inner tier: Micro 1-bit local relaxations */
-    double macro_tunneling_prob;     /* Probability of 2-bit correlated quantum leap (e.g. 0.15) */
-    size_t plateau_stagnation_limit;  /* Consecutive plateau steps before triggering phase leap */
+    double initial_temperature;      /* Starting thermal energy (default: 80.0 ~ 100.0) */
+    double cooling_decay;            /* Geometric cooling rate (default: 0.95 ~ 0.995) */
+    size_t plateau_stagnation_limit; /* Plateau steps before thermodynamic reheating (default: 5 ~ 8) */
+    double reheat_ratio;             /* Fraction of initial temp restored on plateau (default: 0.6) */
+} FlowChaosAnnealConfig;
+
+/* Canonical Adaptive Chaos Search with Thermodynamic Probability Biasing */
+int flow_bitspace_search_adaptive(const FlowBitSpace *space, size_t iterations, uint32_t seed,
+                                  int measured, const FlowTransitionCostModel *transition_model,
+                                  FlowBitSearchResult *result_out);
+
+int flow_bitspace_search_configured(const FlowBitSpace *space, size_t iterations, uint32_t seed,
+                                    int measured, const FlowTransitionCostModel *transition_model,
+                                    const FlowChaosAnnealConfig *anneal_config,
+                                    FlowBitSearchResult *result_out);
+
+int flow_bitspace_search(const FlowBitSpace *space, size_t iterations, uint32_t seed,
+                         int measured, const FlowPlan *seed_plan, FlowBitSearchResult *result_out);
+
+int flow_bitspace_explain_seed(const FlowBitSpace *space, size_t iterations, uint32_t seed,
+                               int measured, const FlowPlan *seed_plan, FILE *out);
+
+/* Backward-Compatible Aliases & Research Baselines */
+typedef struct {
+    size_t macro_cycles;
+    size_t micro_steps_per_cycle;
+    double macro_tunneling_prob;
+    size_t plateau_stagnation_limit;
 } FlowTwoTierChaosConfig;
 
 int flow_bitspace_search_two_tier(const FlowBitSpace *space,
@@ -147,16 +171,6 @@ int flow_bitspace_search_two_tier(const FlowBitSpace *space,
 int flow_bitspace_search_single_tier(const FlowBitSpace *space, size_t iterations, uint32_t seed,
                                      int measured, const FlowTransitionCostModel *transition_model,
                                      FlowBitSearchResult *result_out);
-
-int flow_bitspace_search(const FlowBitSpace *space, size_t iterations, uint32_t seed,
-                         int measured, const FlowPlan *seed_plan, FlowBitSearchResult *result_out);
-
-int flow_bitspace_search_adaptive(const FlowBitSpace *space, size_t iterations, uint32_t seed,
-                                  int measured, const FlowTransitionCostModel *transition_model,
-                                  FlowBitSearchResult *result_out);
-
-int flow_bitspace_explain_seed(const FlowBitSpace *space, size_t iterations, uint32_t seed,
-                               int measured, const FlowPlan *seed_plan, FILE *out);
 
 /* Multi-Objective Pareto Plan Ensemble (Tactical Bundle) */
 typedef enum {

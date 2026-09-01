@@ -819,22 +819,155 @@ int flow_bitspace_search_single_tier(const FlowBitSpace *space, size_t iteration
     return best_plan.eval.hard_gate_passed ? 1 : 0;
 }
 
+int flow_bitspace_search_configured(const FlowBitSpace *space, size_t iterations, uint32_t seed,
+                                    int measured, const FlowTransitionCostModel *transition_model,
+                                    const FlowChaosAnnealConfig *anneal_config,
+                                    FlowBitSearchResult *result_out) {
+    if (space == NULL || result_out == NULL || space->candidate_count == 0) return 0;
+    memset(result_out, 0, sizeof(*result_out));
+    result_out->iterations = iterations == 0 ? 1 : iterations;
+    result_out->seed = seed;
+    result_out->measured = measured;
+
+    double temp_start = (anneal_config != NULL && anneal_config->initial_temperature > 0.0) ?
+                        anneal_config->initial_temperature : 80.0;
+    double temp_decay = (anneal_config != NULL && anneal_config->cooling_decay > 0.0 && anneal_config->cooling_decay < 1.0) ?
+                        anneal_config->cooling_decay : 0.98;
+    size_t stag_limit = (anneal_config != NULL && anneal_config->plateau_stagnation_limit > 0) ?
+                        anneal_config->plateau_stagnation_limit : 6;
+    double reheat_ratio = (anneal_config != NULL && anneal_config->reheat_ratio > 0.0) ?
+                          anneal_config->reheat_ratio : 0.6;
+
+    uint64_t rng = seed == 0 ? UINT64_C(0x123456789abcdef0) : (uint64_t)seed;
+    uint64_t current_genome = (transition_model != NULL && transition_model->has_active_baseline && transition_model->baseline_plan != NULL)
+                              ? transition_model->baseline_plan->genome
+                              : flow_bitspace_default_genome(space);
+    FlowPlan current_plan;
+
+    space->decode(space, current_genome, &current_plan);
+    space->evaluate(space, &current_plan, &current_plan.eval);
+    FlowGateFailureReason seed_reason = FLOW_GATE_PASS;
+    current_plan.eval.hard_gate_passed = hierarchical_hard_gate_reason(space, &current_plan, &current_plan.eval, &seed_reason);
+    result_out->heatmap.total_mutations++;
+    if (!current_plan.eval.hard_gate_passed) {
+        current_plan.eval.energy += 1.0e12;
+        result_out->heatmap.total_failures++;
+        result_out->heatmap.failure_counts[seed_reason]++;
+    } else {
+        if (measured && space->ir != NULL && current_plan.component != NULL) {
+            current_plan.eval.benchmark_ns = flow_component_benchmark(space->ir, current_plan.component, &current_plan.assignment);
+            if (current_plan.eval.benchmark_ns > 0) {
+                current_plan.eval.energy += (double)current_plan.eval.benchmark_ns / 1000.0;
+            }
+        }
+        if (transition_model != NULL && transition_model->has_active_baseline) {
+            current_plan.eval.energy += flow_bitspace_calculate_transition_penalty(transition_model, &current_plan, NULL);
+        }
+    }
+
+    FlowPlan best_plan = current_plan;
+    if (best_plan.eval.hard_gate_passed) {
+        pareto_update_bitspace(result_out, &best_plan);
+    }
+
+    double temp = temp_start;
+    size_t stagnation_count = 0;
+
+    /* Continuous Probability-Biased Single 1-Bit Mutation Loop */
+    for (size_t iter = 0; iter < result_out->iterations; ++iter) {
+        uint64_t cand_genome = flow_bitspace_mutate_1bit(space, current_genome, &rng, NULL);
+        FlowPlan cand_plan;
+        space->decode(space, cand_genome, &cand_plan);
+        space->evaluate(space, &cand_plan, &cand_plan.eval);
+        FlowGateFailureReason cand_reason = FLOW_GATE_PASS;
+        cand_plan.eval.hard_gate_passed = hierarchical_hard_gate_reason(space, &cand_plan, &cand_plan.eval, &cand_reason);
+        result_out->heatmap.total_mutations++;
+
+        if (!cand_plan.eval.hard_gate_passed) {
+            cand_plan.eval.energy += 1.0e12;
+            result_out->heatmap.total_failures++;
+            result_out->heatmap.failure_counts[cand_reason]++;
+        } else {
+            if (measured && space->ir != NULL && cand_plan.component != NULL) {
+                cand_plan.eval.benchmark_ns = flow_component_benchmark(space->ir, cand_plan.component, &cand_plan.assignment);
+                if (cand_plan.eval.benchmark_ns > 0) {
+                    cand_plan.eval.energy += (double)cand_plan.eval.benchmark_ns / 1000.0;
+                }
+            }
+            if (transition_model != NULL && transition_model->has_active_baseline) {
+                cand_plan.eval.energy += flow_bitspace_calculate_transition_penalty(transition_model, &cand_plan, NULL);
+            }
+            pareto_update_bitspace(result_out, &cand_plan);
+        }
+
+        double delta = cand_plan.eval.energy - current_plan.eval.energy;
+        double r = (double)(xorshift64(&rng) % 10000) / 10000.0;
+        if (delta < 0.0 || (temp > 0.001 && r < exp(-delta / temp))) {
+            current_genome = cand_genome;
+            current_plan = cand_plan;
+            if (cand_plan.eval.hard_gate_passed &&
+                (!best_plan.eval.hard_gate_passed || cand_plan.eval.energy < best_plan.eval.energy)) {
+                best_plan = cand_plan;
+                stagnation_count = 0;
+            }
+        } else {
+            stagnation_count++;
+            if (stagnation_count >= stag_limit) {
+                /* Thermodynamic Reheating on Plateau */
+                temp = temp_start * reheat_ratio;
+                stagnation_count = 0;
+            }
+        }
+        temp *= temp_decay;
+    }
+
+    /* Search Protocol Step 2: Measured Recheck & Repeated Benchmark */
+    if (measured && best_plan.component != NULL && best_plan.eval.hard_gate_passed && space->ir != NULL) {
+        uint64_t bench_sum = 0;
+        const int bench_runs = 3;
+        for (int b = 0; b < bench_runs; ++b) {
+            bench_sum += flow_component_benchmark(space->ir, best_plan.component, &best_plan.assignment);
+        }
+        best_plan.eval.benchmark_ns = bench_sum / bench_runs;
+    }
+
+    /* Search Protocol Step 3: Held-out workload boundary verification */
+    if (space->ir != NULL && best_plan.component != NULL && best_plan.eval.hard_gate_passed) {
+        SemanticIR held_out_ir = *space->ir;
+        held_out_ir.input_max_count = (int)((double)held_out_ir.input_max_count * 1.25);
+        if (held_out_ir.input_max_count < space->ir->input_max_count) {
+            held_out_ir.input_max_count = space->ir->input_max_count + 100;
+        }
+        VerificationReport held_out_report;
+        if (!flow_component_verify_plan(&held_out_ir, best_plan.component, &best_plan.assignment, &held_out_report) ||
+            held_out_report.status == VERIFIER_COMPILE_ERROR) {
+            snprintf(best_plan.eval.message, sizeof(best_plan.eval.message),
+                     "held-out check: %s", held_out_report.message);
+        }
+    }
+
+    result_out->best_plan = best_plan;
+    if (result_out->best_latency > 0.0) {
+        result_out->latency_regret_percent =
+            ((best_plan.eval.latency_score - result_out->best_latency) / result_out->best_latency) * 100.0;
+    }
+    if (result_out->best_memory > 0.0) {
+        result_out->memory_regret_percent =
+            (((double)best_plan.eval.memory_bytes - result_out->best_memory) / result_out->best_memory) * 100.0;
+    }
+    return best_plan.eval.hard_gate_passed ? 1 : 0;
+}
+
 int flow_bitspace_search_adaptive(const FlowBitSpace *space, size_t iterations, uint32_t seed,
                                   int measured, const FlowTransitionCostModel *transition_model,
                                   FlowBitSearchResult *result_out) {
-    if (space == NULL || result_out == NULL || space->candidate_count == 0) return 0;
-    size_t total_iters = iterations == 0 ? 100 : iterations;
-    size_t macro = 5;
-    size_t micro = total_iters / macro;
-    if (micro < 1) micro = 1;
-
-    FlowTwoTierChaosConfig config = {
-        .macro_cycles = macro,
-        .micro_steps_per_cycle = micro,
-        .macro_tunneling_prob = 0.15,
-        .plateau_stagnation_limit = 6
+    FlowChaosAnnealConfig config = {
+        .initial_temperature = 80.0,
+        .cooling_decay = 0.98,
+        .plateau_stagnation_limit = 6,
+        .reheat_ratio = 0.6
     };
-    return flow_bitspace_search_two_tier(space, &config, seed, measured, transition_model, result_out);
+    return flow_bitspace_search_configured(space, iterations, seed, measured, transition_model, &config, result_out);
 }
 
 int flow_bitspace_search(const FlowBitSpace *space, size_t iterations, uint32_t seed,
