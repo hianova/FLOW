@@ -582,6 +582,9 @@ int flow_bitspace_search_two_tier(const FlowBitSpace *space,
                 current_plan.eval.energy += (double)current_plan.eval.benchmark_ns / 1000.0;
             }
         }
+        if (transition_model != NULL && transition_model->has_active_baseline) {
+            current_plan.eval.energy += flow_bitspace_calculate_transition_penalty(transition_model, &current_plan, NULL);
+        }
     }
 
     FlowPlan best_plan = current_plan;
@@ -593,18 +596,21 @@ int flow_bitspace_search_two_tier(const FlowBitSpace *space,
     for (size_t macro = 0; macro < macro_cycles; ++macro) {
         /* Outer Tier: Macro Phase Jump / Correlated Multi-Bit Tunneling */
         if (macro > 0) {
+            uint64_t base_genome = best_plan.eval.hard_gate_passed ? best_plan.genome : current_genome;
             double p = (double)(xorshift64(&rng) % 10000) / 10000.0;
             if (p < macro_prob) {
                 /* 2-Bit Correlated Quantum Leap (Escaping Epistasis / Hamming-2 Saddle Barrier) */
                 uint32_t b1 = 0, b2 = 0;
-                uint64_t leaped_genome = flow_bitspace_mutate_1bit(space, current_genome, &rng, &b1);
+                uint64_t leaped_genome = flow_bitspace_mutate_1bit(space, base_genome, &rng, &b1);
                 leaped_genome = flow_bitspace_mutate_1bit(space, leaped_genome, &rng, &b2);
                 current_genome = leaped_genome;
             } else if (space->selector_bits > 0 && space->candidate_count > 1) {
                 /* Subspace Phase Shift (Jump across component manifolds) */
                 uint64_t mask = (space->selector_bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << space->selector_bits) - 1);
                 uint64_t next_cand = (xorshift64(&rng) % space->candidate_count);
-                current_genome = (current_genome & ~mask) | (next_cand & mask);
+                current_genome = (base_genome & ~mask) | (next_cand & mask);
+            } else {
+                current_genome = base_genome;
             }
             space->decode(space, current_genome, &current_plan);
             space->evaluate(space, &current_plan, &current_plan.eval);
@@ -612,10 +618,24 @@ int flow_bitspace_search_two_tier(const FlowBitSpace *space,
             current_plan.eval.hard_gate_passed = hierarchical_hard_gate_reason(space, &current_plan, &current_plan.eval, &jump_reason);
             if (!current_plan.eval.hard_gate_passed) {
                 current_plan.eval.energy += 1.0e12;
+            } else {
+                if (measured && space->ir != NULL && current_plan.component != NULL) {
+                    current_plan.eval.benchmark_ns = flow_component_benchmark(space->ir, current_plan.component, &current_plan.assignment);
+                    if (current_plan.eval.benchmark_ns > 0) {
+                        current_plan.eval.energy += (double)current_plan.eval.benchmark_ns / 1000.0;
+                    }
+                }
+                if (transition_model != NULL && transition_model->has_active_baseline) {
+                    current_plan.eval.energy += flow_bitspace_calculate_transition_penalty(transition_model, &current_plan, NULL);
+                }
+                if (current_plan.eval.energy < best_plan.eval.energy) {
+                    best_plan = current_plan;
+                    pareto_update_bitspace(result_out, &best_plan);
+                }
             }
         }
 
-        double temp_start = 100.0;
+        double temp_start = 100.0 / (1.0 + 0.8 * (double)macro);
         double temp_decay = 0.98;
         double temp = temp_start;
         size_t stagnation_count = 0;
@@ -692,6 +712,99 @@ int flow_bitspace_search_two_tier(const FlowBitSpace *space,
             snprintf(best_plan.eval.message, sizeof(best_plan.eval.message),
                      "held-out check: %s", held_out_report.message);
         }
+    }
+
+    result_out->best_plan = best_plan;
+    if (result_out->best_latency > 0.0) {
+        result_out->latency_regret_percent =
+            ((best_plan.eval.latency_score - result_out->best_latency) / result_out->best_latency) * 100.0;
+    }
+    if (result_out->best_memory > 0.0) {
+        result_out->memory_regret_percent =
+            (((double)best_plan.eval.memory_bytes - result_out->best_memory) / result_out->best_memory) * 100.0;
+    }
+    return best_plan.eval.hard_gate_passed ? 1 : 0;
+}
+
+int flow_bitspace_search_single_tier(const FlowBitSpace *space, size_t iterations, uint32_t seed,
+                                     int measured, const FlowTransitionCostModel *transition_model,
+                                     FlowBitSearchResult *result_out) {
+    if (space == NULL || result_out == NULL || space->candidate_count == 0) return 0;
+    memset(result_out, 0, sizeof(*result_out));
+    result_out->iterations = iterations == 0 ? 1 : iterations;
+    result_out->seed = seed;
+    result_out->measured = measured;
+
+    uint64_t rng = seed == 0 ? UINT64_C(0x123456789abcdef0) : (uint64_t)seed;
+    uint64_t current_genome = (transition_model != NULL && transition_model->has_active_baseline && transition_model->baseline_plan != NULL)
+                              ? transition_model->baseline_plan->genome
+                              : flow_bitspace_default_genome(space);
+    FlowPlan current_plan;
+
+    space->decode(space, current_genome, &current_plan);
+    space->evaluate(space, &current_plan, &current_plan.eval);
+    FlowGateFailureReason seed_reason = FLOW_GATE_PASS;
+    current_plan.eval.hard_gate_passed = hierarchical_hard_gate_reason(space, &current_plan, &current_plan.eval, &seed_reason);
+    result_out->heatmap.total_mutations++;
+    if (!current_plan.eval.hard_gate_passed) {
+        current_plan.eval.energy += 1.0e12;
+        result_out->heatmap.total_failures++;
+        result_out->heatmap.failure_counts[seed_reason]++;
+    } else {
+        if (measured && space->ir != NULL && current_plan.component != NULL) {
+            current_plan.eval.benchmark_ns = flow_component_benchmark(space->ir, current_plan.component, &current_plan.assignment);
+            if (current_plan.eval.benchmark_ns > 0) {
+                current_plan.eval.energy += (double)current_plan.eval.benchmark_ns / 1000.0;
+            }
+        }
+    }
+
+    FlowPlan best_plan = current_plan;
+    if (best_plan.eval.hard_gate_passed) {
+        pareto_update_bitspace(result_out, &best_plan);
+    }
+
+    double temp_start = 100.0;
+    double temp_decay = 0.995;
+    double temp = temp_start;
+
+    for (size_t iter = 0; iter < result_out->iterations; ++iter) {
+        uint64_t cand_genome = flow_bitspace_mutate_1bit(space, current_genome, &rng, NULL);
+        FlowPlan cand_plan;
+        space->decode(space, cand_genome, &cand_plan);
+        space->evaluate(space, &cand_plan, &cand_plan.eval);
+        FlowGateFailureReason cand_reason = FLOW_GATE_PASS;
+        cand_plan.eval.hard_gate_passed = hierarchical_hard_gate_reason(space, &cand_plan, &cand_plan.eval, &cand_reason);
+        result_out->heatmap.total_mutations++;
+
+        if (!cand_plan.eval.hard_gate_passed) {
+            cand_plan.eval.energy += 1.0e12;
+            result_out->heatmap.total_failures++;
+            result_out->heatmap.failure_counts[cand_reason]++;
+        } else {
+            if (measured && space->ir != NULL && cand_plan.component != NULL) {
+                cand_plan.eval.benchmark_ns = flow_component_benchmark(space->ir, cand_plan.component, &cand_plan.assignment);
+                if (cand_plan.eval.benchmark_ns > 0) {
+                    cand_plan.eval.energy += (double)cand_plan.eval.benchmark_ns / 1000.0;
+                }
+            }
+            if (transition_model != NULL && transition_model->has_active_baseline) {
+                cand_plan.eval.energy += flow_bitspace_calculate_transition_penalty(transition_model, &cand_plan, NULL);
+            }
+            pareto_update_bitspace(result_out, &cand_plan);
+        }
+
+        double delta = cand_plan.eval.energy - current_plan.eval.energy;
+        double r = (double)(xorshift64(&rng) % 10000) / 10000.0;
+        if (delta < 0.0 || (temp > 0.001 && r < exp(-delta / temp))) {
+            current_genome = cand_genome;
+            current_plan = cand_plan;
+            if (cand_plan.eval.hard_gate_passed &&
+                (!best_plan.eval.hard_gate_passed || cand_plan.eval.energy < best_plan.eval.energy)) {
+                best_plan = cand_plan;
+            }
+        }
+        temp *= temp_decay;
     }
 
     result_out->best_plan = best_plan;

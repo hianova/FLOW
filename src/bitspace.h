@@ -144,6 +144,10 @@ int flow_bitspace_search_two_tier(const FlowBitSpace *space,
                                   const FlowTransitionCostModel *transition_model,
                                   FlowBitSearchResult *result_out);
 
+int flow_bitspace_search_single_tier(const FlowBitSpace *space, size_t iterations, uint32_t seed,
+                                     int measured, const FlowTransitionCostModel *transition_model,
+                                     FlowBitSearchResult *result_out);
+
 int flow_bitspace_search(const FlowBitSpace *space, size_t iterations, uint32_t seed,
                          int measured, const FlowPlan *seed_plan, FlowBitSearchResult *result_out);
 
