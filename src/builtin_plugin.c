@@ -147,7 +147,9 @@ static int builtin_evaluate_plan(const SemanticIR *ir,
     double target_thr = (double)builtin_target_threads(ir);
     double target_shards = (ir != NULL && ir->state_shared) ? 16.0 : 1.0;
 
-    double diff_cap = fabs((double)capacity - target_cap) * 0.1;
+    double diff_cap = ((double)capacity < target_cap) ?
+                      ((target_cap - (double)capacity) * 50.0) :
+                      (((double)capacity - target_cap) * 0.1);
     double diff_thr = fabs((double)threads - target_thr) * 20.0;
     double diff_shd = fabs((double)shards - target_shards) * 50.0;
 

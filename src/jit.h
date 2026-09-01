@@ -23,9 +23,20 @@ typedef struct {
     size_t initial_code_heap_bytes;
 } FlowJITConfig;
 
+/* Dual-Mapped Zero-TLB-Shootdown JIT Memory Pool Stats */
+typedef struct {
+    int is_dual_mapped;
+    uintptr_t write_base;
+    uintptr_t exec_base;
+    size_t pool_size;
+    size_t pool_used;
+    uint64_t tlb_shootdowns_avoided;
+} FlowJITPoolStats;
+
 /* Initialize / Teardown In-Memory JIT Engine */
 FlowJITEngine *flow_jit_create(const FlowJITConfig *config);
 void flow_jit_destroy(FlowJITEngine *engine);
+int flow_jit_get_pool_stats(const FlowJITEngine *engine, FlowJITPoolStats *stats_out);
 
 /* In-Memory Zero-I/O Compilation from LLVM IR text into executable FlowUnit */
 int flow_jit_compile_llvm_ir(FlowJITEngine *engine,

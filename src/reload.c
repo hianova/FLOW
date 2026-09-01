@@ -6,6 +6,13 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+static uint64_t flow_time_ns_fast(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (uint64_t)ts.tv_sec * UINT64_C(1000000000) + (uint64_t)ts.tv_nsec;
+}
 
 typedef struct FlowReloadGeneration {
     const FlowUnit *unit;
@@ -708,6 +715,7 @@ int flow_reload_begin(FlowReloadContext *context, FlowReloadReader *reader,
     }
     epoch = atomic_load_explicit(&context->epoch, memory_order_acquire);
     atomic_store_explicit(&reader->active_epoch, epoch, memory_order_seq_cst);
+    atomic_store_explicit(&reader->last_heartbeat_ns, flow_time_ns_fast(), memory_order_relaxed);
     generation = atomic_load_explicit(&context->current, memory_order_acquire);
     if (generation == NULL) {
         atomic_store_explicit(&reader->active_epoch, 0, memory_order_seq_cst);
@@ -794,12 +802,22 @@ int flow_reload_apply(FlowReloadContext *context, FlowReloadReader *reader,
     return result;
 }
 
+#define FLOW_EPOCH_LEASE_TIMEOUT_NS (UINT64_C(200) * UINT64_C(1000000)) /* 200 ms */
+
 static int generation_safe(FlowReloadContext *context, uint64_t retire_epoch) {
     const FlowReloadReader *reader;
+    uint64_t now = flow_time_ns_fast();
     for (reader = context->readers; reader != NULL; reader = reader->next) {
         uint64_t active =
             atomic_load_explicit(&reader->active_epoch, memory_order_seq_cst);
-        if (active != 0 && active <= retire_epoch) return 0;
+        if (active != 0 && active <= retire_epoch) {
+            uint64_t hb = atomic_load_explicit(&reader->last_heartbeat_ns, memory_order_relaxed);
+            if (hb > 0 && now > hb && (now - hb) > FLOW_EPOCH_LEASE_TIMEOUT_NS) {
+                /* Straggler lease expired: do not block generation retirement */
+                continue;
+            }
+            return 0;
+        }
     }
     return 1;
 }

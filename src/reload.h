@@ -88,13 +88,30 @@ typedef struct FlowUnit {
     const FlowSchema *schema;
 } FlowUnit;
 
-typedef struct FlowReloadReader {
+#ifndef FLOW_CACHE_LINE_SIZE
+#define FLOW_CACHE_LINE_SIZE 64
+#endif
+
+#if defined(__GNUC__) || defined(__clang__)
+#define FLOW_CACHE_ALIGNED __attribute__((aligned(FLOW_CACHE_LINE_SIZE)))
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#include <stdalign.h>
+#define FLOW_CACHE_ALIGNED alignas(FLOW_CACHE_LINE_SIZE)
+#else
+#define FLOW_CACHE_ALIGNED
+#endif
+
+typedef struct FlowReloadReader FlowReloadReader;
+
+struct FlowReloadReader {
     /* Keep this object address-stable until unregister succeeds. */
     FlowReloadContext *context;
     struct FlowReloadReader *next;
     _Atomic uint64_t active_epoch;
     _Atomic int registered;
-} FlowReloadReader;
+    _Atomic uint64_t last_heartbeat_ns;
+    uint8_t _cache_pad[32]; /* Explicit false-sharing buffer */
+} FLOW_CACHE_ALIGNED;
 
 typedef struct {
     FlowReloadContext *context;

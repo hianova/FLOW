@@ -130,6 +130,20 @@ double flow_bitspace_calculate_transition_penalty(const FlowTransitionCostModel 
                                                   const FlowPlan *candidate,
                                                   int *is_structural_out);
 
+/* Two-Tier Nested Chaos Engine (NP-Hard / Epistasis Saddle Point Solver) */
+typedef struct {
+    size_t macro_cycles;             /* Outer tier: Macro structural/phase cycles */
+    size_t micro_steps_per_cycle;    /* Inner tier: Micro 1-bit local relaxations */
+    double macro_tunneling_prob;     /* Probability of 2-bit correlated quantum leap (e.g. 0.15) */
+    size_t plateau_stagnation_limit;  /* Consecutive plateau steps before triggering phase leap */
+} FlowTwoTierChaosConfig;
+
+int flow_bitspace_search_two_tier(const FlowBitSpace *space,
+                                  const FlowTwoTierChaosConfig *config,
+                                  uint32_t seed, int measured,
+                                  const FlowTransitionCostModel *transition_model,
+                                  FlowBitSearchResult *result_out);
+
 int flow_bitspace_search(const FlowBitSpace *space, size_t iterations, uint32_t seed,
                          int measured, const FlowPlan *seed_plan, FlowBitSearchResult *result_out);
 
