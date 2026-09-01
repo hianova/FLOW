@@ -78,6 +78,36 @@ typedef struct {
     uint64_t max_memory_bandwidth_bytes;
 } FlowPMUThresholds;
 
+#define FLOW_MAX_IP_RANGES 16
+
+typedef struct {
+    uintptr_t start_ip;
+    uintptr_t end_ip;
+    char name[64];
+    uint32_t candidate_index;
+} FlowIPRange;
+
+typedef struct {
+    FlowIPRange ranges[FLOW_MAX_IP_RANGES];
+    size_t range_count;
+} FlowIPRangeTracker;
+
+typedef struct {
+    double ema_alpha;              /* Smoothing factor: default 0.25 */
+    size_t anomaly_streak_required;/* Must persist across N sample windows: default 3 */
+    size_t cooldown_ticks;         /* Ticks between hot-swaps: default 5 */
+    double backoff_multiplier;     /* Backoff multiplier on rapid switches: default 1.5 */
+} FlowAntiThrashingConfig;
+
+typedef struct {
+    double smoothed_miss_rate;
+    double smoothed_ipc;
+    size_t current_anomaly_streak;
+    size_t ticks_since_last_swap;
+    size_t effective_cooldown_ticks;
+    size_t swap_count;
+} FlowDebounceState;
+
 FlowAdaptiveController *flow_adaptive_create(
     FlowReloadContext *context, void *host_context,
     const FlowAdaptiveConfig *config,
@@ -95,6 +125,20 @@ int flow_adaptive_feed_pmu(FlowAdaptiveController *controller,
                            const FlowPMUTelemetry *pmu);
 int flow_adaptive_pmu_metrics(const FlowAdaptiveController *controller,
                               FlowPMUTelemetry *pmu_out);
+
+/* Silicon-Grade Attribution & Anti-Thrashing */
+int flow_adaptive_register_ip_range(FlowAdaptiveController *controller,
+                                   uintptr_t start_ip, uintptr_t end_ip,
+                                   const char *name, uint32_t candidate_index);
+int flow_adaptive_is_ip_attributed(const FlowAdaptiveController *controller,
+                                  uintptr_t ip, uint32_t *candidate_index_out);
+int flow_adaptive_feed_attributed_pmu(FlowAdaptiveController *controller,
+                                      uintptr_t ip, const FlowPMUTelemetry *pmu);
+void flow_adaptive_set_anti_thrashing(FlowAdaptiveController *controller,
+                                      const FlowAntiThrashingConfig *config);
+int flow_adaptive_get_debounce_state(const FlowAdaptiveController *controller,
+                                     FlowDebounceState *state_out);
+
 size_t flow_adaptive_current_index(const FlowAdaptiveController *controller);
 int flow_adaptive_metrics(const FlowAdaptiveController *controller,
                           FlowAdaptiveMetrics *metrics_out);

@@ -97,7 +97,8 @@ slice, compositional security gates, benchmarks, and the bootstrap regression ch
 
 - **Lock-Free RCU Fast Path**: Read-side invocations (`flow_reload_call`) use atomic RCU epoch tracking with zero mutex locks on the common path. Test runs observe low single-digit overhead (~3–8% vs direct C call).
 - **Mode-Dispatched Migration & Live Journal**: Explicit branching across `FLOW_MIGRATE_AUTO`, `FLOW_MIGRATE_SNAPSHOT_COW`, and `FLOW_MIGRATE_STOP_THE_WORLD` with bounded live mutation journal logging and automatic fallback.
-- **eBPF / PMU Hardware Telemetry & Runtime Autotuning**: Real-time sampling of hardware performance counters (L3 cache miss rate, IPC, branch mispredictions, page faults) with automatic threshold-triggered zero-downtime hot-swaps (`flow_adaptive_tick_pmu`).
+- **eBPF Silicon-Grade Telemetry & Anti-Thrashing (`tools/flow_probe.bpf.c`)**: Instruction Pointer (IP) range attribution filtering (`[start_ip, end_ip)`) ensuring PMU hardware samples (L3 misses, IPC) reflect FLOW execution only. Employs Exponential Moving Average (EMA), anomaly streak confirmation, and exponential backoff cooldown to eliminate thrashing.
+- **Non-Blocking Progressive LSP Server (`flowc --lsp`)**: Full JSON-RPC 2.0 Language Server with sub-millisecond static syntax/contract diagnostics (`publishDiagnostics`), hover documentation, and dynamic streaming of Pareto frontiers (`flow/paretoUpdate`), SMT proofs, and topology graphs.
 - **Multi-Objective Pareto Frontier & Plan Ensembles (`--ensemble <prefix>`)**: Automatic extraction of Pareto knee-points into 3 deployable tactical candidates (`Speed`, `Balanced`, `Memory`), emitting unified dispatch headers (`_ensemble.h`) and lockfiles (`_bundle.lock`).
 - **Formal SMT-LIB2 Mathematical Proofs (`--smt-proof <proof.smt2>`)**: Sound QF_BV SMT-LIB 2.6 logic theorem emission asserting invariant negations (Buffer Bounds, Memory Quota, Shard Non-Aliasing, and Functional Determinism) for Proof-Carrying Code.
 - **MLIR `flow` Dialect & Intent Preservation (`--target-mlir <file.mlir>`)**: Emits high-level `flow.intent` and `flow.constraint` operations lowered into standard `func.func`, `scf.for`, and `memref` pipelines.
@@ -117,6 +118,9 @@ flowc examples/rank.flow -o build/rank.c
 
 # BitSpace search with iterations and deterministic seed
 flowc examples/rank.flow -o build/rank.c --search --iterations 100 --seed 42
+
+# Launch Language Server Protocol (LSP) Server over stdio
+flowc --lsp
 
 # Emit Pareto Plan Ensemble Bundle (Speed, Balanced, Memory)
 flowc examples/rank.flow -o build/rank.c --search --ensemble build/rank
@@ -154,6 +158,8 @@ make ensemble-test
 make smt-test
 make mlir-llvm-test
 make topology-test
+make ebpf-pmu-test
+make lsp-test
 make fuzz-test
 ```
 

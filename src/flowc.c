@@ -6,6 +6,7 @@
 #include "abi.h"
 #include "smt.h"
 #include "topology.h"
+#include "lsp.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -13,6 +14,17 @@
 #include <string.h>
 
 int flowc_main(int argc, char **argv) {
+    if (argc >= 2 && strcmp(argv[1], "--lsp") == 0) {
+        FlowLSPConfig lsp_cfg = {0};
+        lsp_cfg.search_batch_iterations = 50;
+        lsp_cfg.emit_pareto_stream = 1;
+        FlowLSPServer *lsp = flow_lsp_create(&lsp_cfg, stdin, stdout);
+        if (lsp == NULL) return EXIT_FAILURE;
+        int res = flow_lsp_run_loop(lsp);
+        flow_lsp_destroy(lsp);
+        return res ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
     const char *input_path;
     const char *output_path;
     FILE *input;

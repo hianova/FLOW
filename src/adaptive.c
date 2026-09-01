@@ -17,6 +17,9 @@ struct FlowAdaptiveController {
     FlowAdaptiveProbe probe;
     FlowAdaptiveMetrics metrics;
     FlowPMUTelemetry pmu;
+    FlowIPRangeTracker ip_tracker;
+    FlowAntiThrashingConfig anti_thrash;
+    FlowDebounceState debounce;
     pthread_mutex_t lock;
 };
 
@@ -117,6 +120,11 @@ FlowAdaptiveController *flow_adaptive_create(
     controller->candidate_count = candidate_count;
     controller->current_index = current_index;
     controller->probe = probe;
+    controller->anti_thrash.ema_alpha = 0.25;
+    controller->anti_thrash.anomaly_streak_required = 1;
+    controller->anti_thrash.cooldown_ticks = 0;
+    controller->anti_thrash.backoff_multiplier = 1.5;
+    controller->debounce.effective_cooldown_ticks = 0;
     return controller;
 }
 
@@ -126,6 +134,61 @@ int flow_adaptive_destroy(FlowAdaptiveController *controller) {
     free(controller->candidates);
     free(controller);
     return FLOW_ADAPTIVE_OK;
+}
+
+int flow_adaptive_register_ip_range(FlowAdaptiveController *controller,
+                                   uintptr_t start_ip, uintptr_t end_ip,
+                                   const char *name, uint32_t candidate_index) {
+    if (controller == NULL || start_ip >= end_ip) return 0;
+    pthread_mutex_lock(&controller->lock);
+    if (controller->ip_tracker.range_count >= FLOW_MAX_IP_RANGES) {
+        pthread_mutex_unlock(&controller->lock);
+        return 0;
+    }
+    FlowIPRange *r = &controller->ip_tracker.ranges[controller->ip_tracker.range_count++];
+    r->start_ip = start_ip;
+    r->end_ip = end_ip;
+    r->candidate_index = candidate_index;
+    strncpy(r->name, name ? name : "", sizeof(r->name) - 1);
+    pthread_mutex_unlock(&controller->lock);
+    return 1;
+}
+
+int flow_adaptive_is_ip_attributed(const FlowAdaptiveController *controller,
+                                  uintptr_t ip, uint32_t *candidate_index_out) {
+    if (controller == NULL) return 0;
+    for (size_t i = 0; i < controller->ip_tracker.range_count; ++i) {
+        const FlowIPRange *r = &controller->ip_tracker.ranges[i];
+        if (ip >= r->start_ip && ip < r->end_ip) {
+            if (candidate_index_out != NULL) *candidate_index_out = r->candidate_index;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int flow_adaptive_feed_attributed_pmu(FlowAdaptiveController *controller,
+                                      uintptr_t ip, const FlowPMUTelemetry *pmu) {
+    uint32_t cand_idx = 0;
+    if (controller == NULL || pmu == NULL) return FLOW_ADAPTIVE_INVALID;
+    if (!flow_adaptive_is_ip_attributed(controller, ip, &cand_idx)) return FLOW_ADAPTIVE_INVALID;
+    return flow_adaptive_feed_pmu(controller, pmu);
+}
+
+void flow_adaptive_set_anti_thrashing(FlowAdaptiveController *controller,
+                                      const FlowAntiThrashingConfig *config) {
+    if (controller == NULL || config == NULL) return;
+    pthread_mutex_lock(&controller->lock);
+    controller->anti_thrash = *config;
+    controller->debounce.effective_cooldown_ticks = config->cooldown_ticks;
+    pthread_mutex_unlock(&controller->lock);
+}
+
+int flow_adaptive_get_debounce_state(const FlowAdaptiveController *controller,
+                                     FlowDebounceState *state_out) {
+    if (controller == NULL || state_out == NULL) return 0;
+    *state_out = controller->debounce;
+    return 1;
 }
 
 int flow_adaptive_call(FlowAdaptiveController *controller,
@@ -297,7 +360,9 @@ FlowAdaptiveStatus flow_adaptive_tick_pmu(FlowAdaptiveController *controller,
     size_t i;
     int high_miss_rate = 0;
     int low_ipc = 0;
+    int is_anomaly = 0;
     int result;
+    double alpha;
 
     if (controller == NULL || thresholds == NULL) return FLOW_ADAPTIVE_INVALID;
 
@@ -309,23 +374,59 @@ FlowAdaptiveStatus flow_adaptive_tick_pmu(FlowAdaptiveController *controller,
     pmu = controller->pmu;
     current_index = controller->current_index;
     controller->evaluating = 1;
-    pthread_mutex_unlock(&controller->lock);
+    controller->debounce.ticks_since_last_swap++;
 
+    /* Exponential Moving Average (EMA) Smoothing */
+    alpha = controller->anti_thrash.ema_alpha > 0.0 ? controller->anti_thrash.ema_alpha : 0.25;
+    if (controller->debounce.smoothed_miss_rate == 0.0) {
+        controller->debounce.smoothed_miss_rate = pmu.cache_miss_rate;
+    } else {
+        controller->debounce.smoothed_miss_rate =
+            (1.0 - alpha) * controller->debounce.smoothed_miss_rate + alpha * pmu.cache_miss_rate;
+    }
+
+    if (controller->debounce.smoothed_ipc == 0.0) {
+        controller->debounce.smoothed_ipc = pmu.ipc;
+    } else {
+        controller->debounce.smoothed_ipc =
+            (1.0 - alpha) * controller->debounce.smoothed_ipc + alpha * pmu.ipc;
+    }
+
+    /* Anomaly Detection over Smoothed Signal */
     if (thresholds->cache_miss_rate_threshold > 0.0 &&
-        pmu.cache_miss_rate >= thresholds->cache_miss_rate_threshold) {
+        controller->debounce.smoothed_miss_rate >= thresholds->cache_miss_rate_threshold) {
         high_miss_rate = 1;
+        is_anomaly = 1;
     }
     if (thresholds->min_ipc_threshold > 0.0 &&
-        pmu.ipc > 0.0 && pmu.ipc <= thresholds->min_ipc_threshold) {
+        controller->debounce.smoothed_ipc > 0.0 &&
+        controller->debounce.smoothed_ipc <= thresholds->min_ipc_threshold) {
         low_ipc = 1;
+        is_anomaly = 1;
     }
 
-    if (!high_miss_rate && !low_ipc) {
-        pthread_mutex_lock(&controller->lock);
+    if (is_anomaly) {
+        controller->debounce.current_anomaly_streak++;
+    } else {
+        controller->debounce.current_anomaly_streak = 0;
+    }
+
+    /* Check Anomaly Streak Requirement */
+    if (controller->debounce.current_anomaly_streak < controller->anti_thrash.anomaly_streak_required) {
         controller->evaluating = 0;
         pthread_mutex_unlock(&controller->lock);
         return FLOW_ADAPTIVE_NO_CHANGE;
     }
+
+    /* Check Anti-Thrashing Cooldown Window */
+    if (controller->debounce.ticks_since_last_swap <= controller->debounce.effective_cooldown_ticks &&
+        controller->debounce.swap_count > 0) {
+        controller->evaluating = 0;
+        pthread_mutex_unlock(&controller->lock);
+        return FLOW_ADAPTIVE_NOT_READY;
+    }
+
+    pthread_mutex_unlock(&controller->lock);
 
     target_index = current_index;
     if (high_miss_rate) {
@@ -370,6 +471,14 @@ FlowAdaptiveStatus flow_adaptive_tick_pmu(FlowAdaptiveController *controller,
     }
     controller->current_index = target_index;
     controller->calls_since_switch = 0;
+    controller->debounce.ticks_since_last_swap = 0;
+    controller->debounce.current_anomaly_streak = 0;
+    controller->debounce.swap_count++;
+    /* Exponential backoff on cooldown */
+    if (controller->anti_thrash.backoff_multiplier > 1.0 && controller->debounce.effective_cooldown_ticks > 0) {
+        controller->debounce.effective_cooldown_ticks =
+            (size_t)(controller->debounce.effective_cooldown_ticks * controller->anti_thrash.backoff_multiplier);
+    }
     pthread_mutex_unlock(&controller->lock);
     return FLOW_ADAPTIVE_OK;
 }
