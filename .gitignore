@@ -1,0 +1,11 @@
+*.DS_Store
+*.plist
+build/
+generated/
+work/mp4parse-rust-bench/target/
+work/retired/*/target/
+*.o
+*.so
+*.dylib
+*.a
+

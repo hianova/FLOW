@@ -1,0 +1,7 @@
+input items {
+    max_count -1
+}
+
+flow scan {
+    items -> top(abc)
+}

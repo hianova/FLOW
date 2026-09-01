@@ -1,0 +1,11 @@
+input packet {
+    max_count 4096
+}
+
+flow binary_parser {
+    packet -> parse -> validate
+}
+
+require {
+    deterministic
+}

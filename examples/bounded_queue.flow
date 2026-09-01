@@ -1,0 +1,17 @@
+input jobs {
+    max_count 1024
+}
+
+state queue {
+    shared
+    bounded
+}
+
+flow bounded_queue {
+    jobs -> enqueue -> dequeue
+}
+
+require {
+    deterministic
+    memory < 64mb
+}

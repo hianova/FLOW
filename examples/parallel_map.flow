@@ -1,0 +1,15 @@
+input values {
+    max_count 4096
+}
+
+flow parallel_map {
+    values -> transform -> collect
+}
+
+require {
+    deterministic
+}
+
+prefer {
+    latency
+}

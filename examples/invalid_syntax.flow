@@ -1,0 +1,11 @@
+input items {
+    max_count 4
+}
+
+flow scan {
+    items -> top(2)
+}
+
+require {
+    deterministiic
+}

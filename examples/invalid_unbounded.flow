@@ -1,0 +1,10 @@
+input values {
+}
+
+flow unbounded_scan {
+    values -> transform -> collect
+}
+
+require {
+    deterministic
+}

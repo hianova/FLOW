@@ -1,0 +1,14 @@
+input events {
+    max_count 1024
+}
+
+state machine {
+}
+
+flow state_machine {
+    events -> transition -> output
+}
+
+require {
+    deterministic
+}

@@ -1,0 +1,182 @@
+export PATH := /opt/homebrew/bin:/usr/local/bin:$(PATH)
+
+CC ?= clang
+CFLAGS ?= -std=c17 -Wall -Wextra -Wpedantic -O2
+LDLIBS ?= -lm
+THREAD_FLAGS ?= -pthread
+
+BUILD_DIR := build
+FLOWC := $(BUILD_DIR)/flowc
+FLOW_TEMPLATE_PATH := $(CURDIR)/tools/self-host-stage2.c
+
+.PHONY: all clean test demos demo benchmark security-test reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test plugin-test reload-stress-test reload-stress-nightly self-host-check acceptance
+
+all: $(FLOWC)
+
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
+
+$(FLOWC): $(wildcard src/*.c) $(wildcard src/*.h) tools/self-host-stage2.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -DFLOW_TEMPLATE_PATH=\"$(FLOW_TEMPLATE_PATH)\" $(wildcard src/*.c) -o $@ $(LDLIBS) $(THREAD_FLAGS)
+
+demo: $(FLOWC)
+	$(FLOWC) examples/rank.flow -o generated/rank.c
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) generated/rank.c -o $(BUILD_DIR)/rank
+	$(BUILD_DIR)/rank
+
+demos: $(FLOWC)
+	@for spec in bounded_queue shared_cache parallel_map rank binary_parser state_machine; do \
+		$(FLOWC) examples/$$spec.flow -o generated/$$spec-demo.c --search --iterations 100 --seed 42 || exit 1; \
+		$(CC) $(CFLAGS) $(THREAD_FLAGS) generated/$$spec-demo.c -o $(BUILD_DIR)/$$spec-demo; \
+		$(BUILD_DIR)/$$spec-demo | grep -q "flow: $$spec" || exit 1; \
+	done
+
+benchmark: demos
+	./tools/benchmark-suite.sh 1000
+
+security-test: | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/security-test.c -o $(BUILD_DIR)/security-test -lm
+	$(BUILD_DIR)/security-test
+
+reload-test: | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/reload-test.c -o $(BUILD_DIR)/reload-test -lm
+	$(BUILD_DIR)/reload-test
+
+live-reload-test: | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/live-reload-test.c -o $(BUILD_DIR)/live-reload-test -lm
+	$(BUILD_DIR)/live-reload-test
+
+backend-reload-test: | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/backend-reload-test.c -o $(BUILD_DIR)/backend-reload-test -lm
+	$(BUILD_DIR)/backend-reload-test
+
+generated-reload-test: $(FLOWC) | $(BUILD_DIR)
+	$(FLOWC) examples/rank.flow -o /tmp/flow-rank-reload.c --search --iterations 50 --seed 42 --reload-adapter
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/generated-reload-test.c /tmp/flow-rank-reload.c -o $(BUILD_DIR)/generated-reload-test -lm
+	$(BUILD_DIR)/generated-reload-test
+	$(FLOWC) examples/small.flow -o /tmp/flow-small-reload.c --reload-adapter
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc -c /tmp/flow-small-reload.c -o /tmp/flow-small-reload.o
+
+adaptive-test: | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/adaptive-test.c -o $(BUILD_DIR)/adaptive-test -lm
+	$(BUILD_DIR)/adaptive-test
+
+bitspace-test: | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/bitspace-test.c -o $(BUILD_DIR)/bitspace-test -lm
+	$(BUILD_DIR)/bitspace-test
+
+plugin-test: | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/plugin-test.c -o $(BUILD_DIR)/plugin-test -lm
+	$(BUILD_DIR)/plugin-test
+
+project-test: | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/project-test.c -o $(BUILD_DIR)/project-test -lm
+	$(BUILD_DIR)/project-test
+
+abi-test: | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/abi-test.c -o $(BUILD_DIR)/abi-test -lm
+	$(BUILD_DIR)/abi-test
+
+vertical-slice-test: $(FLOWC) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/vertical-slice-test.c -o $(BUILD_DIR)/vertical-slice-test -lm
+	$(BUILD_DIR)/vertical-slice-test
+
+reload-stress-test: | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/reload-stress-test.c -o $(BUILD_DIR)/reload-stress-test -lm
+	$(BUILD_DIR)/reload-stress-test
+
+reload-stress-nightly: reload-stress-test
+	FLOW_STRESS_THREADS=32 FLOW_STRESS_CALLS=312500 FLOW_STRESS_PUBLISHES=1000 $(BUILD_DIR)/reload-stress-test
+
+self-host-check: $(FLOWC)
+	./tools/self-host-check.sh
+
+acceptance: test benchmark self-host-check security-test
+
+test: $(FLOWC) reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test bitspace-test plugin-test project-test abi-test vertical-slice-test reload-stress-test
+	! grep -E -q 'heavy-tail|flip_bit_block|Black Swan' src/search.c README.md ACCEPTANCE.md
+	grep -E -q 'one chaotic 1-bit mutation' src/search.c
+	$(FLOWC) examples/rank.flow -o generated/rank.c
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) generated/rank.c -o $(BUILD_DIR)/rank
+	$(BUILD_DIR)/rank | grep -q 'component: sharded_hash'
+	$(BUILD_DIR)/rank | grep -q 'top 3'
+	grep -q 'flow_slot slots' generated/rank.c
+	grep -q 'Verification: status=proven' generated/rank.c
+	! grep -q 'static int flow_verify_input' generated/rank.c
+	$(FLOWC) examples/small.flow -o generated/small.c
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) generated/small.c -o $(BUILD_DIR)/small
+	$(BUILD_DIR)/small | grep -q 'component: linear_array'
+	grep -q 'flow_item items\[FLOW_CAPACITY\]' generated/small.c
+	$(FLOWC) examples/custom_input.flow -o generated/custom-input.c
+	$(CC) $(CFLAGS) generated/custom-input.c -o $(BUILD_DIR)/custom-input
+	$(BUILD_DIR)/custom-input | grep -q 'user 11 score 99'
+	grep -q 'input_samples=3' generated/custom-input.c
+	$(FLOWC) examples/ordered.flow -o generated/ordered.c
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) generated/ordered.c -o $(BUILD_DIR)/ordered
+	$(BUILD_DIR)/ordered | grep -q 'component: ordered_tree'
+	grep -q 'flow_node nodes\[FLOW_CAPACITY\]' generated/ordered.c
+	$(FLOWC) examples/ordered.flow -o generated/ordered-hash.c --component sharded_hash
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) generated/ordered-hash.c -o $(BUILD_DIR)/ordered-hash
+	$(BUILD_DIR)/ordered-hash | grep -q 'component: sharded_hash'
+	! $(FLOWC) examples/ordered.flow -o /tmp/flow-invalid-component.c --component parallel_map
+	$(FLOWC) examples/rank.flow -o generated/rank-search.c --search --iterations 500 --seed 42
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) generated/rank-search.c -o $(BUILD_DIR)/rank-search
+	$(BUILD_DIR)/rank-search | grep -q 'component: sharded_hash'
+	@online_threads=$$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1); \
+	if [ $$online_threads -lt 1 ]; then online_threads=1; fi; \
+	if [ $$online_threads -gt 64 ]; then online_threads=64; fi; \
+	$(BUILD_DIR)/rank-search | grep -q "configuration: capacity 4096 threads $$online_threads shards 16"
+	grep -q 'C search: mode=model iterations=500 seed=42 genome=' generated/rank-search.c
+	grep -q 'Verification: status=runtime_check' generated/rank-search.c
+	$(FLOWC) examples/rank.flow -o generated/rank-benchmark.c --benchmark --iterations 100 --seed 42
+	$(CC) $(CFLAGS) generated/rank-benchmark.c -o $(BUILD_DIR)/rank-benchmark
+	$(BUILD_DIR)/rank-benchmark | grep -q 'component: sharded_hash'
+	grep -q 'C search: mode=benchmark' generated/rank-benchmark.c
+	grep -q 'static int flow_verify_input' generated/rank-benchmark.c
+	$(FLOWC) examples/vocabulary.flow -o generated/vocabulary.c
+	$(CC) $(CFLAGS) generated/vocabulary.c -o $(BUILD_DIR)/vocabulary
+	$(BUILD_DIR)/vocabulary | grep -q 'flow: vocabulary'
+	$(BUILD_DIR)/vocabulary | grep -q 'component: parallel_map'
+	$(BUILD_DIR)/vocabulary | grep -q 'user 3 score 198'
+	grep -q 'map_worker' generated/vocabulary.c
+	grep -q 'output=scores' generated/vocabulary.c
+	grep -q 'resource=cpu' generated/vocabulary.c
+	grep -q 'capability=pthread' generated/vocabulary.c
+	grep -q 'domain=ranking' generated/vocabulary.c
+	$(FLOWC) examples/bounded_queue.flow -o /tmp/flow-bounded-search.c --search --iterations 1 --seed 42 > /tmp/flow-bounded-search.log
+	grep -q 'selected: bounded_queue' /tmp/flow-bounded-search.log
+	$(FLOWC) examples/ambiguous.flow -o generated/ambiguous.c
+	grep -q 'holes=1' generated/ambiguous.c
+	grep -q 'constraints=1' generated/ambiguous.c
+	grep -q 'inferred_facts=' generated/ambiguous.c
+	$(FLOWC) examples/compiler.flow -o generated/compiler.c
+	$(CC) $(CFLAGS) generated/compiler.c -o $(BUILD_DIR)/compiler
+	$(BUILD_DIR)/compiler examples/small.flow -o /tmp/flow-make-self.c
+	$(CC) $(CFLAGS) /tmp/flow-make-self.c -o $(BUILD_DIR)/make-self
+	$(BUILD_DIR)/make-self | grep -q 'flow: scan'
+	grep -q 'self_host_graph_nodes=11' generated/compiler.c
+	$(FLOWC) examples/rank.flow -o generated/rank-profile.c --benchmark --iterations 50 --seed 42 --profile-out generated/rank.profile
+	$(FLOWC) examples/rank.flow -o generated/rank-profile-reuse.c --benchmark --iterations 10 --seed 7 --profile generated/rank.profile > /tmp/flow-profile-reuse.log
+	grep -q 'profile: loaded' /tmp/flow-profile-reuse.log
+	$(FLOWC) examples/project.flow -o generated/project.c --search --iterations 50 --seed 42 --lock generated/flowplan.lock
+	grep -q 'Project: browser_runtime' generated/project.c
+	grep -q 'plan_schema_hash=' generated/flowplan.lock
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) generated/project.c -o $(BUILD_DIR)/project
+	$(BUILD_DIR)/project | grep -q 'flow: browser_pipeline'
+	$(FLOWC) examples/project.flow -o generated/project-locked.c --profile generated/flowplan.lock
+	grep -q 'Project: browser_runtime' generated/project-locked.c
+	$(FLOWC) examples/rank.flow -o generated/rank-cross.c --target-c-header generated/rank-cross.h --target-rust generated/rank-cross.rs --target-python generated/rank-cross.py
+	grep -q 'flow_sharded_hash_create' generated/rank-cross.h
+	grep -q 'pub struct ShardedHash' generated/rank-cross.rs
+	grep -q 'class ShardedHash:' generated/rank-cross.py
+	! $(FLOWC) examples/invalid_capacity.flow -o /tmp/flow-invalid.c
+	! $(FLOWC) examples/invalid_syntax.flow -o /tmp/flow-invalid-syntax.c
+	! $(FLOWC) examples/invalid_unclosed.flow -o /tmp/flow-invalid-unclosed.c
+	! $(FLOWC) examples/invalid_value.flow -o /tmp/flow-invalid-value.c
+	! $(FLOWC) examples/invalid_capability.flow -o /tmp/flow-invalid-capability.c
+	! $(FLOWC) examples/invalid_import.flow -o /tmp/flow-invalid-import.c
+	! $(FLOWC) examples/invalid_unbounded.flow -o /tmp/flow-invalid-unbounded.c
+	! $(FLOWC) examples/invalid_no_input.flow -o /tmp/flow-invalid-no-input.c
+
+clean:
+	rm -rf $(BUILD_DIR) generated/*.c

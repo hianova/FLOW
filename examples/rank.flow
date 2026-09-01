@@ -1,0 +1,21 @@
+input users {
+    max_count 100000
+}
+
+state cache {
+    shared
+    read_heavy
+}
+
+flow rank {
+    users -> score -> sort -> top(3)
+}
+
+require {
+    deterministic
+    memory < 64mb
+}
+
+prefer {
+    latency
+}

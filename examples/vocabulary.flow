@@ -1,0 +1,36 @@
+input values {
+    max_count 128
+}
+
+output scores {
+    type score
+}
+
+state work {
+    bounded
+}
+
+flow vocabulary {
+    values -> transform -> collect
+}
+
+require {
+    deterministic
+}
+
+ensure {
+    deterministic
+}
+
+prefer {
+    latency
+}
+
+resource cpu {
+}
+
+capability pthread {
+}
+
+domain ranking {
+}

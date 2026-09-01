@@ -1,0 +1,18 @@
+input scores {
+    max_count 8
+    sample 10 12
+    sample 11 99
+    sample 12 30
+}
+
+output ranking {
+    type score
+}
+
+flow custom_rank {
+    scores -> sort -> top(2)
+}
+
+require {
+    deterministic
+}

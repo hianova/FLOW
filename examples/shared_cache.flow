@@ -1,0 +1,21 @@
+input requests {
+    max_count 100000
+}
+
+state cache {
+    shared
+    read_heavy
+}
+
+flow shared_cache {
+    requests -> lookup -> cache
+}
+
+require {
+    deterministic
+    memory < 64mb
+}
+
+prefer {
+    latency
+}

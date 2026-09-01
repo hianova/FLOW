@@ -1,0 +1,20 @@
+project browser_runtime
+
+input task_stream {
+    max_count 10000
+}
+
+flow browser_pipeline {
+    task_stream -> transform -> collect
+}
+
+import builtin
+
+require {
+    deterministic
+    memory < 64mb
+}
+
+prefer {
+    latency
+}

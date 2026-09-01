@@ -1,0 +1,7 @@
+input items {
+    max_count 4
+}
+
+flow impossible_top {
+    items -> top(10)
+}

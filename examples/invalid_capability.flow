@@ -1,0 +1,20 @@
+input values {
+    max_count 128
+}
+
+flow capability_probe {
+    values -> transform -> collect
+}
+
+require {
+    deterministic
+}
+
+resource cpu {
+}
+
+capability stdlib {
+}
+
+domain ranking {
+}

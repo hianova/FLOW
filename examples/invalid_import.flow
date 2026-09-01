@@ -1,0 +1,9 @@
+import missing_plugin
+
+input items {
+    max_count 8
+}
+
+flow simple {
+    items -> collect
+}

@@ -1,0 +1,15 @@
+input items {
+    max_count 32
+}
+
+flow scan {
+    items -> top(2)
+}
+
+require {
+    deterministic
+}
+
+prefer {
+    latency
+}

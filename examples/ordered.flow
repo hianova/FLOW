@@ -1,0 +1,15 @@
+input events {
+    max_count 10000
+}
+
+state index {
+    shared
+}
+
+flow ordered_lookup {
+    events -> sort -> top(2)
+}
+
+require {
+    deterministic
+}

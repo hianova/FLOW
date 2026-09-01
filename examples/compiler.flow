@@ -1,0 +1,34 @@
+input source {
+    max_count 4096
+}
+
+output c_source {
+    type text
+}
+
+state compiler {
+    bounded
+}
+
+flow compiler {
+    source -> read_file -> parse -> arena -> graph -> hash_table -> work_queue -> ffi -> lower -> select -> emit
+}
+
+require {
+    deterministic
+    memory < 64mb
+}
+
+ensure {
+    deterministic
+}
+
+resource cpu {
+}
+
+capability stdio {
+}
+
+domain compiler {
+}
+contract compiler
