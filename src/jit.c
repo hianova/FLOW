@@ -290,3 +290,158 @@ int flow_jit_calculate_migration_cost(const FlowLayoutMigrationSpec *spec,
     if (payback_calls_out != NULL) *payback_calls_out = payback;
     return 1;
 }
+
+/* ========================================================================= */
+/* Asynchronous Background JIT Engine (Zero-Latency Main-Thread Compilation) */
+/* ========================================================================= */
+
+#include <pthread.h>
+#include <stdatomic.h>
+
+#define FLOW_ASYNC_JIT_QUEUE_MAX 32
+
+typedef struct {
+    char source[2048];
+    char unit_name[64];
+    FlowLayoutKind layout;
+    int auto_publish;
+} FlowAsyncJITTask;
+
+struct FlowAsyncJITPool {
+    FlowAsyncJITConfig config;
+    pthread_t worker;
+    pthread_mutex_t lock;
+    pthread_cond_t cond;
+    pthread_cond_t idle_cond;
+    FlowAsyncJITTask queue[FLOW_ASYNC_JIT_QUEUE_MAX];
+    size_t queue_head;
+    size_t queue_tail;
+    size_t queue_count;
+    _Atomic int stopping;
+    _Atomic size_t completed_count;
+    _Atomic int in_flight;
+    FlowJITEngine *engine;
+};
+
+static void *async_jit_worker_thread(void *arg) {
+    FlowAsyncJITPool *pool = (FlowAsyncJITPool *)arg;
+
+    while (1) {
+        FlowAsyncJITTask task;
+        pthread_mutex_lock(&pool->lock);
+        while (pool->queue_count == 0 && !atomic_load_explicit(&pool->stopping, memory_order_acquire)) {
+            pthread_cond_wait(&pool->cond, &pool->lock);
+        }
+        if (pool->queue_count == 0 && atomic_load_explicit(&pool->stopping, memory_order_acquire)) {
+            pthread_mutex_unlock(&pool->lock);
+            break;
+        }
+
+        task = pool->queue[pool->queue_head];
+        pool->queue_head = (pool->queue_head + 1) % FLOW_ASYNC_JIT_QUEUE_MAX;
+        pool->queue_count--;
+        atomic_store_explicit(&pool->in_flight, 1, memory_order_release);
+        pthread_mutex_unlock(&pool->lock);
+
+        /* 1. Perform background compilation (Offloaded from main thread) */
+        FlowUnit *compiled_unit = calloc(1, sizeof(FlowUnit));
+        FlowJITCodeBlock code_block;
+        if (compiled_unit != NULL) {
+            flow_jit_compile_llvm_ir(pool->engine, task.source, task.unit_name,
+                                     task.layout, compiled_unit, &code_block);
+
+            /* 2. If auto-publish requested, hot-swap via Reload/QSBR */
+            if (task.auto_publish && pool->config.reload_ctx != NULL) {
+                flow_reload_activate(pool->config.reload_ctx, compiled_unit);
+                flow_qsbr_synchronize(pool->config.reload_ctx, 1000000000);
+                flow_qsbr_reclaim(pool->config.reload_ctx);
+            }
+        }
+
+        atomic_fetch_add_explicit(&pool->completed_count, 1, memory_order_release);
+        atomic_store_explicit(&pool->in_flight, 0, memory_order_release);
+
+        pthread_mutex_lock(&pool->lock);
+        if (pool->queue_count == 0) {
+            pthread_cond_broadcast(&pool->idle_cond);
+        }
+        pthread_mutex_unlock(&pool->lock);
+    }
+    return NULL;
+}
+
+FlowAsyncJITPool *flow_async_jit_create(const FlowAsyncJITConfig *config) {
+    FlowAsyncJITPool *pool = calloc(1, sizeof(*pool));
+    if (pool == NULL) return NULL;
+    if (config != NULL) pool->config = *config;
+    if (pool->config.worker_threads == 0) pool->config.worker_threads = 1;
+
+    pool->engine = flow_jit_create(NULL);
+    pthread_mutex_init(&pool->lock, NULL);
+    pthread_cond_init(&pool->cond, NULL);
+    pthread_cond_init(&pool->idle_cond, NULL);
+    atomic_init(&pool->stopping, 0);
+    atomic_init(&pool->completed_count, 0);
+    atomic_init(&pool->in_flight, 0);
+
+    pthread_create(&pool->worker, NULL, async_jit_worker_thread, pool);
+    return pool;
+}
+
+void flow_async_jit_destroy(FlowAsyncJITPool *pool) {
+    if (pool == NULL) return;
+    atomic_store_explicit(&pool->stopping, 1, memory_order_release);
+    pthread_mutex_lock(&pool->lock);
+    pthread_cond_broadcast(&pool->cond);
+    pthread_mutex_unlock(&pool->lock);
+
+    pthread_join(pool->worker, NULL);
+
+    pthread_cond_destroy(&pool->idle_cond);
+    pthread_cond_destroy(&pool->cond);
+    pthread_mutex_destroy(&pool->lock);
+    if (pool->engine != NULL) flow_jit_destroy(pool->engine);
+    free(pool);
+}
+
+int flow_async_jit_submit(FlowAsyncJITPool *pool,
+                          const char *c_or_llvm_source,
+                          const char *unit_name,
+                          FlowLayoutKind layout,
+                          int auto_publish_on_complete) {
+    if (pool == NULL) return 0;
+    pthread_mutex_lock(&pool->lock);
+    if (pool->queue_count >= FLOW_ASYNC_JIT_QUEUE_MAX ||
+        atomic_load_explicit(&pool->stopping, memory_order_acquire)) {
+        pthread_mutex_unlock(&pool->lock);
+        return 0;
+    }
+
+    FlowAsyncJITTask *task = &pool->queue[pool->queue_tail];
+    pool->queue_tail = (pool->queue_tail + 1) % FLOW_ASYNC_JIT_QUEUE_MAX;
+    pool->queue_count++;
+
+    strncpy(task->source, c_or_llvm_source ? c_or_llvm_source : "", sizeof(task->source) - 1);
+    strncpy(task->unit_name, unit_name ? unit_name : "jit_unit", sizeof(task->unit_name) - 1);
+    task->layout = layout;
+    task->auto_publish = auto_publish_on_complete;
+
+    pthread_cond_signal(&pool->cond);
+    pthread_mutex_unlock(&pool->lock);
+    return 1;
+}
+
+size_t flow_async_jit_completed_count(const FlowAsyncJITPool *pool) {
+    if (pool == NULL) return 0;
+    return atomic_load_explicit(&pool->completed_count, memory_order_acquire);
+}
+
+void flow_async_jit_wait_idle(FlowAsyncJITPool *pool) {
+    if (pool == NULL) return;
+    pthread_mutex_lock(&pool->lock);
+    while (pool->queue_count > 0 || atomic_load_explicit(&pool->in_flight, memory_order_acquire)) {
+        pthread_cond_wait(&pool->idle_cond, &pool->lock);
+    }
+    pthread_mutex_unlock(&pool->lock);
+}
+

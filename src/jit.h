@@ -69,4 +69,31 @@ int flow_jit_calculate_migration_cost(const FlowLayoutMigrationSpec *spec,
                                       double *migration_cost_ns_out,
                                       double *payback_calls_out);
 
+/* ========================================================================= */
+/* Asynchronous Background JIT Engine (Zero-Latency Main-Thread Compilation) */
+/* ========================================================================= */
+
+typedef struct FlowAsyncJITPool FlowAsyncJITPool;
+
+typedef struct {
+    size_t worker_threads;
+    FlowReloadContext *reload_ctx;
+} FlowAsyncJITConfig;
+
+FlowAsyncJITPool *flow_async_jit_create(const FlowAsyncJITConfig *config);
+void flow_async_jit_destroy(FlowAsyncJITPool *pool);
+
+/* Submit compilation task to background worker; returns immediately (0ms blocking for main thread) */
+int flow_async_jit_submit(FlowAsyncJITPool *pool,
+                          const char *c_or_llvm_source,
+                          const char *unit_name,
+                          FlowLayoutKind layout,
+                          int auto_publish_on_complete);
+
+/* Number of background compilations completed */
+size_t flow_async_jit_completed_count(const FlowAsyncJITPool *pool);
+
+/* Wait for all pending background compilations to finish */
+void flow_async_jit_wait_idle(FlowAsyncJITPool *pool);
+
 #endif

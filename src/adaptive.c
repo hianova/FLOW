@@ -1,4 +1,5 @@
 #include "adaptive.h"
+#include "registry.h"
 
 #include <pthread.h>
 #include <stdlib.h>
@@ -493,3 +494,127 @@ const char *flow_adaptive_status_name(FlowAdaptiveStatus status) {
     }
     return "unknown";
 }
+
+uint64_t flow_adaptive_telemetry_bias_from_pmu(const FlowPMUTelemetry *pmu,
+                                               int write_heavy_state,
+                                               const FlowPlanDimensionSet *dims) {
+    if (dims == NULL || dims->count == 0) return 0;
+    uint64_t bias_mask = 0;
+    unsigned shift = 0;
+
+    int bias_contention = write_heavy_state;
+    int bias_cache_locality = (pmu != NULL && pmu->cache_miss_rate > 0.30);
+    int bias_concurrency = (pmu != NULL && pmu->ipc > 0.0 && pmu->ipc < 0.8);
+
+    for (size_t i = 0; i < dims->count; ++i) {
+        const FlowPlanDimension *d = &dims->dimensions[i];
+        unsigned bits = flow_dimension_bits(d);
+        if (bits == 0) continue;
+        uint64_t dim_mask = (bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << bits) - 1);
+
+        int should_bias = 0;
+        if (bias_contention && (strcmp(d->name, "shards") == 0 || strcmp(d->name, "buffer_bytes") == 0 || strcmp(d->name, "growth_percent") == 0)) {
+            should_bias = 1;
+        }
+        if (bias_cache_locality && (strcmp(d->name, "buffer_bytes") == 0 || strcmp(d->name, "arena_bytes") == 0 || strcmp(d->name, "initial_capacity") == 0)) {
+            should_bias = 1;
+        }
+        if (bias_concurrency && (strcmp(d->name, "threads") == 0 || strcmp(d->name, "batch_size") == 0)) {
+            should_bias = 1;
+        }
+        if (!bias_contention && !bias_cache_locality && !bias_concurrency) {
+            /* Default: tactile parameters prioritized for real-time micro-tuning */
+            if (d->dim_class == FLOW_DIM_CLASS_TACTILE_PARAM) {
+                should_bias = 1;
+            }
+        }
+
+        if (should_bias) {
+            bias_mask |= (dim_mask << shift);
+        }
+        shift += bits;
+    }
+    return bias_mask;
+}
+
+uint64_t flow_adaptive_get_telemetry_bias(const FlowAdaptiveController *controller,
+                                          const Component *comp,
+                                          const FlowPlanDimensionSet *dims) {
+    (void)comp;
+    if (controller == NULL || dims == NULL) return 0;
+    FlowPMUTelemetry pmu;
+    int write_heavy = 0;
+    pthread_mutex_lock((pthread_mutex_t *)&controller->lock);
+    pmu = controller->pmu;
+    if (controller->metrics.calls > 0 && controller->metrics.failures > 0) {
+        write_heavy = 1;
+    }
+    pthread_mutex_unlock((pthread_mutex_t *)&controller->lock);
+    return flow_adaptive_telemetry_bias_from_pmu(&pmu, write_heavy, dims);
+}
+
+uint64_t flow_adaptive_synthesize_env_mask(const FlowAdaptiveController *controller,
+                                           const FlowEnvironmentState *env,
+                                           const Component *comp,
+                                           const FlowPlanDimensionSet *dims) {
+    (void)controller;
+    return flow_component_environment_mask(NULL, comp, dims, env);
+}
+
+FlowAdaptiveStatus flow_adaptive_handle_pressure_event(
+    FlowAdaptiveController *controller,
+    const FlowEnvironmentState *env,
+    size_t *morphed_candidate_index_out) {
+    if (controller == NULL || env == NULL) return FLOW_ADAPTIVE_INVALID;
+
+    size_t best_idx = (size_t)-1;
+    double best_suitability = -1.0e9;
+
+    pthread_mutex_lock(&controller->lock);
+    size_t curr = controller->current_index;
+
+    for (size_t i = 0; i < controller->candidate_count; ++i) {
+        const FlowAdaptiveCandidate *cand = &controller->candidates[i];
+        double score = 0.0;
+
+        if (env->pressure_level == FLOW_ENV_PRESSURE_MEMORY_CRITICAL) {
+            /* Under critical memory pressure: high memory_score candidate is top priority */
+            score = (double)cand->memory_score * 100.0 - (double)cand->memory_fixed_bytes / 1024.0;
+        } else if (env->pressure_level == FLOW_ENV_PRESSURE_CACHE_THRASHING) {
+            score = (double)cand->latency_score * 50.0 + (double)cand->memory_score * 20.0;
+        } else if (env->pressure_level == FLOW_ENV_PRESSURE_LATENCY_SPIKE) {
+            score = (double)cand->latency_score * 100.0;
+        } else {
+            /* Normal */
+            score = (double)(cand->latency_score + cand->memory_score);
+        }
+
+        if (score > best_suitability) {
+            best_suitability = score;
+            best_idx = i;
+        }
+    }
+
+    if (best_idx == (size_t)-1 || best_idx == curr) {
+        pthread_mutex_unlock(&controller->lock);
+        if (morphed_candidate_index_out) *morphed_candidate_index_out = curr;
+        return FLOW_ADAPTIVE_NO_CHANGE;
+    }
+
+    /* Perform live hot reload to morphed layout */
+    const FlowUnit *target_unit = controller->candidates[best_idx].unit;
+    int reload_res = flow_reload_activate(controller->context, target_unit);
+    if (reload_res != FLOW_RELOAD_OK) {
+        pthread_mutex_unlock(&controller->lock);
+        return FLOW_ADAPTIVE_RELOAD_FAILED;
+    }
+
+    controller->current_index = best_idx;
+    controller->calls_since_switch = 0;
+    controller->debounce.swap_count++;
+    pthread_mutex_unlock(&controller->lock);
+
+    if (morphed_candidate_index_out) *morphed_candidate_index_out = best_idx;
+    return FLOW_ADAPTIVE_OK;
+}
+

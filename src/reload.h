@@ -110,7 +110,9 @@ struct FlowReloadReader {
     _Atomic uint64_t active_epoch;
     _Atomic int registered;
     _Atomic uint64_t last_heartbeat_ns;
-    uint8_t _cache_pad[32]; /* Explicit false-sharing buffer */
+    _Atomic uint64_t qsbr_epoch;
+    _Atomic int is_offline;
+    uint8_t _cache_pad[24]; /* Explicit false-sharing buffer aligned to 64 bytes */
 } FLOW_CACHE_ALIGNED;
 
 typedef struct {
@@ -175,5 +177,27 @@ int flow_schema_migration_compatible(const FlowSchema *old_schema,
                                      const FlowSchema *new_schema);
 int flow_reload_compatible(const FlowUnit *current, const FlowUnit *candidate);
 const char *flow_reload_status_name(FlowReloadStatus status);
+
+/* ========================================================================= */
+/* Unified QSBR (Quiescent State Based Reclamation) - Zero-Write Read Path   */
+/* ========================================================================= */
+
+/* Reader thread announces a quiescent state (safe point) at event loop boundary */
+void flow_qsbr_checkpoint(FlowReloadReader *reader);
+
+/* Reader thread marks itself offline before sleeping or blocking on I/O */
+void flow_qsbr_offline(FlowReloadReader *reader);
+
+/* Reader thread marks itself online when resuming active processing */
+void flow_qsbr_online(FlowReloadReader *reader);
+
+/* Absolute zero-atomic-write fast read call (pure Acquire read, 0 cache bouncing) */
+int flow_qsbr_call(FlowReloadContext *context, const void *input, void *output);
+
+/* Synchronize: waits for all online registered readers to complete a QSBR grace period */
+int flow_qsbr_synchronize(FlowReloadContext *context, uint64_t timeout_ns);
+
+/* Reclaims all retired generations that have passed the QSBR grace period */
+size_t flow_qsbr_reclaim(FlowReloadContext *context);
 
 #endif

@@ -1000,3 +1000,78 @@ int flow_reload_plan(FlowReloadContext *context, const FlowPlanArtifact *artifac
         return res;
     }
 }
+
+/* ========================================================================= */
+/* Unified QSBR (Quiescent State Based Reclamation) Implementation          */
+/* ========================================================================= */
+
+void flow_qsbr_checkpoint(FlowReloadReader *reader) {
+    if (reader == NULL) return;
+    atomic_fetch_add_explicit(&reader->qsbr_epoch, 1, memory_order_release);
+    atomic_store_explicit(&reader->last_heartbeat_ns, flow_time_ns_fast(), memory_order_relaxed);
+}
+
+void flow_qsbr_offline(FlowReloadReader *reader) {
+    if (reader == NULL) return;
+    atomic_store_explicit(&reader->is_offline, 1, memory_order_release);
+}
+
+void flow_qsbr_online(FlowReloadReader *reader) {
+    if (reader == NULL) return;
+    atomic_store_explicit(&reader->last_heartbeat_ns, flow_time_ns_fast(), memory_order_relaxed);
+    atomic_store_explicit(&reader->is_offline, 0, memory_order_release);
+}
+
+int flow_qsbr_call(FlowReloadContext *context, const void *input, void *output) {
+    if (context == NULL) return FLOW_RELOAD_INVALID;
+    FlowReloadGeneration *curr = atomic_load_explicit(&context->current, memory_order_acquire);
+    if (curr == NULL || curr->unit == NULL || curr->unit->run == NULL) {
+        return FLOW_RELOAD_NO_CURRENT;
+    }
+    return curr->unit->run(context->host_context, curr->state, input, output);
+}
+
+int flow_qsbr_synchronize(FlowReloadContext *context, uint64_t timeout_ns) {
+    if (context == NULL) return FLOW_RELOAD_INVALID;
+    uint64_t start = flow_time_ns_fast();
+    uint64_t target_qsbr_epochs[64];
+    FlowReloadReader *tracked_readers[64];
+    size_t reader_count = 0;
+
+    pthread_mutex_lock(&context->lock);
+    FlowReloadReader *r = context->readers;
+    while (r != NULL && reader_count < 64) {
+        if (atomic_load_explicit(&r->registered, memory_order_acquire)) {
+            tracked_readers[reader_count] = r;
+            target_qsbr_epochs[reader_count] = atomic_load_explicit(&r->qsbr_epoch, memory_order_acquire) + 1;
+            reader_count++;
+        }
+        r = r->next;
+    }
+    pthread_mutex_unlock(&context->lock);
+
+    if (reader_count == 0) return FLOW_RELOAD_OK;
+
+    for (size_t i = 0; i < reader_count; ++i) {
+        FlowReloadReader *reader = tracked_readers[i];
+        while (1) {
+            if (!atomic_load_explicit(&reader->registered, memory_order_acquire)) break;
+            if (atomic_load_explicit(&reader->is_offline, memory_order_acquire)) break;
+            if (atomic_load_explicit(&reader->qsbr_epoch, memory_order_acquire) >= target_qsbr_epochs[i]) break;
+
+            if (timeout_ns > 0 && (flow_time_ns_fast() - start) > timeout_ns) {
+                return FLOW_RELOAD_BUSY;
+            }
+
+            struct timespec req = { .tv_sec = 0, .tv_nsec = 50000 };
+            nanosleep(&req, NULL);
+        }
+    }
+    return FLOW_RELOAD_OK;
+}
+
+size_t flow_qsbr_reclaim(FlowReloadContext *context) {
+    if (context == NULL) return 0;
+    return flow_reload_reclaim(context);
+}
+

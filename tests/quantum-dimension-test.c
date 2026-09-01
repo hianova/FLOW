@@ -62,7 +62,7 @@ int main(void) {
 
     /* Decode a Baseline State */
     FlowPlan baseline_plan;
-    CHECK(space.decode(&space, UINT64_C(0x0), &baseline_plan));
+    CHECK(space.decode(&space, flow_bitspace_default_genome(&space), &baseline_plan));
     CHECK(space.evaluate(&space, &baseline_plan, &baseline_plan.eval));
 
     /* Create Candidate A: Only Tactile Parameter Mutated (Buffer bytes altered) */

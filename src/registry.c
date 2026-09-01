@@ -297,6 +297,58 @@ int flow_component_preference(const SemanticIR *ir,
     return plugin->preference(ir, component);
 }
 
+uint64_t flow_component_mutation_mask(const SemanticIR *ir,
+                                      const Component *component,
+                                      const FlowPlanDimensionSet *dims) {
+    const FlowPlugin *plugin = flow_component_plugin(component);
+    if (plugin != NULL && plugin->get_mutation_mask != NULL) {
+        return plugin->get_mutation_mask(ir, component, dims);
+    }
+    return (uint64_t)-1;
+}
+
+uint64_t flow_component_preference_mask(const SemanticIR *ir,
+                                        const Component *component,
+                                        const FlowPlanDimensionSet *dims) {
+    const FlowPlugin *plugin = flow_component_plugin(component);
+    if (plugin != NULL && plugin->preference_mask != NULL) {
+        return plugin->preference_mask(ir, component, dims);
+    }
+    return 0;
+}
+
+uint64_t flow_component_contract_mask(const SemanticIR *ir,
+                                      const Component *component,
+                                      const FlowPlanDimensionSet *dims) {
+    const FlowPlugin *plugin = flow_component_plugin(component);
+    if (plugin != NULL && plugin->contract_mask != NULL) {
+        return plugin->contract_mask(ir, component, dims);
+    }
+    return (uint64_t)-1;
+}
+
+uint64_t flow_component_resource_mask(const SemanticIR *ir,
+                                      const Component *component,
+                                      const FlowPlanDimensionSet *dims,
+                                      size_t memory_limit_bytes) {
+    const FlowPlugin *plugin = flow_component_plugin(component);
+    if (plugin != NULL && plugin->resource_mask != NULL) {
+        return plugin->resource_mask(ir, component, dims, memory_limit_bytes);
+    }
+    return (uint64_t)-1;
+}
+
+uint64_t flow_component_environment_mask(const SemanticIR *ir,
+                                         const Component *component,
+                                         const FlowPlanDimensionSet *dims,
+                                         const FlowEnvironmentState *env) {
+    const FlowPlugin *plugin = flow_component_plugin(component);
+    if (plugin != NULL && plugin->environment_mask != NULL) {
+        return plugin->environment_mask(ir, component, dims, env);
+    }
+    return (uint64_t)-1;
+}
+
 int flow_component_emit(FILE *output, const SemanticIR *ir,
                         const Component *component,
                         const struct FlowSearchResult *search,

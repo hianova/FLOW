@@ -7,6 +7,9 @@
 #include "smt.h"
 #include "topology.h"
 #include "lsp.h"
+#include "security.h"
+#include "swarm.h"
+#include "genetic.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -54,6 +57,11 @@ int flowc_main(int argc, char **argv) {
     size_t workload_bytes = 0;
     ProfileSeed profile = {0};
     int show_heatmap = 0;
+    int show_masks = 0;
+    int use_mtd = 0;
+    int use_swarm = 0;
+    size_t swarm_particles = 8;
+    int use_synth_kernel = 0;
     int use_explain_seed = 0;
     uint32_t explain_seed = 0;
 
@@ -63,7 +71,7 @@ int flowc_main(int argc, char **argv) {
     }
 
     if (argc < 3) {
-        fprintf(stderr, "usage: flowc <input.flow> -o <output.c> [--search] [--iterations <N>] [--seed <N>] [--benchmark] [--heatmap] [--explain-seed <N>] [--reload-adapter] [--profile <file>] [--profile-out <file>] [--component <id>] [--workload-bytes <N>] [--target-c-header <file.h>] [--target-rust <file.rs>] [--target-python <file.py>]\n");
+        fprintf(stderr, "usage: flowc <input.flow> -o <output.c> [--search] [--iterations <N>] [--seed <N>] [--benchmark] [--heatmap] [--show-masks] [--mtd] [--swarm [N]] [--synth-kernel] [--explain-seed <N>] [--reload-adapter] [--profile <file>] [--profile-out <file>] [--component <id>] [--workload-bytes <N>] [--target-c-header <file.h>] [--target-rust <file.rs>] [--target-python <file.py>]\n");
         return EXIT_FAILURE;
     }
     input_path = argv[1];
@@ -75,6 +83,18 @@ int flowc_main(int argc, char **argv) {
             use_search = 1;
         } else if (strcmp(argv[arg], "--heatmap") == 0) {
             show_heatmap = 1;
+        } else if (strcmp(argv[arg], "--show-masks") == 0 || strcmp(argv[arg], "--mask-canvas") == 0) {
+            show_masks = 1;
+        } else if (strcmp(argv[arg], "--mtd") == 0) {
+            use_mtd = 1;
+        } else if (strcmp(argv[arg], "--swarm") == 0) {
+            use_swarm = 1;
+            use_search = 1;
+            if (arg + 1 < argc && argv[arg + 1][0] >= '0' && argv[arg + 1][0] <= '9') {
+                swarm_particles = (size_t)strtoul(argv[++arg], NULL, 10);
+            }
+        } else if (strcmp(argv[arg], "--synth-kernel") == 0 || strcmp(argv[arg], "--genetic") == 0) {
+            use_synth_kernel = 1;
         } else if (strcmp(argv[arg], "--explain-seed") == 0 && arg + 1 < argc) {
             explain_seed = (uint32_t)strtoul(argv[++arg], NULL, 10);
             use_explain_seed = 1;
@@ -278,8 +298,28 @@ int flowc_main(int argc, char **argv) {
         }
     }
     if (use_search) {
-        search = search_best(&ir, iterations, seed, use_benchmark,
-                             profile.available ? &profile : NULL);
+        if (use_swarm) {
+            FlowBitSpace space;
+            if (flow_bitspace_init_for_ir(&ir, &space)) {
+                FlowBitSearchResult swarm_res;
+                size_t swarm_cycles = (iterations / (swarm_particles * 10)) > 0 ? (iterations / (swarm_particles * 10)) : 6;
+                if (flow_swarm_search(&space, swarm_particles, swarm_cycles, seed, use_benchmark, &swarm_res)) {
+                    flow_plan_to_search_result(&swarm_res.best_plan, &ir, seed, &search);
+                    search.mask_canvas = swarm_res.mask_canvas;
+                    search.iterations = swarm_res.iterations;
+                    search.seed = seed;
+                } else {
+                    search = search_best(&ir, iterations, seed, use_benchmark,
+                                         profile.available ? &profile : NULL);
+                }
+            } else {
+                search = search_best(&ir, iterations, seed, use_benchmark,
+                                     profile.available ? &profile : NULL);
+            }
+        } else {
+            search = search_best(&ir, iterations, seed, use_benchmark,
+                                 profile.available ? &profile : NULL);
+        }
         component = search.component;
         if (use_explain_seed) {
             FlowBitSpace space;
@@ -289,6 +329,24 @@ int flowc_main(int argc, char **argv) {
         }
         if (show_heatmap) {
             flow_search_heatmap_report(&search.heatmap, stdout);
+        }
+        if (show_masks) {
+            flow_mask_canvas_report(&search.mask_canvas, stdout);
+        }
+        if (use_mtd) {
+            size_t sample_sizes[6] = {8, 4, 8, 1, 4, 16};
+            size_t sample_aligns[6] = {8, 4, 8, 1, 4, 8};
+            FlowMTDLayout mtd_layout;
+            if (flow_security_mtd_generate_layout(seed ? (uint64_t)seed : UINT64_C(0x12345678), 6, sample_sizes, sample_aligns, 32, &mtd_layout)) {
+                flow_security_mtd_report(&mtd_layout, stdout);
+            }
+        }
+        if (use_synth_kernel) {
+            FlowGeneticEngine genetic_engine;
+            flow_genetic_init(&genetic_engine, &ir);
+            FlowKernelGenome synth_kernel;
+            flow_genetic_evolve(&genetic_engine, iterations > 0 ? iterations : 200, seed, &synth_kernel);
+            flow_genetic_report(&genetic_engine, stdout);
         }
         if (component == NULL) {
             fprintf(stderr, "flowc: search could not find a viable implementation plan satisfying all hard gates\n");

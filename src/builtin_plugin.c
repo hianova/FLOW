@@ -617,6 +617,107 @@ static int builtin_create_unit(const FlowPlanArtifact *artifact,
     return 1;
 }
 
+static uint64_t builtin_preference_mask(const SemanticIR *ir,
+                                        const Component *component,
+                                        const FlowPlanDimensionSet *dims) {
+    if (dims == NULL || dims->count == 0) return 0;
+    uint64_t mask = 0;
+    unsigned shift = 0;
+
+    for (size_t i = 0; i < dims->count; ++i) {
+        const FlowPlanDimension *d = &dims->dimensions[i];
+        unsigned bits = flow_dimension_bits(d);
+        if (bits == 0) continue;
+        uint64_t dim_mask = (bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << bits) - 1);
+
+        int prefer = 0;
+        if (component != NULL) {
+            if (strcmp(component->id, "sharded_hash") == 0) {
+                if (ir != NULL && (ir->state_shared || ir->state_read_heavy)) {
+                    if (strcmp(d->name, "threads") == 0 || strcmp(d->name, "shards") == 0) {
+                        prefer = 1;
+                    }
+                }
+            } else if (strcmp(component->id, "bounded_queue") == 0) {
+                if (strcmp(d->name, "buffer_bytes") == 0 || strcmp(d->name, "batch_size") == 0) {
+                    prefer = 1;
+                }
+            } else if (strcmp(component->id, "parallel_map") == 0) {
+                if (strcmp(d->name, "threads") == 0 || strcmp(d->name, "batch_size") == 0) {
+                    prefer = 1;
+                }
+            } else if (strcmp(component->id, "linear_array") == 0) {
+                if (strcmp(d->name, "capacity") == 0 || strcmp(d->name, "initial_capacity") == 0) {
+                    prefer = 1;
+                }
+            }
+        }
+
+        if (prefer) {
+            mask |= (dim_mask << shift);
+        }
+        shift += bits;
+    }
+    return mask;
+}
+
+static uint64_t builtin_environment_mask(const SemanticIR *ir,
+                                         const Component *component,
+                                         const FlowPlanDimensionSet *dims,
+                                         const FlowEnvironmentState *env) {
+    (void)ir;
+    (void)component;
+    if (dims == NULL || dims->count == 0 || env == NULL) return (uint64_t)-1;
+    uint64_t mask = (uint64_t)-1;
+    unsigned shift = 0;
+
+    for (size_t i = 0; i < dims->count; ++i) {
+        const FlowPlanDimension *d = &dims->dimensions[i];
+        unsigned bits = flow_dimension_bits(d);
+        if (bits == 0) continue;
+        uint64_t dim_mask = (bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << bits) - 1);
+
+        if (env->pressure_level == FLOW_ENV_PRESSURE_MEMORY_CRITICAL) {
+            /* Under critical memory pressure: forbid arena allocation, force buffer/batch/arena to minimal values */
+            if (strcmp(d->name, "arena_bytes") == 0) {
+                mask &= ~(dim_mask << shift); /* strictly 0 */
+            } else if (strcmp(d->name, "buffer_bytes") == 0 || strcmp(d->name, "batch_size") == 0) {
+                uint64_t allowed = 0x3;
+                for (unsigned b = 0; b < bits; ++b) {
+                    if (((uint64_t)1 << b) > allowed) {
+                        mask &= ~(UINT64_C(1) << (shift + b));
+                    }
+                }
+            } else if (strcmp(d->name, "threads") == 0) {
+                uint64_t allowed = 0x1;
+                for (unsigned b = 0; b < bits; ++b) {
+                    if (((uint64_t)1 << b) > allowed) {
+                        mask &= ~(UINT64_C(1) << (shift + b));
+                    }
+                }
+            }
+        } else if (env->pressure_level == FLOW_ENV_PRESSURE_CACHE_THRASHING) {
+            if (strcmp(d->name, "shards") == 0 || strcmp(d->name, "buffer_bytes") == 0) {
+                uint64_t allowed = 0x3;
+                for (unsigned b = 0; b < bits; ++b) {
+                    if (((uint64_t)1 << b) > allowed) {
+                        mask &= ~(UINT64_C(1) << (shift + b));
+                    }
+                }
+            }
+        }
+
+        if (env->hardware_arch == FLOW_ARCH_APPLE_SILICON) {
+            if (strcmp(d->name, "batch_size") == 0) {
+                mask &= ~(UINT64_C(0x1) << shift);
+            }
+        }
+
+        shift += bits;
+    }
+    return mask;
+}
+
 static const FlowPlugin BUILTIN_PLUGIN = {
     "builtin",
     "1",
@@ -635,6 +736,11 @@ static const FlowPlugin BUILTIN_PLUGIN = {
     builtin_evaluate_plan,
     builtin_verify_plan,
     builtin_benchmark,
+    NULL,
+    builtin_preference_mask,
+    NULL,
+    NULL,
+    builtin_environment_mask,
     builtin_create_unit
 };
 

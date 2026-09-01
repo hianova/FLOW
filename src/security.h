@@ -92,4 +92,40 @@ int flow_security_write_composition_attestation(
     FILE *output, const FlowCompositionSpec *spec,
     const FlowSecurityReport *report);
 
+/* Pre-emptive Safety Mask Generator (Hard Gate 1-Cycle Bitwise Pruning) */
+uint64_t flow_security_get_safety_mask(const SemanticIR *ir,
+                                       const Component *comp,
+                                       const FlowPlanDimensionSet *dims);
+
+/* Moving Target Defense (MTD) Fluid Polymorphic Memory Layout */
+#define FLOW_MTD_MAX_FIELDS 16
+
+typedef struct {
+    uint64_t seed;
+    size_t field_count;
+    size_t field_order[FLOW_MTD_MAX_FIELDS];     /* Permuted index of original fields */
+    size_t field_offsets[FLOW_MTD_MAX_FIELDS];   /* Dynamic runtime byte offsets */
+    size_t padding_bytes[FLOW_MTD_MAX_FIELDS];   /* Non-deterministic inter-field jitter padding */
+    size_t total_size;                           /* Total struct size with jitter padding */
+    size_t required_alignment;                   /* Natural alignment boundary */
+    uint64_t canary_token;                       /* Dynamic canary token for buffer guard */
+    double shannon_entropy;                      /* Offset distribution entropy */
+} FlowMTDLayout;
+
+typedef struct {
+    int enabled;
+    double min_entropy_threshold;                /* Default: 2.0 bits */
+    size_t morph_interval_ops;                   /* Morph interval in operations */
+    size_t max_padding_jitter;                   /* Max extra padding bytes per field */
+} FlowMTDPolicy;
+
+int flow_security_mtd_generate_layout(uint64_t seed, size_t field_count,
+                                      const size_t *field_sizes,
+                                      const size_t *field_alignments,
+                                      size_t max_padding_jitter,
+                                      FlowMTDLayout *layout_out);
+double flow_security_mtd_calculate_entropy(const FlowMTDLayout *layout);
+int flow_security_mtd_verify_alignment(const FlowMTDLayout *layout, const size_t *field_alignments);
+void flow_security_mtd_report(const FlowMTDLayout *layout, FILE *out);
+
 #endif

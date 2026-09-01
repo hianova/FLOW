@@ -1,5 +1,6 @@
 #include "verifier.h"
 #include "security.h"
+#include "registry.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -94,4 +95,81 @@ int verify_candidate(const SemanticIR *ir, const Component *component,
              report->max_count_proven ? "input bound proven" :
                                         "input bound requires runtime guard");
     return 1;
+}
+
+uint64_t flow_verifier_get_contract_mask(const SemanticIR *ir,
+                                         const Component *comp,
+                                         const FlowPlanDimensionSet *dims) {
+    if (dims == NULL || dims->count == 0) return (uint64_t)-1;
+    uint64_t mask = flow_component_contract_mask(ir, comp, dims);
+    unsigned shift = 0;
+
+    int forbid_parallel = 0;
+    if (ir != NULL) {
+        if (!ir->flow_parallelizable && !ir->state_shared) {
+            forbid_parallel = 1;
+        }
+    }
+
+    for (size_t i = 0; i < dims->count; ++i) {
+        const FlowPlanDimension *d = &dims->dimensions[i];
+        unsigned bits = flow_dimension_bits(d);
+        if (bits == 0) continue;
+        uint64_t dim_mask = (bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << bits) - 1);
+
+        if (forbid_parallel && (strcmp(d->name, "threads") == 0 || strcmp(d->name, "shards") == 0)) {
+            /* Strictly sequential / non-parallel contract: mask out all non-zero bits */
+            mask &= ~(dim_mask << shift);
+        }
+        shift += bits;
+    }
+    return mask;
+}
+
+uint64_t flow_verifier_get_resource_mask(const SemanticIR *ir,
+                                         const Component *comp,
+                                         const FlowPlanDimensionSet *dims) {
+    if (dims == NULL || dims->count == 0) return (uint64_t)-1;
+    size_t limit_bytes = (ir != NULL && ir->memory_limit_mb > 0) ?
+                         (size_t)ir->memory_limit_mb * 1024u * 1024u : 0;
+    uint64_t mask = (limit_bytes > 0) ? flow_component_resource_mask(ir, comp, dims, limit_bytes) : (uint64_t)-1;
+    unsigned shift = 0;
+
+    if (limit_bytes == 0 || comp == NULL) return mask;
+
+    size_t per_cap = comp->memory_bytes_per_capacity > 0 ? comp->memory_bytes_per_capacity : 8;
+    size_t max_cap = (limit_bytes > comp->memory_fixed_bytes) ?
+                     (limit_bytes - comp->memory_fixed_bytes) / per_cap : 0;
+
+    for (size_t i = 0; i < dims->count; ++i) {
+        const FlowPlanDimension *d = &dims->dimensions[i];
+        unsigned bits = flow_dimension_bits(d);
+        if (bits == 0) continue;
+
+        if (strcmp(d->name, "capacity") == 0 && d->kind == FLOW_DIM_EXPONENT) {
+            /* Find maximum allowed exponent */
+            uint64_t max_exp = d->min_val;
+            while (max_exp < d->max_val && ((uint64_t)1 << (max_exp + 1)) <= max_cap) {
+                max_exp++;
+            }
+            uint64_t max_raw = max_exp >= d->min_val ? max_exp - d->min_val : 0;
+            for (unsigned b = 0; b < bits; ++b) {
+                if (((uint64_t)1 << b) > max_raw) {
+                    mask &= ~(UINT64_C(1) << (shift + b));
+                }
+            }
+        } else if (strcmp(d->name, "arena_bytes") == 0 && d->kind == FLOW_DIM_LINEAR) {
+            /* Mask arena sizes that inherently exceed total memory limit */
+            uint64_t max_arena = limit_bytes / 2;
+            uint64_t step = d->step == 0 ? 1 : d->step;
+            uint64_t max_raw = max_arena >= d->min_val ? (max_arena - d->min_val) / step : 0;
+            for (unsigned b = 0; b < bits; ++b) {
+                if (((uint64_t)1 << b) > max_raw) {
+                    mask &= ~(UINT64_C(1) << (shift + b));
+                }
+            }
+        }
+        shift += bits;
+    }
+    return mask;
 }

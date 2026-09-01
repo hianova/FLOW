@@ -45,6 +45,24 @@ typedef struct {
     FlowPlanDimension dimensions[FLOW_DIMENSION_MAX];
 } FlowPlanDimensionSet;
 
+static inline unsigned flow_dimension_bits(const FlowPlanDimension *dim) {
+    if (dim == NULL) return 0;
+    if (dim->kind == FLOW_DIM_BOOLEAN) return 1;
+    if (dim->kind == FLOW_DIM_EXPONENT) {
+        uint64_t span = dim->max_val >= dim->min_val ? dim->max_val - dim->min_val : 0;
+        unsigned b = 1;
+        while (((uint64_t)1 << b) <= span && b < 64) ++b;
+        return b;
+    }
+    {
+        uint64_t step = dim->step == 0 ? 1 : dim->step;
+        uint64_t span = dim->max_val >= dim->min_val ? (dim->max_val - dim->min_val) / step : 0;
+        unsigned b = 1;
+        while (((uint64_t)1 << b) <= span && b < 64) ++b;
+        return b;
+    }
+}
+
 typedef struct {
     size_t count;
     uint64_t values[FLOW_DIMENSION_MAX];
@@ -143,6 +161,63 @@ typedef uint64_t (*FlowPluginBenchmarkFn)(const SemanticIR *ir,
 /* 13. Opaque domain context cleanup hook */
 typedef void (*FlowPluginFreeSemanticsFn)(void *domain_ctx);
 
+/* 14. Epigenetic Environmental Mutation Mask Hook */
+typedef uint64_t (*FlowPluginMutationMaskFn)(const SemanticIR *ir,
+                                             const Component *component,
+                                             const FlowPlanDimensionSet *dims);
+
+/* 15. Domain Preference Mask Hook */
+typedef uint64_t (*FlowPluginPreferenceMaskFn)(const SemanticIR *ir,
+                                               const Component *component,
+                                               const FlowPlanDimensionSet *dims);
+
+/* 16. Semantic Contract Mask Hook */
+typedef uint64_t (*FlowPluginContractMaskFn)(const SemanticIR *ir,
+                                             const Component *component,
+                                             const FlowPlanDimensionSet *dims);
+
+/* 17. Resource Quota Mask Hook */
+typedef uint64_t (*FlowPluginResourceMaskFn)(const SemanticIR *ir,
+                                             const Component *component,
+                                             const FlowPlanDimensionSet *dims,
+                                             size_t memory_limit_bytes);
+
+/* Environment Pressure Level for Dynamic Adaptability & Extreme Morphing */
+typedef enum {
+    FLOW_ENV_PRESSURE_NONE = 0,
+    FLOW_ENV_PRESSURE_MEMORY_MODERATE,
+    FLOW_ENV_PRESSURE_MEMORY_CRITICAL,    /* E.g. 100 tabs open, RAM near exhaustion */
+    FLOW_ENV_PRESSURE_CACHE_THRASHING,    /* L2/L3 miss rate > 25% */
+    FLOW_ENV_PRESSURE_LATENCY_SPIKE,      /* P99 tail latency violation */
+    FLOW_ENV_PRESSURE_BATTERY_SAVER       /* Low power mode / TDP constraint */
+} FlowEnvPressureLevel;
+
+/* Hardware Architecture Class for Silicon Specialization */
+typedef enum {
+    FLOW_ARCH_GENERIC = 0,
+    FLOW_ARCH_APPLE_SILICON,   /* Unified memory, 128-byte cache line, AMX/NEON */
+    FLOW_ARCH_INTEL_AVX2,      /* 64-byte cache line, 256-bit SIMD */
+    FLOW_ARCH_INTEL_AVX512,    /* 64-byte cache line, 512-bit SIMD */
+    FLOW_ARCH_ARM_NEON         /* Generic AArch64 / Mobile */
+} FlowHardwareArch;
+
+typedef struct {
+    FlowEnvPressureLevel pressure_level;
+    FlowHardwareArch hardware_arch;
+    size_t available_ram_bytes;
+    size_t active_concurrent_tabs;
+    size_t l2_cache_bytes;
+    size_t l3_cache_bytes;
+    double measured_miss_rate;
+    double measured_ipc;
+} FlowEnvironmentState;
+
+/* 18. Dynamic Environment Adaptation Mask Hook */
+typedef uint64_t (*FlowPluginEnvironmentMaskFn)(const SemanticIR *ir,
+                                                const Component *component,
+                                                const FlowPlanDimensionSet *dims,
+                                                const FlowEnvironmentState *env);
+
 struct FlowComponent {
     const char *id;
     const char *kind;
@@ -180,6 +255,11 @@ struct FlowPlugin {
     FlowPluginEvaluatePlanFn evaluate_plan;
     FlowPluginVerifyPlanFn verify_plan;
     FlowPluginBenchmarkFn benchmark;
+    FlowPluginMutationMaskFn get_mutation_mask;
+    FlowPluginPreferenceMaskFn preference_mask;
+    FlowPluginContractMaskFn contract_mask;
+    FlowPluginResourceMaskFn resource_mask;
+    FlowPluginEnvironmentMaskFn environment_mask;
     /* Runtime Unit Instantiation hook */
     int (*create_unit)(const struct FlowPlanArtifact *artifact,
                        const SemanticIR *ir,

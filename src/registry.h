@@ -46,6 +46,23 @@ int flow_component_verify(const SemanticIR *ir, const Component *component,
                           char *message, size_t message_size);
 int flow_component_preference(const SemanticIR *ir,
                               const Component *component);
+uint64_t flow_component_mutation_mask(const SemanticIR *ir,
+                                      const Component *component,
+                                      const FlowPlanDimensionSet *dims);
+uint64_t flow_component_preference_mask(const SemanticIR *ir,
+                                        const Component *component,
+                                        const FlowPlanDimensionSet *dims);
+uint64_t flow_component_contract_mask(const SemanticIR *ir,
+                                      const Component *component,
+                                      const FlowPlanDimensionSet *dims);
+uint64_t flow_component_resource_mask(const SemanticIR *ir,
+                                      const Component *component,
+                                      const FlowPlanDimensionSet *dims,
+                                      size_t memory_limit_bytes);
+uint64_t flow_component_environment_mask(const SemanticIR *ir,
+                                         const Component *component,
+                                         const FlowPlanDimensionSet *dims,
+                                         const FlowEnvironmentState *env);
 int flow_component_emit(FILE *output, const SemanticIR *ir,
                         const Component *component,
                         const struct FlowSearchResult *search,

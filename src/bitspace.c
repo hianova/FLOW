@@ -1,5 +1,8 @@
 #include "bitspace.h"
 #include "registry.h"
+#include "security.h"
+#include "verifier.h"
+#include "adaptive.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -250,6 +253,61 @@ void flow_search_heatmap_report(const FlowSearchHeatmap *heatmap, FILE *out) {
     }
 }
 
+/* 3-Tier Dynamic Mask Canvas Composition & Superposition */
+int flow_mask_canvas_compose(const SemanticIR *ir, const Component *comp,
+                            const FlowPlanDimensionSet *dims,
+                            const FlowPMUTelemetry *pmu,
+                            FlowMaskCanvas *canvas_out) {
+    if (canvas_out == NULL) return 0;
+    memset(canvas_out, 0, sizeof(*canvas_out));
+
+    /* 1. Hard Constraints (AND / Zero-Defect Physical Pruning) */
+    canvas_out->hard_safety_mask = flow_security_get_safety_mask(ir, comp, dims);
+    canvas_out->hard_contract_mask = flow_verifier_get_contract_mask(ir, comp, dims);
+    canvas_out->hard_resource_mask = flow_verifier_get_resource_mask(ir, comp, dims);
+    canvas_out->hard_plugin_mask = flow_component_mutation_mask(ir, comp, dims);
+
+    canvas_out->hard_composite_mask = canvas_out->hard_safety_mask &
+                                      canvas_out->hard_contract_mask &
+                                      canvas_out->hard_resource_mask &
+                                      canvas_out->hard_plugin_mask;
+
+    /* 2. Soft Dynamic Telemetry & Domain Preferences */
+    canvas_out->domain_preference_mask = flow_component_preference_mask(ir, comp, dims);
+    canvas_out->dynamic_telemetry_bias = flow_adaptive_telemetry_bias_from_pmu(
+        pmu, (ir != NULL && (ir->state_shared || ir->state_read_heavy)), dims);
+
+    canvas_out->soft_composite_bias = canvas_out->domain_preference_mask |
+                                      canvas_out->dynamic_telemetry_bias;
+
+    /* Project soft bias onto hard manifold */
+    if (canvas_out->soft_composite_bias != 0) {
+        canvas_out->soft_composite_bias &= canvas_out->hard_composite_mask;
+    }
+    return 1;
+}
+
+void flow_mask_canvas_report(const FlowMaskCanvas *canvas, FILE *out) {
+    if (canvas == NULL || out == NULL) return;
+    fprintf(out, "Dynamic Mask Canvas Superposition:\n");
+    fprintf(out, "  [Tier 1 Hard Safety]      0x%016llx (security gates / race / FD safety)\n",
+            (unsigned long long)canvas->hard_safety_mask);
+    fprintf(out, "  [Tier 1 Hard Contract]    0x%016llx (semantic IR / parallel contracts)\n",
+            (unsigned long long)canvas->hard_contract_mask);
+    fprintf(out, "  [Tier 1 Hard Resource]    0x%016llx (memory limits / quotas)\n",
+            (unsigned long long)canvas->hard_resource_mask);
+    fprintf(out, "  [Tier 1 Hard Plugin]      0x%016llx (plugin domain constraints)\n",
+            (unsigned long long)canvas->hard_plugin_mask);
+    fprintf(out, "  => COMPOSITE HARD MASK    0x%016llx (1-cycle physical early pruning)\n",
+            (unsigned long long)canvas->hard_composite_mask);
+    fprintf(out, "  [Tier 2 Dynamic PMU Bias] 0x%016llx (hardware telemetry feedback)\n",
+            (unsigned long long)canvas->dynamic_telemetry_bias);
+    fprintf(out, "  [Tier 3 Domain Preference]0x%016llx (plugin architecture preference)\n",
+            (unsigned long long)canvas->domain_preference_mask);
+    fprintf(out, "  => COMPOSITE SOFT BIAS    0x%016llx (probability-biasing manifold)\n",
+            (unsigned long long)canvas->soft_composite_bias);
+}
+
 static uint32_t calc_bits_for_dims(const FlowPlanDimensionSet *dims) {
     uint32_t total = 0;
     for (size_t i = 0; i < dims->count; ++i) {
@@ -269,9 +327,16 @@ int flow_bitspace_init_single(const SemanticIR *ir, const Component *comp, FlowB
         return 0;
     }
     space->candidate_bits[0] = calc_bits_for_dims(&space->candidate_dims[0]);
+    flow_mask_canvas_compose(ir, comp, &space->candidate_dims[0], NULL, &space->candidate_canvases[0]);
+    space->candidate_masks[0] = space->candidate_canvases[0].hard_composite_mask;
+    space->global_canvas = space->candidate_canvases[0];
+
     space->selector_bits = 0;
     space->bit_count = space->candidate_bits[0];
+    if (space->bit_count == 0) space->bit_count = 1;
     if (space->bit_count > 64) space->bit_count = 64;
+    space->env_mask = (space->bit_count >= 64) ? (uint64_t)-1 : (((uint64_t)1 << space->bit_count) - 1);
+    space->env_mask &= space->candidate_masks[0];
 
     space->schema_hash = flow_bitspace_compute_schema_hash(ir, comp, &space->candidate_dims[0]);
     space->decode = hierarchical_decode;
@@ -303,6 +368,9 @@ int flow_bitspace_init_for_ir(const SemanticIR *ir, FlowBitSpace *space) {
         if (space->candidate_bits[i] > max_dim_bits) {
             max_dim_bits = space->candidate_bits[i];
         }
+        /* 3-Tier Mask Superposition per candidate */
+        flow_mask_canvas_compose(ir, c, &space->candidate_dims[i], NULL, &space->candidate_canvases[i]);
+        space->candidate_masks[i] = space->candidate_canvases[i].hard_composite_mask;
     }
 
     if (comp_count > 1) {
@@ -317,6 +385,26 @@ int flow_bitspace_init_for_ir(const SemanticIR *ir, FlowBitSpace *space) {
     space->bit_count = space->selector_bits + max_dim_bits;
     if (space->bit_count == 0) space->bit_count = 1;
     if (space->bit_count > 64) space->bit_count = 64;
+
+    /* Global Environment Mask & Composite Canvas covering all active bits */
+    uint64_t full_mask = (space->bit_count >= 64) ? (uint64_t)-1 : (((uint64_t)1 << space->bit_count) - 1);
+    space->env_mask = full_mask;
+
+    if (comp_count == 1) {
+        space->global_canvas = space->candidate_canvases[0];
+        space->env_mask &= space->candidate_masks[0];
+    } else {
+        uint64_t sel_mask = (space->selector_bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << space->selector_bits) - 1);
+        uint64_t union_hard = sel_mask;
+        uint64_t union_soft = 0;
+        for (size_t i = 0; i < comp_count; ++i) {
+            union_hard |= (space->candidate_canvases[i].hard_composite_mask << space->selector_bits);
+            union_soft |= (space->candidate_canvases[i].soft_composite_bias << space->selector_bits);
+        }
+        space->global_canvas.hard_composite_mask = union_hard & full_mask;
+        space->global_canvas.soft_composite_bias = union_soft & full_mask;
+        space->env_mask &= space->global_canvas.hard_composite_mask;
+    }
 
     space->schema_hash = flow_bitspace_compute_schema_hash(ir, space->candidates[0], &space->candidate_dims[0]);
     space->decode = hierarchical_decode;
@@ -335,13 +423,135 @@ static uint64_t xorshift64(uint64_t *state) {
     return x;
 }
 
-uint64_t flow_bitspace_mutate_1bit(const FlowBitSpace *space, uint64_t genome,
-                                   uint64_t *rng_state, uint32_t *mutated_bit_out) {
+/* ========================================================================= */
+/* 1024-Bit Bitset Array Genome Operations (O(1) 1-Bit Chaotic Mutation)     */
+/* ========================================================================= */
+
+void flow_genome_init(FlowGenome *g, uint32_t total_bits) {
+    if (g == NULL) return;
+    memset(g, 0, sizeof(*g));
+    g->total_bits = (total_bits > 0 && total_bits <= (FLOW_GENOME_MAX_WORDS * 64)) ? total_bits : 64;
+    g->active_words = (g->total_bits + 63) / 64;
+    if (g->active_words == 0) g->active_words = 1;
+    if (g->active_words > FLOW_GENOME_MAX_WORDS) g->active_words = FLOW_GENOME_MAX_WORDS;
+}
+
+void flow_genome_from_u64(FlowGenome *g, uint64_t val, uint32_t total_bits) {
+    flow_genome_init(g, total_bits);
+    g->words[0] = val;
+}
+
+uint64_t flow_genome_to_u64(const FlowGenome *g) {
+    if (g == NULL) return 0;
+    return g->words[0];
+}
+
+int flow_genome_get_bit(const FlowGenome *g, uint32_t bit_idx) {
+    if (g == NULL || bit_idx >= g->total_bits) return 0;
+    uint32_t word_idx = bit_idx / 64;
+    uint32_t offset = bit_idx % 64;
+    if (word_idx >= FLOW_GENOME_MAX_WORDS) return 0;
+    return (int)((g->words[word_idx] >> offset) & 1);
+}
+
+void flow_genome_set_bit(FlowGenome *g, uint32_t bit_idx, int val) {
+    if (g == NULL || bit_idx >= g->total_bits) return;
+    uint32_t word_idx = bit_idx / 64;
+    uint32_t offset = bit_idx % 64;
+    if (word_idx >= FLOW_GENOME_MAX_WORDS) return;
+    if (val) {
+        g->words[word_idx] |= (UINT64_C(1) << offset);
+    } else {
+        g->words[word_idx] &= ~(UINT64_C(1) << offset);
+    }
+}
+
+void flow_genome_flip_bit(FlowGenome *g, uint32_t bit_idx) {
+    if (g == NULL || bit_idx >= g->total_bits) return;
+    uint32_t word_idx = bit_idx / 64;
+    uint32_t offset = bit_idx % 64;
+    if (word_idx >= FLOW_GENOME_MAX_WORDS) return;
+    g->words[word_idx] ^= (UINT64_C(1) << offset);
+}
+
+void flow_genome_mutate_1bit(FlowGenome *g, uint64_t *rng_state, uint32_t *mutated_bit_out) {
+    if (g == NULL || g->total_bits == 0) return;
+    uint64_t rnd = xorshift64(rng_state);
+    uint32_t bit_idx = (uint32_t)(rnd % (uint64_t)g->total_bits);
+    flow_genome_flip_bit(g, bit_idx);
+    if (mutated_bit_out != NULL) *mutated_bit_out = bit_idx;
+}
+
+int flow_genome_equals(const FlowGenome *a, const FlowGenome *b) {
+    if (a == NULL || b == NULL) return 0;
+    if (a->total_bits != b->total_bits) return 0;
+    uint32_t words = a->active_words;
+    for (uint32_t i = 0; i < words; ++i) {
+        if (a->words[i] != b->words[i]) return 0;
+    }
+    return 1;
+}
+
+uint64_t flow_bitspace_mutate_1bit_superposed(const FlowBitSpace *space, uint64_t genome,
+                                             const FlowMaskCanvas *canvas, double bias_weight,
+                                             uint64_t *rng_state, uint32_t *mutated_bit_out) {
     uint32_t bits = (space != NULL && space->bit_count > 0) ? space->bit_count : 16;
     if (bits > 64) bits = 64;
-    uint32_t bit = (uint32_t)(xorshift64(rng_state) % bits);
-    if (mutated_bit_out != NULL) *mutated_bit_out = bit;
-    return genome ^ (UINT64_C(1) << bit);
+
+    uint64_t hard_mask = (canvas != NULL && canvas->hard_composite_mask != 0) ?
+                         canvas->hard_composite_mask :
+                         ((space != NULL && space->env_mask != 0) ? space->env_mask : (uint64_t)-1);
+    if (space != NULL && space->env_mask != 0) {
+        hard_mask &= space->env_mask;
+    }
+
+    uint64_t soft_bias = (canvas != NULL) ? canvas->soft_composite_bias : 0;
+    soft_bias &= hard_mask;
+
+    uint64_t rnd = xorshift64(rng_state);
+
+    if (bias_weight > 0.0 && soft_bias != 0) {
+        uint32_t soft_indices[64];
+        size_t soft_count = 0;
+        for (uint32_t b = 0; b < bits; ++b) {
+            if (soft_bias & (UINT64_C(1) << b)) {
+                soft_indices[soft_count++] = b;
+            }
+        }
+        uint32_t p_val = (uint32_t)(rnd & 0xFFFF);
+        uint32_t threshold = (uint32_t)(bias_weight * 65536.0);
+        if (soft_count > 0 && p_val < threshold) {
+            uint32_t chosen_bit = soft_indices[(rnd >> 16) % soft_count];
+            if (mutated_bit_out != NULL) *mutated_bit_out = chosen_bit;
+            return genome ^ (UINT64_C(1) << chosen_bit);
+        }
+    }
+
+    /* Standard Hard-Masked 1-Bit Mutation (Zero-Overhead Early Pruning) */
+    uint32_t bit = (uint32_t)((rnd >> 16) % bits);
+    uint64_t mutation_bit = (UINT64_C(1) << bit);
+
+    if (mutation_bit & hard_mask) {
+        if (mutated_bit_out != NULL) *mutated_bit_out = bit;
+        return genome ^ mutation_bit;
+    }
+
+    if (mutated_bit_out != NULL) *mutated_bit_out = 0xFFFFFFFF;
+    return genome;
+}
+
+uint64_t flow_bitspace_mutate_1bit_masked(const FlowBitSpace *space, uint64_t genome,
+                                          uint64_t env_mask, uint64_t *rng_state,
+                                          uint32_t *mutated_bit_out) {
+    FlowMaskCanvas canvas;
+    memset(&canvas, 0, sizeof(canvas));
+    canvas.hard_composite_mask = env_mask;
+    return flow_bitspace_mutate_1bit_superposed(space, genome, &canvas, 0.0, rng_state, mutated_bit_out);
+}
+
+uint64_t flow_bitspace_mutate_1bit(const FlowBitSpace *space, uint64_t genome,
+                                   uint64_t *rng_state, uint32_t *mutated_bit_out) {
+    return flow_bitspace_mutate_1bit_masked(space, genome, (uint64_t)-1, rng_state, mutated_bit_out);
 }
 
 static void pareto_update_bitspace(FlowBitSearchResult *res, const FlowPlan *plan) {
@@ -413,7 +623,7 @@ uint64_t flow_bitspace_encode(const FlowBitSpace *space, size_t cand_idx, const 
     return genome;
 }
 
-static uint64_t flow_bitspace_default_genome(const FlowBitSpace *space) {
+uint64_t flow_bitspace_default_genome(const FlowBitSpace *space) {
     if (space == NULL || space->candidate_count == 0) return 0;
     size_t cand_idx = 0;
     if (space->ir != NULL) {
@@ -872,10 +1082,29 @@ int flow_bitspace_search_configured(const FlowBitSpace *space, size_t iterations
 
     double temp = temp_start;
     size_t stagnation_count = 0;
+    FlowMaskCanvas active_canvas;
+    if (anneal_config != NULL && anneal_config->use_mask_canvas) {
+        active_canvas = anneal_config->mask_canvas;
+    } else {
+        active_canvas = space->global_canvas;
+        if (anneal_config != NULL && anneal_config->env_mask != 0) {
+            active_canvas.hard_composite_mask &= anneal_config->env_mask;
+        }
+    }
+    double soft_weight = (anneal_config != NULL && anneal_config->soft_bias_weight > 0.0) ?
+                         anneal_config->soft_bias_weight : 0.50;
 
-    /* Continuous Probability-Biased Single 1-Bit Mutation Loop */
+    /* Continuous Probability-Biased Single 1-Bit Mutation Loop with Epigenetic Early Pruning */
     for (size_t iter = 0; iter < result_out->iterations; ++iter) {
-        uint64_t cand_genome = flow_bitspace_mutate_1bit(space, current_genome, &rng, NULL);
+        uint32_t flipped_bit = 0;
+        double cur_bias_weight = current_plan.eval.hard_gate_passed ? soft_weight : 0.0;
+        uint64_t cand_genome = flow_bitspace_mutate_1bit_superposed(space, current_genome, &active_canvas, cur_bias_weight, &rng, &flipped_bit);
+        if (flipped_bit == 0xFFFFFFFF) {
+            /* 1-cycle Bitwise Epigenetic Early Pruning */
+            result_out->heatmap.total_mutations++;
+            continue;
+        }
+
         FlowPlan cand_plan;
         space->decode(space, cand_genome, &cand_plan);
         space->evaluate(space, &cand_plan, &cand_plan.eval);
@@ -947,6 +1176,7 @@ int flow_bitspace_search_configured(const FlowBitSpace *space, size_t iterations
     }
 
     result_out->best_plan = best_plan;
+    result_out->mask_canvas = active_canvas;
     if (result_out->best_latency > 0.0) {
         result_out->latency_regret_percent =
             ((best_plan.eval.latency_score - result_out->best_latency) / result_out->best_latency) * 100.0;

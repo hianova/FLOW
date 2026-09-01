@@ -13,7 +13,7 @@ PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 INCLUDEDIR ?= $(PREFIX)/include/flow
 
-.PHONY: all clean test demos demo benchmark security-test reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test plugin-test reload-stress-test reload-stress-nightly self-host-check acceptance install uninstall fuzz-test fuzz ensemble-test smt-test mlir-llvm-test topology-test ebpf-pmu-test lsp-test jit-migration-test bootstrap-sandbox-test quantum-dimension-test two-tier-chaos-test zero-tlb-shootdown-test
+.PHONY: all clean test demos demo benchmark security-test reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test plugin-test reload-stress-test reload-stress-nightly self-host-check acceptance install uninstall fuzz-test fuzz ensemble-test smt-test mlir-llvm-test topology-test ebpf-pmu-test lsp-test jit-migration-test bootstrap-sandbox-test quantum-dimension-test two-tier-chaos-test zero-tlb-shootdown-test epigenetic-mask-test dynamic-mask-superposition-test mtd-defense-test swarm-federation-test genetic-programming-test dynamic-env-morph-test qsbr-unified-test bitset-genome-test async-jit-worker-test
 
 all: $(FLOWC)
 
@@ -143,6 +143,42 @@ zero-tlb-shootdown-test: | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/zero-tlb-shootdown-test.c -o $(BUILD_DIR)/zero-tlb-shootdown-test -lm
 	$(BUILD_DIR)/zero-tlb-shootdown-test
 
+epigenetic-mask-test: | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/epigenetic-mask-test.c -o $(BUILD_DIR)/epigenetic-mask-test -lm
+	$(BUILD_DIR)/epigenetic-mask-test
+
+dynamic-mask-superposition-test: | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/dynamic-mask-superposition-test.c -o $(BUILD_DIR)/dynamic-mask-superposition-test -lm
+	$(BUILD_DIR)/dynamic-mask-superposition-test
+
+mtd-defense-test: | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/mtd-defense-test.c -o $(BUILD_DIR)/mtd-defense-test -lm
+	$(BUILD_DIR)/mtd-defense-test
+
+swarm-federation-test: | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/swarm-federation-test.c -o $(BUILD_DIR)/swarm-federation-test -lm
+	$(BUILD_DIR)/swarm-federation-test
+
+genetic-programming-test: | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/genetic-programming-test.c -o $(BUILD_DIR)/genetic-programming-test -lm
+	$(BUILD_DIR)/genetic-programming-test
+
+dynamic-env-morph-test: | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/dynamic-env-morph-test.c -o $(BUILD_DIR)/dynamic-env-morph-test -lm
+	$(BUILD_DIR)/dynamic-env-morph-test
+
+qsbr-unified-test: | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/qsbr-unified-test.c -o $(BUILD_DIR)/qsbr-unified-test -lm
+	$(BUILD_DIR)/qsbr-unified-test
+
+bitset-genome-test: | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/bitset-genome-test.c -o $(BUILD_DIR)/bitset-genome-test -lm
+	$(BUILD_DIR)/bitset-genome-test
+
+async-jit-worker-test: | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/async-jit-worker-test.c -o $(BUILD_DIR)/async-jit-worker-test -lm
+	$(BUILD_DIR)/async-jit-worker-test
+
 fuzz: | $(BUILD_DIR)
 	clang -std=c17 -O2 -fsanitize=fuzzer,address,undefined -DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/fuzz-test.c -o $(BUILD_DIR)/fuzzer-engine -lm
 	@echo "Running LLVM libFuzzer for 5 seconds..."
@@ -160,7 +196,7 @@ self-host-check: $(FLOWC)
 
 acceptance: test benchmark self-host-check security-test
 
-test: $(FLOWC) reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test bitspace-test plugin-test project-test abi-test vertical-slice-test reload-stress-test fuzz-test ensemble-test smt-test mlir-llvm-test topology-test ebpf-pmu-test lsp-test jit-migration-test bootstrap-sandbox-test quantum-dimension-test two-tier-chaos-test zero-tlb-shootdown-test
+test: $(FLOWC) reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test bitspace-test plugin-test project-test abi-test vertical-slice-test reload-stress-test fuzz-test ensemble-test smt-test mlir-llvm-test topology-test ebpf-pmu-test lsp-test jit-migration-test bootstrap-sandbox-test quantum-dimension-test two-tier-chaos-test zero-tlb-shootdown-test epigenetic-mask-test dynamic-mask-superposition-test mtd-defense-test swarm-federation-test genetic-programming-test dynamic-env-morph-test qsbr-unified-test bitset-genome-test async-jit-worker-test
 	! grep -E -q 'heavy-tail|flip_bit_block|Black Swan' src/search.c README.md ACCEPTANCE.md
 	grep -E -q 'one chaotic 1-bit mutation' src/search.c
 	$(FLOWC) examples/rank.flow -o generated/rank.c

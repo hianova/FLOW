@@ -2,6 +2,7 @@
 #define FLOW_ADAPTIVE_H
 
 #include "reload.h"
+#include "plugin.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -143,5 +144,25 @@ size_t flow_adaptive_current_index(const FlowAdaptiveController *controller);
 int flow_adaptive_metrics(const FlowAdaptiveController *controller,
                           FlowAdaptiveMetrics *metrics_out);
 const char *flow_adaptive_status_name(FlowAdaptiveStatus status);
+
+/* Dynamic Telemetry Bias Generator (Soft/Dynamic Chaos Biasing) */
+uint64_t flow_adaptive_telemetry_bias_from_pmu(const FlowPMUTelemetry *pmu,
+                                               int write_heavy_state,
+                                               const FlowPlanDimensionSet *dims);
+
+uint64_t flow_adaptive_get_telemetry_bias(const FlowAdaptiveController *controller,
+                                          const Component *comp,
+                                          const FlowPlanDimensionSet *dims);
+
+/* Dynamic Environment Pressure & Instant Morphing API */
+uint64_t flow_adaptive_synthesize_env_mask(const FlowAdaptiveController *controller,
+                                           const FlowEnvironmentState *env,
+                                           const Component *comp,
+                                           const FlowPlanDimensionSet *dims);
+
+FlowAdaptiveStatus flow_adaptive_handle_pressure_event(
+    FlowAdaptiveController *controller,
+    const FlowEnvironmentState *env,
+    size_t *morphed_candidate_index_out);
 
 #endif

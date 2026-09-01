@@ -3,6 +3,7 @@
 
 #include "flow.h"
 #include "plugin.h"
+#include "adaptive.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -10,6 +11,19 @@
 
 #define FLOW_PARETO_MAX 16
 #define FLOW_BITSPACE_MAX_CANDIDATES 32
+
+/* 3-Tier Dynamic Mask Canvas (Superposition Architecture) */
+typedef struct {
+    uint64_t hard_safety_mask;       /* src/security.c (Ownership, FD limits, Sanitizer safety) */
+    uint64_t hard_contract_mask;     /* src/verifier.c (IR contracts, sequential/parallel semantics) */
+    uint64_t hard_resource_mask;     /* src/verifier.c (Hard memory quota ceiling) */
+    uint64_t hard_plugin_mask;       /* src/plugin.h (Domain-declared hard mutation limits) */
+    uint64_t hard_composite_mask;    /* Bitwise AND: 1-Cycle Physical Early Pruning */
+
+    uint64_t domain_preference_mask; /* src/plugin.h (Expert domain knowledge guidance) */
+    uint64_t dynamic_telemetry_bias; /* src/adaptive.c (eBPF / PMU real-time signals) */
+    uint64_t soft_composite_bias;    /* Superposition: Probability-Biasing Manifold */
+} FlowMaskCanvas;
 
 typedef struct {
     double energy;
@@ -22,12 +36,30 @@ typedef struct {
     char message[128];
 } FlowEvaluation;
 
+#define FLOW_GENOME_MAX_WORDS 16 /* 16 * 64 = 1024 bits maximum */
+
+typedef struct {
+    uint64_t words[FLOW_GENOME_MAX_WORDS];
+    uint32_t active_words;
+    uint32_t total_bits;
+} FlowGenome;
+
+void flow_genome_init(FlowGenome *g, uint32_t total_bits);
+void flow_genome_from_u64(FlowGenome *g, uint64_t val, uint32_t total_bits);
+uint64_t flow_genome_to_u64(const FlowGenome *g);
+int flow_genome_get_bit(const FlowGenome *g, uint32_t bit_idx);
+void flow_genome_set_bit(FlowGenome *g, uint32_t bit_idx, int val);
+void flow_genome_flip_bit(FlowGenome *g, uint32_t bit_idx);
+void flow_genome_mutate_1bit(FlowGenome *g, uint64_t *rng_state, uint32_t *mutated_bit_out);
+int flow_genome_equals(const FlowGenome *a, const FlowGenome *b);
+
 typedef struct {
     const Component *component;
     FlowPlanDimensionSet dimension_set;
     FlowPlanAssignment assignment;
     FlowEvaluation eval;
     uint64_t genome;
+    FlowGenome genome_multiword;
     uint32_t bit_count;
     uint64_t schema_hash;
     uint64_t contract_hash;
@@ -40,11 +72,15 @@ struct FlowBitSpace {
     const Component *candidates[FLOW_BITSPACE_MAX_CANDIDATES];
     FlowPlanDimensionSet candidate_dims[FLOW_BITSPACE_MAX_CANDIDATES];
     uint32_t candidate_bits[FLOW_BITSPACE_MAX_CANDIDATES];
+    uint64_t candidate_masks[FLOW_BITSPACE_MAX_CANDIDATES]; /* Epigenetic mutation mask per candidate */
+    FlowMaskCanvas candidate_canvases[FLOW_BITSPACE_MAX_CANDIDATES]; /* 3-Tier Mask Canvas per candidate */
+    FlowMaskCanvas global_canvas; /* Global composite canvas across all candidates */
     size_t candidate_count;
     uint32_t selector_bits;
     uint32_t bit_count;
     uint64_t contract_hash;
     uint64_t schema_hash;
+    uint64_t env_mask; /* Epigenetic environmental & semantic constraint mask */
 
     int (*decode)(const FlowBitSpace *space, uint64_t genome, FlowPlan *plan);
     int (*evaluate)(const FlowBitSpace *space, const FlowPlan *plan, FlowEvaluation *result);
@@ -77,7 +113,9 @@ uint64_t flow_bitspace_compute_schema_hash(const SemanticIR *ir, const Component
 int flow_bitspace_init_single(const SemanticIR *ir, const Component *comp, FlowBitSpace *space);
 int flow_bitspace_init_for_ir(const SemanticIR *ir, FlowBitSpace *space);
 uint64_t flow_bitspace_mutate_1bit(const FlowBitSpace *space, uint64_t genome, uint64_t *rng_state, uint32_t *mutated_bit_out);
+uint64_t flow_bitspace_mutate_1bit_masked(const FlowBitSpace *space, uint64_t genome, uint64_t env_mask, uint64_t *rng_state, uint32_t *mutated_bit_out);
 uint64_t flow_bitspace_encode(const FlowBitSpace *space, size_t cand_idx, const FlowPlanAssignment *plan);
+uint64_t flow_bitspace_default_genome(const FlowBitSpace *space);
 
 /* Constraint Failure Categories for High-Speed Zero-Overhead Heatmap */
 typedef enum {
@@ -111,10 +149,21 @@ typedef struct {
     uint32_t seed;
     int measured;
     FlowSearchHeatmap heatmap;
+    FlowMaskCanvas mask_canvas;
 } FlowBitSearchResult;
 
 const char *flow_gate_failure_name(FlowGateFailureReason reason);
 void flow_search_heatmap_report(const FlowSearchHeatmap *heatmap, FILE *out);
+
+/* 3-Tier Dynamic Mask Canvas Composition & Report */
+int flow_mask_canvas_compose(const SemanticIR *ir, const Component *comp,
+                            const FlowPlanDimensionSet *dims,
+                            const FlowPMUTelemetry *pmu,
+                            FlowMaskCanvas *canvas_out);
+void flow_mask_canvas_report(const FlowMaskCanvas *canvas, FILE *out);
+uint64_t flow_bitspace_mutate_1bit_superposed(const FlowBitSpace *space, uint64_t genome,
+                                             const FlowMaskCanvas *canvas, double bias_weight,
+                                             uint64_t *rng_state, uint32_t *mutated_bit_out);
 
 /* Transition Cost Model for Emergent Structural vs Parameter Decision-Making */
 typedef struct {
@@ -136,6 +185,10 @@ typedef struct {
     double cooling_decay;            /* Geometric cooling rate (default: 0.95 ~ 0.995) */
     size_t plateau_stagnation_limit; /* Plateau steps before thermodynamic reheating (default: 5 ~ 8) */
     double reheat_ratio;             /* Fraction of initial temp restored on plateau (default: 0.6) */
+    uint64_t env_mask;               /* Epigenetic environmental & semantic mask (0 = all bits) */
+    FlowMaskCanvas mask_canvas;      /* 3-Tier Dynamic Mask Superposition Canvas */
+    double soft_bias_weight;         /* Probability weight for soft bias (default: 0.70) */
+    int use_mask_canvas;             /* Flag indicating custom mask canvas is active */
 } FlowChaosAnnealConfig;
 
 /* Canonical Adaptive Chaos Search with Thermodynamic Probability Biasing */

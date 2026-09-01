@@ -1,6 +1,7 @@
 #include "security.h"
 #include "registry.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -334,4 +335,177 @@ int flow_security_write_composition_attestation(
                 report->first_failure_message);
     }
     return ferror(output) == 0;
+}
+
+uint64_t flow_security_get_safety_mask(const SemanticIR *ir,
+                                       const Component *comp,
+                                       const FlowPlanDimensionSet *dims) {
+    if (dims == NULL || dims->count == 0) return (uint64_t)-1;
+    uint64_t mask = (uint64_t)-1;
+    unsigned shift = 0;
+
+    int forbid_concurrency = 0;
+    if (ir != NULL && comp != NULL) {
+        /* Ownership / Race condition safety gate */
+        int is_read_only = ir->fact_mutability_read_only;
+        if (is_read_only && ir->state_shared && !comp->supports_read_heavy) {
+            forbid_concurrency = 1;
+        }
+        if (!ir->state_shared && !ir->flow_parallelizable) {
+            forbid_concurrency = 1;
+        }
+        if (ir->state_shared && !comp->supports_shared) {
+            forbid_concurrency = 1;
+        }
+    }
+
+    for (size_t i = 0; i < dims->count; ++i) {
+        const FlowPlanDimension *d = &dims->dimensions[i];
+        unsigned bits = flow_dimension_bits(d);
+        if (bits == 0) continue;
+        uint64_t dim_mask = (bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << bits) - 1);
+
+        if (forbid_concurrency && (strcmp(d->name, "threads") == 0 || strcmp(d->name, "shards") == 0)) {
+            /* Concurrency physically forbidden: mask all non-zero bits so raw value is strictly 0 (1 thread / 1 shard) */
+            mask &= ~(dim_mask << shift);
+        } else if (strcmp(d->name, "threads") == 0) {
+            /* System thread & FD exhaustion limit: threads cannot exceed 64 (exp > 6) */
+            if (d->kind == FLOW_DIM_EXPONENT && d->max_val > 6) {
+                uint64_t max_allowed_exp = 6;
+                uint64_t max_allowed_raw = max_allowed_exp >= d->min_val ? max_allowed_exp - d->min_val : 0;
+                for (unsigned b = 0; b < bits; ++b) {
+                    if (((uint64_t)1 << b) > max_allowed_raw) {
+                        mask &= ~(UINT64_C(1) << (shift + b));
+                    }
+                }
+            }
+        }
+        shift += bits;
+    }
+    return mask;
+}
+
+static uint64_t mtd_xorshift64(uint64_t *state) {
+    uint64_t x = *state;
+    if (x == 0) x = UINT64_C(0x85432917a4c9b13d);
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    *state = x;
+    return x;
+}
+
+double flow_security_mtd_calculate_entropy(const FlowMTDLayout *layout) {
+    if (layout == NULL || layout->field_count <= 1 || layout->total_size == 0) return 0.0;
+    double entropy = 0.0;
+    double total = (double)layout->total_size;
+
+    for (size_t i = 0; i < layout->field_count; ++i) {
+        size_t gap = (i + 1 < layout->field_count) ?
+                     (layout->field_offsets[i + 1] - layout->field_offsets[i]) :
+                     (layout->total_size - layout->field_offsets[i]);
+        if (gap > 0) {
+            double p = (double)gap / total;
+            entropy -= p * (log(p) / log(2.0));
+        }
+    }
+    return entropy;
+}
+
+int flow_security_mtd_verify_alignment(const FlowMTDLayout *layout, const size_t *field_alignments) {
+    if (layout == NULL) return 0;
+    for (size_t i = 0; i < layout->field_count; ++i) {
+        size_t orig_idx = layout->field_order[i];
+        size_t align = (field_alignments != NULL && field_alignments[orig_idx] > 0) ?
+                       field_alignments[orig_idx] : sizeof(void *);
+        if ((layout->field_offsets[i] % align) != 0) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+int flow_security_mtd_generate_layout(uint64_t seed, size_t field_count,
+                                      const size_t *field_sizes,
+                                      const size_t *field_alignments,
+                                      size_t max_padding_jitter,
+                                      FlowMTDLayout *layout_out) {
+    if (layout_out == NULL || field_count == 0 || field_sizes == NULL) return 0;
+    if (field_count > FLOW_MTD_MAX_FIELDS) field_count = FLOW_MTD_MAX_FIELDS;
+    memset(layout_out, 0, sizeof(*layout_out));
+
+    layout_out->seed = seed;
+    layout_out->field_count = field_count;
+    uint64_t rng = seed == 0 ? UINT64_C(0xa1b2c3d4e5f60718) : seed;
+
+    /* 1. Initial sequential order */
+    for (size_t i = 0; i < field_count; ++i) {
+        layout_out->field_order[i] = i;
+    }
+
+    /* 2. Fisher-Yates Field Order Permutation */
+    for (size_t i = field_count - 1; i > 0; --i) {
+        size_t j = (size_t)(mtd_xorshift64(&rng) % (i + 1));
+        size_t tmp = layout_out->field_order[i];
+        layout_out->field_order[i] = layout_out->field_order[j];
+        layout_out->field_order[j] = tmp;
+    }
+
+    /* 3. Determine natural max alignment */
+    size_t max_align = sizeof(void *);
+    for (size_t i = 0; i < field_count; ++i) {
+        size_t align = (field_alignments != NULL && field_alignments[i] > 0) ? field_alignments[i] : sizeof(void *);
+        if (align > max_align) max_align = align;
+    }
+    layout_out->required_alignment = max_align;
+
+    /* 4. Layout Placement with Dynamic Inter-Field Padding Jitter */
+    size_t current_offset = 0;
+    if (max_padding_jitter == 0) max_padding_jitter = 16;
+
+    for (size_t i = 0; i < field_count; ++i) {
+        size_t orig_idx = layout_out->field_order[i];
+        size_t size = field_sizes[orig_idx];
+        size_t align = (field_alignments != NULL && field_alignments[orig_idx] > 0) ?
+                       field_alignments[orig_idx] : sizeof(void *);
+
+        /* Align offset */
+        current_offset = (current_offset + align - 1) & ~(align - 1);
+        layout_out->field_offsets[i] = current_offset;
+
+        /* Add field size */
+        current_offset += size;
+
+        /* Add non-deterministic jitter padding */
+        size_t jitter = (size_t)(mtd_xorshift64(&rng) % max_padding_jitter);
+        /* Ensure jitter maintains alignment for next potential field */
+        jitter = (jitter + align - 1) & ~(align - 1);
+        layout_out->padding_bytes[i] = jitter;
+        current_offset += jitter;
+    }
+
+    /* Align total struct size to max alignment */
+    current_offset = (current_offset + max_align - 1) & ~(max_align - 1);
+    layout_out->total_size = current_offset;
+
+    /* 5. Dynamic Canary Guard Token */
+    layout_out->canary_token = mtd_xorshift64(&rng);
+
+    /* 6. Compute Shannon Entropy */
+    layout_out->shannon_entropy = flow_security_mtd_calculate_entropy(layout_out);
+
+    return flow_security_mtd_verify_alignment(layout_out, field_alignments);
+}
+
+void flow_security_mtd_report(const FlowMTDLayout *layout, FILE *out) {
+    if (layout == NULL || out == NULL) return;
+    fprintf(out, "Moving Target Defense (MTD) Polymorphic Layout:\n");
+    fprintf(out, "  Seed: 0x%016llx | Total Size: %zu bytes | Max Align: %zu\n",
+            (unsigned long long)layout->seed, layout->total_size, layout->required_alignment);
+    fprintf(out, "  Shannon Offset Entropy: %.3f bits | Canary: 0x%016llx\n",
+            layout->shannon_entropy, (unsigned long long)layout->canary_token);
+    for (size_t i = 0; i < layout->field_count; ++i) {
+        fprintf(out, "  [Field slot %zu] orig_index=%zu offset=%-4zu padding=%-3zu\n",
+                i, layout->field_order[i], layout->field_offsets[i], layout->padding_bytes[i]);
+    }
 }

@@ -51,6 +51,7 @@ typedef struct FlowSearchResult {
     FlowTuning tuning;
     FlowParetoSummary pareto;
     FlowSearchHeatmap heatmap;
+    FlowMaskCanvas mask_canvas;
 } SearchResult;
 
 typedef struct {
