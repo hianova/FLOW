@@ -5,6 +5,7 @@
 #include "bitspace.h"
 #include "abi.h"
 #include "smt.h"
+#include "topology.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -36,6 +37,8 @@ int flowc_main(int argc, char **argv) {
     const char *target_llvm_ir = NULL;
     const char *ensemble_prefix = NULL;
     const char *smt_proof_path = NULL;
+    const char *topology_out = NULL;
+    int run_topology_audit = 0;
     size_t workload_bytes = 0;
     ProfileSeed profile = {0};
     int show_heatmap = 0;
@@ -96,6 +99,10 @@ int flowc_main(int argc, char **argv) {
             use_search = 1;
         } else if (strcmp(argv[arg], "--smt-proof") == 0 && arg + 1 < argc) {
             smt_proof_path = argv[++arg];
+        } else if (strcmp(argv[arg], "--topology") == 0 && arg + 1 < argc) {
+            topology_out = argv[++arg];
+        } else if (strcmp(argv[arg], "--topology-audit") == 0) {
+            run_topology_audit = 1;
         } else if (strcmp(argv[arg], "--seed") == 0 && arg + 1 < argc) {
             seed = (uint32_t)strtoul(argv[++arg], NULL, 10);
         } else {
@@ -523,6 +530,37 @@ int flowc_main(int argc, char **argv) {
             }
         }
     }
+
+    /* Codebase & Intent Topology Analysis */
+    {
+        FlowTopologyGraph topology_graph;
+        flow_topology_build_intent_graph(&topology_graph, &ir, component, NULL);
+
+        if (topology_out != NULL) {
+            FILE *top_fp = fopen(topology_out, "w");
+            if (top_fp != NULL) {
+                if (strstr(topology_out, ".dot") != NULL) {
+                    flow_topology_export_dot(&topology_graph, top_fp);
+                } else {
+                    flow_topology_export_json(&topology_graph, top_fp);
+                }
+                fclose(top_fp);
+                printf("  topology: wrote %s\n", topology_out);
+            }
+        }
+
+        if (run_topology_audit) {
+            FlowTopologyGraph codebase_graph;
+            flow_topology_build_codebase_graph(&codebase_graph);
+            FlowTopologyAuditReport audit_report;
+            flow_topology_audit(&codebase_graph, &audit_report);
+            printf("  topology audit: nodes=%zu core=%zu plugins=%zu modularity=%.2f leaks=%zu %s\n",
+                   audit_report.total_nodes, audit_report.core_nodes, audit_report.plugin_nodes,
+                   audit_report.modularity_score, audit_report.cross_layer_leaks,
+                   audit_report.cross_layer_leaks == 0 ? "(Clean Interface Firewall)" : audit_report.leak_details);
+        }
+    }
+
     flow_ir_cleanup(&ir);
     return EXIT_SUCCESS;
 }
