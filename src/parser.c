@@ -292,8 +292,11 @@ int parse_spec(FILE *input, FlowSpec *spec) {
                 }
                 break;
             case SECTION_PREFER:
-                if (strcmp(line, "latency") == 0) spec->prefer_latency = 1;
-                else {
+                if (strcmp(line, "latency") == 0 || strcmp(line, "throughput") == 0) {
+                    spec->prefer_latency = 1;
+                } else if (strcmp(line, "memory") == 0) {
+                    spec->prefer_latency = 0;
+                } else {
                     fprintf(stderr, "flowc: invalid preference line %d: %s\n", line_number, line);
                     parse_error = 1;
                 }

@@ -75,6 +75,9 @@ FlowTuning flow_default_tuning(const SemanticIR *ir,
 SearchResult search_best(const SemanticIR *ir, size_t iterations, uint32_t seed,
                          int measured, const ProfileSeed *profile);
 
+void flow_plan_to_search_result(const FlowPlan *plan, const SemanticIR *ir,
+                                uint32_t seed, SearchResult *out);
+
 int flow_search_result_to_artifact(const SemanticIR *ir, const SearchResult *result,
                                   FlowPlanArtifact *art);
 

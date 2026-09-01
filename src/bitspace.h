@@ -122,6 +122,24 @@ int flow_bitspace_search(const FlowBitSpace *space, size_t iterations, uint32_t 
 int flow_bitspace_explain_seed(const FlowBitSpace *space, size_t iterations, uint32_t seed,
                                int measured, const FlowPlan *seed_plan, FILE *out);
 
+/* Multi-Objective Pareto Plan Ensemble (Tactical Bundle) */
+typedef enum {
+    FLOW_TACTIC_SPEED = 0,    /* Minimizes latency / maximizes throughput */
+    FLOW_TACTIC_BALANCED = 1, /* Knee point on Pareto frontier (minimal energy) */
+    FLOW_TACTIC_MEMORY = 2,   /* Minimizes memory footprint */
+    FLOW_TACTIC_COUNT = 3
+} FlowPlanTactic;
+
+typedef struct {
+    FlowPlan tactics[FLOW_TACTIC_COUNT];
+    int available[FLOW_TACTIC_COUNT];
+    size_t count;
+} FlowPlanEnsemble;
+
+const char *flow_plan_tactic_name(FlowPlanTactic tactic);
+int flow_bitspace_extract_ensemble(const FlowBitSearchResult *search_res,
+                                   FlowPlanEnsemble *ensemble_out);
+
 /* Plan Artifact I/O & Strict Validation (Evidence Spine Persistence) */
 int flow_plan_artifact_save(FILE *output, const FlowPlanArtifact *artifact);
 int flow_plan_artifact_load(FILE *input, FlowPlanArtifact *artifact);

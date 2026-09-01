@@ -927,3 +927,58 @@ int flow_artifact_validate(const FlowPlanArtifact *art, const SemanticIR *ir,
 
     return 1;
 }
+
+const char *flow_plan_tactic_name(FlowPlanTactic tactic) {
+    switch (tactic) {
+        case FLOW_TACTIC_SPEED: return "speed";
+        case FLOW_TACTIC_BALANCED: return "balanced";
+        case FLOW_TACTIC_MEMORY: return "memory";
+        default: return "unknown";
+    }
+}
+
+int flow_bitspace_extract_ensemble(const FlowBitSearchResult *search_res,
+                                   FlowPlanEnsemble *ensemble_out) {
+    if (search_res == NULL || ensemble_out == NULL) return 0;
+    memset(ensemble_out, 0, sizeof(*ensemble_out));
+
+    if (search_res->best_plan.component == NULL) return 0;
+
+    /* Start with best_plan as baseline for all 3 tactics */
+    ensemble_out->tactics[FLOW_TACTIC_SPEED] = search_res->best_plan;
+    ensemble_out->tactics[FLOW_TACTIC_BALANCED] = search_res->best_plan;
+    ensemble_out->tactics[FLOW_TACTIC_MEMORY] = search_res->best_plan;
+    ensemble_out->available[FLOW_TACTIC_SPEED] = 1;
+    ensemble_out->available[FLOW_TACTIC_BALANCED] = 1;
+    ensemble_out->available[FLOW_TACTIC_MEMORY] = 1;
+    ensemble_out->count = 3;
+
+    if (search_res->pareto_count > 0) {
+        double min_lat = search_res->pareto_points[0].eval.latency_score;
+        double min_energy = search_res->pareto_points[0].eval.energy;
+        size_t min_mem = search_res->pareto_points[0].eval.memory_bytes;
+        size_t speed_idx = 0;
+        size_t balanced_idx = 0;
+        size_t mem_idx = 0;
+
+        for (size_t i = 1; i < search_res->pareto_count; ++i) {
+            const FlowPlan *p = &search_res->pareto_points[i];
+            if (p->eval.latency_score < min_lat) {
+                min_lat = p->eval.latency_score;
+                speed_idx = i;
+            }
+            if (p->eval.energy < min_energy) {
+                min_energy = p->eval.energy;
+                balanced_idx = i;
+            }
+            if (p->eval.memory_bytes < min_mem) {
+                min_mem = p->eval.memory_bytes;
+                mem_idx = i;
+            }
+        }
+        ensemble_out->tactics[FLOW_TACTIC_SPEED] = search_res->pareto_points[speed_idx];
+        ensemble_out->tactics[FLOW_TACTIC_BALANCED] = search_res->pareto_points[balanced_idx];
+        ensemble_out->tactics[FLOW_TACTIC_MEMORY] = search_res->pareto_points[mem_idx];
+    }
+    return 1;
+}

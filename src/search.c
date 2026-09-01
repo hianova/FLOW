@@ -183,3 +183,34 @@ int flow_artifact_to_profile_seed(const FlowPlanArtifact *art, ProfileSeed *seed
     seed_out->tuning.arena_bytes = flow_plan_get_value(&art->dimensions, &art->plan, "arena_bytes", 0);
     return 1;
 }
+
+void flow_plan_to_search_result(const FlowPlan *plan, const SemanticIR *ir,
+                                uint32_t seed, SearchResult *out) {
+    if (plan == NULL || out == NULL) return;
+    memset(out, 0, sizeof(*out));
+    out->component = plan->component;
+    out->genome = plan->genome;
+    out->dimension_set = plan->dimension_set;
+    out->assignment = plan->assignment;
+    out->metrics.capacity = plan->eval.capacity;
+    out->metrics.threads = flow_plan_get_value(&plan->dimension_set, &plan->assignment, "threads", 1);
+    out->metrics.shards = flow_plan_get_value(&plan->dimension_set, &plan->assignment, "shards", 1);
+    out->metrics.latency_score = plan->eval.latency_score;
+    out->metrics.throughput_score = plan->eval.throughput_score;
+    out->metrics.memory_bytes = plan->eval.memory_bytes;
+    out->metrics.energy = plan->eval.energy;
+    out->capacity = (double)plan->eval.capacity;
+    out->threads = (double)out->metrics.threads;
+    out->shards = (double)out->metrics.shards;
+    out->energy = plan->eval.energy;
+    out->benchmark_ns = (uint64_t)plan->eval.latency_score;
+    out->measured = 0;
+    out->iterations = 1;
+    out->seed = seed;
+    out->tuning = flow_default_tuning(ir, plan->component);
+    out->tuning.buffer_bytes = flow_plan_get_value(&plan->dimension_set, &plan->assignment, "buffer_bytes", out->tuning.buffer_bytes);
+    out->tuning.initial_capacity = flow_plan_get_value(&plan->dimension_set, &plan->assignment, "initial_capacity", out->tuning.initial_capacity);
+    out->tuning.growth_percent = (unsigned)flow_plan_get_value(&plan->dimension_set, &plan->assignment, "growth_percent", out->tuning.growth_percent);
+    out->tuning.batch_size = flow_plan_get_value(&plan->dimension_set, &plan->assignment, "batch_size", out->tuning.batch_size);
+    out->tuning.arena_bytes = flow_plan_get_value(&plan->dimension_set, &plan->assignment, "arena_bytes", out->tuning.arena_bytes);
+}

@@ -16,6 +16,7 @@ struct FlowAdaptiveController {
     int evaluating;
     FlowAdaptiveProbe probe;
     FlowAdaptiveMetrics metrics;
+    FlowPMUTelemetry pmu;
     pthread_mutex_t lock;
 };
 
@@ -259,6 +260,117 @@ int flow_adaptive_metrics(const FlowAdaptiveController *controller,
     pthread_mutex_lock((pthread_mutex_t *)&controller->lock);
     *metrics_out = controller->metrics;
     pthread_mutex_unlock((pthread_mutex_t *)&controller->lock);
+    return FLOW_ADAPTIVE_OK;
+}
+
+int flow_adaptive_feed_pmu(FlowAdaptiveController *controller,
+                           const FlowPMUTelemetry *pmu) {
+    if (controller == NULL || pmu == NULL) return FLOW_ADAPTIVE_INVALID;
+    pthread_mutex_lock(&controller->lock);
+    controller->pmu = *pmu;
+    if (pmu->l3_cache_references > 0) {
+        controller->pmu.cache_miss_rate =
+            (double)pmu->l3_cache_misses / (double)pmu->l3_cache_references;
+    }
+    if (pmu->cpu_cycles > 0) {
+        controller->pmu.ipc =
+            (double)pmu->instructions / (double)pmu->cpu_cycles;
+    }
+    pthread_mutex_unlock(&controller->lock);
+    return FLOW_ADAPTIVE_OK;
+}
+
+int flow_adaptive_pmu_metrics(const FlowAdaptiveController *controller,
+                              FlowPMUTelemetry *pmu_out) {
+    if (controller == NULL || pmu_out == NULL) return FLOW_ADAPTIVE_INVALID;
+    pthread_mutex_lock((pthread_mutex_t *)&controller->lock);
+    *pmu_out = controller->pmu;
+    pthread_mutex_unlock((pthread_mutex_t *)&controller->lock);
+    return FLOW_ADAPTIVE_OK;
+}
+
+FlowAdaptiveStatus flow_adaptive_tick_pmu(FlowAdaptiveController *controller,
+                                         const FlowPMUThresholds *thresholds) {
+    FlowPMUTelemetry pmu;
+    size_t current_index;
+    size_t target_index;
+    size_t i;
+    int high_miss_rate = 0;
+    int low_ipc = 0;
+    int result;
+
+    if (controller == NULL || thresholds == NULL) return FLOW_ADAPTIVE_INVALID;
+
+    pthread_mutex_lock(&controller->lock);
+    if (controller->evaluating) {
+        pthread_mutex_unlock(&controller->lock);
+        return FLOW_ADAPTIVE_NOT_READY;
+    }
+    pmu = controller->pmu;
+    current_index = controller->current_index;
+    controller->evaluating = 1;
+    pthread_mutex_unlock(&controller->lock);
+
+    if (thresholds->cache_miss_rate_threshold > 0.0 &&
+        pmu.cache_miss_rate >= thresholds->cache_miss_rate_threshold) {
+        high_miss_rate = 1;
+    }
+    if (thresholds->min_ipc_threshold > 0.0 &&
+        pmu.ipc > 0.0 && pmu.ipc <= thresholds->min_ipc_threshold) {
+        low_ipc = 1;
+    }
+
+    if (!high_miss_rate && !low_ipc) {
+        pthread_mutex_lock(&controller->lock);
+        controller->evaluating = 0;
+        pthread_mutex_unlock(&controller->lock);
+        return FLOW_ADAPTIVE_NO_CHANGE;
+    }
+
+    target_index = current_index;
+    if (high_miss_rate) {
+        /* Find candidate with best memory locality / minimal score */
+        int best_mem = controller->candidates[current_index].memory_score;
+        for (i = 0; i < controller->candidate_count; ++i) {
+            if (controller->candidates[i].memory_score < best_mem) {
+                best_mem = controller->candidates[i].memory_score;
+                target_index = i;
+            }
+        }
+    } else if (low_ipc) {
+        /* Find candidate with lowest latency / highest throughput */
+        int best_lat = controller->candidates[current_index].latency_score;
+        for (i = 0; i < controller->candidate_count; ++i) {
+            if (controller->candidates[i].latency_score < best_lat) {
+                best_lat = controller->candidates[i].latency_score;
+                target_index = i;
+            }
+        }
+    }
+
+    if (target_index == current_index) {
+        pthread_mutex_lock(&controller->lock);
+        controller->evaluating = 0;
+        pthread_mutex_unlock(&controller->lock);
+        return FLOW_ADAPTIVE_NO_CHANGE;
+    }
+
+    /* Live hot-swap to the hardware-adapted candidate */
+    result = flow_reload_live_begin(
+        controller->context, controller->candidates[target_index].unit,
+        controller->config.journal_capacity);
+    if (result == FLOW_RELOAD_OK)
+        result = flow_reload_live_finish(controller->context);
+
+    pthread_mutex_lock(&controller->lock);
+    controller->evaluating = 0;
+    if (result != FLOW_RELOAD_OK) {
+        pthread_mutex_unlock(&controller->lock);
+        return FLOW_ADAPTIVE_RELOAD_FAILED;
+    }
+    controller->current_index = target_index;
+    controller->calls_since_switch = 0;
+    pthread_mutex_unlock(&controller->lock);
     return FLOW_ADAPTIVE_OK;
 }
 

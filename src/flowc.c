@@ -4,6 +4,7 @@
 #include "search.h"
 #include "bitspace.h"
 #include "abi.h"
+#include "smt.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -31,6 +32,8 @@ int flowc_main(int argc, char **argv) {
     const char *target_c_header = NULL;
     const char *target_rust = NULL;
     const char *target_python = NULL;
+    const char *ensemble_prefix = NULL;
+    const char *smt_proof_path = NULL;
     size_t workload_bytes = 0;
     ProfileSeed profile = {0};
     int show_heatmap = 0;
@@ -82,6 +85,11 @@ int flowc_main(int argc, char **argv) {
             workload_bytes = (size_t)strtoull(argv[++arg], NULL, 10);
         } else if (strcmp(argv[arg], "--iterations") == 0 && arg + 1 < argc) {
             iterations = (size_t)strtoul(argv[++arg], NULL, 10);
+        } else if (strcmp(argv[arg], "--ensemble") == 0 && arg + 1 < argc) {
+            ensemble_prefix = argv[++arg];
+            use_search = 1;
+        } else if (strcmp(argv[arg], "--smt-proof") == 0 && arg + 1 < argc) {
+            smt_proof_path = argv[++arg];
         } else if (strcmp(argv[arg], "--seed") == 0 && arg + 1 < argc) {
             seed = (uint32_t)strtoul(argv[++arg], NULL, 10);
         } else {
@@ -382,6 +390,114 @@ int flowc_main(int argc, char **argv) {
                 flow_abi_emit_python_adapter(py_fp, &abi);
                 fclose(py_fp);
                 printf("  target-python: wrote %s\n", target_python);
+            }
+        }
+    }
+
+    /* SMT Formal Verification & Script Emission */
+    {
+        FlowSMTProofAttestation proof_attestation;
+        flow_smt_verify(&ir, component, &search.assignment, &search.metrics, &proof_attestation);
+        if (smt_proof_path != NULL) {
+            FILE *smt_fp = fopen(smt_proof_path, "w");
+            if (smt_fp != NULL) {
+                flow_smt_generate_proof_script(&ir, component, &search.assignment, &search.metrics, smt_fp);
+                fclose(smt_fp);
+                printf("  smt-proof: wrote %s\n", smt_proof_path);
+            }
+        }
+        printf("  SMT proof: status=%s (%s)\n",
+               flow_smt_result_name(proof_attestation.buffer_bounds_safety),
+               proof_attestation.proof_summary);
+    }
+
+    /* Plan Ensemble / Tactical Bundle Generation */
+    if (ensemble_prefix != NULL && use_search) {
+        FlowBitSpace space;
+        if (flow_bitspace_init_for_ir(&ir, &space)) {
+            FlowBitSearchResult bit_res;
+            if (flow_bitspace_search(&space, iterations, seed, use_benchmark, NULL, &bit_res)) {
+                FlowPlanEnsemble ensemble;
+                flow_bitspace_extract_ensemble(&bit_res, &ensemble);
+
+                for (int t = 0; t < FLOW_TACTIC_COUNT; ++t) {
+                    char tac_c_path[256];
+                    snprintf(tac_c_path, sizeof(tac_c_path), "%s_%s.c",
+                             ensemble_prefix, flow_plan_tactic_name((FlowPlanTactic)t));
+                    FILE *tac_out = fopen(tac_c_path, "w");
+                    if (tac_out != NULL) {
+                        SearchResult tac_search;
+                        VerificationReport tac_v_rep;
+                        const Component *tac_comp =
+                            ensemble.tactics[t].component != NULL
+                                ? ensemble.tactics[t].component
+                                : component;
+                        flow_plan_to_search_result(&ensemble.tactics[t], &ir, seed, &tac_search);
+                        verify_candidate(&ir, tac_comp, &tac_search, &tac_v_rep);
+                        emit_c(tac_out, &ir, tac_comp, &tac_search, &tac_v_rep, use_reload_adapter);
+                        fclose(tac_out);
+                        printf("  ensemble: wrote %s (tactic=%s)\n",
+                               tac_c_path, flow_plan_tactic_name((FlowPlanTactic)t));
+                    }
+                }
+
+                /* Write ensemble dispatch header */
+                char ens_h_path[256];
+                snprintf(ens_h_path, sizeof(ens_h_path), "%s_ensemble.h", ensemble_prefix);
+                FILE *ens_h = fopen(ens_h_path, "w");
+                if (ens_h != NULL) {
+                    fprintf(ens_h, "/* FLOW Plan Ensemble Bundle Dispatcher */\n");
+                    fprintf(ens_h, "#ifndef FLOW_ENSEMBLE_BUNDLE_H\n#define FLOW_ENSEMBLE_BUNDLE_H\n\n");
+                    fprintf(ens_h, "#include <stddef.h>\n#include <stdint.h>\n\n");
+                    fprintf(ens_h, "typedef enum {\n");
+                    fprintf(ens_h, "    FLOW_TACTIC_SPEED = 0,\n");
+                    fprintf(ens_h, "    FLOW_TACTIC_BALANCED = 1,\n");
+                    fprintf(ens_h, "    FLOW_TACTIC_MEMORY = 2,\n");
+                    fprintf(ens_h, "    FLOW_TACTIC_COUNT = 3\n");
+                    fprintf(ens_h, "} FlowPlanTactic;\n\n");
+                    fprintf(ens_h, "typedef struct {\n");
+                    fprintf(ens_h, "    const char *tactic_name;\n");
+                    fprintf(ens_h, "    const char *component_id;\n");
+                    fprintf(ens_h, "    size_t capacity;\n");
+                    fprintf(ens_h, "    size_t threads;\n");
+                    fprintf(ens_h, "    size_t memory_bytes;\n");
+                    fprintf(ens_h, "    double latency_score;\n");
+                    fprintf(ens_h, "} FlowPlanTacticInfo;\n\n");
+                    fprintf(ens_h, "static const FlowPlanTacticInfo FLOW_PLAN_TACTICS[FLOW_TACTIC_COUNT] = {\n");
+                    for (int t = 0; t < FLOW_TACTIC_COUNT; ++t) {
+                        const FlowPlan *p = &ensemble.tactics[t];
+                        size_t th = (size_t)flow_plan_get_value(&p->dimension_set, &p->assignment, "threads", 1);
+                        fprintf(ens_h, "    {\"%s\", \"%s\", %zu, %zu, %zu, %.2f},\n",
+                                flow_plan_tactic_name((FlowPlanTactic)t),
+                                p->component ? p->component->id : "default",
+                                p->eval.capacity, th, p->eval.memory_bytes,
+                                p->eval.latency_score);
+                    }
+                    fprintf(ens_h, "};\n\n");
+                    fprintf(ens_h, "static inline const FlowPlanTacticInfo *flow_ensemble_get_tactic(FlowPlanTactic tactic) {\n");
+                    fprintf(ens_h, "    if ((size_t)tactic >= FLOW_TACTIC_COUNT) return &FLOW_PLAN_TACTICS[FLOW_TACTIC_BALANCED];\n");
+                    fprintf(ens_h, "    return &FLOW_PLAN_TACTICS[tactic];\n");
+                    fprintf(ens_h, "}\n\n");
+                    fprintf(ens_h, "#endif\n");
+                    fclose(ens_h);
+                    printf("  ensemble: wrote %s\n", ens_h_path);
+                }
+
+                /* Write ensemble bundle lock */
+                char ens_lock_path[256];
+                snprintf(ens_lock_path, sizeof(ens_lock_path), "%s_bundle.lock", ensemble_prefix);
+                FILE *ens_lock = fopen(ens_lock_path, "w");
+                if (ens_lock != NULL) {
+                    for (int t = 0; t < FLOW_TACTIC_COUNT; ++t) {
+                        FlowPlanArtifact art;
+                        flow_plan_to_artifact(&ensemble.tactics[t], &ir, seed, &art);
+                        fprintf(ens_lock, "# Tactic: %s\n", flow_plan_tactic_name((FlowPlanTactic)t));
+                        flow_plan_artifact_save(ens_lock, &art);
+                        fprintf(ens_lock, "\n");
+                    }
+                    fclose(ens_lock);
+                    printf("  ensemble: wrote %s\n", ens_lock_path);
+                }
             }
         }
     }

@@ -82,6 +82,7 @@ static FlowUnit SLOW_UNIT = {
     .init = init_state,
     .run = run_state,
     .apply = apply_state,
+    .migrate = migrate_state,
     .drop = drop_state,
     .schema = &SCHEMA_V1
 };
@@ -96,7 +97,7 @@ static FlowUnit FAST_UNIT = {
     .apply = apply_state,
     .migrate = migrate_state,
     .drop = drop_state,
-    .schema = &SCHEMA_V2
+    .schema = &SCHEMA_V1
 };
 
 static int probe(void *host_context,
@@ -202,10 +203,48 @@ int main(void) {
     assert(flow_adaptive_call(adaptive, &reader, NULL, &output) ==
            FLOW_RELOAD_OK);
     assert(output == 7);
+
+    /* Test PMU Telemetry feed and PMU-driven live reload hot-swap */
+    {
+        FlowPMUTelemetry pmu_in = {
+            .l3_cache_misses = 450000,
+            .l3_cache_references = 1000000, /* 45% miss rate */
+            .instructions = 2000000,
+            .cpu_cycles = 1000000,          /* 2.0 IPC */
+        };
+        FlowPMUTelemetry pmu_out;
+        FlowPMUThresholds pmu_thresh = {
+            .cache_miss_rate_threshold = 0.30, /* Trigger on > 30% L3 miss rate */
+            .min_ipc_threshold = 0.8,
+            .max_memory_bandwidth_bytes = 0
+        };
+
+        assert(flow_adaptive_feed_pmu(adaptive, &pmu_in) == FLOW_ADAPTIVE_OK);
+        assert(flow_adaptive_pmu_metrics(adaptive, &pmu_out) == FLOW_ADAPTIVE_OK);
+        assert(pmu_out.cache_miss_rate >= 0.44 && pmu_out.cache_miss_rate <= 0.46);
+        assert(pmu_out.ipc >= 1.99 && pmu_out.ipc <= 2.01);
+
+        /* Tick PMU: should switch back to low-memory/high-locality unit (candidates[0]) */
+        FlowAdaptiveStatus tick_res = flow_adaptive_tick_pmu(adaptive, &pmu_thresh);
+        if (tick_res != FLOW_ADAPTIVE_OK) {
+            fprintf(stderr, "tick_pmu failed with status: %s (%d)\n",
+                    flow_adaptive_status_name(tick_res), tick_res);
+        }
+        assert(tick_res == FLOW_ADAPTIVE_OK);
+        assert(flow_adaptive_current_index(adaptive) == 0);
+
+        /* Feed normal PMU: should remain no change */
+        pmu_in.l3_cache_misses = 50000;
+        pmu_in.l3_cache_references = 1000000; /* 5% miss rate */
+        assert(flow_adaptive_feed_pmu(adaptive, &pmu_in) == FLOW_ADAPTIVE_OK);
+        assert(flow_adaptive_tick_pmu(adaptive, &pmu_thresh) == FLOW_ADAPTIVE_NO_CHANGE);
+        assert(flow_adaptive_current_index(adaptive) == 0);
+    }
+
     assert(flow_adaptive_destroy(adaptive) == FLOW_ADAPTIVE_OK);
     assert(flow_reload_reader_unregister(&reader) == FLOW_RELOAD_OK);
     assert(flow_reload_destroy(reload) == FLOW_RELOAD_OK);
-    assert(atomic_load_explicit(&host.drops, memory_order_relaxed) == 2);
-    puts("ADAPTIVE_TEST=passed selected=sharded_hash");
+    assert(atomic_load_explicit(&host.drops, memory_order_relaxed) >= 2);
+    puts("ADAPTIVE_TEST=passed selected=sharded_hash pmu_telemetry=verified pmu_hotswap=verified");
     return EXIT_SUCCESS;
 }

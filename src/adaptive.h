@@ -60,6 +60,24 @@ typedef enum {
     FLOW_ADAPTIVE_RELOAD_FAILED = 4
 } FlowAdaptiveStatus;
 
+typedef struct {
+    uint64_t l3_cache_misses;
+    uint64_t l3_cache_references;
+    uint64_t branch_mispredictions;
+    uint64_t page_faults;
+    uint64_t memory_bandwidth_bytes;
+    uint64_t cpu_cycles;
+    uint64_t instructions;
+    double cache_miss_rate;
+    double ipc;
+} FlowPMUTelemetry;
+
+typedef struct {
+    double cache_miss_rate_threshold;
+    double min_ipc_threshold;
+    uint64_t max_memory_bandwidth_bytes;
+} FlowPMUThresholds;
+
 FlowAdaptiveController *flow_adaptive_create(
     FlowReloadContext *context, void *host_context,
     const FlowAdaptiveConfig *config,
@@ -71,6 +89,12 @@ int flow_adaptive_call(FlowAdaptiveController *controller,
                        FlowReloadReader *reader, const void *input,
                        void *output);
 FlowAdaptiveStatus flow_adaptive_tick(FlowAdaptiveController *controller);
+FlowAdaptiveStatus flow_adaptive_tick_pmu(FlowAdaptiveController *controller,
+                                         const FlowPMUThresholds *thresholds);
+int flow_adaptive_feed_pmu(FlowAdaptiveController *controller,
+                           const FlowPMUTelemetry *pmu);
+int flow_adaptive_pmu_metrics(const FlowAdaptiveController *controller,
+                              FlowPMUTelemetry *pmu_out);
 size_t flow_adaptive_current_index(const FlowAdaptiveController *controller);
 int flow_adaptive_metrics(const FlowAdaptiveController *controller,
                           FlowAdaptiveMetrics *metrics_out);
