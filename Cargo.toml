@@ -11,7 +11,12 @@ repository = "https://github.com/hianova/FLOW"
 name = "flowc"
 path = "src/main.rs"
 
-[dependencies]
+[workspace]
+members = [
+    ".",
+    "crates/flow-plugin",
+    "crates/flow-plugin-example",
+]
 
 [build-dependencies]
 cc = "1.0"

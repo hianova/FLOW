@@ -50,6 +50,7 @@ typedef struct FlowSearchResult {
     uint32_t seed;
     FlowTuning tuning;
     FlowParetoSummary pareto;
+    FlowSearchHeatmap heatmap;
 } SearchResult;
 
 typedef struct {

@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* ========================================================================= */
 /* 1. Legacy External Plugin Test                                            */
@@ -152,6 +153,7 @@ static const FlowPlugin PLUGIN = {
     plugin_dimensions,
     plugin_evaluate_plan,
     plugin_verify_plan,
+    NULL,
     NULL
 };
 
@@ -320,7 +322,8 @@ static const FlowPlugin CUSTOM_TILE_PLUGIN = {
     custom_tile_dimensions,
     custom_tile_evaluate_plan,
     custom_tile_verify_plan,
-    custom_tile_benchmark
+    custom_tile_benchmark,
+    NULL
 };
 
 /* ========================================================================= */
@@ -559,9 +562,40 @@ int main(void) {
         /* Negative: non-existent file */
         CHECK(!flow_registry_load_dso("/tmp/missing_file.so", dso_err, sizeof(dso_err)));
         CHECK(strstr(dso_err, "dlopen failed") != NULL);
+
+        /* 5. Test Rust SDK generated DSO plugin loading */
+        const char *rust_dso_paths[] = {
+            "crates/flow-plugin-example/target/release/libflow_plugin_example.dylib",
+            "target/release/libflow_plugin_example.dylib",
+            "target/release/libflow_plugin_example.so",
+            NULL
+        };
+        for (int p = 0; rust_dso_paths[p] != NULL; ++p) {
+            if (access(rust_dso_paths[p], F_OK) == 0) {
+                int load_ok = flow_registry_load_dso(rust_dso_paths[p], dso_err, sizeof(dso_err));
+                if (!load_ok) {
+                    fprintf(stderr, "flow_registry_load_dso(%s) failed: %s\n", rust_dso_paths[p], dso_err);
+                }
+                CHECK(load_ok);
+                const FlowPlugin *rust_loaded = flow_registry_lookup("rust_simd_plugin");
+                CHECK(rust_loaded != NULL);
+                CHECK(strcmp(rust_loaded->name, "rust_simd_plugin") == 0);
+                CHECK(rust_loaded->component_count == 1);
+                CHECK(strcmp(rust_loaded->components[0].id, "rust_simd_tile") == 0);
+
+                /* Verify Rust declared dimensions */
+                FlowPlanDimensionSet rust_dims;
+                CHECK(rust_loaded->enumerate_dimensions(NULL, &rust_loaded->components[0], &rust_dims));
+                CHECK(rust_dims.count == 3);
+                CHECK(strcmp(rust_dims.dimensions[0].name, "vector_lanes") == 0);
+                CHECK(strcmp(rust_dims.dimensions[1].name, "tile_size") == 0);
+                CHECK(strcmp(rust_dims.dimensions[2].name, "threads") == 0);
+                break;
+            }
+        }
     }
 
-    printf("PLUGIN_TEST=passed registered=%zu selected=custom_tile dimensions=3 candidates=2 dso_loading=verified\n",
+    printf("PLUGIN_TEST=passed registered=%zu selected=custom_tile dimensions=3 candidates=2 dso_loading=verified rust_plugin_sdk=verified\n",
            component_count());
     return 0;
 }

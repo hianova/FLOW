@@ -33,6 +33,9 @@ int flowc_main(int argc, char **argv) {
     const char *target_python = NULL;
     size_t workload_bytes = 0;
     ProfileSeed profile = {0};
+    int show_heatmap = 0;
+    int use_explain_seed = 0;
+    uint32_t explain_seed = 0;
 
     if (!flow_registry_init()) {
         fprintf(stderr, "flowc: failed to initialize plugin registry\n");
@@ -40,7 +43,7 @@ int flowc_main(int argc, char **argv) {
     }
 
     if (argc < 3) {
-        fprintf(stderr, "usage: flowc <input.flow> -o <output.c> [--search] [--iterations <N>] [--seed <N>] [--benchmark] [--reload-adapter] [--profile <file>] [--profile-out <file>] [--component <id>] [--workload-bytes <N>] [--target-c-header <file.h>] [--target-rust <file.rs>] [--target-python <file.py>]\n");
+        fprintf(stderr, "usage: flowc <input.flow> -o <output.c> [--search] [--iterations <N>] [--seed <N>] [--benchmark] [--heatmap] [--explain-seed <N>] [--reload-adapter] [--profile <file>] [--profile-out <file>] [--component <id>] [--workload-bytes <N>] [--target-c-header <file.h>] [--target-rust <file.rs>] [--target-python <file.py>]\n");
         return EXIT_FAILURE;
     }
     input_path = argv[1];
@@ -49,6 +52,12 @@ int flowc_main(int argc, char **argv) {
         if (strcmp(argv[arg], "-o") == 0 && arg + 1 < argc) {
             output_path = argv[++arg];
         } else if (strcmp(argv[arg], "--search") == 0) {
+            use_search = 1;
+        } else if (strcmp(argv[arg], "--heatmap") == 0) {
+            show_heatmap = 1;
+        } else if (strcmp(argv[arg], "--explain-seed") == 0 && arg + 1 < argc) {
+            explain_seed = (uint32_t)strtoul(argv[++arg], NULL, 10);
+            use_explain_seed = 1;
             use_search = 1;
         } else if (strcmp(argv[arg], "--benchmark") == 0) {
             use_benchmark = 1;
@@ -239,6 +248,22 @@ int flowc_main(int argc, char **argv) {
         search = search_best(&ir, iterations, seed, use_benchmark,
                              profile.available ? &profile : NULL);
         component = search.component;
+        if (use_explain_seed) {
+            FlowBitSpace space;
+            if (flow_bitspace_init_for_ir(&ir, &space)) {
+                flow_bitspace_explain_seed(&space, iterations, explain_seed, use_benchmark, NULL, stdout);
+            }
+        }
+        if (show_heatmap) {
+            flow_search_heatmap_report(&search.heatmap, stdout);
+        }
+        if (component == NULL) {
+            fprintf(stderr, "flowc: search could not find a viable implementation plan satisfying all hard gates\n");
+            flow_search_heatmap_report(&search.heatmap, stderr);
+            fprintf(stderr, "Hint: Run with --explain-seed %u for step-by-step constraint rejection diagnostics.\n", seed);
+            flow_ir_cleanup(&ir);
+            return EXIT_FAILURE;
+        }
     }
     if (use_reload_adapter && !flow_component_supports_reload(component)) {
         fprintf(stderr, "flowc: --reload-adapter is not supported by component '%s'\n", component->id);

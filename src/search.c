@@ -132,6 +132,7 @@ SearchResult search_best(const SemanticIR *ir, size_t iterations, uint32_t seed,
     result.seed = seed;
     result.tuning = tuning;
     result.pareto = pareto;
+    result.heatmap = bit_res.heatmap;
     return result;
 }
 

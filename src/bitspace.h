@@ -79,6 +79,25 @@ int flow_bitspace_init_for_ir(const SemanticIR *ir, FlowBitSpace *space);
 uint64_t flow_bitspace_mutate_1bit(const FlowBitSpace *space, uint64_t genome, uint64_t *rng_state, uint32_t *mutated_bit_out);
 uint64_t flow_bitspace_encode(const FlowBitSpace *space, size_t cand_idx, const FlowPlanAssignment *plan);
 
+/* Constraint Failure Categories for High-Speed Zero-Overhead Heatmap */
+typedef enum {
+    FLOW_GATE_PASS = 0,
+    FLOW_GATE_FAIL_MEMORY_LIMIT,      /* Exceeds IR memory_limit_mb */
+    FLOW_GATE_FAIL_VERIFIER_UNPROVEN, /* Verifier compile error or failed proof */
+    FLOW_GATE_FAIL_THREAD_AFFINITY,   /* Thread / concurrency / component incompatibility */
+    FLOW_GATE_FAIL_QUOTA_EXCEEDED,    /* Resource quota limit exceeded */
+    FLOW_GATE_FAIL_DIMENSION_BOUND,   /* Value outside allowed dimension range or top_n */
+    FLOW_GATE_FAIL_REENTRANCY,        /* Reentrancy / effect contract violation */
+    FLOW_GATE_FAIL_MUTATION_INVALID,  /* Invalid bit mutation / decode failure */
+    FLOW_GATE_CATEGORY_MAX
+} FlowGateFailureReason;
+
+typedef struct {
+    uint64_t total_mutations;
+    uint64_t total_failures;
+    uint64_t failure_counts[FLOW_GATE_CATEGORY_MAX];
+} FlowSearchHeatmap;
+
 /* Search / Optimize over Hierarchical FlowBitSpace using 1-Bit Chaos Engine */
 typedef struct {
     FlowPlan best_plan;
@@ -91,10 +110,17 @@ typedef struct {
     size_t iterations;
     uint32_t seed;
     int measured;
+    FlowSearchHeatmap heatmap;
 } FlowBitSearchResult;
+
+const char *flow_gate_failure_name(FlowGateFailureReason reason);
+void flow_search_heatmap_report(const FlowSearchHeatmap *heatmap, FILE *out);
 
 int flow_bitspace_search(const FlowBitSpace *space, size_t iterations, uint32_t seed,
                          int measured, const FlowPlan *seed_plan, FlowBitSearchResult *result_out);
+
+int flow_bitspace_explain_seed(const FlowBitSpace *space, size_t iterations, uint32_t seed,
+                               int measured, const FlowPlan *seed_plan, FILE *out);
 
 /* Plan Artifact I/O & Strict Validation (Evidence Spine Persistence) */
 int flow_plan_artifact_save(FILE *output, const FlowPlanArtifact *artifact);

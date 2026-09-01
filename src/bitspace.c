@@ -173,23 +173,81 @@ static int hierarchical_evaluate(const FlowBitSpace *space, const FlowPlan *plan
     return 1;
 }
 
-static int hierarchical_hard_gate(const FlowBitSpace *space, const FlowPlan *plan, const FlowEvaluation *result) {
+static int hierarchical_hard_gate_reason(const FlowBitSpace *space, const FlowPlan *plan,
+                                         const FlowEvaluation *result, FlowGateFailureReason *reason_out) {
     VerificationReport v_report;
-    if (space == NULL || plan == NULL || result == NULL || plan->component == NULL) return 0;
-    if (result->capacity == 0) return 0;
+    if (space == NULL || plan == NULL || result == NULL || plan->component == NULL) {
+        if (reason_out) *reason_out = FLOW_GATE_FAIL_MUTATION_INVALID;
+        return 0;
+    }
+    if (result->capacity == 0) {
+        if (reason_out) *reason_out = FLOW_GATE_FAIL_DIMENSION_BOUND;
+        return 0;
+    }
     if (space->ir != NULL) {
-        if (!component_compatible(space->ir, plan->component)) return 0;
-        if (space->ir->top_n > 0 && result->capacity < (size_t)space->ir->top_n) return 0;
-        if (space->ir->memory_limit_mb > 0 &&
-            result->memory_bytes > (size_t)space->ir->memory_limit_mb * 1024u * 1024u)
+        if (!component_compatible(space->ir, plan->component)) {
+            if (reason_out) *reason_out = FLOW_GATE_FAIL_THREAD_AFFINITY;
             return 0;
+        }
+        if (space->ir->top_n > 0 && result->capacity < (size_t)space->ir->top_n) {
+            if (reason_out) *reason_out = FLOW_GATE_FAIL_DIMENSION_BOUND;
+            return 0;
+        }
+        if (space->ir->memory_limit_mb > 0 &&
+            result->memory_bytes > (size_t)space->ir->memory_limit_mb * 1024u * 1024u) {
+            if (reason_out) *reason_out = FLOW_GATE_FAIL_MEMORY_LIMIT;
+            return 0;
+        }
     }
     if (space->ir != NULL && plan->component != NULL) {
-        if (!flow_component_verify_plan(space->ir, plan->component, &plan->assignment, &v_report))
+        if (!flow_component_verify_plan(space->ir, plan->component, &plan->assignment, &v_report)) {
+            if (reason_out) *reason_out = FLOW_GATE_FAIL_VERIFIER_UNPROVEN;
             return 0;
-        if (v_report.status == VERIFIER_COMPILE_ERROR) return 0;
+        }
+        if (v_report.status == VERIFIER_COMPILE_ERROR) {
+            if (reason_out) *reason_out = FLOW_GATE_FAIL_VERIFIER_UNPROVEN;
+            return 0;
+        }
     }
+    if (reason_out) *reason_out = FLOW_GATE_PASS;
     return 1;
+}
+
+static int hierarchical_hard_gate(const FlowBitSpace *space, const FlowPlan *plan, const FlowEvaluation *result) {
+    return hierarchical_hard_gate_reason(space, plan, result, NULL);
+}
+
+const char *flow_gate_failure_name(FlowGateFailureReason reason) {
+    switch (reason) {
+        case FLOW_GATE_PASS: return "passed";
+        case FLOW_GATE_FAIL_MEMORY_LIMIT: return "memory_limit";
+        case FLOW_GATE_FAIL_VERIFIER_UNPROVEN: return "verifier_unproven";
+        case FLOW_GATE_FAIL_THREAD_AFFINITY: return "thread_affinity";
+        case FLOW_GATE_FAIL_QUOTA_EXCEEDED: return "quota_exceeded";
+        case FLOW_GATE_FAIL_DIMENSION_BOUND: return "dimension_bound";
+        case FLOW_GATE_FAIL_REENTRANCY: return "reentrancy_contract";
+        case FLOW_GATE_FAIL_MUTATION_INVALID: return "mutation_invalid";
+        default: return "unknown_constraint";
+    }
+}
+
+void flow_search_heatmap_report(const FlowSearchHeatmap *heatmap, FILE *out) {
+    if (heatmap == NULL || out == NULL || heatmap->total_mutations == 0) return;
+    fprintf(out, "Search Heatmap (%llu total mutations, %llu failures):\n",
+            (unsigned long long)heatmap->total_mutations,
+            (unsigned long long)heatmap->total_failures);
+    if (heatmap->total_failures == 0) {
+        fprintf(out, "  All evaluated plans passed hard gates (100%% viable)\n");
+        return;
+    }
+    for (int r = 1; r < FLOW_GATE_CATEGORY_MAX; ++r) {
+        if (heatmap->failure_counts[r] > 0) {
+            double pct = ((double)heatmap->failure_counts[r] * 100.0) / (double)heatmap->total_failures;
+            fprintf(out, "  - %-20s: %llu (%.1f%% of failures)\n",
+                    flow_gate_failure_name((FlowGateFailureReason)r),
+                    (unsigned long long)heatmap->failure_counts[r], pct);
+        }
+    }
 }
 
 static uint32_t calc_bits_for_dims(const FlowPlanDimensionSet *dims) {
@@ -443,9 +501,13 @@ int flow_bitspace_search(const FlowBitSpace *space, size_t iterations, uint32_t 
 
     space->decode(space, current_genome, &current_plan);
     space->evaluate(space, &current_plan, &current_plan.eval);
-    current_plan.eval.hard_gate_passed = space->hard_gate(space, &current_plan, &current_plan.eval);
+    FlowGateFailureReason seed_reason = FLOW_GATE_PASS;
+    current_plan.eval.hard_gate_passed = hierarchical_hard_gate_reason(space, &current_plan, &current_plan.eval, &seed_reason);
+    result_out->heatmap.total_mutations++;
     if (!current_plan.eval.hard_gate_passed) {
         current_plan.eval.energy += 1.0e12;
+        result_out->heatmap.total_failures++;
+        result_out->heatmap.failure_counts[seed_reason]++;
     } else {
         if (measured && space->ir != NULL && current_plan.component != NULL) {
             current_plan.eval.benchmark_ns = flow_component_benchmark(space->ir, current_plan.component, &current_plan.assignment);
@@ -469,10 +531,14 @@ int flow_bitspace_search(const FlowBitSpace *space, size_t iterations, uint32_t 
         FlowPlan cand_plan;
         space->decode(space, cand_genome, &cand_plan);
         space->evaluate(space, &cand_plan, &cand_plan.eval);
-        cand_plan.eval.hard_gate_passed = space->hard_gate(space, &cand_plan, &cand_plan.eval);
+        FlowGateFailureReason cand_reason = FLOW_GATE_PASS;
+        cand_plan.eval.hard_gate_passed = hierarchical_hard_gate_reason(space, &cand_plan, &cand_plan.eval, &cand_reason);
+        result_out->heatmap.total_mutations++;
 
         if (!cand_plan.eval.hard_gate_passed) {
             cand_plan.eval.energy += 1.0e12;
+            result_out->heatmap.total_failures++;
+            result_out->heatmap.failure_counts[cand_reason]++;
         } else {
             if (measured && space->ir != NULL && cand_plan.component != NULL) {
                 cand_plan.eval.benchmark_ns = flow_component_benchmark(space->ir, cand_plan.component, &cand_plan.assignment);
@@ -530,6 +596,65 @@ int flow_bitspace_search(const FlowBitSpace *space, size_t iterations, uint32_t 
         result_out->memory_regret_percent =
             (((double)best_plan.eval.memory_bytes - result_out->best_memory) / result_out->best_memory) * 100.0;
     }
+    return best_plan.eval.hard_gate_passed ? 1 : 0;
+}
+
+int flow_bitspace_explain_seed(const FlowBitSpace *space, size_t iterations, uint32_t seed,
+                               int measured, const FlowPlan *seed_plan, FILE *out) {
+    if (space == NULL || out == NULL || space->candidate_count == 0) return 0;
+    size_t iters = iterations == 0 ? 1 : iterations;
+    uint64_t rng = seed == 0 ? UINT64_C(0x123456789abcdef0) : (uint64_t)seed;
+    uint64_t current_genome = seed_plan != NULL ? seed_plan->genome : flow_bitspace_default_genome(space);
+    FlowPlan current_plan;
+
+    fprintf(out, "=== FLOW Search Deterministic Replay Diagnostics (Seed: %u, Iterations: %zu, Measured: %d) ===\n",
+            seed, iters, measured);
+
+    space->decode(space, current_genome, &current_plan);
+    space->evaluate(space, &current_plan, &current_plan.eval);
+    FlowGateFailureReason seed_reason = FLOW_GATE_PASS;
+    current_plan.eval.hard_gate_passed = hierarchical_hard_gate_reason(space, &current_plan, &current_plan.eval, &seed_reason);
+
+    fprintf(out, "[Step 0 / Initial Genome] 0x%016llx Comp=%s Status=%s (Energy=%.2f, Mem=%zu, Lat=%.2f)\n",
+            (unsigned long long)current_genome,
+            current_plan.component ? current_plan.component->id : "none",
+            current_plan.eval.hard_gate_passed ? "PASS" : flow_gate_failure_name(seed_reason),
+            current_plan.eval.energy, current_plan.eval.memory_bytes, current_plan.eval.latency_score);
+
+    double temp = 100.0;
+    double temp_decay = 0.995;
+
+    for (size_t iter = 0; iter < iters; ++iter) {
+        uint32_t flipped_bit = 0;
+        uint64_t cand_genome = flow_bitspace_mutate_1bit(space, current_genome, &rng, &flipped_bit);
+        FlowPlan cand_plan;
+        space->decode(space, cand_genome, &cand_plan);
+        space->evaluate(space, &cand_plan, &cand_plan.eval);
+        FlowGateFailureReason cand_reason = FLOW_GATE_PASS;
+        cand_plan.eval.hard_gate_passed = hierarchical_hard_gate_reason(space, &cand_plan, &cand_plan.eval, &cand_reason);
+
+        if (!cand_plan.eval.hard_gate_passed) {
+            cand_plan.eval.energy += 1.0e12;
+            fprintf(out, "  [Step %zu] Flipped bit %u -> Genome=0x%016llx Comp=%s -> REJECTED (%s)\n",
+                    iter + 1, flipped_bit, (unsigned long long)cand_genome,
+                    cand_plan.component ? cand_plan.component->id : "none",
+                    flow_gate_failure_name(cand_reason));
+        } else {
+            double delta = cand_plan.eval.energy - current_plan.eval.energy;
+            double r = (double)(xorshift64(&rng) % 10000) / 10000.0;
+            int accepted = (delta < 0.0 || (temp > 0.001 && r < exp(-delta / temp)));
+            fprintf(out, "  [Step %zu] Flipped bit %u -> Genome=0x%016llx Comp=%s -> PASS (Energy=%.2f, Delta=%.2f) [%s]\n",
+                    iter + 1, flipped_bit, (unsigned long long)cand_genome,
+                    cand_plan.component ? cand_plan.component->id : "none",
+                    cand_plan.eval.energy, delta, accepted ? "ACCEPTED" : "ANNEAL_DISCARD");
+            if (accepted) {
+                current_genome = cand_genome;
+                current_plan = cand_plan;
+            }
+        }
+        temp *= temp_decay;
+    }
+    fprintf(out, "=== End of Replay Diagnostics ===\n");
     return 1;
 }
 
