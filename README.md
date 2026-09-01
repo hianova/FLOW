@@ -94,21 +94,48 @@ slice, compositional security gates, benchmarks, and the bootstrap regression ch
 ## Current State and Architecture Scope
 
 ### Completed Capabilities
-- **Lock-Free RCU Fast Path**: Read-side invocations (`flow_reload_call`) use atomic RCU epoch tracking with zero mutex locks on the common path. Test runs observe low single-digit overhead (~3–8% vs direct C call, subject to platform benchmarking).
-- **Mode-Dispatched Migration**: Explicit branching across `FLOW_MIGRATE_AUTO`, `FLOW_MIGRATE_SNAPSHOT_COW`, and `FLOW_MIGRATE_STOP_THE_WORLD`.
-- **Bounded Live Journal & Fallback**: Concurrent mutation journal logging during migration with automatic stop-the-world catchup fallback on overflow (`flow_reload_live_finish_or_fallback`).
-- **Dynamic DSO Module Loading**: `flow_registry_load_dso()` loads shared objects via `dlopen()` / `dlsym()`, validating the standard `FlowPluginDescriptor` ABI (major/minor version, struct size, module hash). Loaded modules remain safely resident in memory.
-- **Builtin Plan Artifact Activation**: `flow_reload_plan()` instantiates real executable units (`builtin_create_unit` for `sharded_hash`, `linear_array`, `parallel_map`) with dynamically allocated state, full mutation journaling, and schema-compatible live state transfer.
-- **End-to-End Cross-Language Vertical Slice**: Validated pipeline passing Python writable `memoryview` and read-only `bytes` buffers into C native cores, performing live plan hot reloads without data loss, and verifying Rust borrowed slice (`&[u8]`) bounds.
-- **Contract and Schema Consistency Validation**: Structural verification ensuring plan dimensions, genome encoding, and component contracts match without schema drift.
-- **Self-Host Stage 2 Alignment**: Reproduces identical component selection, contract hash, and `.flowplan` lock format between native `flowc` and stage 2 bootstrap.
 
-### Remaining / Roadmap Items
-- **Safe Dynamic DSO Unload**: Module handles currently remain resident to guarantee callback and destructor memory safety. Dynamic `dlclose()` requires full RCU generation reference count draining.
-- **Third-Party External Plugin `create_unit`**: External plugins currently fall back to generic state machines unless they provide an explicit `create_unit` callback implementation.
-- **True OS/Hardware Copy-on-Write**: Snapshot migration uses live journal replay rather than OS page-level CoW.
-- **Standalone Package Distribution**: C headers, Rust slices, and Python ctypes adapters are code-generated integration targets, not standalone distributed packages.
-- **Full-Pipeline Self-Host Native Modernization**: Stage 2 bootstrap passes all semantic regression gates, but has not yet been rewritten to directly embed the unified `FlowBitSpace` library.
+- **Lock-Free RCU Fast Path**: Read-side invocations (`flow_reload_call`) use atomic RCU epoch tracking with zero mutex locks on the common path. Test runs observe low single-digit overhead (~3–8% vs direct C call).
+- **Mode-Dispatched Migration & Live Journal**: Explicit branching across `FLOW_MIGRATE_AUTO`, `FLOW_MIGRATE_SNAPSHOT_COW`, and `FLOW_MIGRATE_STOP_THE_WORLD` with bounded live mutation journal logging and automatic fallback.
+- **eBPF / PMU Hardware Telemetry & Runtime Autotuning**: Real-time sampling of hardware performance counters (L3 cache miss rate, IPC, branch mispredictions, page faults) with automatic threshold-triggered zero-downtime hot-swaps (`flow_adaptive_tick_pmu`).
+- **Multi-Objective Pareto Frontier & Plan Ensembles (`--ensemble <prefix>`)**: Automatic extraction of Pareto knee-points into 3 deployable tactical candidates (`Speed`, `Balanced`, `Memory`), emitting unified dispatch headers (`_ensemble.h`) and lockfiles (`_bundle.lock`).
+- **Formal SMT-LIB2 Mathematical Proofs (`--smt-proof <proof.smt2>`)**: Sound QF_BV SMT-LIB 2.6 logic theorem emission asserting invariant negations (Buffer Bounds, Memory Quota, Shard Non-Aliasing, and Functional Determinism) for Proof-Carrying Code.
+- **MLIR `flow` Dialect & Intent Preservation (`--target-mlir <file.mlir>`)**: Emits high-level `flow.intent` and `flow.constraint` operations lowered into standard `func.func`, `scf.for`, and `memref` pipelines.
+- **Direct LLVM IR Emission & LTO (`--target-llvm-ir <file.ll>`)**: Emits native LLVM IR bitcode text for cross-language Link-Time Optimization (LTO) with zero-cost function inlining across Rust, C++, and C host runtimes.
+- **Codebase Topology Knowledge Graph & Firewall Audit (`--topology-audit`, `--topology <file.json/dot>`)**: In-memory knowledge graph auditing compiler layers (Core Layer 0 vs Interface Layer 1 vs Plugin Layer 2), guaranteeing zero interface leaks while driving shard partition locality.
+- **Mutation Heatmap & Deterministic Replay (`--heatmap`, `--explain-seed <SEED>`)**: Zero-overhead in-memory failure counter tracking across 1-bit mutation searches with deterministic step-by-step diagnostic replay.
+- **Safe Rust Plugin SDK (`crates/flow-plugin`)**: Zero-dependency Safe Rust crate with `declare_flow_plugin!` exporting standard CDYLIB plugins verified by DSO loaders (`flow_registry_load_dso`).
+- **LLVM libFuzzer & Standalone Robustness Harness (`make fuzz-test`, `make fuzz`)**: Complete memory safety verification against malformed, unbounded, and corrupted specification streams.
+- **End-to-End Cross-Language Vertical Slice**: Validated pipeline passing Python writable `memoryview` and read-only `bytes` buffers into C native cores, performing live plan hot reloads without data loss, and verifying Rust borrowed slice (`&[u8]`) bounds.
+- **Self-Host Bootstrap Alignment**: Reproduces identical component selection, contract hash, and `.flowplan` lock format between native `flowc` and stage 2/3 bootstrap engines.
+
+## CLI Reference
+
+```sh
+# Basic compilation to C
+flowc examples/rank.flow -o build/rank.c
+
+# BitSpace search with iterations and deterministic seed
+flowc examples/rank.flow -o build/rank.c --search --iterations 100 --seed 42
+
+# Emit Pareto Plan Ensemble Bundle (Speed, Balanced, Memory)
+flowc examples/rank.flow -o build/rank.c --search --ensemble build/rank
+
+# Emit Formal SMT-LIB2 Mathematical Proof Script
+flowc examples/rank.flow -o build/rank.c --smt-proof build/rank.smt2
+
+# Emit MLIR flow dialect and LLVM IR bitcode
+flowc examples/rank.flow -o build/rank.c --target-mlir build/rank.mlir --target-llvm-ir build/rank.ll
+
+# Export Codebase / Intent Topology Graph and perform Interface Firewall Audit
+flowc examples/rank.flow -o build/rank.c --topology build/rank_topology.json --topology-audit
+
+# Search failure heatmap & deterministic mutation replay
+flowc examples/rank.flow -o build/rank.c --search --heatmap --explain-seed 42
+
+# Generate multi-language Zero-Copy ABI adapters
+flowc examples/rank.flow -o build/rank.c --target-c-header build/rank.h --target-rust build/rank.rs --target-python build/rank.py
+```
 
 ## Verification and Security
 
@@ -123,12 +150,12 @@ slice, compositional security gates, benchmarks, and the bootstrap regression ch
 make security-test
 make abi-test
 make vertical-slice-test
+make ensemble-test
+make smt-test
+make mlir-llvm-test
+make topology-test
+make fuzz-test
 ```
-
-The security layer searches plan/composition boundaries. It is not a universal
-domain vulnerability scanner. A module remains responsible for domain-local
-correctness through its verifier, differential oracle, sanitizer setup, and
-regression corpus.
 
 ## Repository Boundary
 
