@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-int main(int argc, char **argv) {
+int flowc_main(int argc, char **argv) {
     const char *input_path;
     const char *output_path;
     FILE *input;
@@ -363,3 +363,9 @@ int main(int argc, char **argv) {
     flow_ir_cleanup(&ir);
     return EXIT_SUCCESS;
 }
+
+#ifndef FLOWC_NO_MAIN
+int main(int argc, char **argv) {
+    return flowc_main(argc, argv);
+}
+#endif

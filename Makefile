@@ -9,9 +9,23 @@ BUILD_DIR := build
 FLOWC := $(BUILD_DIR)/flowc
 FLOW_TEMPLATE_PATH := $(CURDIR)/tools/self-host-stage2.c
 
-.PHONY: all clean test demos demo benchmark security-test reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test plugin-test reload-stress-test reload-stress-nightly self-host-check acceptance
+PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
+INCLUDEDIR ?= $(PREFIX)/include/flow
+
+.PHONY: all clean test demos demo benchmark security-test reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test plugin-test reload-stress-test reload-stress-nightly self-host-check acceptance install uninstall
 
 all: $(FLOWC)
+
+install: $(FLOWC)
+	mkdir -p $(DESTDIR)$(BINDIR)
+	install -m 755 $(FLOWC) $(DESTDIR)$(BINDIR)/flowc
+	mkdir -p $(DESTDIR)$(INCLUDEDIR)
+	install -m 644 src/*.h $(DESTDIR)$(INCLUDEDIR)
+
+uninstall:
+	rm -f $(DESTDIR)$(BINDIR)/flowc
+	rm -rf $(DESTDIR)$(INCLUDEDIR)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)

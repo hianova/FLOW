@@ -1,6 +1,7 @@
 *.DS_Store
 *.plist
 build/
+target/
 generated/
 work/mp4parse-rust-bench/target/
 work/retired/*/target/

@@ -64,6 +64,28 @@ make test
 make acceptance
 ```
 
+## Installation
+
+### Method 1: Via `cargo install` (Rust Ecosystem)
+```sh
+cargo install --git https://github.com/hianova/FLOW.git
+# or locally:
+cargo install --path .
+```
+
+### Method 2: Via `make install` (Standard POSIX)
+```sh
+make
+sudo make install
+# or install to ~/.local/bin without root:
+make install PREFIX=$HOME/.local
+```
+
+### Method 3: One-Line Install Script
+```sh
+curl -fsSL https://raw.githubusercontent.com/hianova/FLOW/main/tools/install.sh | sh
+```
+
 The acceptance command covers generic C generation, dynamic DSO loading,
 hierarchical bit-space search, plan persistence, lock-free RCU reload/migration,
 adaptive runtime policy, zero-copy ABI view validation, C/Rust/Python vertical
