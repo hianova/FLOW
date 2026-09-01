@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient -->
+    <radialGradient id="bg-glow" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" stop-color="#0a192f" />
+      <stop offset="60%" stop-color="#050c18" />
+      <stop offset="100%" stop-color="#02060d" />
+    </radialGradient>
+
+    <!-- Wave 1: Speed (Cyan to Azure) -->
+    <linearGradient id="wave-speed" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00f5ff" />
+      <stop offset="50%" stop-color="#00a8ff" />
+      <stop offset="100%" stop-color="#0066ff" />
+    </linearGradient>
+
+    <!-- Wave 2: Balanced (Electric Blue to Sapphire) -->
+    <linearGradient id="wave-balanced" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00d2ff" />
+      <stop offset="50%" stop-color="#3a7bd5" />
+      <stop offset="100%" stop-color="#4a00e0" />
+    </linearGradient>
+
+    <!-- Wave 3: Memory / Locality (Deep Violet to Neon Indigo) -->
+    <linearGradient id="wave-memory" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00f2fe" />
+      <stop offset="50%" stop-color="#4facfe" />
+      <stop offset="100%" stop-color="#6b11ff" />
+    </linearGradient>
+
+    <!-- Blue Halo Glow Filter -->
+    <filter id="glow-heavy" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="12" result="blur1" />
+      <feGaussianBlur stdDeviation="24" result="blur2" />
+      <feMerge>
+        <feMergeNode in="blur2" />
+        <feMergeNode in="blur1" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <filter id="glow-subtle" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Dark Tech Background with Rounded Corners -->
+  <rect width="512" height="512" rx="108" fill="url(#bg-glow)" stroke="#1a365d" stroke-width="3" />
+
+  <!-- Ambient Blue Halo in the Center -->
+  <circle cx="256" cy="256" r="160" fill="#0066ff" opacity="0.18" filter="url(#glow-heavy)" />
+  <circle cx="256" cy="256" r="90" fill="#00f5ff" opacity="0.12" filter="url(#glow-heavy)" />
+
+  <!-- Geometric Circuit Accents -->
+  <g opacity="0.25" stroke="#00f5ff" stroke-width="1.5" stroke-dasharray="3,6" fill="none">
+    <circle cx="256" cy="256" r="210" />
+    <circle cx="256" cy="256" r="175" />
+    <path d="M 256 36 L 256 60 M 256 452 L 256 476 M 36 256 L 60 256 M 452 256 L 476 256" />
+  </g>
+
+  <!-- 3 Flowing Harmonic Waves with Blue Glow Halo -->
+  <g filter="url(#glow-heavy)">
+    <!-- Wave 3 (Bottom: Memory / Architecture Base) -->
+    <path d="M 80 320 C 150 250, 210 390, 290 320 C 350 265, 400 310, 432 290"
+          fill="none"
+          stroke="url(#wave-memory)"
+          stroke-width="12"
+          stroke-linecap="round"
+          opacity="0.85" />
+
+    <!-- Wave 2 (Middle: Balanced / Adaptive Harmony) -->
+    <path d="M 80 256 C 160 170, 220 340, 310 256 C 370 195, 410 240, 432 226"
+          fill="none"
+          stroke="url(#wave-balanced)"
+          stroke-width="16"
+          stroke-linecap="round"
+          opacity="0.95" />
+
+    <!-- Wave 1 (Top: Speed / Silicon Precision) -->
+    <path d="M 80 192 C 170 100, 230 290, 330 192 C 380 140, 415 170, 432 160"
+          fill="none"
+          stroke="url(#wave-speed)"
+          stroke-width="20"
+          stroke-linecap="round" />
+  </g>
+
+  <!-- Quantum / Pareto Frontier Discrete Nodes (Luminous Dots) -->
+  <g filter="url(#glow-subtle)">
+    <!-- Wave 1 Key Points -->
+    <circle cx="170" cy="146" r="6.5" fill="#ffffff" stroke="#00f5ff" stroke-width="3" />
+    <circle cx="330" cy="192" r="7.5" fill="#ffffff" stroke="#00f5ff" stroke-width="3" />
+    <circle cx="432" cy="160" r="5.5" fill="#ffffff" stroke="#00f5ff" stroke-width="2.5" />
+
+    <!-- Wave 2 Key Points -->
+    <circle cx="160" cy="213" r="6" fill="#ffffff" stroke="#00d2ff" stroke-width="2.5" />
+    <circle cx="310" cy="256" r="7" fill="#ffffff" stroke="#00d2ff" stroke-width="3" />
+
+    <!-- Wave 3 Key Points -->
+    <circle cx="210" cy="350" r="5.5" fill="#ffffff" stroke="#4facfe" stroke-width="2" />
+    <circle cx="290" cy="320" r="6.5" fill="#ffffff" stroke="#4facfe" stroke-width="2.5" />
+  </g>
+</svg>

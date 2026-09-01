@@ -1,0 +1,143 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 280" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="banner-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#040914" />
+      <stop offset="50%" stop-color="#081426" />
+      <stop offset="100%" stop-color="#030710" />
+    </linearGradient>
+
+    <!-- Wave Gradients -->
+    <linearGradient id="banner-wave-1" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00f5ff" />
+      <stop offset="50%" stop-color="#00a8ff" />
+      <stop offset="100%" stop-color="#0066ff" />
+    </linearGradient>
+
+    <linearGradient id="banner-wave-2" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00d2ff" />
+      <stop offset="50%" stop-color="#3a7bd5" />
+      <stop offset="100%" stop-color="#6b11ff" />
+    </linearGradient>
+
+    <linearGradient id="banner-wave-3" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00f2fe" />
+      <stop offset="50%" stop-color="#4facfe" />
+      <stop offset="100%" stop-color="#7000ff" />
+    </linearGradient>
+
+    <linearGradient id="text-glow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="40%" stop-color="#e0f7ff" />
+      <stop offset="100%" stop-color="#00f5ff" />
+    </linearGradient>
+
+    <!-- Glowing Filters -->
+    <filter id="banner-glow-heavy" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="10" result="b1" />
+      <feGaussianBlur stdDeviation="20" result="b2" />
+      <feMerge>
+        <feMergeNode in="b2" />
+        <feMergeNode in="b1" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <filter id="banner-glow-subtle" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="4" result="b" />
+      <feMerge>
+        <feMergeNode in="b" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Banner Background -->
+  <rect width="900" height="280" rx="20" fill="url(#banner-bg)" stroke="#1a365d" stroke-width="1.5" />
+
+  <!-- Ambient Light Halos -->
+  <circle cx="160" cy="140" r="120" fill="#0066ff" opacity="0.2" filter="url(#banner-glow-heavy)" />
+  <circle cx="160" cy="140" r="65" fill="#00f5ff" opacity="0.15" filter="url(#banner-glow-heavy)" />
+
+  <!-- LEFT: 3 Flowing Waves Logo Icon -->
+  <g transform="translate(10, 0)">
+    <!-- Tech Accent Circles -->
+    <circle cx="150" cy="140" r="100" fill="none" stroke="#00f5ff" stroke-width="1" stroke-dasharray="3,6" opacity="0.25" />
+    <circle cx="150" cy="140" r="80" fill="none" stroke="#00d2ff" stroke-width="1" stroke-dasharray="2,4" opacity="0.2" />
+
+    <!-- 3 Flowing Waves -->
+    <g filter="url(#banner-glow-heavy)">
+      <!-- Wave 3 (Bottom) -->
+      <path d="M 60 175 C 95 135, 130 215, 175 175 C 205 145, 230 170, 245 160"
+            fill="none" stroke="url(#banner-wave-3)" stroke-width="7" stroke-linecap="round" opacity="0.8" />
+
+      <!-- Wave 2 (Middle) -->
+      <path d="M 60 140 C 100 95, 135 185, 185 140 C 215 110, 235 130, 245 125"
+            fill="none" stroke="url(#banner-wave-2)" stroke-width="9" stroke-linecap="round" opacity="0.9" />
+
+      <!-- Wave 1 (Top) -->
+      <path d="M 60 105 C 105 55, 140 155, 195 105 C 220 80, 238 95, 245 90"
+            fill="none" stroke="url(#banner-wave-1)" stroke-width="11" stroke-linecap="round" />
+    </g>
+
+    <!-- Discrete Quantum Nodes -->
+    <g filter="url(#banner-glow-subtle)">
+      <circle cx="105" cy="80" r="4.5" fill="#ffffff" stroke="#00f5ff" stroke-width="2" />
+      <circle cx="195" cy="105" r="5" fill="#ffffff" stroke="#00f5ff" stroke-width="2" />
+      <circle cx="100" cy="118" r="4" fill="#ffffff" stroke="#00d2ff" stroke-width="1.5" />
+      <circle cx="185" cy="140" r="4.5" fill="#ffffff" stroke="#00d2ff" stroke-width="2" />
+      <circle cx="130" cy="195" r="4" fill="#ffffff" stroke="#4facfe" stroke-width="1.5" />
+      <circle cx="175" cy="175" r="4.5" fill="#ffffff" stroke="#4facfe" stroke-width="2" />
+    </g>
+  </g>
+
+  <!-- Vertical Divider Line -->
+  <line x1="290" y1="50" x2="290" y2="230" stroke="#1e3a5f" stroke-width="1.5" stroke-dasharray="4,4" />
+
+  <!-- RIGHT: Typography & Badges -->
+  <g transform="translate(330, 0)">
+    <!-- Title "FLOW" -->
+    <text x="0" y="115"
+          font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif"
+          font-size="64"
+          font-weight="900"
+          letter-spacing="6"
+          fill="url(#text-glow)"
+          filter="url(#banner-glow-subtle)">FLOW</text>
+
+    <!-- Subtitle -->
+    <text x="0" y="150"
+          font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif"
+          font-size="16"
+          font-weight="600"
+          letter-spacing="2.5"
+          fill="#00f5ff"
+          opacity="0.95">CONSTRAINT COMPILER &amp; ADAPTIVE RUNTIME</text>
+
+    <!-- Description Badges -->
+    <g transform="translate(0, 175)">
+      <!-- Badge 1: Silicon eBPF -->
+      <rect x="0" y="0" width="115" height="26" rx="6" fill="#0d213f" stroke="#00f5ff" stroke-width="1" opacity="0.9"/>
+      <text x="57" y="17" font-family="sans-serif" font-size="11" font-weight="600" fill="#00f5ff" text-anchor="middle">eBPF Telemetry</text>
+
+      <!-- Badge 2: In-Memory JIT -->
+      <rect x="125" y="0" width="105" height="26" rx="6" fill="#0d213f" stroke="#38bdf8" stroke-width="1" opacity="0.9"/>
+      <text x="177" y="17" font-family="sans-serif" font-size="11" font-weight="600" fill="#38bdf8" text-anchor="middle">In-Memory JIT</text>
+
+      <!-- Badge 3: SMT Formal Proof -->
+      <rect x="240" y="0" width="125" height="26" rx="6" fill="#0d213f" stroke="#818cf8" stroke-width="1" opacity="0.9"/>
+      <text x="302" y="17" font-family="sans-serif" font-size="11" font-weight="600" fill="#818cf8" text-anchor="middle">SMT-LIB2 Proven</text>
+
+      <!-- Badge 4: RCU Lock-Free -->
+      <rect x="375" y="0" width="120" height="26" rx="6" fill="#0d213f" stroke="#a78bfa" stroke-width="1" opacity="0.9"/>
+      <text x="435" y="17" font-family="sans-serif" font-size="11" font-weight="600" fill="#a78bfa" text-anchor="middle">Lock-Free RCU</text>
+    </g>
+
+    <!-- Bottom Metric Tag -->
+    <text x="0" y="235"
+          font-family="ui-monospace, Menlo, Monaco, Consolas, monospace"
+          font-size="12"
+          fill="#64748b"
+          letter-spacing="0.5">Modularity: 1.00 • Zero Interface Leaks • Zero-Copy ABI</text>
+  </g>
+</svg>

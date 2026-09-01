@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/banner.svg" alt="FLOW Banner" width="100%" />
+</p>
+
 # FLOW
 
 FLOW is a pure-C, project-level constraint compiler and implementation-plan optimizer.
