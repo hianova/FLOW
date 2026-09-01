@@ -32,6 +32,8 @@ int flowc_main(int argc, char **argv) {
     const char *target_c_header = NULL;
     const char *target_rust = NULL;
     const char *target_python = NULL;
+    const char *target_mlir = NULL;
+    const char *target_llvm_ir = NULL;
     const char *ensemble_prefix = NULL;
     const char *smt_proof_path = NULL;
     size_t workload_bytes = 0;
@@ -81,6 +83,10 @@ int flowc_main(int argc, char **argv) {
             target_rust = argv[++arg];
         } else if (strcmp(argv[arg], "--target-python") == 0 && arg + 1 < argc) {
             target_python = argv[++arg];
+        } else if (strcmp(argv[arg], "--target-mlir") == 0 && arg + 1 < argc) {
+            target_mlir = argv[++arg];
+        } else if (strcmp(argv[arg], "--target-llvm-ir") == 0 && arg + 1 < argc) {
+            target_llvm_ir = argv[++arg];
         } else if (strcmp(argv[arg], "--workload-bytes") == 0 && arg + 1 < argc) {
             workload_bytes = (size_t)strtoull(argv[++arg], NULL, 10);
         } else if (strcmp(argv[arg], "--iterations") == 0 && arg + 1 < argc) {
@@ -390,6 +396,22 @@ int flowc_main(int argc, char **argv) {
                 flow_abi_emit_python_adapter(py_fp, &abi);
                 fclose(py_fp);
                 printf("  target-python: wrote %s\n", target_python);
+            }
+        }
+        if (target_mlir != NULL) {
+            FILE *mlir_fp = fopen(target_mlir, "w");
+            if (mlir_fp != NULL) {
+                flow_emit_mlir(mlir_fp, &ir, component, use_search ? &search : NULL, &verification);
+                fclose(mlir_fp);
+                printf("  target-mlir: wrote %s\n", target_mlir);
+            }
+        }
+        if (target_llvm_ir != NULL) {
+            FILE *ll_fp = fopen(target_llvm_ir, "w");
+            if (ll_fp != NULL) {
+                flow_emit_llvm_ir(ll_fp, &ir, component, use_search ? &search : NULL, &verification);
+                fclose(ll_fp);
+                printf("  target-llvm-ir: wrote %s\n", target_llvm_ir);
             }
         }
     }

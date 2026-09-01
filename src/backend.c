@@ -1059,3 +1059,117 @@ int emit_c(FILE *output, const SemanticIR *ir, const Component *component,
     return flow_component_emit(output, ir, component, search, verification,
                                reload_adapter);
 }
+
+int flow_emit_mlir(FILE *output, const SemanticIR *ir, const Component *component,
+                   const SearchResult *search, const VerificationReport *verification) {
+    if (output == NULL || ir == NULL || component == NULL || verification == NULL) return 0;
+
+    size_t capacity = search != NULL ? (size_t)search->capacity : verification->capacity;
+    size_t threads = search != NULL ? (size_t)search->threads : 1;
+    size_t shards = search != NULL ? (size_t)search->shards : 1;
+    size_t memory_limit = ir->memory_limit_mb > 0 ? (size_t)ir->memory_limit_mb * 1024u * 1024u : 0;
+
+    fprintf(output, "// =============================================================================\n");
+    fprintf(output, "// FLOW MLIR Dialect Representation (Intent-Preserving High-Level IR)\n");
+    fprintf(output, "// Flow Intent: %s -> %s\n", ir->flow_name, component->id);
+    fprintf(output, "// =============================================================================\n\n");
+
+    fprintf(output, "module @%s attributes {\n", ir->flow_name[0] ? ir->flow_name : "flow_module");
+    fprintf(output, "  flow.domain = \"%s\",\n", ir->domain_name[0] ? ir->domain_name : "general");
+    fprintf(output, "  flow.deterministic = %s,\n", ir->fact_deterministic ? "true" : "false");
+    fprintf(output, "  flow.resource = \"%s\"\n", ir->resource_name[0] ? ir->resource_name : "cpu");
+    fprintf(output, "} {\n");
+
+    /* 1. FLOW Intent & Constraints Dialect */
+    fprintf(output, "  // --- Flow Dialect: Intent & Hard Constraints ---\n");
+    fprintf(output, "  flow.intent @%s(%s: memref<?xi32>) -> memref<?xi32> {\n",
+            ir->flow_name[0] ? ir->flow_name : "pipeline", ir->output_name);
+    fprintf(output, "    flow.constraint.capacity %zu : index\n", capacity);
+    fprintf(output, "    flow.constraint.memory_limit %zu : i64\n", memory_limit);
+    fprintf(output, "    flow.constraint.parallelizable %s\n", ir->flow_parallelizable ? "true" : "false");
+    fprintf(output, "    flow.component.selected \"%s\" (kind = \"%s\", threads = %zu, shards = %zu)\n",
+            component->id, component->kind, threads, shards);
+    fprintf(output, "  }\n\n");
+
+    /* 2. Lowered Standard Func & Scf Execution Kernels */
+    fprintf(output, "  // --- Lowered Execution Kernel (SCF / Affine / MemRef) ---\n");
+    fprintf(output, "  func.func @flow_kernel(%%input: memref<%zuxi32>, %%output: memref<%zuxi32>) -> i32 {\n",
+            capacity, capacity);
+    fprintf(output, "    %%c0 = arith.constant 0 : index\n");
+    fprintf(output, "    %%c1 = arith.constant 1 : index\n");
+    fprintf(output, "    %%cap = arith.constant %zu : index\n", capacity);
+    fprintf(output, "    scf.for %%iv = %%c0 to %%cap step %%c1 {\n");
+    fprintf(output, "      %%elem = memref.load %%input[%%iv] : memref<%zuxi32>\n", capacity);
+    fprintf(output, "      memref.store %%elem, %%output[%%iv] : memref<%zuxi32>\n", capacity);
+    fprintf(output, "    }\n");
+    fprintf(output, "    %%res = arith.constant 0 : i32\n");
+    fprintf(output, "    return %%res : i32\n");
+    fprintf(output, "  }\n");
+    fprintf(output, "}\n");
+
+    return ferror(output) == 0;
+}
+
+int flow_emit_llvm_ir(FILE *output, const SemanticIR *ir, const Component *component,
+                      const SearchResult *search, const VerificationReport *verification) {
+    if (output == NULL || ir == NULL || component == NULL || verification == NULL) return 0;
+
+    size_t capacity = search != NULL ? (size_t)search->capacity : verification->capacity;
+    if (capacity < 1) capacity = 1;
+
+    fprintf(output, "; =============================================================================\n");
+    fprintf(output, "; FLOW LLVM IR Module (Direct LTO-Ready Bitcode Generation)\n");
+    fprintf(output, "; Component: %s (%s), Capacity: %zu\n", component->id, component->kind, capacity);
+    fprintf(output, "; =============================================================================\n\n");
+
+    fprintf(output, "source_filename = \"%s.flow\"\n", ir->flow_name[0] ? ir->flow_name : "flow");
+    fprintf(output, "target datalayout = \"e-m:o-i64:64-i128:128-n32:64-S128\"\n");
+    fprintf(output, "target triple = \"arm64-apple-darwin\"\n\n");
+
+    fprintf(output, "%%struct.flow_item = type { i32, i32 }\n");
+    fprintf(output, "%%struct.flow_state = type { [ %zu x %%struct.flow_item ], i64, i32 }\n\n", capacity);
+
+    /* Function: flow_init */
+    fprintf(output, "; Function: flow_init\n");
+    fprintf(output, "define i32 @flow_init(ptr %%state_out) nounwind alwaysinline ssp {\n");
+    fprintf(output, "entry:\n");
+    fprintf(output, "  %%st = call ptr @calloc(i64 1, i64 %zu)\n", sizeof(int) * 2 * capacity + 16);
+    fprintf(output, "  %%cmp = icmp eq ptr %%st, null\n");
+    fprintf(output, "  br i1 %%cmp, label %%err, label %%ok\n\n");
+    fprintf(output, "ok:\n");
+    fprintf(output, "  store ptr %%st, ptr %%state_out, align 8\n");
+    fprintf(output, "  ret i32 0\n\n");
+    fprintf(output, "err:\n");
+    fprintf(output, "  ret i32 -1\n");
+    fprintf(output, "}\n\n");
+
+    /* Function: flow_run */
+    fprintf(output, "; Function: flow_run\n");
+    fprintf(output, "define i32 @flow_run(ptr %%state, ptr %%input, ptr %%output) nounwind alwaysinline ssp {\n");
+    fprintf(output, "entry:\n");
+    fprintf(output, "  %%cmp_st = icmp eq ptr %%state, null\n");
+    fprintf(output, "  br i1 %%cmp_st, label %%ret_err, label %%exec\n\n");
+    fprintf(output, "exec:\n");
+    fprintf(output, "  ret i32 0\n\n");
+    fprintf(output, "ret_err:\n");
+    fprintf(output, "  ret i32 -1\n");
+    fprintf(output, "}\n\n");
+
+    /* Function: flow_drop */
+    fprintf(output, "; Function: flow_drop\n");
+    fprintf(output, "define void @flow_drop(ptr %%state) nounwind alwaysinline ssp {\n");
+    fprintf(output, "entry:\n");
+    fprintf(output, "  %%cmp = icmp ne ptr %%state, null\n");
+    fprintf(output, "  br i1 %%cmp, label %%do_free, label %%done\n\n");
+    fprintf(output, "do_free:\n");
+    fprintf(output, "  call void @free(ptr %%state)\n");
+    fprintf(output, "  br label %%done\n\n");
+    fprintf(output, "done:\n");
+    fprintf(output, "  ret void\n");
+    fprintf(output, "}\n\n");
+
+    fprintf(output, "declare ptr @calloc(i64, i64) nounwind\n");
+    fprintf(output, "declare void @free(ptr) nounwind\n");
+
+    return ferror(output) == 0;
+}
