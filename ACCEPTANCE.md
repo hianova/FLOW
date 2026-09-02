@@ -133,14 +133,30 @@ The unified hierarchical bitspace architecture:
 - 1-bit chaotic mutation explores both candidate space and parameter space.
 - `.flowplan` evidence spine captures `contract_hash`, `plan_schema_hash`, `seed`, `genome`, dynamic dimension definitions, metrics, and attestation.
 
+## M9 — Mathematical Self-Constrained Geometry & Polyhedral Hypercube Projection
+
+Pass:
+
+```sh
+make polytope-projection-test
+```
+
+The self-constraining geometric architecture:
+- Replaces all hardcoded timeouts and fixed constants with mathematical constraint projections and statistical derivations.
+- Formulates the Mask Canvas as the exact orthogonal projection $\Pi_{\mathcal{P}} : \{Ax \le b\} \to \{0,1\}^N$ of the polyhedral constraint system onto the discrete hypercube.
+- Derives QSBR watchdog grace periods dynamically from SemanticIR SLA deadlines or Chebyshev 4-sigma distribution bounds ($\mu + 4\sigma$).
+- Computes phase-lag dead-time delay steps dynamically via the Nyquist-Shannon sampling relation $d = \lceil \tau_{\text{delay}} / \Delta t \rceil$.
+
 ## Core boundary
 
 ```text
 .flow contract (declarative constraints)
     -> module resolve
     -> domain semantic context
+    -> polyhedral constraint system \mathcal{P} = {Ax <= b}
+    -> orthogonal hypercube projection \Pi_{\mathcal{P}}({0,1}^N)
     -> hierarchical FlowBitSpace
-    -> 1-bit chaotic search
+    -> 1-bit chaotic constraint annealing
     -> Linker Hard Gates
     -> FlowPlanArtifact (.flowplan)
     -> verified C / ABI backend emission
