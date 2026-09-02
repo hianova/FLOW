@@ -266,3 +266,38 @@ int flow_topology_export_dot(const FlowTopologyGraph *graph, FILE *output) {
     fprintf(output, "}\n");
     return ferror(output) == 0;
 }
+
+int flow_topology_attach_telemetry(FlowTopologyGraph *graph, const char *node_name,
+                                  double hotspot_score, const char *metric_name,
+                                  double raw_val, double thresh_val,
+                                  const char *unit, const char *symptom) {
+    if (graph == NULL || node_name == NULL) return 0;
+    for (size_t i = 0; i < graph->node_count; ++i) {
+        FlowTopologyNode *n = &graph->nodes[i];
+        if (strcmp(n->name, node_name) == 0 || strcmp(n->module, node_name) == 0) {
+            n->hotspot_score = hotspot_score;
+            if (metric_name) strncpy(n->hotspot_metric, metric_name, sizeof(n->hotspot_metric) - 1);
+            n->hotspot_raw_val = raw_val;
+            n->hotspot_threshold_val = thresh_val;
+            if (unit) strncpy(n->hotspot_unit, unit, sizeof(n->hotspot_unit) - 1);
+            if (symptom) strncpy(n->dynamic_symptom, symptom, sizeof(n->dynamic_symptom) - 1);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+const FlowTopologyNode *flow_topology_get_peak_hotspot(const FlowTopologyGraph *graph) {
+    if (graph == NULL || graph->node_count == 0) return NULL;
+    const FlowTopologyNode *peak = NULL;
+    double max_score = -1.0;
+    for (size_t i = 0; i < graph->node_count; ++i) {
+        const FlowTopologyNode *n = &graph->nodes[i];
+        if (n->hotspot_score > max_score) {
+            max_score = n->hotspot_score;
+            peak = n;
+        }
+    }
+    return peak;
+}
+

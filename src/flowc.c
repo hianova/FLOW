@@ -60,6 +60,14 @@ int flowc_main(int argc, char **argv) {
         return EXIT_SUCCESS;
     }
 
+    /* Flowy: Subconscious Neural Telemetry & Bottleneck Reasoner (flowc bottleneck) */
+    if (argc >= 2 && (strcmp(argv[1], "bottleneck") == 0 || strcmp(argv[1], "--bottleneck") == 0)) {
+        FlowTopologyGraph graph;
+        flow_topology_build_codebase_graph(&graph);
+        flowy_print_bottleneck_explanation(&graph, stdout);
+        return EXIT_SUCCESS;
+    }
+
     /* Quantitative Mechanism Efficiency Audit (flowc audit-mechanisms) */
     if (argc >= 2 && (strcmp(argv[1], "audit-mechanisms") == 0 || strcmp(argv[1], "--audit-mechanisms") == 0)) {
         FlowMechanismAuditReport rep;

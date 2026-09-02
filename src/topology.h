@@ -37,6 +37,14 @@ typedef struct {
     char module[64];
     int is_core;
     uint32_t layer; /* 0=Core, 1=ABI/Registry, 2=Plugin, 3=Intent/User */
+
+    /* Subconscious Neural Telemetry (attached by background eBPF / PMU / QSBR probes) */
+    double hotspot_score;            /* Normalized hotspot intensity [0.0 .. 100.0] */
+    char hotspot_metric[64];         /* e.g. "L3 Cache Miss Rate", "QSBR Epoch Queue Depth", "Motor Torque Ratio" */
+    double hotspot_raw_val;          /* Raw measured value */
+    double hotspot_threshold_val;    /* Normal baseline value */
+    char hotspot_unit[16];           /* e.g. "%", "MB/s", "N*m" */
+    char dynamic_symptom[128];       /* Short symptom description */
 } FlowTopologyNode;
 
 typedef struct {
@@ -72,6 +80,13 @@ uint32_t flow_topology_add_node(FlowTopologyGraph *graph, FlowNodeType type,
                                 const char *name, const char *module, int is_core, uint32_t layer);
 int flow_topology_add_edge(FlowTopologyGraph *graph, uint32_t from_id, uint32_t to_id,
                            FlowEdgeType type, double weight, const char *label);
+
+/* Subconscious Neural Telemetry Ingestion (Mechanism -> Neural Graph) */
+int flow_topology_attach_telemetry(FlowTopologyGraph *graph, const char *node_name,
+                                  double hotspot_score, const char *metric_name,
+                                  double raw_val, double thresh_val,
+                                  const char *unit, const char *symptom);
+const FlowTopologyNode *flow_topology_get_peak_hotspot(const FlowTopologyGraph *graph);
 
 /* Build Complete FLOW Architecture & Spec Topology */
 void flow_topology_build_codebase_graph(FlowTopologyGraph *graph);

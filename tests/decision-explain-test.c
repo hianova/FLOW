@@ -55,9 +55,34 @@ int main(void) {
     CHECK(strstr(ans_why.explanation, "left_leg") != NULL);
     CHECK(strstr(ans_why.explanation, "CAUSAL REASONING") != NULL);
 
-    /* 4. Test Timeline Rendering */
-    flowy_print_decision_timeline(&logger, stdout);
+    /* 4. Test Subconscious Neural Telemetry Ingestion & Bottleneck Reasoner */
+    FlowTopologyGraph net_graph;
+    flow_topology_build_codebase_graph(&net_graph);
+    CHECK(flow_topology_attach_telemetry(&net_graph, "reload", 91.2,
+                                         "QSBR Reclamation Queue Depth",
+                                         42.0, 10.0, "epochs",
+                                         "Extreme turnover rate stalling RCU reclamation") == 1);
+    const FlowTopologyNode *peak = flow_topology_get_peak_hotspot(&net_graph);
+    CHECK(peak != NULL);
+    CHECK(strcmp(peak->name, "reload") == 0);
+    CHECK(peak->hotspot_score == 91.2);
 
-    printf("DECISION_EXPLAIN_TEST=passed causal_reasoning=verified telemetry_explainability=verified\n");
+    char bottleneck_explanation[2048] = {0};
+    CHECK(flowy_explain_bottleneck(&net_graph, bottleneck_explanation, sizeof(bottleneck_explanation)) == 1);
+    CHECK(strstr(bottleneck_explanation, "reload") != NULL);
+    CHECK(strstr(bottleneck_explanation, "91.2%") != NULL);
+    CHECK(strstr(bottleneck_explanation, "QSBR") != NULL);
+
+    /* 5. Test Natural Language Query: "系統現在效能卡在哪裡？為什麼？" */
+    FlowyIntrospectiveAnswer ans_bottleneck;
+    CHECK(flowy_query_codebase(&net_graph, "系統現在效能卡在哪裡？為什麼？", &ans_bottleneck) == 1);
+    CHECK(strstr(ans_bottleneck.explanation, "reload") != NULL);
+    CHECK(strstr(ans_bottleneck.explanation, "SUBCONSCIOUS NEURAL TELEMETRY") != NULL);
+
+    /* 6. Test Timeline Rendering */
+    flowy_print_decision_timeline(&logger, stdout);
+    flowy_print_bottleneck_explanation(&net_graph, stdout);
+
+    printf("DECISION_EXPLAIN_TEST=passed causal_reasoning=verified telemetry_explainability=verified bottleneck_reasoner=verified\n");
     return 0;
 }

@@ -90,6 +90,10 @@ void flowy_explain_decision(const FlowDecisionEvent *event, char *buf_out, size_
 void flowy_print_decision_explanation(const FlowDecisionEvent *event, FILE *out);
 void flowy_print_decision_timeline(const FlowDecisionLogger *logger, FILE *out);
 
+/* Subconscious Neural Telemetry Reasoning (Bottleneck / Hotspot Reasoner) */
+int flowy_explain_bottleneck(const FlowTopologyGraph *graph, char *buf_out, size_t max_len);
+void flowy_print_bottleneck_explanation(const FlowTopologyGraph *graph, FILE *out);
+
 /* Interactive Loop */
 int flowy_interactive_loop(FlowOrchestrator *orch, FILE *in, FILE *out);
 
