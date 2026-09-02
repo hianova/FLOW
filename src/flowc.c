@@ -6,7 +6,6 @@
 #include "abi.h"
 #include "smt.h"
 #include "topology.h"
-#include "lsp.h"
 #include "security.h"
 #include "swarm.h"
 #include "genetic.h"
@@ -18,15 +17,34 @@
 #include <string.h>
 
 int flowc_main(int argc, char **argv) {
-    if (argc >= 2 && strcmp(argv[1], "--lsp") == 0) {
-        FlowLSPConfig lsp_cfg = {0};
-        lsp_cfg.search_batch_iterations = 50;
-        lsp_cfg.emit_pareto_stream = 1;
-        FlowLSPServer *lsp = flow_lsp_create(&lsp_cfg, stdin, stdout);
-        if (lsp == NULL) return EXIT_FAILURE;
-        int res = flow_lsp_run_loop(lsp);
-        flow_lsp_destroy(lsp);
-        return res ? EXIT_SUCCESS : EXIT_FAILURE;
+    /* Living Topology Orchestrator Background Continuous Evolution Daemon */
+    if (argc >= 2 && (strcmp(argv[1], "daemon") == 0 || strcmp(argv[1], "--daemon") == 0)) {
+        size_t interval_ms = 100;
+        size_t max_cycles = 3;
+        for (int i = 2; i < argc; ++i) {
+            if (strcmp(argv[i], "--interval-ms") == 0 && i + 1 < argc) {
+                interval_ms = (size_t)strtoul(argv[++i], NULL, 10);
+            } else if (strcmp(argv[i], "--cycles") == 0 && i + 1 < argc) {
+                max_cycles = (size_t)strtoul(argv[++i], NULL, 10);
+            }
+        }
+        flow_registry_init();
+        FlowOrchestrator *orch = flow_orchestrator_create(".");
+        char diag[256] = {0};
+        flow_orchestrator_absorb(orch, "examples/compiler.flow", diag, sizeof(diag));
+        flow_orchestrator_absorb(orch, "examples/project.flow", diag, sizeof(diag));
+        printf("flow-daemon: [started] Living Topology Orchestrator daemon active (interval=%zums, cycles=%zu)\n", interval_ms, max_cycles);
+        for (size_t c = 0; c < max_cycles; ++c) {
+            double delta = 0.0;
+            flow_orchestrator_refactor_entropy(orch, &delta);
+            FlowOrchestratorEpoch ep;
+            flow_orchestrator_anneal(orch, 50, 42 + (uint32_t)c, &ep);
+            printf("flow-daemon: [cycle #%zu] Entropy=%.4f (Delta=%.4f) GlobalEnergy=%.4f ActiveEpoch=#%llu PrimaryComponent=%s\n",
+                   c + 1, ep.entropy_score, delta, ep.global_energy, (unsigned long long)ep.epoch_id, ep.primary_component);
+        }
+        printf("flow-daemon: [quiesced] Background continuous annealing completed.\n");
+        flow_orchestrator_destroy(orch);
+        return EXIT_SUCCESS;
     }
 
     /* State / Topology Orchestrator CLI Suite */

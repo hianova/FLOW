@@ -741,7 +741,8 @@ static const FlowPlugin BUILTIN_PLUGIN = {
     NULL,
     NULL,
     builtin_environment_mask,
-    builtin_create_unit
+    builtin_create_unit,
+    NULL
 };
 
 const FlowPlugin *flow_builtin_plugin(void) {

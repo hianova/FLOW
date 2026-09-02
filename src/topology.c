@@ -52,7 +52,6 @@ void flow_topology_build_codebase_graph(FlowTopologyGraph *graph) {
     uint32_t n_jit      = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "jit", "core", 1, 0);
     uint32_t n_smt      = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "smt", "core", 1, 0);
     uint32_t n_backend  = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "backend", "core", 1, 0);
-    uint32_t n_lsp      = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "lsp", "core", 1, 0);
     uint32_t n_swarm        = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "swarm", "core", 1, 0);
     uint32_t n_genetic      = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "genetic", "core", 1, 0);
     uint32_t n_orchestrator = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "orchestrator", "core", 1, 0);
@@ -84,8 +83,6 @@ void flow_topology_build_codebase_graph(FlowTopologyGraph *graph) {
     flow_topology_add_edge(graph, n_adaptive, n_jit, FLOW_EDGE_CALLS, 1.0, "rejit_migration");
     flow_topology_add_edge(graph, n_semantic, n_smt, FLOW_EDGE_CALLS, 1.0, "generate_proof");
     flow_topology_add_edge(graph, n_backend, n_abi, FLOW_EDGE_USES, 1.0, "emit_abi_adapters");
-    flow_topology_add_edge(graph, n_lsp, n_semantic, FLOW_EDGE_CALLS, 1.0, "diagnostics_ast");
-    flow_topology_add_edge(graph, n_lsp, n_bitspace, FLOW_EDGE_CALLS, 1.0, "pareto_streaming");
     flow_topology_add_edge(graph, n_orchestrator, n_bitspace, FLOW_EDGE_CALLS, 1.0, "synthesize_topology");
     flow_topology_add_edge(graph, n_orchestrator, n_search, FLOW_EDGE_CALLS, 1.0, "global_anneal");
     flow_topology_add_edge(graph, n_orchestrator, n_smt, FLOW_EDGE_CALLS, 1.0, "invariant_attestation");

@@ -265,6 +265,7 @@ struct FlowPlugin {
                        const SemanticIR *ir,
                        const Component *component,
                        struct FlowUnit *unit_out);
+    void *domain_context;
 };
 
 #define FLOW_PLUGIN_ABI_MAJOR 1
@@ -283,5 +284,47 @@ typedef struct FlowPluginDescriptor {
 } FlowPluginDescriptor;
 
 typedef const FlowPluginDescriptor *(*FlowPluginEntryFn)(void);
+
+/* ========================================================================= */
+/* Declarative Plugin Contracts (Zero-C-Callback Specification)              */
+/* ========================================================================= */
+
+#define FLOW_CONTRACT_MAX_DIMENSIONS 16
+#define FLOW_CONTRACT_MAX_COMPONENTS 8
+
+typedef struct {
+    char name[FLOW_DIM_NAME_MAX];
+    FlowDimensionKind kind;
+    FlowDimensionClass dim_class;
+    uint64_t min_val;
+    uint64_t max_val;
+    uint64_t step;
+    uint64_t default_val;
+    uint64_t base_migration_cost_ns;
+} FlowContractDimension;
+
+typedef struct {
+    char component_id[64];
+    char kind[32];                     /* "collection", "algorithm", "engine" */
+    int supports_shared;
+    int supports_read_heavy;
+    int supports_ordered;
+    int supports_parallel;
+    size_t memory_bytes_per_slot;
+    size_t memory_fixed_overhead;
+    double base_latency_weight;
+    double base_throughput_weight;
+    size_t dimension_count;
+    FlowContractDimension dimensions[FLOW_CONTRACT_MAX_DIMENSIONS];
+} FlowContractComponent;
+
+typedef struct {
+    const char *module_name;
+    const char *module_version;
+    const char *target_domain;          /* E.g. "finance", "telemetry", "ai_pipeline" */
+    const char *target_contract;        /* E.g. "low_latency", "bounded_memory" */
+    size_t component_count;
+    FlowContractComponent components[FLOW_CONTRACT_MAX_COMPONENTS];
+} FlowPluginContract;
 
 #endif

@@ -2,6 +2,7 @@
 
 #include <dlfcn.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static const FlowPlugin *PLUGINS[FLOW_PLUGIN_MAX];
@@ -469,4 +470,220 @@ size_t component_index(const Component *component) {
     for (i = 0; i < component_count(); ++i)
         if (component_at(i) == component) return i;
     return 0;
+}
+
+/* ========================================================================= */
+/* Declarative Plugin Synthesizer Implementation                             */
+/* ========================================================================= */
+
+typedef struct {
+    FlowPluginContract contract;
+} FlowDeclarativeContext;
+
+static int decl_validate_contract(const SemanticIR *ir, const FlowPlugin *plugin,
+                                  char *message, size_t message_size) {
+    if (plugin == NULL || plugin->domain_context == NULL || ir == NULL) return 1;
+    const FlowDeclarativeContext *ctx = (const FlowDeclarativeContext *)plugin->domain_context;
+    if (ctx->contract.target_domain != NULL && ctx->contract.target_domain[0] != '\0') {
+        if (ir->domain_name[0] != '\0' && strcmp(ir->domain_name, ctx->contract.target_domain) != 0) {
+            if (message && message_size) snprintf(message, message_size, "domain mismatch with contract %s", ctx->contract.target_domain);
+            return 0;
+        }
+    }
+    if (ctx->contract.target_contract != NULL && ctx->contract.target_contract[0] != '\0') {
+        if (ir->contract_name[0] != '\0' && strcmp(ir->contract_name, ctx->contract.target_contract) != 0) {
+            if (message && message_size) snprintf(message, message_size, "contract mismatch with contract %s", ctx->contract.target_contract);
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int decl_compatible(const SemanticIR *ir, const Component *component) {
+    if (ir == NULL || component == NULL) return 0;
+    if (ir->state_shared && !component->supports_shared) return 0;
+    if (ir->state_read_heavy && !component->supports_read_heavy) return 0;
+    if (ir->flow_parallelizable && !component->supports_parallelizable) return 0;
+    if (ir->fact_ordered && component->supports_unordered) return 0;
+    return 1;
+}
+
+static int decl_emit(FILE *output, const SemanticIR *ir, const Component *component,
+                     const struct FlowSearchResult *search,
+                     const struct FlowVerificationReport *verification,
+                     int reload_adapter) {
+    (void)search; (void)verification; (void)reload_adapter;
+    if (output == NULL || ir == NULL || component == NULL) return 0;
+    fprintf(output, "/* Auto-Generated Declarative FLOW Component: %s */\n", component->id);
+    return 1;
+}
+
+static int decl_enumerate_dimensions(const SemanticIR *ir, const Component *component,
+                                     FlowPlanDimensionSet *dims_out) {
+    (void)ir;
+    if (component == NULL || dims_out == NULL) return 0;
+    const FlowPlugin *plugin = flow_component_plugin(component);
+    if (plugin == NULL || plugin->domain_context == NULL) return 0;
+    const FlowDeclarativeContext *ctx = (const FlowDeclarativeContext *)plugin->domain_context;
+
+    /* Find matching component contract */
+    for (size_t c = 0; c < ctx->contract.component_count; ++c) {
+        if (strcmp(ctx->contract.components[c].component_id, component->id) == 0) {
+            const FlowContractComponent *cc = &ctx->contract.components[c];
+            dims_out->count = cc->dimension_count;
+            for (size_t d = 0; d < cc->dimension_count; ++d) {
+                strncpy(dims_out->dimensions[d].name, cc->dimensions[d].name, FLOW_DIM_NAME_MAX - 1);
+                dims_out->dimensions[d].kind = cc->dimensions[d].kind;
+                dims_out->dimensions[d].dim_class = cc->dimensions[d].dim_class;
+                dims_out->dimensions[d].min_val = cc->dimensions[d].min_val;
+                dims_out->dimensions[d].max_val = cc->dimensions[d].max_val;
+                dims_out->dimensions[d].step = cc->dimensions[d].step;
+                dims_out->dimensions[d].default_val = cc->dimensions[d].default_val;
+                dims_out->dimensions[d].base_migration_cost_ns = cc->dimensions[d].base_migration_cost_ns;
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int decl_evaluate_plan(const SemanticIR *ir, const Component *component,
+                              const FlowPlanAssignment *plan, FlowPlanMetrics *metrics_out) {
+    if (ir == NULL || component == NULL || plan == NULL || metrics_out == NULL) return 0;
+    const FlowPlugin *plugin = flow_component_plugin(component);
+    if (plugin == NULL || plugin->domain_context == NULL) return 0;
+    const FlowDeclarativeContext *ctx = (const FlowDeclarativeContext *)plugin->domain_context;
+
+    size_t capacity = 1024;
+    size_t threads = 1;
+    size_t shards = 1;
+
+    FlowPlanDimensionSet dims;
+    if (decl_enumerate_dimensions(ir, component, &dims)) {
+        for (size_t d = 0; d < dims.count && d < plan->count; ++d) {
+            if (strcmp(dims.dimensions[d].name, "capacity") == 0) {
+                capacity = (dims.dimensions[d].kind == FLOW_DIM_EXPONENT) ?
+                           ((size_t)1 << plan->values[d]) : (size_t)plan->values[d];
+            } else if (strcmp(dims.dimensions[d].name, "threads") == 0) {
+                threads = (dims.dimensions[d].kind == FLOW_DIM_EXPONENT) ?
+                          ((size_t)1 << plan->values[d]) : (size_t)plan->values[d];
+            } else if (strcmp(dims.dimensions[d].name, "shards") == 0) {
+                shards = (dims.dimensions[d].kind == FLOW_DIM_EXPONENT) ?
+                         ((size_t)1 << plan->values[d]) : (size_t)plan->values[d];
+            }
+        }
+    }
+
+    /* Find matching component contract */
+    double lat_weight = 1.0;
+    double tp_weight = 1.0;
+    size_t bytes_per_slot = 16;
+    size_t fixed_overhead = 64;
+
+    for (size_t c = 0; c < ctx->contract.component_count; ++c) {
+        if (strcmp(ctx->contract.components[c].component_id, component->id) == 0) {
+            lat_weight = ctx->contract.components[c].base_latency_weight;
+            tp_weight = ctx->contract.components[c].base_throughput_weight;
+            bytes_per_slot = ctx->contract.components[c].memory_bytes_per_slot;
+            fixed_overhead = ctx->contract.components[c].memory_fixed_overhead;
+            break;
+        }
+    }
+
+    metrics_out->capacity = capacity;
+    metrics_out->threads = threads;
+    metrics_out->shards = shards;
+    metrics_out->memory_bytes = fixed_overhead + capacity * bytes_per_slot;
+    metrics_out->latency_score = lat_weight * (10.0 + (double)capacity / 1000.0);
+    metrics_out->throughput_score = tp_weight * (double)threads * 100000.0;
+    metrics_out->energy = metrics_out->latency_score * 5.0 + (double)metrics_out->memory_bytes / 1024.0;
+    return 1;
+}
+
+static int decl_verify_plan(const SemanticIR *ir, const Component *component,
+                            const FlowPlanAssignment *plan, VerificationReport *report_out) {
+    if (report_out == NULL) return 0;
+    FlowPlanMetrics metrics;
+    if (!decl_evaluate_plan(ir, component, plan, &metrics)) {
+        report_out->status = VERIFIER_COMPILE_ERROR;
+        snprintf(report_out->message, sizeof(report_out->message), "failed to evaluate declarative plan");
+        return 0;
+    }
+
+    report_out->capacity = metrics.capacity;
+    report_out->estimated_bytes = metrics.memory_bytes;
+    if (ir != NULL && ir->input_max_count > 0 && metrics.capacity < (size_t)ir->input_max_count) {
+        report_out->status = VERIFIER_COMPILE_ERROR;
+        snprintf(report_out->message, sizeof(report_out->message), "capacity %zu below required max_count %d",
+                 metrics.capacity, ir->input_max_count);
+        return 0;
+    }
+
+    report_out->status = VERIFIER_PROVEN;
+    report_out->max_count_proven = 1;
+    snprintf(report_out->message, sizeof(report_out->message), "declarative contract verified proven");
+    return 1;
+}
+
+FlowPlugin *flow_plugin_create_from_contract(const FlowPluginContract *contract) {
+    if (contract == NULL || contract->component_count == 0) return NULL;
+
+    FlowPlugin *p = calloc(1, sizeof(FlowPlugin));
+    if (p == NULL) return NULL;
+
+    FlowDeclarativeContext *ctx = calloc(1, sizeof(FlowDeclarativeContext));
+    if (ctx == NULL) { free(p); return NULL; }
+    ctx->contract = *contract;
+
+    Component *comps = calloc(contract->component_count, sizeof(Component));
+    if (comps == NULL) { free(ctx); free(p); return NULL; }
+
+    for (size_t c = 0; c < contract->component_count; ++c) {
+        const FlowContractComponent *cc = &contract->components[c];
+        comps[c].id = strdup(cc->component_id);
+        comps[c].kind = strdup(cc->kind[0] ? cc->kind : "collection");
+        comps[c].resource = "cpu";
+        comps[c].capability = "declarative";
+        comps[c].domain_contract = contract->target_contract ? strdup(contract->target_contract) : "";
+        comps[c].flow_binding = "";
+        comps[c].supports_shared = cc->supports_shared;
+        comps[c].supports_read_heavy = cc->supports_read_heavy;
+        comps[c].supports_unordered = !cc->supports_ordered;
+        comps[c].supports_parallelizable = cc->supports_parallel;
+        comps[c].memory_fixed_bytes = cc->memory_fixed_overhead;
+        comps[c].memory_bytes_per_capacity = cc->memory_bytes_per_slot;
+        comps[c].latency_score = (int)cc->base_latency_weight;
+        comps[c].memory_score = 10;
+    }
+
+    p->name = strdup(contract->module_name);
+    p->version = strdup(contract->module_version ? contract->module_version : "1.0.0");
+    p->components = comps;
+    p->component_count = contract->component_count;
+    p->domain_context = ctx;
+
+    /* Synthetic zero-callback bindings */
+    p->emit = decl_emit;
+    p->validate_contract = decl_validate_contract;
+    p->compatible = decl_compatible;
+    p->enumerate_dimensions = decl_enumerate_dimensions;
+    p->evaluate_plan = decl_evaluate_plan;
+    p->verify_plan = decl_verify_plan;
+
+    return p;
+}
+
+void flow_plugin_free_contract_plugin(FlowPlugin *plugin) {
+    if (plugin == NULL) return;
+    if (plugin->components != NULL) {
+        for (size_t i = 0; i < plugin->component_count; ++i) {
+            free((void *)plugin->components[i].id);
+            free((void *)plugin->components[i].kind);
+        }
+        free((void *)plugin->components);
+    }
+    free((void *)plugin->name);
+    free((void *)plugin->version);
+    free(plugin->domain_context);
+    free(plugin);
 }

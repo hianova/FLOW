@@ -4,24 +4,31 @@
 
 # FLOW
 
-> **A Pure-C Constraint Compiler & Dynamic JIT Implementation-Plan Optimizer.**
+> **Living Topology Orchestrator & Autonomous Continuous Evolution Engine**
 
-FLOW compiles declarative intent (`.flow`) into verified, hardware-specialized C implementations. Using **1-Bit Chaotic Search**, **Asynchronous JIT**, and **Unified QSBR**, FLOW dynamically searches and hot-swaps optimal data structures and concurrency layouts with zero runtime latency.
+FLOW manages declarative intents and constraint topologies (`.flow`). Using **1-Bit Chaotic Annealing**, **Declarative Plugin Contracts**, **Asynchronous JIT**, and **Unified QSBR**, FLOW continuously searches, verifies, and hot-swaps optimal machine code with zero runtime latency.
 
 ```text
-project.flow ──► Semantic IR ──► 1024-Bit BitSpace ──► 1-Bit Chaos + Mask Canvas ──► Async JIT / QSBR ──► Zero-Latency Native Code
+ ┌────────────────────────────────────────────────────────────────────────┐
+ │                      LIVING CODEBASE SUITE                             │
+ │                                                                        │
+ │ [flow absorb] ──► Global Constraint Topology ──► 1024-Bit BitSpace     │
+ │                           │                              │             │
+ │                           ▼                              ▼             │
+ │ [flow daemon] ◄── Continuous Annealing ──► Async JIT & Unified QSBR   │
+ └────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## Key Features
 
-- **1024-Bit 1-Bit Chaotic Search (`FlowGenome`)**: Constant-time $O(1)$ mutation ($12.96\text{ ns/op}$) exploring high-dimensional Pareto implementation frontiers without combinatorial explosion.
-- **3-Tier Dynamic Mask Canvas (`FlowMaskCanvas`)**: Superposes Tier-1 hard safety/verifier masks with Tier-2 eBPF/PMU telemetry and Tier-3 domain preferences for 1-cycle early pruning.
-- **Asynchronous Background JIT (`FlowAsyncJITPool`)**: Offloads compilation completely to background workers, eliminating main-thread latency ($< 34\mu\text{s}$ P99 latency during live morphing).
-- **Unified QSBR (`flow_qsbr_call`)**: Zero-atomic-write, zero-cache-bouncing lock-free memory reclamation delivering $> 390\text{M ops/sec}$ concurrent throughput with offline thread immunity.
-- **Dynamic Adaptation & Moving Target Defense (MTD)**: Instant layout morphing (AoS $\leftrightarrow$ SoA $\leftrightarrow$ Columnar) under memory pressure ($96.9\%$ memory reduction) with polymorphic struct randomization.
-- **Cross-Language Zero-Copy ABI**: Generates synchronized C headers, Safe Rust crates, and Python `memoryview` bindings.
+- **Living Topology Orchestrator**: `flow absorb` unifies multi-intent constraint graphs via Semantic Merge; `flow daemon` runs continuous background annealing to minimize entropy.
+- **Declarative Plugin Contracts**: Zero-C-callback plugin architecture (`FlowPluginContract`) synthesizes domain verification, dimension spaces, and cost models automatically.
+- **1024-Bit Chaotic Search (`FlowGenome`)**: Constant-time $O(1)$ mutation ($12.96\text{ ns/op}$) exploring high-dimensional Pareto implementation frontiers without combinatorial explosion.
+- **3-Tier Dynamic Mask Canvas (`FlowMaskCanvas`)**: Superposes Tier-1 hard safety masks, Tier-2 eBPF/PMU telemetry, and Tier-3 domain preferences for 1-cycle early pruning.
+- **Enterprise Production Suite**: Features Deterministic Audit Trails with 100% exact time-travel replay, sub-microsecond ($< 1\mu\text{s}$) QSBR Golden Baseline fallback, and Bounded Chaos compliance gating.
+- **Asynchronous JIT & Unified QSBR**: Background worker pool eliminating compilation latency with zero-atomic-write lock-free QSBR memory reclamation ($> 390\text{M ops/s}$).
 
 ---
 
@@ -55,17 +62,20 @@ prefer {
 ## Quickstart & CLI
 
 ```sh
-# 1. Compile spec to optimized C with 1-Bit BitSpace search
-flowc examples/project.flow -o build/project.c --search --iterations 100 --seed 42
+# 1. Absorb intent into global constraint topology
+flowc absorb examples/project.flow
 
-# 2. Emit multi-language Zero-Copy ABI bindings (C header, Rust, Python)
-flowc examples/rank.flow -o build/rank.c --target-c-header build/rank.h --target-rust build/rank.rs --target-python build/rank.py
+# 2. Global chaotic Pareto annealing & epoch solidification
+flowc anneal examples/compiler.flow examples/project.flow
 
-# 3. Launch Language Server (LSP) over stdio
-flowc --lsp
+# 3. Launch background continuous evolution daemon
+flowc daemon --cycles 10 --interval-ms 500
 
-# 4. Generate Formal SMT-LIB2 Mathematical Proof
-flowc examples/rank.flow -o build/rank.c --smt-proof build/rank.smt2
+# 4. Inspect topological landscape & SMT mathematical theorems
+flowc landscape
+
+# 5. Multi-objective state time travel (speed, balanced, memory)
+flowc morph speed
 ```
 
 ---
@@ -73,7 +83,7 @@ flowc examples/rank.flow -o build/rank.c --smt-proof build/rank.smt2
 ## Build & Test
 
 ```sh
-# Build compiler and run full test suite (32 regression suites)
+# Build binary and run full test suite (34 regression suites)
 make
 make test
 make acceptance

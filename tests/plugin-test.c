@@ -595,7 +595,63 @@ int main(void) {
         }
     }
 
-    printf("PLUGIN_TEST=passed registered=%zu selected=custom_tile dimensions=3 candidates=2 dso_loading=verified rust_plugin_sdk=verified\n",
+    /* 6. Test Declarative Plugin Contract (Zero-C-Callback Synthesized Extension) */
+    FlowPluginContract decl_contract = {
+        .module_name = "declarative_matrix",
+        .module_version = "2.0.0",
+        .target_domain = "tensor_compute",
+        .target_contract = "bounded_latency",
+        .component_count = 1,
+        .components = {
+            {
+                .component_id = "declarative_tile",
+                .kind = "algorithm",
+                .supports_shared = 1,
+                .supports_read_heavy = 1,
+                .supports_ordered = 0,
+                .supports_parallel = 1,
+                .memory_bytes_per_slot = 32,
+                .memory_fixed_overhead = 128,
+                .base_latency_weight = 1.5,
+                .base_throughput_weight = 2.0,
+                .dimension_count = 2,
+                .dimensions = {
+                    { .name = "capacity", .kind = FLOW_DIM_EXPONENT, .min_val = 6, .max_val = 14, .default_val = 10 },
+                    { .name = "threads",  .kind = FLOW_DIM_EXPONENT, .min_val = 0, .max_val = 4,  .default_val = 2 }
+                }
+            }
+        }
+    };
+
+    FlowPlugin *decl_plugin = flow_plugin_create_from_contract(&decl_contract);
+    CHECK(decl_plugin != NULL);
+    CHECK(flow_registry_register(decl_plugin));
+
+    const FlowPlugin *lookup_decl = flow_registry_lookup("declarative_matrix");
+    CHECK(lookup_decl != NULL);
+    CHECK(lookup_decl->component_count == 1);
+    CHECK(strcmp(lookup_decl->components[0].id, "declarative_tile") == 0);
+
+    /* Verify synthesized auto-callbacks */
+    FlowPlanDimensionSet decl_dims;
+    CHECK(lookup_decl->enumerate_dimensions(NULL, &lookup_decl->components[0], &decl_dims));
+    CHECK(decl_dims.count == 2);
+    CHECK(strcmp(decl_dims.dimensions[0].name, "capacity") == 0);
+    CHECK(strcmp(decl_dims.dimensions[1].name, "threads") == 0);
+
+    SemanticIR ir_decl = { .input_max_count = 100 };
+    FlowPlanAssignment decl_assignment = { .count = 2, .values = { 10, 2 } }; /* capacity = 2^10 = 1024, threads = 2^2 = 4 */
+    FlowPlanMetrics decl_metrics;
+    CHECK(lookup_decl->evaluate_plan(&ir_decl, &lookup_decl->components[0], &decl_assignment, &decl_metrics));
+    CHECK(decl_metrics.capacity == 1024);
+    CHECK(decl_metrics.threads == 4);
+    CHECK(decl_metrics.memory_bytes == 128 + 1024 * 32);
+
+    VerificationReport decl_v_rep;
+    CHECK(lookup_decl->verify_plan(&ir_decl, &lookup_decl->components[0], &decl_assignment, &decl_v_rep));
+    CHECK(decl_v_rep.status == VERIFIER_PROVEN);
+
+    printf("PLUGIN_TEST=passed registered=%zu selected=custom_tile dimensions=3 candidates=2 declarative_contracts=verified dso_loading=verified\n",
            component_count());
     return 0;
 }

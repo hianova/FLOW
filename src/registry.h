@@ -82,4 +82,8 @@ size_t component_index(const Component *component);
 
 const FlowPlugin *flow_builtin_plugin(void);
 
+/* Declarative Contract Synthesizer (Auto-generates all component callbacks) */
+FlowPlugin *flow_plugin_create_from_contract(const FlowPluginContract *contract);
+void flow_plugin_free_contract_plugin(FlowPlugin *plugin);
+
 #endif
