@@ -10,6 +10,7 @@
 #include "security.h"
 #include "swarm.h"
 #include "genetic.h"
+#include "orchestrator.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -26,6 +27,108 @@ int flowc_main(int argc, char **argv) {
         int res = flow_lsp_run_loop(lsp);
         flow_lsp_destroy(lsp);
         return res ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
+    /* State / Topology Orchestrator CLI Suite */
+    if (argc >= 2 && (strcmp(argv[1], "absorb") == 0 || strcmp(argv[1], "--absorb") == 0)) {
+        if (argc < 3) {
+            fprintf(stderr, "usage: flowc absorb <file.flow>\n");
+            return EXIT_FAILURE;
+        }
+        flow_registry_init();
+        FlowOrchestrator *orch = flow_orchestrator_create(".");
+        char diag[256] = {0};
+        FlowAbsorbStatus st = flow_orchestrator_absorb(orch, argv[2], diag, sizeof(diag));
+        printf("flow-orchestrator: [%s] %s\n", flow_absorb_status_name(st), diag);
+        flow_orchestrator_destroy(orch);
+        return (st == FLOW_ABSORB_OK || st == FLOW_ABSORB_ALREADY_ABSORBED) ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
+    if (argc >= 2 && (strcmp(argv[1], "anneal") == 0 || strcmp(argv[1], "--anneal") == 0)) {
+        flow_registry_init();
+        FlowOrchestrator *orch = flow_orchestrator_create(".");
+        /* If specific files passed, absorb them first */
+        for (int i = 2; i < argc; ++i) {
+            if (argv[i][0] != '-') {
+                char diag[256] = {0};
+                flow_orchestrator_absorb(orch, argv[i], diag, sizeof(diag));
+            }
+        }
+        if (flow_orchestrator_intent_count(orch) == 0) {
+            /* Try default examples/project.flow if no files */
+            char diag[256] = {0};
+            flow_orchestrator_absorb(orch, "examples/project.flow", diag, sizeof(diag));
+        }
+        FlowOrchestratorEpoch epoch;
+        if (!flow_orchestrator_anneal(orch, 200, 42, &epoch)) {
+            fprintf(stderr, "flowc anneal: failed to solidify global constraints into a sound epoch\n");
+            flow_orchestrator_destroy(orch);
+            return EXIT_FAILURE;
+        }
+        printf("flow-orchestrator: [epoch_solidified] Epoch=#%llu GlobalEnergy=%.4f Entropy=%.4f PrimaryComponent=%s\n",
+               (unsigned long long)epoch.epoch_id, epoch.global_energy, epoch.entropy_score, epoch.primary_component);
+        flow_orchestrator_landscape(orch, stdout);
+        flow_orchestrator_destroy(orch);
+        return EXIT_SUCCESS;
+    }
+
+    if (argc >= 2 && (strcmp(argv[1], "landscape") == 0 || strcmp(argv[1], "--landscape") == 0)) {
+        flow_registry_init();
+        FlowOrchestrator *orch = flow_orchestrator_create(".");
+        for (int i = 2; i < argc; ++i) {
+            if (argv[i][0] != '-') {
+                char diag[256] = {0};
+                flow_orchestrator_absorb(orch, argv[i], diag, sizeof(diag));
+            }
+        }
+        if (flow_orchestrator_intent_count(orch) == 0) {
+            char diag[256] = {0};
+            flow_orchestrator_absorb(orch, "examples/project.flow", diag, sizeof(diag));
+        }
+        FlowOrchestratorEpoch epoch;
+        flow_orchestrator_anneal(orch, 100, 42, &epoch);
+        flow_orchestrator_landscape(orch, stdout);
+        flow_orchestrator_destroy(orch);
+        return EXIT_SUCCESS;
+    }
+
+    if (argc >= 2 && (strcmp(argv[1], "refactor") == 0 || strcmp(argv[1], "--refactor") == 0)) {
+        flow_registry_init();
+        FlowOrchestrator *orch = flow_orchestrator_create(".");
+        char diag[256] = {0};
+        flow_orchestrator_absorb(orch, "examples/project.flow", diag, sizeof(diag));
+        FlowOrchestratorEpoch epoch;
+        flow_orchestrator_anneal(orch, 100, 42, &epoch);
+        double delta = 0.0;
+        flow_orchestrator_refactor_entropy(orch, &delta);
+        printf("flow-orchestrator: [entropy_reduction] Codebase Entropy Delta=%.4f (Refactored Epoch Solidified)\n", delta);
+        flow_orchestrator_destroy(orch);
+        return EXIT_SUCCESS;
+    }
+
+    if (argc >= 2 && (strcmp(argv[1], "morph") == 0 || strcmp(argv[1], "--morph") == 0)) {
+        const char *tactic_str = argc >= 3 ? argv[2] : "speed";
+        FlowPlanTactic tactic = FLOW_TACTIC_SPEED;
+        if (strcmp(tactic_str, "memory") == 0) tactic = FLOW_TACTIC_MEMORY;
+        else if (strcmp(tactic_str, "balanced") == 0) tactic = FLOW_TACTIC_BALANCED;
+
+        flow_registry_init();
+        FlowOrchestrator *orch = flow_orchestrator_create(".");
+        char diag[256] = {0};
+        flow_orchestrator_absorb(orch, "examples/project.flow", diag, sizeof(diag));
+        FlowOrchestratorEpoch epoch;
+        flow_orchestrator_anneal(orch, 100, 42, &epoch);
+
+        FlowPlan target_plan;
+        if (flow_orchestrator_time_travel(orch, tactic, &target_plan)) {
+            printf("flow-orchestrator: [state_time_travel] Morphed to Tactic '%s' (Component=%s, LatencyScore=%.1f, MemBytes=%zu)\n",
+                   flow_plan_tactic_name(tactic),
+                   target_plan.component ? target_plan.component->id : "unknown",
+                   target_plan.eval.latency_score,
+                   target_plan.eval.memory_bytes);
+        }
+        flow_orchestrator_destroy(orch);
+        return EXIT_SUCCESS;
     }
 
     const char *input_path;
