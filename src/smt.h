@@ -36,6 +36,14 @@ int flow_smt_verify(const SemanticIR *ir,
                     const FlowPlanMetrics *metrics,
                     FlowSMTProofAttestation *proof_out);
 
+/* Evaluate and formally verify with microsecond time-budget watchdog */
+int flow_smt_verify_with_budget(const SemanticIR *ir,
+                                const Component *component,
+                                const FlowPlanAssignment *plan,
+                                const FlowPlanMetrics *metrics,
+                                uint64_t budget_us,
+                                FlowSMTProofAttestation *proof_out);
+
 const char *flow_smt_result_name(FlowSMTResult res);
 
 #endif

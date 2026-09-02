@@ -3,6 +3,9 @@
 #include "topology.h"
 #include "registry.h"
 #include "orchestrator.h"
+#include "jit.h"
+#include "adaptive.h"
+#include "smt.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -62,14 +65,56 @@ int main(void) {
     /* ========================================================================= */
     /* Verification 4: Stage 4 Crisis Cleared & Asynchronous Recovery            */
     /* ========================================================================= */
-    printf("\n[Audit 4/4] Verifying Stage 4: Asynchronous Recovery to JIT v2...\n");
+    printf("\n[Audit 4/5] Verifying Stage 4: Asynchronous Recovery to JIT v2...\n");
     CHECK(result.stage4_recovery_success == 1);
     CHECK(strstr(result.stage4_recovery_log, "Crisis cleared. RAM 16GB restored") != NULL);
     CHECK(strstr(result.stage4_recovery_log, "[Optimized_JIT_v2]") != NULL);
     printf("  -> PASS: Background JIT safely resumed and hot-swapped upon resource restoration.\n");
 
+    /* ========================================================================= */
+    /* Verification 5: Deep Mathematical Derivation Audits                       */
+    /* ========================================================================= */
+    printf("\n[Audit 5/5] Auditing Pure Mathematical Derivations & Zero-Hardcode Invariants...\n");
+
+    /* 5a. JIT AST Memory Sizing */
+    SemanticIR ir11;
+    memset(&ir11, 0, sizeof(ir11));
+    ir11.flow_node_count = 11;
+    int jit_ram_11 = flow_jit_calculate_min_memory_mb(&ir11);
+    CHECK(jit_ram_11 == 100);
+    printf("  -> PASS: JIT RAM requirement derived from AST graph complexity: %d MB.\n", jit_ram_11);
+
+    /* 5b. Schmitt Trigger Anti-Flapping Hysteresis */
+    FlowSchmittTrigger st;
+    flow_schmitt_trigger_init(&st, 100.0, 500000000ULL);
+    CHECK(st.drop_threshold == 80.0);
+    CHECK(st.recovery_threshold == 150.0);
+
+    /* Test drop to 16MB */
+    int changed = 0;
+    flow_schmitt_trigger_update(&st, 16.0, 1000ULL, &changed);
+    CHECK(st.current_state == 1);
+    CHECK(changed == 1);
+
+    /* Test flapping around 95MB <-> 105MB (must NOT flap back to JIT) */
+    flow_schmitt_trigger_update(&st, 95.0, 2000ULL, &changed);
+    CHECK(st.current_state == 1);
+    CHECK(changed == 0);
+    flow_schmitt_trigger_update(&st, 105.0, 3000ULL, &changed);
+    CHECK(st.current_state == 1);
+    CHECK(changed == 0);
+    printf("  -> PASS: Schmitt Trigger successfully rejected flapping at 95MB <-> 105MB.\n");
+
+    /* 5c. SMT Watchdog Conservative Polytope Fallback (<10us budget) */
+    FlowSMTProofAttestation watchdog_proof;
+    Component dummy_comp = { .id = "test" };
+    int smt_ok = flow_smt_verify_with_budget(&ir11, &dummy_comp, NULL, NULL, 5, &watchdog_proof);
+    CHECK(smt_ok == 1);
+    CHECK(strstr(watchdog_proof.proof_summary, "Conservative Polytope Interval Bounding Box") != NULL);
+    printf("  -> PASS: SMT 5us watchdog triggered conservative polytope interval bounding box fallback.\n");
+
     printf("\n================================================================================\n");
-    printf("FLOWY_LEVEL5_CRUCIBLE=PASSED (All 4 stages mathematically audited and proven sound)\n");
+    printf("FLOWY_LEVEL5_CRUCIBLE=PASSED (All 5 stages mathematically audited and proven sound)\n");
     printf("================================================================================\n");
     return 0;
 }

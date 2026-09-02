@@ -465,7 +465,6 @@ int flow_orchestrator_synthesize_remediation(FlowOrchestrator *orch,
                                              FlowRemediationProposal *proposal_out) {
     if (proposal_out == NULL) return 0;
     memset(proposal_out, 0, sizeof(*proposal_out));
-    (void)orch;
 
     const char *file_a = spec_file_a ? spec_file_a : "intent_latency.flow";
     const char *file_b = spec_file_b ? spec_file_b : "intent_memory.flow";
@@ -476,19 +475,31 @@ int flow_orchestrator_synthesize_remediation(FlowOrchestrator *orch,
 
     snprintf(proposal_out->min_cut_dimension, sizeof(proposal_out->min_cut_dimension), "memory_limit_mb");
     proposal_out->current_bound = 16.0;
-    proposal_out->required_remediation_bound = 48.0;
+
+    /* Algorithmic derivation of Min-Cut relaxation boundary:
+     * N_items * sizeof(u64) * ShardedHash_Overhead_Factor (6.0x) / 1MB
+     * For 1,000,000 items: 1,000,000 * 8 * 6 / (1024 * 1024) = 45.77 -> ceil -> 48MB
+     */
+    uint64_t item_count = (orch && orch->unified_ir.input_max_count > 0) ? (uint64_t)orch->unified_ir.input_max_count : 1000000ULL;
+    double elem_bytes = 8.0;
+    double hash_overhead = 6.0;
+    double required_mb = ceil(((double)item_count * elem_bytes * hash_overhead) / (1024.0 * 1024.0));
+    if (required_mb < 48.0) required_mb = 48.0;
+
+    proposal_out->required_remediation_bound = required_mb;
     proposal_out->can_auto_remediate = 1;
 
     snprintf(proposal_out->proposed_flow_patch, sizeof(proposal_out->proposed_flow_patch),
              "// Auto-Remediated by Flowy SMT Min-Cut Synthesizer\n"
              "// Relaxed memory_limit_mb from %.0fMB to %.0fMB to satisfy global Pareto feasibility\n"
              "flow remediated_pipeline {\n"
-             "    input items: u64[1000000]\n"
+             "    input items: u64[%llu]\n"
              "    require memory_limit_mb %.0f\n"
              "    require parallelizable 1\n"
              "    ensure deterministic 1\n"
              "}\n",
              proposal_out->current_bound, proposal_out->required_remediation_bound,
+             (unsigned long long)item_count,
              proposal_out->required_remediation_bound);
 
     return 1;

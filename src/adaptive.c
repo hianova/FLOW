@@ -685,3 +685,47 @@ int flow_adaptive_is_running_golden(const FlowAdaptiveController *controller) {
     return atomic_load_explicit(&controller->is_running_golden, memory_order_acquire);
 }
 
+/* ========================================================================= */
+/* Schmitt Trigger Anti-Flapping & Hysteresis Controller Implementation      */
+/* ========================================================================= */
+
+void flow_schmitt_trigger_init(FlowSchmittTrigger *st, double base_min, uint64_t dwell_ns) {
+    if (st == NULL) return;
+    memset(st, 0, sizeof(*st));
+    st->drop_threshold = base_min * 0.8;      /* 80% of minimum threshold */
+    st->recovery_threshold = base_min * 1.5;  /* 150% of minimum threshold */
+    st->dwell_time_required_ns = dwell_ns > 0 ? dwell_ns : 500000000ULL; /* 500ms default */
+    st->stable_since_ns = 0;
+    st->current_state = 0; /* Nominal */
+}
+
+int flow_schmitt_trigger_update(FlowSchmittTrigger *st, double current_val, uint64_t current_time_ns, int *state_changed_out) {
+    if (st == NULL) return 0;
+    if (state_changed_out) *state_changed_out = 0;
+
+    if (st->current_state == 0) {
+        /* Nominal Mode -> Check for Drop Threshold breach */
+        if (current_val < st->drop_threshold) {
+            st->current_state = 1; /* Instant switch to survival mode */
+            st->stable_since_ns = 0;
+            if (state_changed_out) *state_changed_out = 1;
+        }
+    } else {
+        /* Survival Mode -> Check for sustained recovery above upper threshold */
+        if (current_val >= st->recovery_threshold) {
+            if (st->stable_since_ns == 0) {
+                st->stable_since_ns = current_time_ns;
+            } else if ((current_time_ns - st->stable_since_ns) >= st->dwell_time_required_ns) {
+                st->current_state = 0; /* Recover back to nominal mode after dwell period */
+                st->stable_since_ns = 0;
+                if (state_changed_out) *state_changed_out = 1;
+            }
+        } else {
+            /* Flapping reset */
+            st->stable_since_ns = 0;
+        }
+    }
+
+    return st->current_state;
+}
+

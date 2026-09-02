@@ -175,4 +175,19 @@ int flow_adaptive_record_error_and_check_fallback(FlowAdaptiveController *contro
                                                   size_t max_consecutive_errors);
 int flow_adaptive_is_running_golden(const FlowAdaptiveController *controller);
 
+/* ========================================================================= */
+/* Schmitt Trigger Anti-Flapping & Hysteresis Controller                     */
+/* ========================================================================= */
+
+typedef struct {
+    double drop_threshold;           /* e.g., M_jit_min * 0.8 = 80 MB */
+    double recovery_threshold;       /* e.g., M_jit_min * 1.5 = 150 MB */
+    uint64_t dwell_time_required_ns; /* Sustained stability duration (e.g. 500ms) */
+    uint64_t stable_since_ns;
+    int current_state;               /* 0: Nominal/JIT, 1: Survival/Static */
+} FlowSchmittTrigger;
+
+void flow_schmitt_trigger_init(FlowSchmittTrigger *st, double base_min, uint64_t dwell_ns);
+int flow_schmitt_trigger_update(FlowSchmittTrigger *st, double current_val, uint64_t current_time_ns, int *state_changed_out);
+
 #endif

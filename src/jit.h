@@ -46,6 +46,9 @@ int flow_jit_compile_llvm_ir(FlowJITEngine *engine,
                              FlowUnit *unit_out,
                              FlowJITCodeBlock *code_block_out);
 
+/* Dynamically derive the physical compiler working-set RAM threshold (MB) */
+int flow_jit_calculate_min_memory_mb(const SemanticIR *ir);
+
 /* Dynamic JIT State Migration Routine Generators */
 typedef struct {
     size_t item_count;
