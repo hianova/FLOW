@@ -100,6 +100,46 @@ void flow_topology_build_codebase_graph(FlowTopologyGraph *graph) {
     flow_topology_add_edge(graph, n_comp_sharded, n_plugin_builtin, FLOW_EDGE_USES, 1.0, "declares_sharded");
     flow_topology_add_edge(graph, n_comp_tree, n_plugin_builtin, FLOW_EDGE_USES, 1.0, "declares_tree");
     flow_topology_add_edge(graph, n_comp_pmap, n_plugin_builtin, FLOW_EDGE_USES, 1.0, "declares_pmap");
+
+    /* Layer 4: Doc-as-Topology Knowledge Nodes & Philosophy Bindings */
+    uint32_t n_doc_ch01 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch01_what_is_flow", "book", 0, 4);
+    uint32_t n_doc_ch02 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch02_intent_vs_implementation", "book", 0, 4);
+    uint32_t n_doc_ch03 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch03_hello_chaos", "book", 0, 4);
+    uint32_t n_doc_ch04 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch04_topology_graph", "book", 0, 4);
+    uint32_t n_doc_ch05 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch05_1bit_chaos_engine", "book", 0, 4);
+    uint32_t n_doc_ch06 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch06_smt_formal_verification", "book", 0, 4);
+    uint32_t n_doc_ch07 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch07_qsbr_lockfree_hotswap", "book", 0, 4);
+    uint32_t n_doc_ch08 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch08_memory_high_watermark_survival", "book", 0, 4);
+    uint32_t n_doc_ch09 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch09_geometric_morphing_aos_soa", "book", 0, 4);
+    uint32_t n_doc_ch10 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch10_meet_flowy", "book", 0, 4);
+    uint32_t n_doc_ch11 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch11_semantic_reasoning_sandbox", "book", 0, 4);
+    uint32_t n_doc_ch12 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch12_dynamic_plugins_abi", "book", 0, 4);
+    uint32_t n_doc_ch13 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch13_overcoming_epistasis", "book", 0, 4);
+    uint32_t n_doc_ch14 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch14_swarm_intelligence", "book", 0, 4);
+    uint32_t n_doc_ch15 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch15_embodied_physical_gates", "book", 0, 4);
+    uint32_t n_doc_ch16 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch16_level5_crucible_test", "book", 0, 4);
+    uint32_t n_doc_ch17 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch17_performance_benchmarks", "book", 0, 4);
+
+    /* Bi-directional Knowledge Edges (Code -> Book Chapter: "Why") */
+    flow_topology_add_edge(graph, n_parser, n_doc_ch02, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_semantic, n_doc_ch02, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_backend, n_doc_ch03, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_bitspace, n_doc_ch05, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_search, n_doc_ch05, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_smt, n_doc_ch06, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_verifier, n_doc_ch06, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_reload, n_doc_ch07, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_jit, n_doc_ch08, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_adaptive, n_doc_ch09, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_orchestrator, n_doc_ch11, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_registry, n_doc_ch12, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_abi, n_doc_ch12, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_security, n_doc_ch12, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_genetic, n_doc_ch13, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_swarm, n_doc_ch14, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_embodied, n_doc_ch15, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_comp_sharded, n_doc_ch16, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    (void)n_doc_ch01; (void)n_doc_ch04; (void)n_doc_ch10; (void)n_doc_ch17;
 }
 
 void flow_topology_build_intent_graph(FlowTopologyGraph *graph, const SemanticIR *ir,
@@ -157,6 +197,11 @@ void flow_topology_audit(const FlowTopologyGraph *graph, FlowTopologyAuditReport
         if (graph->nodes[i].layer == 0) report->core_nodes++;
         else if (graph->nodes[i].layer == 2) report->plugin_nodes++;
         else if (graph->nodes[i].layer == 3) report->intent_nodes++;
+        else if (graph->nodes[i].layer == 4 || graph->nodes[i].type == FLOW_NODE_DOC_CHAPTER) report->doc_nodes++;
+    }
+
+    for (size_t e = 0; e < graph->edge_count; ++e) {
+        if (graph->edges[e].type == FLOW_EDGE_DOCUMENTS) report->doc_edges++;
     }
 
     /* Audit Cross-Layer Leak Violations: Core (Layer 0) -> Plugin Impl (Layer 2) */
@@ -203,6 +248,7 @@ static const char *flow_node_type_name(FlowNodeType type) {
         case FLOW_NODE_INTENT_OP: return "IntentOp";
         case FLOW_NODE_DIMENSION: return "Dimension";
         case FLOW_NODE_SHARD_GROUP: return "ShardGroup";
+        case FLOW_NODE_DOC_CHAPTER: return "DocChapter";
         default: return "Unknown";
     }
 }
@@ -215,6 +261,7 @@ static const char *flow_edge_type_name(FlowEdgeType type) {
         case FLOW_EDGE_BINDS_DIMENSION: return "BINDS_DIMENSION";
         case FLOW_EDGE_DATA_FLOW: return "DATA_FLOW";
         case FLOW_EDGE_SHARD_AFFINITY: return "SHARD_AFFINITY";
+        case FLOW_EDGE_DOCUMENTS: return "DOCUMENTS";
         default: return "RELATED_TO";
     }
 }

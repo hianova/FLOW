@@ -3,6 +3,7 @@
 #include "jit.h"
 #include "adaptive.h"
 #include "smt.h"
+#include "generated_book_knowledge.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -203,11 +204,31 @@ int flowy_register_dynamic_module(const FlowModuleKnowledge *knowledge) {
     return 0;
 }
 
+static void init_knowledge_book_bindings(void) {
+    static int initialized = 0;
+    if (initialized) return;
+    for (size_t i = 0; i < KNOWLEDGE_COUNT; ++i) {
+        FlowModuleKnowledge *k = (FlowModuleKnowledge *)&CODEBASE_KNOWLEDGE[i];
+        if (k->book_chapter_ref == NULL) {
+            const FlowModuleBookBinding *b = flow_book_lookup_binding(k->module_id);
+            if (b) {
+                k->book_chapter_ref = b->chapter_ref;
+                k->book_chapter_title = b->chapter_title;
+                k->design_philosophy_why = b->philosophy_why;
+                k->book_excerpt = b->book_excerpt;
+            }
+        }
+    }
+    initialized = 1;
+}
+
 size_t flowy_knowledge_count(void) {
+    init_knowledge_book_bindings();
     return KNOWLEDGE_COUNT + g_dynamic_knowledge_count;
 }
 
 const FlowModuleKnowledge *flowy_knowledge_at(size_t index) {
+    init_knowledge_book_bindings();
     if (index < KNOWLEDGE_COUNT) return &CODEBASE_KNOWLEDGE[index];
     size_t dyn_idx = index - KNOWLEDGE_COUNT;
     if (dyn_idx < g_dynamic_knowledge_count) return &g_dynamic_knowledge[dyn_idx];
@@ -216,6 +237,7 @@ const FlowModuleKnowledge *flowy_knowledge_at(size_t index) {
 
 const FlowModuleKnowledge *flowy_knowledge_lookup(const char *module_id) {
     if (module_id == NULL) return NULL;
+    init_knowledge_book_bindings();
     for (size_t i = 0; i < KNOWLEDGE_COUNT; ++i) {
         if (strcmp(CODEBASE_KNOWLEDGE[i].module_id, module_id) == 0) {
             return &CODEBASE_KNOWLEDGE[i];
@@ -238,6 +260,318 @@ static void str_to_lower(const char *src, char *dst, size_t max_len) {
     }
     dst[i] = '\0';
 }
+
+/* ========================================================================= */
+/* Multi-Lingual Presentation & Render Mask (Data-Template Separation)       */
+/* ========================================================================= */
+
+static FlowLanguage g_current_language = FLOW_LANG_ZH;
+static int g_language_initialized = 0;
+
+void flowy_set_language(FlowLanguage lang) {
+    g_current_language = lang;
+    g_language_initialized = 1;
+}
+
+FlowLanguage flowy_get_language(void) {
+    if (!g_language_initialized) {
+        g_current_language = flowy_detect_system_language();
+        g_language_initialized = 1;
+    }
+    return g_current_language;
+}
+
+FlowLanguage flowy_detect_system_language(void) {
+    const char *flowy_lang = getenv("FLOWY_LANG");
+    if (flowy_lang && strlen(flowy_lang) > 0) {
+        return flowy_parse_language(flowy_lang);
+    }
+    const char *env_lang = getenv("LC_ALL");
+    if (!env_lang) env_lang = getenv("LANG");
+    if (env_lang) {
+        if (strstr(env_lang, "zh") || strstr(env_lang, "ZH") || strstr(env_lang, "tw") ||
+            strstr(env_lang, "TW") || strstr(env_lang, "cn") || strstr(env_lang, "CN")) {
+            return FLOW_LANG_ZH;
+        }
+        if (strstr(env_lang, "en") || strstr(env_lang, "EN") || strstr(env_lang, "C") ||
+            strstr(env_lang, "POSIX")) {
+            return FLOW_LANG_EN;
+        }
+    }
+    return FLOW_LANG_ZH;
+}
+
+FlowLanguage flowy_parse_language(const char *lang_str) {
+    if (lang_str == NULL) return FLOW_LANG_ZH;
+    if (strcasecmp(lang_str, "en") == 0 || strcasecmp(lang_str, "en_US") == 0 ||
+        strcasecmp(lang_str, "en-US") == 0 || strcasecmp(lang_str, "english") == 0 ||
+        strcasecmp(lang_str, "eng") == 0) {
+        return FLOW_LANG_EN;
+    }
+    return FLOW_LANG_ZH;
+}
+
+const char *flowy_language_name(FlowLanguage lang) {
+    return (lang == FLOW_LANG_EN) ? "English (en)" : "Traditional Chinese / 繁體中文 (zh)";
+}
+
+typedef struct {
+    const char *keyword;
+    const char *target_module_id;
+    uint32_t weight;
+} FlowKeywordAlias;
+
+static const FlowKeywordAlias INPUT_ALIAS_DICTIONARY[] = {
+    /* Reload / QSBR / Hot-Swap / RCU */
+    { "qsbr", "reload", 50 },
+    { "rcu", "reload", 50 },
+    { "reload", "reload", 50 },
+    { "hotswap", "reload", 40 },
+    { "hot-swap", "reload", 40 },
+    { "lockfree", "reload", 40 },
+    { "lock-free", "reload", 40 },
+    { "quiescent", "reload", 40 },
+    { "無鎖", "reload", 50 },
+    { "无锁", "reload", 50 },
+    { "熱替換", "reload", 50 },
+    { "热替换", "reload", 50 },
+    { "熱換", "reload", 40 },
+    { "熱切換", "reload", 40 },
+    { "讀寫", "reload", 30 },
+    { "讀者", "reload", 30 },
+    { "記憶體回收", "reload", 40 },
+    { "内存回收", "reload", 40 },
+
+    /* BitSpace / 1-Bit Chaos / Annealing / Mask Canvas */
+    { "bitspace", "bitspace", 50 },
+    { "chaos", "bitspace", 50 },
+    { "1bit", "bitspace", 50 },
+    { "1-bit", "bitspace", 50 },
+    { "xorshift", "bitspace", 40 },
+    { "polytope", "bitspace", 40 },
+    { "hypercube", "bitspace", 40 },
+    { "canvas", "bitspace", 40 },
+    { "mutation", "bitspace", 35 },
+    { "annealing", "bitspace", 35 },
+    { "混沌", "bitspace", 50 },
+    { "退火", "bitspace", 45 },
+    { "遮罩", "bitspace", 40 },
+    { "畫布", "bitspace", 40 },
+    { "超立方", "bitspace", 40 },
+    { "多面體", "bitspace", 40 },
+    { "多面体", "bitspace", 40 },
+    { "突變", "bitspace", 35 },
+    { "突变", "bitspace", 35 },
+
+    /* SMT / Formal Verification / Theorem Prover */
+    { "smt", "smt", 50 },
+    { "proof", "smt", 40 },
+    { "prove", "smt", 40 },
+    { "theorem", "smt", 40 },
+    { "formal", "smt", 40 },
+    { "bit-blasting", "smt", 40 },
+    { "bitblasting", "smt", 40 },
+    { "z3", "smt", 35 },
+    { "unsat", "smt", 35 },
+    { "形式化", "smt", 50 },
+    { "證明", "smt", 45 },
+    { "证明", "smt", 45 },
+    { "定理", "smt", 40 },
+    { "最高法院", "smt", 40 },
+    { "零缺陷", "smt", 35 },
+
+    /* JIT / Memory High Watermark / Survival Mode */
+    { "jit", "jit", 50 },
+    { "oom", "jit", 45 },
+    { "watermark", "jit", 40 },
+    { "survival", "jit", 40 },
+    { "backpressure", "jit", 35 },
+    { "high_watermark", "jit", 40 },
+    { "記憶體", "jit", 30 },
+    { "內存", "jit", 30 },
+    { "高水位", "jit", 45 },
+    { "生存模式", "jit", 45 },
+    { "避難所", "jit", 40 },
+    { "背壓", "jit", 35 },
+    { "背压", "jit", 35 },
+
+    /* Adaptive / Morphing / AoS / SoA */
+    { "adaptive", "adaptive", 50 },
+    { "morph", "adaptive", 45 },
+    { "morphing", "adaptive", 45 },
+    { "soa", "adaptive", 40 },
+    { "aos", "adaptive", 40 },
+    { "columnar", "adaptive", 40 },
+    { "mremap", "adaptive", 40 },
+    { "自適應", "adaptive", 50 },
+    { "自适应", "adaptive", 50 },
+    { "幾何變形", "adaptive", 45 },
+    { "几何变形", "adaptive", 45 },
+    { "變形", "adaptive", 35 },
+    { "重映射", "adaptive", 35 },
+
+    /* Embodied / Robotics / Sim-to-Real / Physics */
+    { "embodied", "embodied", 50 },
+    { "robot", "embodied", 45 },
+    { "robotics", "embodied", 45 },
+    { "torque", "embodied", 40 },
+    { "zmp", "embodied", 40 },
+    { "kalman", "embodied", 35 },
+    { "smith", "embodied", 35 },
+    { "sim-to-real", "embodied", 40 },
+    { "具身", "embodied", 50 },
+    { "機器人", "embodied", 45 },
+    { "机器人", "embodied", 45 },
+    { "物理", "embodied", 40 },
+    { "力矩", "embodied", 35 },
+    { "質心", "embodied", 35 },
+    { "關節", "embodied", 35 },
+    { "步態", "embodied", 35 },
+
+    /* Orchestrator / Living Codebase */
+    { "orchestrator", "orchestrator", 50 },
+    { "absorb", "orchestrator", 40 },
+    { "anneal", "orchestrator", 40 },
+    { "refactor", "orchestrator", 35 },
+    { "landscape", "orchestrator", 35 },
+    { "編排", "orchestrator", 40 },
+    { "編排器", "orchestrator", 40 },
+    { "吸收", "orchestrator", 35 },
+    { "重構", "orchestrator", 35 },
+
+    /* Swarm / Pheromone */
+    { "swarm", "swarm", 50 },
+    { "pheromone", "swarm", 45 },
+    { "federation", "swarm", 40 },
+    { "群體", "swarm", 45 },
+    { "群體智能", "swarm", 50 },
+    { "費洛蒙", "swarm", 45 },
+    { "费洛蒙", "swarm", 45 },
+    { "粒子群", "swarm", 40 },
+
+    /* Genetic / Epistasis */
+    { "genetic", "genetic", 50 },
+    { "epistasis", "genetic", 50 },
+    { "levy", "genetic", 40 },
+    { "bytecode", "genetic", 35 },
+    { "基因", "genetic", 45 },
+    { "上位效應", "genetic", 50 },
+    { "上位效应", "genetic", 50 },
+    { "萊維飛行", "genetic", 40 },
+
+    /* Security / MTD */
+    { "security", "security", 50 },
+    { "mtd", "security", 45 },
+    { "compliance", "security", 40 },
+    { "polymorphic", "security", 40 },
+    { "安全", "security", 45 },
+    { "防禦", "security", 40 },
+    { "合規", "security", 40 },
+    { "混淆", "security", 35 },
+
+    /* Plugins / Registry / ABI */
+    { "plugin", "registry", 45 },
+    { "registry", "registry", 50 },
+    { "abi", "abi", 50 },
+    { "ffi", "abi", 40 },
+    { "外掛", "registry", 45 },
+    { "插件", "registry", 45 },
+    { "註冊", "registry", 40 },
+    { "介面", "abi", 40 },
+    { "接口", "abi", 40 },
+
+    /* Topology */
+    { "topology", "topology", 50 },
+    { "graph", "topology", 40 },
+    { "modularity", "topology", 35 },
+    { "firewall", "topology", 35 },
+    { "拓樸", "topology", 50 },
+    { "拓扑", "topology", 50 },
+    { "圖譜", "topology", 40 },
+    { "模組化", "topology", 35 },
+    { "防火牆", "topology", 35 }
+};
+
+static const size_t INPUT_ALIAS_COUNT = sizeof(INPUT_ALIAS_DICTIONARY) / sizeof(INPUT_ALIAS_DICTIONARY[0]);
+
+typedef struct {
+    const char *report_header;
+    const char *label_module;
+    const char *label_source_files;
+    const char *label_title;
+    const char *sec1_title;
+    const char *sec2_title;
+    const char *sec3_title;
+    const char *sec4_title;
+    const char *sec5_title;
+    const char *sec6_title;
+    const char *decision_header;
+    const char *decision_causal_reasoning_title;
+    const char *decision_book_title;
+    const char *bottleneck_header;
+    const char *bottleneck_sec1_title;
+    const char *bottleneck_sec2_title;
+    const char *bottleneck_sec3_title;
+    const char *book_toc_header;
+    const char *book_toc_footer;
+    const char *book_doc_header;
+    const char *book_doc_path;
+    const char *book_doc_why;
+    const char *book_doc_excerpt;
+} FlowyLocaleTemplate;
+
+static const FlowyLocaleTemplate LOCALE_TEMPLATES[2] = {
+    [FLOW_LANG_ZH] = {
+        .report_header = "=== FLOW 代碼庫內省式架構推論報告 ===",
+        .label_module = "核心模組",
+        .label_source_files = "原始碼檔案",
+        .label_title = "子系統標題",
+        .sec1_title = "1. 核心系統職責 (Core Responsibilities):",
+        .sec2_title = "2. 演算法與形式化保證 (Algorithmic & Theoretical Guarantees):",
+        .sec3_title = "3. 記憶體佈局與並發模型 (Memory Layout & Concurrency Model):",
+        .sec4_title = "4. 關鍵權威 API (Key Authoritative APIs):",
+        .sec5_title = "5. 💡 設計哲學與成因 (Why - 摘自《The FLOW Book》):",
+        .sec6_title = "6. 📖 文檔拓樸章節索引與精華 (Book Chapter Reference & Excerpt):",
+        .decision_header = "=== FLOW 即時決策與因果解釋 (Real-Time Causal Explanation) ===",
+        .decision_causal_reasoning_title = "確定性因果推論 (打破物理黑盒子 / Deterministic Causal Reasoning):",
+        .decision_book_title = "💡 《The FLOW Book》延伸閱讀與設計哲學 (Design Philosophy):",
+        .bottleneck_header = "=== FLOW 下意識神經遙測與效能瓶頸報告 (Subconscious Telemetry) ===",
+        .bottleneck_sec1_title = "1. 架構角色與定位 (Architectural Role):",
+        .bottleneck_sec2_title = "2. 確定性診斷與成因推論 (Deterministic Diagnosis):",
+        .bottleneck_sec3_title = "3. 自主修復機制 (Autonomous Remedy):",
+        .book_toc_header = "               《The FLOW Book: 意圖驅動的活體系統》 全書目錄                     ",
+        .book_toc_footer = "使用 'flowy book <chapter_number|module_name>' 閱讀特定章節摘錄與設計哲學。",
+        .book_doc_header = "《The FLOW Book》 知識庫索引",
+        .book_doc_path = "檔案位置",
+        .book_doc_why = "💡 設計哲學 (Why):",
+        .book_doc_excerpt = "📖 核心段落摘要 (Excerpt):"
+    },
+    [FLOW_LANG_EN] = {
+        .report_header = "=== FLOW INTROSPECTIVE CODEBASE ARCHITECTURE REPORT ===",
+        .label_module = "Module",
+        .label_source_files = "Source Files",
+        .label_title = "Title",
+        .sec1_title = "1. CORE RESPONSIBILITIES:",
+        .sec2_title = "2. ALGORITHMIC & THEORETICAL GUARANTEES:",
+        .sec3_title = "3. MEMORY LAYOUT & CONCURRENCY MODEL:",
+        .sec4_title = "4. KEY AUTHORITATIVE APIS:",
+        .sec5_title = "5. 💡 DESIGN PHILOSOPHY & WHY (From 《The FLOW Book》):",
+        .sec6_title = "6. 📖 BOOK CHAPTER REFERENCE & EXCERPT:",
+        .decision_header = "=== FLOW INTROSPECTIVE REAL-TIME DECISION & CAUSAL EXPLANATION ===",
+        .decision_causal_reasoning_title = "DETERMINISTIC CAUSAL REASONING (Breaking Physical Black-Box):",
+        .decision_book_title = "💡 《The FLOW Book》 Further Reading & Design Philosophy:",
+        .bottleneck_header = "=== FLOW SUBCONSCIOUS NEURAL TELEMETRY & BOTTLENECK REPORT ===",
+        .bottleneck_sec1_title = "1. ARCHITECTURAL ROLE (From Codebase Knowledge):",
+        .bottleneck_sec2_title = "2. DETERMINISTIC DIAGNOSIS & REASONING (For Humans):",
+        .bottleneck_sec3_title = "3. AUTONOMOUS REMEDY (Zero Human Knobs Required):",
+        .book_toc_header = "               《The FLOW Book: Autopoietic Living Systems》 Table of Contents    ",
+        .book_toc_footer = "Use 'flowy book <chapter_number|module_name>' to view chapter excerpts and design philosophy.",
+        .book_doc_header = "《The FLOW Book》 Knowledge Graph Index",
+        .book_doc_path = "File Path",
+        .book_doc_why = "💡 Design Philosophy (Why):",
+        .book_doc_excerpt = "📖 Core Paragraph Excerpt:"
+    }
+};
 
 /* ========================================================================= */
 /* Real-Time Decision Logger & Causal Explainability                         */
@@ -308,12 +642,27 @@ const FlowDecisionEvent *flow_decision_logger_latest(const FlowDecisionLogger *l
     return &logger->events[idx];
 }
 
-void flowy_explain_decision(const FlowDecisionEvent *event, char *buf_out, size_t max_len) {
+void flowy_explain_decision_lang(const FlowDecisionEvent *event, FlowLanguage lang, char *buf_out, size_t max_len) {
     if (event == NULL || buf_out == NULL || max_len == 0) return;
     double t_ms = (double)event->timestamp_ns / 1000000.0;
 
+    const char *target_mod = "adaptive";
+    if (event->trigger_type == FLOW_DECISION_TRIGGER_MEMORY_PRESSURE) {
+        target_mod = "jit";
+    } else if (event->trigger_type == FLOW_DECISION_TRIGGER_SMT_COUNTEREXAMPLE) {
+        target_mod = "smt";
+    } else if (event->trigger_type == FLOW_DECISION_TRIGGER_STRAGGLER_QUARANTINE) {
+        target_mod = "reload";
+    } else if (event->trigger_type == FLOW_DECISION_TRIGGER_TORQUE_ANOMALY ||
+               event->trigger_type == FLOW_DECISION_TRIGGER_ZMP_INSTABILITY) {
+        target_mod = "embodied";
+    }
+
+    const FlowModuleBookBinding *b = flow_book_lookup_binding_lang(target_mod, lang);
+    const FlowyLocaleTemplate *tpl = &LOCALE_TEMPLATES[lang == FLOW_LANG_EN ? FLOW_LANG_EN : FLOW_LANG_ZH];
+
     snprintf(buf_out, max_len,
-             "=== FLOW INTROSPECTIVE REAL-TIME DECISION & CAUSAL EXPLANATION ===\n"
+             "%s\n"
              "Timestamp:         t = %.2f ms (%llu ns)\n"
              "Trigger Source:    %s\n"
              "Observed Telemetry:%10.2f %s (Threshold: %.2f %s)\n"
@@ -321,8 +670,12 @@ void flowy_explain_decision(const FlowDecisionEvent *event, char *buf_out, size_
              "1-Bit Chaos Action:Flipped Bit #%u in 1024-Bit BitSpace\n"
              "Topology Mutation: %s -> %s\n"
              "Hot-Swap Latency:  %llu ns (Zero Stop-the-World under QSBR)\n\n"
-             "DETERMINISTIC CAUSAL REASONING (Breaking Physical Black-Box):\n"
-             "%s\n",
+             "%s\n"
+             "%s\n\n"
+             "%s\n"
+             "  * %s: %s (flow-book/src/%s)\n"
+             "  * %s: 「%s」\n",
+             tpl->decision_header,
              t_ms, (unsigned long long)event->timestamp_ns,
              event->trigger_source,
              event->observed_metric_value, event->metric_unit,
@@ -331,7 +684,18 @@ void flowy_explain_decision(const FlowDecisionEvent *event, char *buf_out, size_
              event->flipped_genome_bit,
              event->pre_topology, event->post_topology,
              (unsigned long long)event->hot_swap_grace_ns,
-             event->causal_rationale);
+             tpl->decision_causal_reasoning_title,
+             event->causal_rationale,
+             tpl->decision_book_title,
+             (lang == FLOW_LANG_EN ? "Chapter Index" : "章節索引"),
+             b ? b->chapter_title : "The FLOW Book",
+             b ? b->chapter_ref : "introduction.md",
+             (lang == FLOW_LANG_EN ? "Design Philosophy" : "設計哲學"),
+             b ? b->philosophy_why : "Autopoietic topology runtime adaptation.");
+}
+
+void flowy_explain_decision(const FlowDecisionEvent *event, char *buf_out, size_t max_len) {
+    flowy_explain_decision_lang(event, flowy_get_language(), buf_out, max_len);
 }
 
 void flowy_print_decision_explanation(const FlowDecisionEvent *event, FILE *out) {
@@ -368,7 +732,7 @@ void flowy_print_decision_timeline(const FlowDecisionLogger *logger, FILE *out) 
     fprintf(out, "========================================================================================================\n");
 }
 
-int flowy_explain_bottleneck(const FlowTopologyGraph *graph, char *buf_out, size_t max_len) {
+int flowy_explain_bottleneck_lang(const FlowTopologyGraph *graph, FlowLanguage lang, char *buf_out, size_t max_len) {
     if (buf_out == NULL || max_len == 0) return 0;
 
     FlowTopologyGraph local_graph;
@@ -378,7 +742,6 @@ int flowy_explain_bottleneck(const FlowTopologyGraph *graph, char *buf_out, size
         g = &local_graph;
     }
 
-    /* Check if neural telemetry is already populated; if not, populate live probe telemetry */
     const FlowTopologyNode *peak = flow_topology_get_peak_hotspot(g);
     if (peak == NULL || peak->hotspot_score <= 0.0) {
         FlowTopologyGraph *mutable_g = (FlowTopologyGraph *)g;
@@ -395,35 +758,76 @@ int flowy_explain_bottleneck(const FlowTopologyGraph *graph, char *buf_out, size
 
     if (peak == NULL) return 0;
     const FlowModuleKnowledge *k = flowy_knowledge_lookup(peak->name);
+    const FlowyLocaleTemplate *tpl = &LOCALE_TEMPLATES[lang == FLOW_LANG_EN ? FLOW_LANG_EN : FLOW_LANG_ZH];
 
-    snprintf(buf_out, max_len,
-             "=== FLOW SUBCONSCIOUS NEURAL TELEMETRY & BOTTLENECK REPORT ===\n"
-             "Active Peak Hotspot:  %s (Layer %u Core Module)\n"
-             "Hotspot Intensity:    %.1f%%\n"
-             "Observed Metric:      %s: %.2f %s (Baseline: <= %.2f %s)\n"
-             "Subconscious Symptom: %s\n\n"
-             "1. ARCHITECTURAL ROLE (From Codebase Knowledge):\n"
-             "   %s (%s)\n"
-             "   %s\n\n"
-             "2. DETERMINISTIC DIAGNOSIS & REASONING (For Humans):\n"
-             "   目前的效能熱點集中在 %s 模組。由於短時間內產生大量舊世代記憶體，導致 QSBR\n"
-             "   回收佇列暫時擁塞（%s 達到 %.1f%s）。\n"
-             "   1-bit 混沌引擎目前已經自動將新突變的分配遮蔽 (Masked)，優先讓讀取執行緒\n"
-             "   度過寬限期 (Grace Period) 以清空回收水位。\n\n"
-             "3. AUTONOMOUS REMEDY (Zero Human Knobs Required):\n"
-             "   1-Bit chaotic engine applied temporary mutation mask (0x0000ffff) to pause\n"
-             "   non-critical state turnover until watermark drops below 20%%.\n",
-             peak->name, peak->layer,
-             peak->hotspot_score,
-             peak->hotspot_metric, peak->hotspot_raw_val, peak->hotspot_unit,
-             peak->hotspot_threshold_val, peak->hotspot_unit,
-             peak->dynamic_symptom,
-             k ? k->title : "Core Module", k ? k->header_file : "src/reload.h",
-             k ? k->responsibilities : "RCU reclamation",
-             peak->name,
-             peak->hotspot_metric, peak->hotspot_raw_val, peak->hotspot_unit);
-
+    if (lang == FLOW_LANG_EN) {
+        snprintf(buf_out, max_len,
+                 "%s\n"
+                 "Active Peak Hotspot:  %s (Layer %u Core Module)\n"
+                 "Hotspot Intensity:    %.1f%%\n"
+                 "Observed Metric:      %s: %.2f %s (Baseline: <= %.2f %s)\n"
+                 "Subconscious Symptom: %s\n\n"
+                 "%s\n"
+                 "   %s (%s)\n"
+                 "   %s\n\n"
+                 "%s\n"
+                 "   Performance hotspot currently isolated in '%s' module. Rapid generational\n"
+                 "   turnover created temporary QSBR epoch queue congestion (%s reached %.1f%s).\n"
+                 "   1-Bit chaotic engine masked new mutation allocations to prioritize reader threads\n"
+                 "   passing quiescent grace periods.\n\n"
+                 "%s\n"
+                 "   1-Bit chaotic engine applied temporary mutation mask (0x0000ffff) to pause\n"
+                 "   non-critical state turnover until watermark drops below 20%%.\n",
+                 tpl->bottleneck_header,
+                 peak->name, peak->layer,
+                 peak->hotspot_score,
+                 peak->hotspot_metric, peak->hotspot_raw_val, peak->hotspot_unit,
+                 peak->hotspot_threshold_val, peak->hotspot_unit,
+                 peak->dynamic_symptom,
+                 tpl->bottleneck_sec1_title,
+                 k ? k->title : "Core Module", k ? k->header_file : "src/reload.h",
+                 k ? k->responsibilities : "RCU reclamation",
+                 tpl->bottleneck_sec2_title,
+                 peak->name,
+                 peak->hotspot_metric, peak->hotspot_raw_val, peak->hotspot_unit,
+                 tpl->bottleneck_sec3_title);
+    } else {
+        snprintf(buf_out, max_len,
+                 "%s\n"
+                 "Active Peak Hotspot:  %s (Layer %u Core Module)\n"
+                 "Hotspot Intensity:    %.1f%%\n"
+                 "Observed Metric:      %s: %.2f %s (Baseline: <= %.2f %s)\n"
+                 "Subconscious Symptom: %s\n\n"
+                 "%s\n"
+                 "   %s (%s)\n"
+                 "   %s\n\n"
+                 "%s\n"
+                 "   目前的效能熱點集中在 %s 模組。由於短時間內產生大量舊世代記憶體，導致 QSBR\n"
+                 "   回收佇列暫時擁塞（%s 達到 %.1f%s）。\n"
+                 "   1-bit 混沌引擎目前已經自動將新突變的分配遮蔽 (Masked)，優先讓讀取執行緒\n"
+                 "   度過寬限期 (Grace Period) 以清空回收水位。\n\n"
+                 "%s\n"
+                 "   1-Bit 混沌引擎已自動套用暫態突變遮罩 (0x0000ffff) 暫停非關鍵世代切換，\n"
+                 "   直至回收水位降至 20%% 以下。\n",
+                 tpl->bottleneck_header,
+                 peak->name, peak->layer,
+                 peak->hotspot_score,
+                 peak->hotspot_metric, peak->hotspot_raw_val, peak->hotspot_unit,
+                 peak->hotspot_threshold_val, peak->hotspot_unit,
+                 peak->dynamic_symptom,
+                 tpl->bottleneck_sec1_title,
+                 k ? k->title : "Core Module", k ? k->header_file : "src/reload.h",
+                 k ? k->responsibilities : "RCU reclamation",
+                 tpl->bottleneck_sec2_title,
+                 peak->name,
+                 peak->hotspot_metric, peak->hotspot_raw_val, peak->hotspot_unit,
+                 tpl->bottleneck_sec3_title);
+    }
     return 1;
+}
+
+int flowy_explain_bottleneck(const FlowTopologyGraph *graph, char *buf_out, size_t max_len) {
+    return flowy_explain_bottleneck_lang(graph, flowy_get_language(), buf_out, max_len);
 }
 
 void flowy_print_bottleneck_explanation(const FlowTopologyGraph *graph, FILE *out) {
@@ -433,9 +837,10 @@ void flowy_print_bottleneck_explanation(const FlowTopologyGraph *graph, FILE *ou
     fprintf(out, "\n%s\n", buf);
 }
 
-int flowy_query_codebase(const FlowTopologyGraph *graph,
-                         const char *query_text,
-                         FlowyIntrospectiveAnswer *answer_out) {
+int flowy_query_codebase_lang(const FlowTopologyGraph *graph,
+                              const char *query_text,
+                              FlowLanguage lang,
+                              FlowyIntrospectiveAnswer *answer_out) {
     if (query_text == NULL || answer_out == NULL) return 0;
     memset(answer_out, 0, sizeof(*answer_out));
     strncpy(answer_out->query, query_text, sizeof(answer_out->query) - 1);
@@ -443,23 +848,23 @@ int flowy_query_codebase(const FlowTopologyGraph *graph,
     char lower_q[512] = {0};
     str_to_lower(query_text, lower_q, sizeof(lower_q));
 
-    /* Check if this is a bottleneck / hotspot reasoning query (bottleneck / 瓶頸 / 卡在哪 / 效能卡) */
-    if (strstr(lower_q, "bottleneck") || strstr(query_text, "瓶頸") || strstr(query_text, "卡在哪") ||
-        strstr(query_text, "效能卡") || strstr(query_text, "效能熱點") || strstr(lower_q, "hotspot") ||
-        strstr(query_text, "慢")) {
-        flowy_explain_bottleneck(graph, answer_out->explanation, sizeof(answer_out->explanation));
+    /* Check Intent: Bottleneck Reasoner */
+    if (strstr(lower_q, "bottleneck") || strstr(query_text, "瓶頸") || strstr(query_text, "瓶颈") ||
+        strstr(query_text, "卡在哪") || strstr(query_text, "效能卡") || strstr(query_text, "效能熱點") ||
+        strstr(lower_q, "hotspot") || strstr(query_text, "慢") || strstr(lower_q, "slow")) {
+        flowy_explain_bottleneck_lang(graph, lang, answer_out->explanation, sizeof(answer_out->explanation));
         answer_out->primary_module = flowy_knowledge_lookup("reload");
         answer_out->matched_score = 100;
         return 1;
     }
 
-    /* Check if this is a causal decision reasoning query (why / 原因 / 為什麼 / 決策 / 左腿 / 馬達) */
-    if (strstr(lower_q, "why") || strstr(query_text, "為什麼") || strstr(lower_q, "reason") ||
-        strstr(lower_q, "decision") || strstr(lower_q, "anomal") || strstr(query_text, "決策") ||
-        strstr(query_text, "原因") || strstr(query_text, "左腿") || strstr(query_text, "馬達")) {
+    /* Check Intent: Causal Decision Explanation */
+    if (strstr(lower_q, "why") || strstr(query_text, "為什麼") || strstr(query_text, "为什么") ||
+        strstr(lower_q, "reason") || strstr(lower_q, "decision") || strstr(lower_q, "anomal") ||
+        strstr(query_text, "決策") || strstr(query_text, "决策") || strstr(query_text, "原因") ||
+        strstr(query_text, "左腿") || strstr(query_text, "馬達") || strstr(query_text, "马达")) {
         ensure_default_logger();
         const FlowDecisionEvent *ev = NULL;
-        /* Find most relevant event matching query keywords if possible */
         for (size_t i = 0; i < g_default_decision_logger.total_recorded && i < FLOW_MAX_DECISION_LOGS; ++i) {
             const FlowDecisionEvent *cand = &g_default_decision_logger.events[i];
             char cand_lower[128] = {0};
@@ -476,76 +881,159 @@ int flowy_query_codebase(const FlowTopologyGraph *graph,
             ev = flow_decision_logger_latest(&g_default_decision_logger);
         }
 
-        flowy_explain_decision(ev, answer_out->explanation, sizeof(answer_out->explanation));
+        flowy_explain_decision_lang(ev, lang, answer_out->explanation, sizeof(answer_out->explanation));
         answer_out->primary_module = flowy_knowledge_lookup("embodied");
         answer_out->matched_score = 100;
         return 1;
     }
 
-    const FlowModuleKnowledge *best_m = NULL;
+    /* Core Reasoning: Map natural language input to language-agnostic module ID via Alias Dictionary */
+    const char *matched_module_id = NULL;
     uint32_t best_score = 0;
-    size_t total_k = flowy_knowledge_count();
 
-    for (size_t i = 0; i < total_k; ++i) {
-        const FlowModuleKnowledge *k = flowy_knowledge_at(i);
-        if (k == NULL) continue;
-        uint32_t score = 0;
-
-        if (strstr(lower_q, k->module_id)) score += 50;
-
-        /* Match keywords */
-        char lower_kw[512] = {0};
-        if (k->keywords) str_to_lower(k->keywords, lower_kw, sizeof(lower_kw));
-
-        char *token = strtok(lower_kw, " ");
-        while (token != NULL) {
-            if (strstr(lower_q, token) || strstr(query_text, token)) {
-                score += 15;
+    for (size_t a = 0; a < INPUT_ALIAS_COUNT; ++a) {
+        const FlowKeywordAlias *alias = &INPUT_ALIAS_DICTIONARY[a];
+        if (strstr(lower_q, alias->keyword) || strstr(query_text, alias->keyword)) {
+            if (alias->weight > best_score) {
+                best_score = alias->weight;
+                matched_module_id = alias->target_module_id;
             }
-            token = strtok(NULL, " ");
-        }
-
-        if (score > best_score) {
-            best_score = score;
-            best_m = k;
         }
     }
 
+    /* Also check direct module ID matches */
+    size_t total_k = flowy_knowledge_count();
+    for (size_t i = 0; i < total_k; ++i) {
+        const FlowModuleKnowledge *k = flowy_knowledge_at(i);
+        if (k == NULL) continue;
+        if (strstr(lower_q, k->module_id)) {
+            if (60 > best_score) {
+                best_score = 60;
+                matched_module_id = k->module_id;
+            }
+        }
+    }
+
+    const FlowModuleKnowledge *best_m = matched_module_id ? flowy_knowledge_lookup(matched_module_id) : NULL;
     if (best_m == NULL) {
         best_m = &CODEBASE_KNOWLEDGE[0]; /* Default to bitspace */
     }
 
     answer_out->primary_module = best_m;
-    answer_out->matched_score = best_score;
+    answer_out->matched_score = best_score > 0 ? best_score : 10;
 
-    /* Build detailed technical explanation directly from codebase knowledge */
+    /* Output Presentation Layer: Apply Render Mask based on target language */
+    const FlowyLocaleTemplate *tpl = &LOCALE_TEMPLATES[lang == FLOW_LANG_EN ? FLOW_LANG_EN : FLOW_LANG_ZH];
+    const FlowModuleBookBinding *binding = flow_book_lookup_binding_lang(best_m->module_id, lang);
+
+    const char *phil_why = (binding && binding->philosophy_why) ? binding->philosophy_why :
+                           (best_m->design_philosophy_why ? best_m->design_philosophy_why : "Autopoietic living system guarantees.");
+    const char *book_chap = (binding && binding->chapter_title) ? binding->chapter_title :
+                            (best_m->book_chapter_title ? best_m->book_chapter_title : "The FLOW Book");
+    const char *book_ref = (binding && binding->chapter_ref) ? binding->chapter_ref :
+                           (best_m->book_chapter_ref ? best_m->book_chapter_ref : "introduction.md");
+    const char *book_exc = (binding && binding->book_excerpt) ? binding->book_excerpt :
+                           (best_m->book_excerpt ? best_m->book_excerpt : "Refer to 《The FLOW Book》 for comprehensive architectural details.");
+
     snprintf(answer_out->explanation, sizeof(answer_out->explanation),
-             "=== FLOW INTROSPECTIVE CODEBASE ARCHITECTURE REPORT ===\n"
-             "Module:        %s (Layer %u)\n"
-             "Source Files:  %s, %s\n"
-             "Title:         %s\n\n"
-             "1. CORE RESPONSIBILITIES:\n"
+             "%s\n"
+             "%s: %s (Layer %u)\n"
+             "%s: %s, %s\n"
+             "%s: %s\n\n"
+             "%s\n"
              "   %s\n\n"
-             "2. ALGORITHMIC & THEORETICAL GUARANTEES:\n"
+             "%s\n"
              "   %s\n\n"
-             "3. MEMORY LAYOUT & CONCURRENCY MODEL:\n"
+             "%s\n"
              "   %s\n\n"
-             "4. KEY AUTHORITATIVE APIS:\n"
+             "%s\n"
+             "   %s\n\n"
+             "%s\n"
+             "   「%s」\n\n"
+             "%s\n"
+             "   [%s] (flow-book/src/%s)\n"
              "   %s\n",
-             best_m->module_id, best_m->layer,
-             best_m->header_file, best_m->source_file,
-             best_m->title,
-             best_m->responsibilities,
-             best_m->algorithmic_guarantee,
-             best_m->memory_concurrency_model,
-             best_m->key_apis);
+             tpl->report_header,
+             tpl->label_module, best_m->module_id, best_m->layer,
+             tpl->label_source_files, best_m->header_file, best_m->source_file,
+             tpl->label_title, best_m->title,
+             tpl->sec1_title, best_m->responsibilities,
+             tpl->sec2_title, best_m->algorithmic_guarantee,
+             tpl->sec3_title, best_m->memory_concurrency_model,
+             tpl->sec4_title, best_m->key_apis,
+             tpl->sec5_title, phil_why,
+             tpl->sec6_title, book_chap, book_ref, book_exc);
 
     return 1;
+}
+
+int flowy_query_codebase(const FlowTopologyGraph *graph,
+                         const char *query_text,
+                         FlowyIntrospectiveAnswer *answer_out) {
+    return flowy_query_codebase_lang(graph, query_text, flowy_get_language(), answer_out);
 }
 
 void flowy_print_answer(const FlowyIntrospectiveAnswer *answer, FILE *out) {
     if (answer == NULL || out == NULL) return;
     fprintf(out, "\n%s\n", answer->explanation);
+}
+
+int flowy_show_book_lang(const char *target, FlowLanguage lang, FILE *out) {
+    if (out == NULL) return 0;
+    const FlowyLocaleTemplate *tpl = &LOCALE_TEMPLATES[lang == FLOW_LANG_EN ? FLOW_LANG_EN : FLOW_LANG_ZH];
+    const FlowBookChapterDoc *chapters = (lang == FLOW_LANG_EN) ? FLOW_BOOK_CHAPTERS_EN : FLOW_BOOK_CHAPTERS_ZH;
+
+    if (target == NULL || strcmp(target, "all") == 0 || strcmp(target, "toc") == 0 || strcmp(target, "summary") == 0) {
+        fprintf(out, "================================================================================\n");
+        fprintf(out, "%s\n", tpl->book_toc_header);
+        fprintf(out, "================================================================================\n");
+        for (size_t i = 0; i < FLOW_BOOK_CHAPTER_COUNT; ++i) {
+            const FlowBookChapterDoc *ch = &chapters[i];
+            fprintf(out, "[Chapter %02zu] %s\n", i + 1, ch->chapter_title);
+            fprintf(out, "             %s: flow-book/src/%s\n", tpl->book_doc_path, ch->chapter_ref);
+            fprintf(out, "             %s 「%s」\n\n", (lang == FLOW_LANG_EN ? "Philosophy:" : "哲學:"), ch->philosophy_why);
+        }
+        fprintf(out, "================================================================================\n");
+        fprintf(out, "%s\n\n", tpl->book_toc_footer);
+        return 1;
+    }
+
+    int ch_num = atoi(target);
+    const FlowBookChapterDoc *ch_found = NULL;
+    if (ch_num >= 1 && ch_num <= (int)FLOW_BOOK_CHAPTER_COUNT) {
+        ch_found = &chapters[ch_num - 1];
+    } else {
+        ch_found = flow_book_lookup_chapter_lang(target, lang);
+    }
+
+    if (ch_found == NULL) {
+        const FlowModuleBookBinding *binding = flow_book_lookup_binding_lang(target, lang);
+        if (binding) {
+            ch_found = flow_book_lookup_chapter_lang(binding->chapter_ref, lang);
+        }
+    }
+
+    if (ch_found) {
+        fprintf(out, "================================================================================\n");
+        fprintf(out, "%s: %s\n", tpl->book_doc_header, ch_found->chapter_title);
+        fprintf(out, "%s: flow-book/src/%s\n", tpl->book_doc_path, ch_found->chapter_ref);
+        fprintf(out, "================================================================================\n\n");
+        fprintf(out, "%s\n   「%s」\n\n", tpl->book_doc_why, ch_found->philosophy_why);
+        fprintf(out, "%s\n   %s\n\n", tpl->book_doc_excerpt, ch_found->book_excerpt);
+        fprintf(out, "================================================================================\n\n");
+        return 1;
+    }
+
+    if (lang == FLOW_LANG_EN) {
+        fprintf(out, "flowy book: Chapter or module '%s' not found. Use 'flowy book all' to list chapters.\n", target);
+    } else {
+        fprintf(out, "flowy book: 找不到對應章節或模組 '%s'。請使用 'flowy book all' 查看目錄。\n", target);
+    }
+    return 0;
+}
+
+int flowy_show_book(const char *target, FILE *out) {
+    return flowy_show_book_lang(target, flowy_get_language(), out);
 }
 
 void flowy_print_counterfactual_report(const FlowCounterfactualReport *report, FILE *out) {
@@ -673,6 +1161,28 @@ int flowy_interactive_loop(FlowOrchestrator *orch, FILE *in, FILE *out) {
             continue;
         }
 
+        if (strncmp(line_buf, "book", 4) == 0) {
+            const char *arg = line_buf + 4;
+            while (*arg == ' ') arg++;
+            flowy_show_book(*arg ? arg : "all", out);
+            continue;
+        }
+
+        if (strncmp(line_buf, "lang", 4) == 0 || strncmp(line_buf, "language", 8) == 0) {
+            const char *arg = strchr(line_buf, ' ');
+            if (arg) {
+                while (*arg == ' ') arg++;
+                if (*arg) {
+                    FlowLanguage new_lang = flowy_parse_language(arg);
+                    flowy_set_language(new_lang);
+                    fprintf(out, "\n[FLOWY] Language render mask set to: %s\n\n", flowy_language_name(new_lang));
+                }
+            } else {
+                fprintf(out, "\n[FLOWY] Active language: %s (Switch with 'lang zh' or 'lang en')\n\n", flowy_language_name(flowy_get_language()));
+            }
+            continue;
+        }
+
         if (strcmp(line_buf, "list") == 0) {
             fprintf(out, "\nRegistered Codebase Modules (%zu total):\n", flowy_knowledge_count());
             for (size_t i = 0; i < flowy_knowledge_count(); ++i) {
@@ -722,7 +1232,9 @@ int flowy_crucible_run(FlowyCrucibleResult *result_out, FILE *log_stream) {
         (void)probability_bias;
 
         snprintf(result_out->stage1_rejection_log, sizeof(result_out->stage1_rejection_log),
-                 "[FLOWY-AUDIT] Proposed Mask 0x%02llX rejected by SMT. Theorem: (Memory < 64MB) ∧ (Connections > 10K) ∧ (Lock_Based_Queue) = Livelock. Probability bias zeroed.",
+                 "[FLOWY-AUDIT] Proposed Mask 0x%02llX rejected by SMT. Theorem: (Memory < 64MB) ∧ (Connections > 10K) ∧ (Lock_Based_Queue) = Livelock. Probability bias zeroed.\n"
+                 "  📖 知識庫檢索：此現象屬於【上位效應壁壘 (Epistasis Barrier)】。\n"
+                 "  💡 延伸閱讀：《The FLOW Book》 第 13 章：跨越上位效應壁壘 (SMT 形式化基因連鎖群與超級位元原子翻轉)。",
                  (unsigned long long)candidate_mask);
         fprintf(out, "%s\n", result_out->stage1_rejection_log);
     }
@@ -738,7 +1250,8 @@ int flowy_crucible_run(FlowyCrucibleResult *result_out, FILE *log_stream) {
     if (ram_available_mb < dynamic_jit_threshold_mb) {
         result_out->stage2_jit_vetoed = 1;
         snprintf(result_out->stage2_jit_log, sizeof(result_out->stage2_jit_log),
-                 "[FLOWY-AUDIT] JIT Compilation Disabled. Reason: Available RAM (%dMB) < JIT Threshold (%dMB). Forking compiler will trigger OS OOM Killer.",
+                 "[FLOWY-AUDIT] JIT Compilation Disabled. Reason: Available RAM (%dMB) < JIT Threshold (%dMB). Forking compiler will trigger OS OOM Killer.\n"
+                 "  💡 延伸閱讀：《The FLOW Book》 第 8 章：記憶體高水位與生存模式 (對抗 OOM 的背壓機制與 Static Survival 避難所)。",
                  ram_available_mb, dynamic_jit_threshold_mb);
         fprintf(out, "%s\n", result_out->stage2_jit_log);
 
@@ -751,11 +1264,6 @@ int flowy_crucible_run(FlowyCrucibleResult *result_out, FILE *log_stream) {
     /* --------------------------------------------------------------------- */
     /* Stage 3: Zero-Downtime Hot-swap & Dynamic Energy Derivation (< 50ms)   */
     /* --------------------------------------------------------------------- */
-    /* Real multi-objective Pareto energy calculation:
-     * E(AoS_Multi, 64 cores, 10k conns) = (64 cores * 8.0W) + (10000 * 0.00285) = 540.5
-     * E(SoA_EventLoop, 1 core, 10k conns) = (1 core * 8.0W) + (10000 * 0.0192) = 200.0
-     * Delta E = E(SoA) - E(AoS) = 200.0 - 540.5 = -340.5
-     */
     double energy_aos_multi = (64.0 * 8.0) + (10000.0 * 0.00285);
     double energy_soa_eventloop = (1.0 * 8.0) + (10000.0 * 0.0192);
     result_out->energy_delta = energy_soa_eventloop - energy_aos_multi;
@@ -763,11 +1271,6 @@ int flowy_crucible_run(FlowyCrucibleResult *result_out, FILE *log_stream) {
     result_out->stage3_hotswap_success = 1;
     result_out->dropped_requests = 0;
     result_out->oom_killer_triggered = 0;
-
-    /* Dual-Tier Zero-Copy Fallback Read Query Test */
-    int key_in_old_table = 42;
-    int fallback_query_success = (key_in_old_table == 42); /* Zero-copy fallback verified */
-    (void)fallback_query_success;
 
     clock_gettime(CLOCK_MONOTONIC, &end_ts);
     uint64_t elapsed_ns = ((uint64_t)end_ts.tv_sec - (uint64_t)start_ts.tv_sec) * 1000000000ULL +
@@ -780,7 +1283,8 @@ int flowy_crucible_run(FlowyCrucibleResult *result_out, FILE *log_stream) {
              "Trigger: OOM + Concurrency Storm.\n"
              "Action: Applied Topology Shift {AoS_Multi -> SoA_EventLoop}.\n"
              "Verification: SMT [Pass], QSBR Migration [Success, 0 drops].\n"
-             "Energy Delta: %.1f.",
+             "Energy Delta: %.1f.\n"
+             "💡 延伸閱讀：《The FLOW Book》 第 7 章：QSBR 無鎖熱替換 與 第 9 章：幾何變形 (AoS 到 SoA 即時重映射)。",
              result_out->energy_delta);
     fprintf(out, "%s\n", result_out->stage3_narrative_log);
 

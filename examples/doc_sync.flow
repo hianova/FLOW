@@ -1,0 +1,35 @@
+input markdown_sources {
+    max_count 1024
+}
+
+output c_header {
+    type text
+}
+
+state doc_knowledge {
+    bounded
+    immutable
+}
+
+flow doc_sync {
+    markdown_sources -> parse_headings -> extract_philosophy -> bilingual_align -> emit_c_header
+}
+
+require {
+    deterministic
+    memory < 16mb
+}
+
+ensure {
+    deterministic
+}
+
+resource cpu {
+}
+
+capability stdio {
+}
+
+domain doc_knowledge {
+}
+contract doc_knowledge

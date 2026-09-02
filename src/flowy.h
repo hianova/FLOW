@@ -21,6 +21,11 @@ typedef struct {
     const char *memory_concurrency_model;
     const char *key_apis;
     const char *keywords;
+    /* Doc-as-Topology: Compile-Time Static Binding to 《The FLOW Book》 */
+    const char *book_chapter_ref;
+    const char *book_chapter_title;
+    const char *design_philosophy_why;
+    const char *book_excerpt;
 } FlowModuleKnowledge;
 
 typedef struct {
@@ -28,7 +33,7 @@ typedef struct {
     const FlowModuleKnowledge *related_modules[4];
     size_t related_count;
     char query[256];
-    char explanation[2048];
+    char explanation[4096];
     uint32_t matched_score;
 } FlowyIntrospectiveAnswer;
 
@@ -71,6 +76,24 @@ typedef struct {
     size_t total_recorded;
 } FlowDecisionLogger;
 
+/* ========================================================================= */
+/* Multi-Lingual Presentation & Render Mask (Data-Template Separation)       */
+/* ========================================================================= */
+
+#ifndef FLOW_LANG_ENUM_DEFINED
+#define FLOW_LANG_ENUM_DEFINED
+typedef enum {
+    FLOW_LANG_ZH = 0, /* Traditional Chinese (預設 / Default) */
+    FLOW_LANG_EN = 1  /* English */
+} FlowLanguage;
+#endif
+
+void flowy_set_language(FlowLanguage lang);
+FlowLanguage flowy_get_language(void);
+FlowLanguage flowy_detect_system_language(void);
+FlowLanguage flowy_parse_language(const char *lang_str);
+const char *flowy_language_name(FlowLanguage lang);
+
 /* Introspective Knowledge Base */
 size_t flowy_knowledge_count(void);
 const FlowModuleKnowledge *flowy_knowledge_at(size_t index);
@@ -81,19 +104,29 @@ int flowy_register_dynamic_module(const FlowModuleKnowledge *knowledge);
 int flowy_query_codebase(const FlowTopologyGraph *graph,
                          const char *query_text,
                          FlowyIntrospectiveAnswer *answer_out);
+int flowy_query_codebase_lang(const FlowTopologyGraph *graph,
+                              const char *query_text,
+                              FlowLanguage lang,
+                              FlowyIntrospectiveAnswer *answer_out);
 
 void flowy_print_answer(const FlowyIntrospectiveAnswer *answer, FILE *out);
+
+/* Living Documentation & The FLOW Book Viewer */
+int flowy_show_book(const char *target, FILE *out);
+int flowy_show_book_lang(const char *target, FlowLanguage lang, FILE *out);
 
 /* Real-Time Decision Causal Explanation */
 void flow_decision_logger_init(FlowDecisionLogger *logger);
 int flow_decision_logger_record(FlowDecisionLogger *logger, const FlowDecisionEvent *event);
 const FlowDecisionEvent *flow_decision_logger_latest(const FlowDecisionLogger *logger);
 void flowy_explain_decision(const FlowDecisionEvent *event, char *buf_out, size_t max_len);
+void flowy_explain_decision_lang(const FlowDecisionEvent *event, FlowLanguage lang, char *buf_out, size_t max_len);
 void flowy_print_decision_explanation(const FlowDecisionEvent *event, FILE *out);
 void flowy_print_decision_timeline(const FlowDecisionLogger *logger, FILE *out);
 
 /* Subconscious Neural Telemetry Reasoning (Bottleneck / Hotspot Reasoner) */
 int flowy_explain_bottleneck(const FlowTopologyGraph *graph, char *buf_out, size_t max_len);
+int flowy_explain_bottleneck_lang(const FlowTopologyGraph *graph, FlowLanguage lang, char *buf_out, size_t max_len);
 void flowy_print_bottleneck_explanation(const FlowTopologyGraph *graph, FILE *out);
 
 /* Interactive Loop */
@@ -114,21 +147,21 @@ void flowy_print_autopilot_incident(const FlowAutopilotIncident *incident, FILE 
 
 typedef struct {
     int stage1_smt_rejected;
-    char stage1_rejection_log[256];
+    char stage1_rejection_log[512];
 
     int stage2_jit_vetoed;
-    char stage2_jit_log[256];
-    char stage2_routing_log[256];
+    char stage2_jit_log[512];
+    char stage2_routing_log[512];
 
     int stage3_hotswap_success;
     uint64_t stage3_latency_ms;
     uint64_t dropped_requests;
     int oom_killer_triggered;
     double energy_delta;
-    char stage3_narrative_log[512];
+    char stage3_narrative_log[1024];
 
     int stage4_recovery_success;
-    char stage4_recovery_log[256];
+    char stage4_recovery_log[512];
 } FlowyCrucibleResult;
 
 int flowy_crucible_run(FlowyCrucibleResult *result_out, FILE *log_stream);

@@ -3,6 +3,7 @@
 #include "registry.h"
 #include "benchmark.h"
 #include "orchestrator.h"
+#include "generated_book_knowledge.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,6 +11,37 @@
 
 int main(int argc, char **argv) {
     flow_registry_init();
+
+    /* Initialize default language from system environment (FLOWY_LANG / LANG / LC_ALL) */
+    FlowLanguage active_lang = flowy_detect_system_language();
+    flowy_set_language(active_lang);
+
+    /* Check for global --lang or -l flag anywhere in arguments */
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--lang") == 0 || strcmp(argv[i], "-l") == 0) {
+            if (i + 1 < argc) {
+                active_lang = flowy_parse_language(argv[i + 1]);
+                flowy_set_language(active_lang);
+                for (int j = i; j + 2 < argc; ++j) {
+                    argv[j] = argv[j + 2];
+                }
+                argc -= 2;
+                i--;
+            }
+        }
+    }
+
+    /* 0. Language Query / Switch (flowy lang [zh|en]) */
+    if (argc >= 2 && (strcmp(argv[1], "lang") == 0 || strcmp(argv[1], "language") == 0)) {
+        if (argc >= 3) {
+            FlowLanguage new_lang = flowy_parse_language(argv[2]);
+            flowy_set_language(new_lang);
+            printf("FLOW language render mask switched to: %s\n", flowy_language_name(new_lang));
+        } else {
+            printf("Active FLOW language: %s (Available: 'zh', 'en')\n", flowy_language_name(flowy_get_language()));
+        }
+        return EXIT_SUCCESS;
+    }
 
     /* 1. Interactive Conversational Assistant (flowy / flowy shell) */
     if (argc < 2 || strcmp(argv[1], "shell") == 0 || strcmp(argv[1], "--shell") == 0) {
@@ -69,11 +101,12 @@ int main(int argc, char **argv) {
         printf("================================================================================\n");
         printf("          FLOW UNIFIED CODEBASE ARCHITECTURE & FORMAL INVARIANT AUDIT           \n");
         printf("================================================================================\n");
-        printf("Topology Total Nodes:       %zu (Core: %zu, Plugins: %zu, Intents: %zu)\n",
-               topo_report.total_nodes, topo_report.core_nodes, topo_report.plugin_nodes, topo_report.intent_nodes);
+        printf("Topology Total Nodes:       %zu (Core: %zu, Plugins: %zu, Intents: %zu, Doc Chapters: %zu)\n",
+               topo_report.total_nodes, topo_report.core_nodes, topo_report.plugin_nodes, topo_report.intent_nodes, topo_report.doc_nodes);
+        printf("Doc-as-Topology Edges:      %zu (Compile-Time Static Binding to 《The FLOW Book》)\n", topo_report.doc_edges);
         printf("Cross-Layer Leaks:          %zu\n", topo_report.cross_layer_leaks);
         printf("Modularity Score:           %.2f (1.00 = Absolute Architectural Soundness)\n", topo_report.modularity_score);
-        printf("Layer Separation Firewalls: SOUND (Core Layer 0 -> Interface Layer 1 -> Plugin Layer 2)\n");
+        printf("Layer Separation Firewalls: SOUND (Core Layer 0 -> Interface Layer 1 -> Plugin Layer 2 -> Doc Layer 4)\n");
         printf("--------------------------------------------------------------------------------\n");
         printf("SMT FORMAL THEOREM PROOFS:\n");
         printf("  * [Buffer Bounds Safety]   QF_LIA Sound (Zero-Overflow Guaranteed)\n");
@@ -88,12 +121,14 @@ int main(int argc, char **argv) {
     /* 7. Living Documentation Viewer (flowy doc [module]) */
     if (strcmp(argv[1], "doc") == 0 || strcmp(argv[1], "--doc") == 0) {
         const char *mod = argc >= 3 ? argv[2] : "all";
+        FlowLanguage cur_lang = flowy_get_language();
         if (strcmp(mod, "all") == 0) {
             printf("================================================================================\n");
             printf("                     FLOW LIVING CODEBASE DOCUMENTATION                         \n");
             printf("================================================================================\n");
             for (size_t i = 0; i < flowy_knowledge_count(); ++i) {
                 const FlowModuleKnowledge *k = flowy_knowledge_at(i);
+                const FlowModuleBookBinding *b = flow_book_lookup_binding_lang(k->module_id, cur_lang);
                 printf("\n--- [%s] (Layer %u Core Subsystem) ---\n", k->module_id, k->layer);
                 printf("Title:        %s\n", k->title);
                 printf("Source:       %s, %s\n", k->header_file, k->source_file);
@@ -101,6 +136,10 @@ int main(int argc, char **argv) {
                 printf("Guarantees:   %s\n", k->algorithmic_guarantee);
                 printf("Memory Model: %s\n", k->memory_concurrency_model);
                 printf("APIs:         %s\n", k->key_apis);
+                if (b && b->chapter_title) {
+                    printf("Book Ref:     %s (flow-book/src/%s)\n", b->chapter_title, b->chapter_ref ? b->chapter_ref : "");
+                    printf("Philosophy:   「%s」\n", b->philosophy_why ? b->philosophy_why : "");
+                }
             }
             printf("================================================================================\n");
             return EXIT_SUCCESS;
@@ -110,15 +149,30 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "flowy doc: module '%s' not found. Use 'flowy doc all' to list.\n", mod);
                 return EXIT_FAILURE;
             }
+            const FlowModuleBookBinding *b = flow_book_lookup_binding_lang(k->module_id, cur_lang);
             printf("=== FLOW LIVING DOCUMENTATION: %s ===\n", k->module_id);
             printf("Title:        %s (Layer %u)\n", k->title, k->layer);
             printf("Source Files: %s, %s\n\n", k->header_file, k->source_file);
             printf("1. RESPONSIBILITIES:\n   %s\n\n", k->responsibilities);
             printf("2. ALGORITHMIC GUARANTEES:\n   %s\n\n", k->algorithmic_guarantee);
             printf("3. CONCURRENCY & MEMORY MODEL:\n   %s\n\n", k->memory_concurrency_model);
-            printf("4. KEY APIS:\n   %s\n", k->key_apis);
+            printf("4. KEY APIS:\n   %s\n\n", k->key_apis);
+            if (b && b->chapter_title) {
+                printf("5. 💡 DESIGN PHILOSOPHY & WHY (From 《The FLOW Book》):\n   「%s」\n\n",
+                       b->philosophy_why ? b->philosophy_why : "");
+                printf("6. 📖 BOOK CHAPTER REFERENCE & EXCERPT:\n   [%s] (flow-book/src/%s)\n   %s\n",
+                       b->chapter_title, b->chapter_ref ? b->chapter_ref : "",
+                       b->book_excerpt ? b->book_excerpt : "");
+            }
             return EXIT_SUCCESS;
         }
+    }
+
+    /* 7b. 《The FLOW Book》 Living Book Viewer (flowy book [chapter|module|all]) */
+    if (strcmp(argv[1], "book") == 0 || strcmp(argv[1], "--book") == 0) {
+        const char *target = argc >= 3 ? argv[2] : "all";
+        int res = flowy_show_book(target, stdout);
+        return res ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
     /* 8. Quantitative Mechanism Efficiency Audit (flowy audit-mechanisms) */

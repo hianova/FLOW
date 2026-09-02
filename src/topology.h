@@ -18,7 +18,8 @@ typedef enum {
     FLOW_NODE_COMPONENT = 2,     /* Architectural components (linear_array, sharded_hash, etc.) */
     FLOW_NODE_INTENT_OP = 3,     /* Flow Intent operations (transform, group, sort, top, etc.) */
     FLOW_NODE_DIMENSION = 4,     /* BitSpace dimensions (capacity, threads, shards, buffer_bytes) */
-    FLOW_NODE_SHARD_GROUP = 5    /* Shard partition cluster */
+    FLOW_NODE_SHARD_GROUP = 5,   /* Shard partition cluster */
+    FLOW_NODE_DOC_CHAPTER = 6    /* Doc-as-Topology: Living Documentation Chapter / Philosophy Node */
 } FlowNodeType;
 
 typedef enum {
@@ -27,7 +28,8 @@ typedef enum {
     FLOW_EDGE_IMPLEMENTS = 2,        /* Plugin implements Component interface */
     FLOW_EDGE_BINDS_DIMENSION = 3,   /* Component binds to BitSpace dimension */
     FLOW_EDGE_DATA_FLOW = 4,         /* Dataflow pipeline connection (A -> B) */
-    FLOW_EDGE_SHARD_AFFINITY = 5     /* Affinity / Locality between nodes */
+    FLOW_EDGE_SHARD_AFFINITY = 5,    /* Affinity / Locality between nodes */
+    FLOW_EDGE_DOCUMENTS = 6          /* Doc-as-Topology: Code Node -> Book Chapter / Design Philosophy */
 } FlowEdgeType;
 
 typedef struct {
@@ -36,7 +38,7 @@ typedef struct {
     char name[64];
     char module[64];
     int is_core;
-    uint32_t layer; /* 0=Core, 1=ABI/Registry, 2=Plugin, 3=Intent/User */
+    uint32_t layer; /* 0=Core, 1=ABI/Registry, 2=Plugin, 3=Intent/User, 4=Doc */
 
     /* Subconscious Neural Telemetry (attached by background eBPF / PMU / QSBR probes) */
     double hotspot_score;            /* Normalized hotspot intensity [0.0 .. 100.0] */
@@ -68,6 +70,8 @@ typedef struct {
     size_t core_nodes;
     size_t plugin_nodes;
     size_t intent_nodes;
+    size_t doc_nodes;
+    size_t doc_edges;
     size_t cross_layer_leaks;
     char leak_details[512];
     double average_coupling;
