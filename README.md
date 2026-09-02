@@ -68,20 +68,22 @@ flowc absorb examples/project.flow
 # 2. Global chaotic Pareto annealing & epoch solidification
 flowc anneal examples/compiler.flow examples/project.flow
 
-# 3. Flowy: Introspective Codebase Reasoner & Real-Time Causal Explainer
+# 3. Flowy: Living Introspection, Causal Explanation & Living Docs
 flowc ask "how does lock-free QSBR memory reclamation work?"
 flowc why                  # Explains deterministic causality of latest real-time morph
+flowc bottleneck           # Identifies neural telemetry peak hotspot & self-healing action
 flowc timeline             # Real-time dynamic decision timeline
+flowc doc bitspace         # Living codebase API & invariant documentation
 flowc flowy                # Interactive introspective reasoning shell
 
-# 4. Mechanism Efficiency & Quantitative Empirical Audit
+# 4. Unified Architectural & SMT Formal Invariant Audit
+flowc audit
+
+# 5. Mechanism Efficiency & Quantitative Empirical Audit
 flowc audit-mechanisms
 
-# 5. Launch background continuous evolution daemon
+# 6. Launch background continuous evolution daemon
 flowc daemon --cycles 10 --interval-ms 500
-
-# 6. Inspect topological landscape & SMT mathematical theorems
-flowc landscape
 
 # 7. Multi-objective state time travel (speed, balanced, memory)
 flowc morph speed
