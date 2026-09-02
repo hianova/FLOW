@@ -509,3 +509,47 @@ void flow_security_mtd_report(const FlowMTDLayout *layout, FILE *out) {
                 i, layout->field_order[i], layout->field_offsets[i], layout->padding_bytes[i]);
     }
 }
+
+/* ========================================================================= */
+/* Bounded Chaos Compliance Mode Implementation                             */
+/* ========================================================================= */
+
+uint64_t flow_security_get_compliance_mask(FlowComplianceMode mode,
+                                           const FlowPlanDimensionSet *dims) {
+    if (mode == FLOW_COMPLIANCE_PERMISSIVE_STAGING || dims == NULL || dims->count == 0) {
+        return (uint64_t)-1;
+    }
+
+    /* In STRICT_PROD mode: lock core structural/algorithm dimensions.
+       Only allow buffer_bytes, initial_capacity, growth_percent, and batch_size tuning. */
+    uint64_t mask = 0;
+    unsigned shift = 0;
+    for (size_t i = 0; i < dims->count; ++i) {
+        const FlowPlanDimension *d = &dims->dimensions[i];
+        unsigned bits = flow_dimension_bits(d);
+        if (bits == 0) continue;
+        uint64_t dim_mask = (bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << bits) - 1);
+
+        int is_safe_tuning = (strcmp(d->name, "tuning_buffer") == 0 ||
+                              strcmp(d->name, "tuning_initial") == 0 ||
+                              strcmp(d->name, "tuning_growth") == 0 ||
+                              strcmp(d->name, "tuning_batch") == 0);
+
+        if (is_safe_tuning) {
+            mask |= (dim_mask << shift);
+        }
+        shift += bits;
+    }
+    return mask;
+}
+
+int flow_security_is_mutation_compliant(FlowComplianceMode mode,
+                                        uint32_t mutated_bit,
+                                        const FlowPlanDimensionSet *dims) {
+    if (mode == FLOW_COMPLIANCE_PERMISSIVE_STAGING) return 1;
+    uint64_t mask = flow_security_get_compliance_mask(mode, dims);
+    if (mutated_bit < 64) {
+        return (mask & ((uint64_t)1 << mutated_bit)) != 0;
+    }
+    return 0;
+}

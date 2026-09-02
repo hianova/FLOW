@@ -53,6 +53,7 @@ struct FlowReloadContext {
     FlowReloadReader *readers;
     FlowReloadGeneration *retired;
     FlowLiveMigration live;
+    FlowAuditTrail audit_trail;
 };
 
 static uint64_t schema_mix(uint64_t hash, const void *data, size_t size) {
@@ -1073,5 +1074,105 @@ int flow_qsbr_synchronize(FlowReloadContext *context, uint64_t timeout_ns) {
 size_t flow_qsbr_reclaim(FlowReloadContext *context) {
     if (context == NULL) return 0;
     return flow_reload_reclaim(context);
+}
+
+/* ========================================================================= */
+/* Deterministic Audit Trail & Mutation Snapshots Implementation             */
+/* ========================================================================= */
+
+int flow_audit_trail_record(FlowReloadContext *context, const FlowMutationSnapshot *snapshot) {
+    if (context == NULL || snapshot == NULL) return 0;
+    pthread_mutex_lock(&context->lock);
+    size_t slot = context->audit_trail.head;
+    context->audit_trail.entries[slot] = *snapshot;
+    if (context->audit_trail.entries[slot].timestamp_ns == 0) {
+        context->audit_trail.entries[slot].timestamp_ns = flow_time_ns_fast();
+    }
+    context->audit_trail.head = (slot + 1) % FLOW_AUDIT_TRAIL_CAPACITY;
+    context->audit_trail.total_recorded++;
+    pthread_mutex_unlock(&context->lock);
+    return 1;
+}
+
+size_t flow_audit_trail_count(const FlowReloadContext *context) {
+    if (context == NULL) return 0;
+    return context->audit_trail.total_recorded < FLOW_AUDIT_TRAIL_CAPACITY ?
+           context->audit_trail.total_recorded : FLOW_AUDIT_TRAIL_CAPACITY;
+}
+
+int flow_audit_trail_get(const FlowReloadContext *context, size_t index, FlowMutationSnapshot *out) {
+    if (context == NULL || out == NULL) return 0;
+    size_t count = flow_audit_trail_count(context);
+    if (index >= count) return 0;
+
+    size_t total = context->audit_trail.total_recorded;
+    size_t start_idx = (total >= FLOW_AUDIT_TRAIL_CAPACITY) ? context->audit_trail.head : 0;
+    size_t slot = (start_idx + index) % FLOW_AUDIT_TRAIL_CAPACITY;
+
+    *out = context->audit_trail.entries[slot];
+    return 1;
+}
+
+int flow_audit_trail_export(const FlowReloadContext *context, FILE *out) {
+    if (context == NULL || out == NULL) return 0;
+    size_t count = flow_audit_trail_count(context);
+    fprintf(out, "{\n  \"audit_trail_total\": %zu,\n  \"snapshots\": [\n", count);
+    for (size_t i = 0; i < count; ++i) {
+        FlowMutationSnapshot s;
+        flow_audit_trail_get(context, i, &s);
+        fprintf(out, "    {\n"
+                     "      \"snapshot_id\": %llu,\n"
+                     "      \"timestamp_ns\": %llu,\n"
+                     "      \"generation_id\": %llu,\n"
+                     "      \"env_mask\": \"0x%016llx\",\n"
+                     "      \"random_seed\": %llu,\n"
+                     "      \"schema_hash\": \"0x%016llx\",\n"
+                     "      \"llvm_ir_hash\": \"0x%016llx\",\n"
+                     "      \"component_id\": \"%s\",\n"
+                     "      \"flow_name\": \"%s\",\n"
+                     "      \"is_golden_fallback\": %s\n"
+                     "    }%s\n",
+                     (unsigned long long)s.snapshot_id,
+                     (unsigned long long)s.timestamp_ns,
+                     (unsigned long long)s.generation_id,
+                     (unsigned long long)s.env_mask,
+                     (unsigned long long)s.random_seed,
+                     (unsigned long long)s.schema_hash,
+                     (unsigned long long)s.llvm_ir_hash,
+                     s.component_id,
+                     s.flow_name,
+                     s.is_golden_fallback ? "true" : "false",
+                     (i + 1 < count) ? "," : "");
+    }
+    fprintf(out, "  ]\n}\n");
+    return 1;
+}
+
+int flow_audit_replay(const FlowMutationSnapshot *snapshot, uint64_t *reproduced_ir_hash_out) {
+    if (snapshot == NULL) return 0;
+
+    /* Deterministic Polynomial State Reconstruction:
+       H = mix(seed, mix(env_mask, mix(schema_hash, genome_words))) */
+    uint64_t h = UINT64_C(0xcbf29ce484222325);
+    h ^= snapshot->random_seed;
+    h *= UINT64_C(0x100000001b3);
+    h ^= snapshot->env_mask;
+    h *= UINT64_C(0x100000001b3);
+    h ^= snapshot->schema_hash;
+    h *= UINT64_C(0x100000001b3);
+
+    for (int w = 0; w < 16; ++w) {
+        h ^= snapshot->genome_words[w];
+        h *= UINT64_C(0x100000001b3);
+    }
+
+    if (snapshot->is_golden_fallback) {
+        h ^= UINT64_C(0x9e3779b97f4a7c15);
+    }
+
+    if (reproduced_ir_hash_out != NULL) {
+        *reproduced_ir_hash_out = h;
+    }
+    return 1;
 }
 

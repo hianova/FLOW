@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdatomic.h>
+#include <stdio.h>
 
 #define FLOW_RELOAD_ABI_VERSION UINT32_C(3)
 
@@ -199,5 +200,39 @@ int flow_qsbr_synchronize(FlowReloadContext *context, uint64_t timeout_ns);
 
 /* Reclaims all retired generations that have passed the QSBR grace period */
 size_t flow_qsbr_reclaim(FlowReloadContext *context);
+
+/* ========================================================================= */
+/* Deterministic Audit Trail & Mutation Snapshots                            */
+/* ========================================================================= */
+
+#define FLOW_AUDIT_TRAIL_CAPACITY 256
+
+typedef struct {
+    uint64_t snapshot_id;
+    uint64_t timestamp_ns;
+    uint64_t generation_id;
+    uint64_t env_mask;           /* Environmental & Hardware Mask */
+    uint64_t random_seed;        /* PRNG Seed that generated this JIT unit */
+    uint64_t schema_hash;        /* Schema & ABI layout hash */
+    uint64_t llvm_ir_hash;       /* Hash of synthesized IR / C / machine code */
+    uint64_t genome_words[16];   /* 1024-Bit exact genome */
+    uint32_t genome_bits;        /* Total bits */
+    char component_id[64];       /* Component identifier */
+    char flow_name[64];          /* Flow intent name */
+    char author_attestation[64]; /* SMT & Safety Attestation */
+    int is_golden_fallback;      /* 1 if this was a fallback to Golden Baseline */
+} FlowMutationSnapshot;
+
+typedef struct {
+    FlowMutationSnapshot entries[FLOW_AUDIT_TRAIL_CAPACITY];
+    size_t head;
+    size_t total_recorded;
+} FlowAuditTrail;
+
+int flow_audit_trail_record(FlowReloadContext *context, const FlowMutationSnapshot *snapshot);
+size_t flow_audit_trail_count(const FlowReloadContext *context);
+int flow_audit_trail_get(const FlowReloadContext *context, size_t index, FlowMutationSnapshot *out);
+int flow_audit_trail_export(const FlowReloadContext *context, FILE *out);
+int flow_audit_replay(const FlowMutationSnapshot *snapshot, uint64_t *reproduced_ir_hash_out);
 
 #endif

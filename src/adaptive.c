@@ -21,6 +21,10 @@ struct FlowAdaptiveController {
     FlowIPRangeTracker ip_tracker;
     FlowAntiThrashingConfig anti_thrash;
     FlowDebounceState debounce;
+    const FlowUnit *golden_unit;
+    void *golden_state;
+    _Atomic int is_running_golden;
+    _Atomic size_t consecutive_errors;
     pthread_mutex_t lock;
 };
 
@@ -616,5 +620,68 @@ FlowAdaptiveStatus flow_adaptive_handle_pressure_event(
 
     if (morphed_candidate_index_out) *morphed_candidate_index_out = best_idx;
     return FLOW_ADAPTIVE_OK;
+}
+
+/* ========================================================================= */
+/* Golden Baseline Fallback & Anomaly Protection                             */
+/* ========================================================================= */
+
+int flow_adaptive_set_golden_baseline(FlowAdaptiveController *controller,
+                                      const FlowUnit *golden_unit,
+                                      void *golden_state) {
+    if (controller == NULL || golden_unit == NULL) return 0;
+    pthread_mutex_lock(&controller->lock);
+    controller->golden_unit = golden_unit;
+    controller->golden_state = golden_state;
+    atomic_store_explicit(&controller->is_running_golden, 0, memory_order_release);
+    atomic_store_explicit(&controller->consecutive_errors, 0, memory_order_release);
+    pthread_mutex_unlock(&controller->lock);
+    return 1;
+}
+
+int flow_adaptive_fallback_to_golden_baseline(FlowAdaptiveController *controller,
+                                              const char *reason_diagnostic) {
+    if (controller == NULL || controller->golden_unit == NULL) return 0;
+
+    pthread_mutex_lock(&controller->lock);
+    const FlowUnit *golden = controller->golden_unit;
+    int reload_res;
+    if (controller->golden_state != NULL) {
+        reload_res = flow_reload_publish(controller->context, golden, controller->golden_state);
+    } else {
+        reload_res = flow_reload_activate(controller->context, golden);
+    }
+
+    if (reload_res == FLOW_RELOAD_OK) {
+        atomic_store_explicit(&controller->is_running_golden, 1, memory_order_release);
+        atomic_store_explicit(&controller->consecutive_errors, 0, memory_order_release);
+
+        /* Record snapshot in audit trail */
+        FlowMutationSnapshot snap;
+        memset(&snap, 0, sizeof(snap));
+        snap.timestamp_ns = clock_ns();
+        snap.is_golden_fallback = 1;
+        strncpy(snap.component_id, golden->schema ? golden->schema->name : "golden_baseline", sizeof(snap.component_id) - 1);
+        strncpy(snap.author_attestation, reason_diagnostic ? reason_diagnostic : "OOD_SPIKE_FALLBACK", sizeof(snap.author_attestation) - 1);
+        flow_audit_trail_record(controller->context, &snap);
+    }
+    pthread_mutex_unlock(&controller->lock);
+    return reload_res == FLOW_RELOAD_OK;
+}
+
+int flow_adaptive_record_error_and_check_fallback(FlowAdaptiveController *controller,
+                                                  size_t max_consecutive_errors) {
+    if (controller == NULL) return 0;
+    size_t threshold = max_consecutive_errors > 0 ? max_consecutive_errors : 3;
+    size_t errs = (size_t)atomic_fetch_add_explicit(&controller->consecutive_errors, 1, memory_order_acq_rel) + 1;
+    if (errs >= threshold && controller->golden_unit != NULL) {
+        return flow_adaptive_fallback_to_golden_baseline(controller, "EXCEEDED_CONSECUTIVE_ERROR_THRESHOLD");
+    }
+    return 0;
+}
+
+int flow_adaptive_is_running_golden(const FlowAdaptiveController *controller) {
+    if (controller == NULL) return 0;
+    return atomic_load_explicit(&controller->is_running_golden, memory_order_acquire);
 }
 

@@ -165,4 +165,14 @@ FlowAdaptiveStatus flow_adaptive_handle_pressure_event(
     const FlowEnvironmentState *env,
     size_t *morphed_candidate_index_out);
 
+/* Golden Baseline Fallback & Anomaly Protection */
+int flow_adaptive_set_golden_baseline(FlowAdaptiveController *controller,
+                                      const FlowUnit *golden_unit,
+                                      void *golden_state);
+int flow_adaptive_fallback_to_golden_baseline(FlowAdaptiveController *controller,
+                                              const char *reason_diagnostic);
+int flow_adaptive_record_error_and_check_fallback(FlowAdaptiveController *controller,
+                                                  size_t max_consecutive_errors);
+int flow_adaptive_is_running_golden(const FlowAdaptiveController *controller);
+
 #endif

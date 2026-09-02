@@ -128,4 +128,19 @@ double flow_security_mtd_calculate_entropy(const FlowMTDLayout *layout);
 int flow_security_mtd_verify_alignment(const FlowMTDLayout *layout, const size_t *field_alignments);
 void flow_security_mtd_report(const FlowMTDLayout *layout, FILE *out);
 
+/* ========================================================================= */
+/* Bounded Chaos Compliance Mode & Regulatory Production Gate                */
+/* ========================================================================= */
+
+typedef enum {
+    FLOW_COMPLIANCE_PERMISSIVE_STAGING = 0, /* Full unconstrained 1024-bit exploration */
+    FLOW_COMPLIANCE_STRICT_PROD = 1         /* Strictly bounded: algorithm/lifecycle locked, only tuning */
+} FlowComplianceMode;
+
+uint64_t flow_security_get_compliance_mask(FlowComplianceMode mode,
+                                           const FlowPlanDimensionSet *dims);
+int flow_security_is_mutation_compliant(FlowComplianceMode mode,
+                                        uint32_t mutated_bit,
+                                        const FlowPlanDimensionSet *dims);
+
 #endif
