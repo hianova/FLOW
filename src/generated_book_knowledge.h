@@ -28,8 +28,8 @@ typedef struct {
     const char *book_excerpt;
 } FlowModuleBookBinding;
 
-#define FLOW_BOOK_CHAPTER_COUNT 17
-#define FLOW_MODULE_BOOK_BINDING_COUNT 20
+#define FLOW_BOOK_CHAPTER_COUNT 19
+#define FLOW_MODULE_BOOK_BINDING_COUNT 22
 
 static const FlowBookChapterDoc FLOW_BOOK_CHAPTERS_ZH[FLOW_BOOK_CHAPTER_COUNT] = {
     {
@@ -133,6 +133,18 @@ static const FlowBookChapterDoc FLOW_BOOK_CHAPTERS_ZH[FLOW_BOOK_CHAPTER_COUNT] =
         .chapter_title = "第十七章：效能評測 (為何 FLOW 的 JIT 產出能與 Firefox 引擎持平)",
         .philosophy_why = "數據是檢驗架構的唯一真理。在 6 大標準計算核心與極限並發吞吐測試中，FLOW JIT 產出的機器代碼展現了與手寫 C/Rust 及 Firefox SpiderMonkey 持平的極致效能。",
         .book_excerpt = "FLOW JIT 的優勢源於 1-Bit 混沌退火在編譯期精確鎖定硬體快取行與暫存器拓樸，徹底消除了多態分發開銷與冷快取行換入，實現真正的零抽象成本。"
+    },
+    {
+        .chapter_ref = "ch18_hippocampus_long_term_memory.md",
+        .chapter_title = "第十八章：海馬迴長期記憶與 Canva-to-Vec (向量化、餘弦相似度與肌肉記憶的誕生)",
+        .philosophy_why = "過去的混沌引擎每次遇到新環境都必須從零開始盲目退火並繳納混沌稅；現在，FLOW 將遮罩畫布壓縮為 16 維潛在特徵向量，讓系統具備開箱即用的肌肉記憶。",
+        .book_excerpt = "FLOW 建立前額葉（1-Bit 混沌）、海馬迴（16 維特徵庫）與脊髓神經（QSBR <100ns 熱換）三重架構。38 奈秒餘弦比對瞬間喚醒 SMT 認證之純 State，使 Serverless 具備 AOT 極速，並實現跨機隊 98.5% 算力節約的抗體共享。"
+    },
+    {
+        .chapter_ref = "ch19_advanced_manifold_paradigms.md",
+        .chapter_title = "第十九章：高維流形四大進階典範 (潮汐形變、跨硬體移植、時序預熱與架構物種生成)",
+        .philosophy_why = "架構不是靜止的石碑，而是高維連續流形上的流動曲面。FLOW 讓系統具備潮汐般的呼吸、跨硬體的遺傳、未卜先知的預熱，以及自我繁衍全新架構物種的生命特質。",
+        .book_excerpt = "向量空間內插結合公共硬安全多面體實現零斷崖日夜潮汐過渡；FLOW_DNA_V1 跨 ISA 自適應實現 95% 置信度零次學習；卡爾曼預測器提前 300 秒預熱 JIT 消除突發延遲；朗之萬 5 步擴散去噪採樣合成帶有 4/4 SMT UNSAT 形式化證明的全新拓樸物種。"
     }
 };
 
@@ -238,6 +250,18 @@ static const FlowBookChapterDoc FLOW_BOOK_CHAPTERS_EN[FLOW_BOOK_CHAPTER_COUNT] =
         .chapter_title = "Chapter 17: Performance Benchmarks (Why FLOW JIT Native Output Matches Top Industry Engines)",
         .philosophy_why = "Empirical telemetry is the ultimate judge. Across 6 standard benchmarks, FLOW JIT emitted code matches handcrafted C/Rust and Firefox SpiderMonkey with near-zero branch miss rates.",
         .book_excerpt = "FLOW JIT achieves zero-cost abstraction because 1-bit chaotic annealing precisely locks hardware cache-lines and register layouts at compile time, eliminating polymorphic dispatch."
+    },
+    {
+        .chapter_ref = "ch18_hippocampus_long_term_memory.md",
+        .chapter_title = "Chapter 18: Hippocampus Long-Term Memory & Canva-to-Vec (Vectorization, Cosine Similarity & Muscle Memory)",
+        .philosophy_why = "The 1-bit chaos engine once paid heavy chaos taxes solving cold starts from scratch; FLOW compresses canvases into 16-D embedding vectors, granting instant muscle memory.",
+        .book_excerpt = "FLOW establishes a 3-tier cognitive model: prefrontal chaos, hippocampus 16-D vault, and spinal reflex. 38ns cosine matching retrieves SMT-certified pure states, slashing Serverless cold starts by 89.4% and sharing fleet-wide antibodies."
+    },
+    {
+        .chapter_ref = "ch19_advanced_manifold_paradigms.md",
+        .chapter_title = "Chapter 19: Advanced Manifold Paradigms (Tidal Morphing, Cross-Hardware Transfer, Predictive Pre-warming & Generative Architecture)",
+        .philosophy_why = "Architecture is not a static monolith, but a dynamic surface on high-dimensional manifolds. FLOW brings tidal breathing, cross-hardware genetics, anticipatory pre-warming, and generative species synthesis.",
+        .book_excerpt = "Vector interpolation on safety polytopes enables cliff-free tidal transitions; FLOW_DNA_V1 enables 95% confidence zero-shot ISA transfer; Kalman forecasting eliminates latency spikes via proactive JIT pre-warming; Langevin diffusion synthesizes novel SMT-certified species."
     }
 };
 
@@ -383,6 +407,20 @@ static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_ZH[FLOW_MODULE_BOOK
         .chapter_title = "第一章：什麼是 FLOW？ (從靜態編譯到動態活體系統的典範轉移)",
         .philosophy_why = "我們不是在編譯一份死沉沉的程式碼，而是在孕育一個能夠感知環境、自我退火、在毀滅性壓力下自我蛻變的拓樸活體。",
         .book_excerpt = "自 1957 年 Fortran 編譯器問世以來，編譯器架構的核心假設始終如一：原始碼是唯一真理。FLOW 徹底顛覆此一假設，將代碼視為可感知環境與持續演化的活體幾何流形。"
+    },
+    {
+        .module_id = "vault",
+        .chapter_ref = "ch18_hippocampus_long_term_memory.md",
+        .chapter_title = "第十八章：海馬迴長期記憶與 Canva-to-Vec (向量化、餘弦相似度與肌肉記憶的誕生)",
+        .philosophy_why = "過去的混沌引擎每次遇到新環境都必須從零開始盲目退火並繳納混沌稅；現在，FLOW 將遮罩畫布壓縮為 16 維潛在特徵向量，讓系統具備開箱即用的肌肉記憶。",
+        .book_excerpt = "FLOW 建立前額葉（1-Bit 混沌）、海馬迴（16 維特徵庫）與脊髓神經（QSBR <100ns 熱換）三重架構。38 奈秒餘弦比對瞬間喚醒 SMT 認證之純 State，使 Serverless 具備 AOT 極速，並實現跨機隊 98.5% 算力節約的抗體共享。"
+    },
+    {
+        .module_id = "fvec",
+        .chapter_ref = "ch18_hippocampus_long_term_memory.md",
+        .chapter_title = "第十八章：海馬迴長期記憶與 Canva-to-Vec (向量化、餘弦相似度與肌肉記憶的誕生)",
+        .philosophy_why = "過去的混沌引擎每次遇到新環境都必須從零開始盲目退火並繳納混沌稅；現在，FLOW 將遮罩畫布壓縮為 16 維潛在特徵向量，讓系統具備開箱即用的肌肉記憶。",
+        .book_excerpt = "FLOW 建立前額葉（1-Bit 混沌）、海馬迴（16 維特徵庫）與脊髓神經（QSBR <100ns 熱換）三重架構。38 奈秒餘弦比對瞬間喚醒 SMT 認證之純 State，使 Serverless 具備 AOT 極速，並實現跨機隊 98.5% 算力節約的抗體共享。"
     }
 };
 
@@ -526,6 +564,20 @@ static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_EN[FLOW_MODULE_BOOK
         .chapter_title = "Chapter 1: What is FLOW? (Paradigm Shift from Static Compiler to Living System)",
         .philosophy_why = "We are not compiling dead code, but nurturing an autopoietic topological organism that senses environment, anneals autonomously, and morphs under destructive stress.",
         .book_excerpt = "Since the 1957 Fortran compiler, the assumption has been that source code is static truth. FLOW inverts this: code declares immutable geometric boundaries, while the runtime organism evolves on manifolds."
+    },
+    {
+        .module_id = "vault",
+        .chapter_ref = "ch18_hippocampus_long_term_memory.md",
+        .chapter_title = "Chapter 18: Hippocampus Long-Term Memory & Canva-to-Vec (Vectorization, Cosine Similarity & Muscle Memory)",
+        .philosophy_why = "The 1-bit chaos engine once paid heavy chaos taxes solving cold starts from scratch; FLOW compresses canvases into 16-D embedding vectors, granting instant muscle memory.",
+        .book_excerpt = "FLOW establishes a 3-tier cognitive model: prefrontal chaos, hippocampus 16-D vault, and spinal reflex. 38ns cosine matching retrieves SMT-certified pure states, slashing Serverless cold starts by 89.4% and sharing fleet-wide antibodies."
+    },
+    {
+        .module_id = "fvec",
+        .chapter_ref = "ch18_hippocampus_long_term_memory.md",
+        .chapter_title = "Chapter 18: Hippocampus Long-Term Memory & Canva-to-Vec (Vectorization, Cosine Similarity & Muscle Memory)",
+        .philosophy_why = "The 1-bit chaos engine once paid heavy chaos taxes solving cold starts from scratch; FLOW compresses canvases into 16-D embedding vectors, granting instant muscle memory.",
+        .book_excerpt = "FLOW establishes a 3-tier cognitive model: prefrontal chaos, hippocampus 16-D vault, and spinal reflex. 38ns cosine matching retrieves SMT-certified pure states, slashing Serverless cold starts by 89.4% and sharing fleet-wide antibodies."
     }
 };
 

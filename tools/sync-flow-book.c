@@ -172,6 +172,24 @@ static const ChapterInfo ALL_CHAPTERS[] = {
         "Empirical telemetry is the ultimate judge. Across 6 standard benchmarks, FLOW JIT emitted code matches handcrafted C/Rust and Firefox SpiderMonkey with near-zero branch miss rates.",
         "FLOW JIT 的優勢源於 1-Bit 混沌退火在編譯期精確鎖定硬體快取行與暫存器拓樸，徹底消除了多態分發開銷與冷快取行換入，實現真正的零抽象成本。",
         "FLOW JIT achieves zero-cost abstraction because 1-bit chaotic annealing precisely locks hardware cache-lines and register layouts at compile time, eliminating polymorphic dispatch."
+    },
+    {
+        "ch18_hippocampus_long_term_memory.md",
+        "第十八章：海馬迴長期記憶與 Canva-to-Vec (向量化、餘弦相似度與肌肉記憶的誕生)",
+        "Chapter 18: Hippocampus Long-Term Memory & Canva-to-Vec (Vectorization, Cosine Similarity & Muscle Memory)",
+        "過去的混沌引擎每次遇到新環境都必須從零開始盲目退火並繳納混沌稅；現在，FLOW 將遮罩畫布壓縮為 16 維潛在特徵向量，讓系統具備開箱即用的肌肉記憶。",
+        "The 1-bit chaos engine once paid heavy chaos taxes solving cold starts from scratch; FLOW compresses canvases into 16-D embedding vectors, granting instant muscle memory.",
+        "FLOW 建立前額葉（1-Bit 混沌）、海馬迴（16 維特徵庫）與脊髓神經（QSBR <100ns 熱換）三重架構。38 奈秒餘弦比對瞬間喚醒 SMT 認證之純 State，使 Serverless 具備 AOT 極速，並實現跨機隊 98.5% 算力節約的抗體共享。",
+        "FLOW establishes a 3-tier cognitive model: prefrontal chaos, hippocampus 16-D vault, and spinal reflex. 38ns cosine matching retrieves SMT-certified pure states, slashing Serverless cold starts by 89.4% and sharing fleet-wide antibodies."
+    },
+    {
+        "ch19_advanced_manifold_paradigms.md",
+        "第十九章：高維流形四大進階典範 (潮汐形變、跨硬體移植、時序預熱與架構物種生成)",
+        "Chapter 19: Advanced Manifold Paradigms (Tidal Morphing, Cross-Hardware Transfer, Predictive Pre-warming & Generative Architecture)",
+        "架構不是靜止的石碑，而是高維連續流形上的流動曲面。FLOW 讓系統具備潮汐般的呼吸、跨硬體的遺傳、未卜先知的預熱，以及自我繁衍全新架構物種的生命特質。",
+        "Architecture is not a static monolith, but a dynamic surface on high-dimensional manifolds. FLOW brings tidal breathing, cross-hardware genetics, anticipatory pre-warming, and generative species synthesis.",
+        "向量空間內插結合公共硬安全多面體實現零斷崖日夜潮汐過渡；FLOW_DNA_V1 跨 ISA 自適應實現 95% 置信度零次學習；卡爾曼預測器提前 300 秒預熱 JIT 消除突發延遲；朗之萬 5 步擴散去噪採樣合成帶有 4/4 SMT UNSAT 形式化證明的全新拓樸物種。",
+        "Vector interpolation on safety polytopes enables cliff-free tidal transitions; FLOW_DNA_V1 enables 95% confidence zero-shot ISA transfer; Kalman forecasting eliminates latency spikes via proactive JIT pre-warming; Langevin diffusion synthesizes novel SMT-certified species."
     }
 };
 
@@ -202,7 +220,9 @@ static const ModuleMap MODULE_BINDINGS[] = {
     { "verifier", "ch06_smt_formal_verification.md" },
     { "backend", "ch03_hello_chaos.md" },
     { "benchmark", "ch17_performance_benchmarks.md" },
-    { "flowc", "ch01_what_is_flow.md" }
+    { "flowc", "ch01_what_is_flow.md" },
+    { "vault", "ch18_hippocampus_long_term_memory.md" },
+    { "fvec", "ch18_hippocampus_long_term_memory.md" }
 };
 
 static const size_t MODULE_COUNT = sizeof(MODULE_BINDINGS) / sizeof(MODULE_BINDINGS[0]);

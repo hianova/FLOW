@@ -212,7 +212,6 @@ typedef struct {
 } FlowBitSearchResult;
 
 const char *flow_gate_failure_name(FlowGateFailureReason reason);
-void flow_search_heatmap_report(const FlowSearchHeatmap *heatmap, FILE *out);
 
 /* 3-Tier Dynamic Mask Canvas Composition & Report */
 int flow_mask_canvas_compose(const SemanticIR *ir, const Component *comp,

@@ -198,7 +198,8 @@ typedef enum {
     FLOW_ARCH_APPLE_SILICON,   /* Unified memory, 128-byte cache line, AMX/NEON */
     FLOW_ARCH_INTEL_AVX2,      /* 64-byte cache line, 256-bit SIMD */
     FLOW_ARCH_INTEL_AVX512,    /* 64-byte cache line, 512-bit SIMD */
-    FLOW_ARCH_ARM_NEON         /* Generic AArch64 / Mobile */
+    FLOW_ARCH_ARM_NEON,        /* Generic AArch64 / Mobile */
+    FLOW_ARCH_RISCV_VECTOR     /* RISC-V Vector Extension */
 } FlowHardwareArch;
 
 typedef struct {

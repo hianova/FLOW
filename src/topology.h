@@ -19,7 +19,8 @@ typedef enum {
     FLOW_NODE_INTENT_OP = 3,     /* Flow Intent operations (transform, group, sort, top, etc.) */
     FLOW_NODE_DIMENSION = 4,     /* BitSpace dimensions (capacity, threads, shards, buffer_bytes) */
     FLOW_NODE_SHARD_GROUP = 5,   /* Shard partition cluster */
-    FLOW_NODE_DOC_CHAPTER = 6    /* Doc-as-Topology: Living Documentation Chapter / Philosophy Node */
+    FLOW_NODE_DOC_CHAPTER = 6,   /* Doc-as-Topology: Living Documentation Chapter / Philosophy Node */
+    FLOW_NODE_FVEC_EXPERIENCE = 7 /* .fvec Architecture Feature Model Node */
 } FlowNodeType;
 
 typedef enum {
@@ -29,7 +30,8 @@ typedef enum {
     FLOW_EDGE_BINDS_DIMENSION = 3,   /* Component binds to BitSpace dimension */
     FLOW_EDGE_DATA_FLOW = 4,         /* Dataflow pipeline connection (A -> B) */
     FLOW_EDGE_SHARD_AFFINITY = 5,    /* Affinity / Locality between nodes */
-    FLOW_EDGE_DOCUMENTS = 6          /* Doc-as-Topology: Code Node -> Book Chapter / Design Philosophy */
+    FLOW_EDGE_DOCUMENTS = 6,         /* Doc-as-Topology: Code Node -> Book Chapter / Design Philosophy */
+    FLOW_EDGE_MEMORIALIZES = 7       /* .fvec Historical Experience -> Component */
 } FlowEdgeType;
 
 typedef struct {
@@ -91,6 +93,7 @@ int flow_topology_attach_telemetry(FlowTopologyGraph *graph, const char *node_na
                                   double raw_val, double thresh_val,
                                   const char *unit, const char *symptom);
 const FlowTopologyNode *flow_topology_get_peak_hotspot(const FlowTopologyGraph *graph);
+int flow_topology_attach_fvec_store(FlowTopologyGraph *graph, const void *store);
 
 /* Build Complete FLOW Architecture & Spec Topology */
 void flow_topology_build_codebase_graph(FlowTopologyGraph *graph);

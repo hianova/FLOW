@@ -234,25 +234,6 @@ const char *flow_gate_failure_name(FlowGateFailureReason reason) {
     }
 }
 
-void flow_search_heatmap_report(const FlowSearchHeatmap *heatmap, FILE *out) {
-    if (heatmap == NULL || out == NULL || heatmap->total_mutations == 0) return;
-    fprintf(out, "Search Heatmap (%llu total mutations, %llu failures):\n",
-            (unsigned long long)heatmap->total_mutations,
-            (unsigned long long)heatmap->total_failures);
-    if (heatmap->total_failures == 0) {
-        fprintf(out, "  All evaluated plans passed hard gates (100%% viable)\n");
-        return;
-    }
-    for (int r = 1; r < FLOW_GATE_CATEGORY_MAX; ++r) {
-        if (heatmap->failure_counts[r] > 0) {
-            double pct = ((double)heatmap->failure_counts[r] * 100.0) / (double)heatmap->total_failures;
-            fprintf(out, "  - %-20s: %llu (%.1f%% of failures)\n",
-                    flow_gate_failure_name((FlowGateFailureReason)r),
-                    (unsigned long long)heatmap->failure_counts[r], pct);
-        }
-    }
-}
-
 /* ========================================================================= */
 /* Mathematical Polyhedral Constraint & Hypercube Projection Implementation  */
 /* ========================================================================= */

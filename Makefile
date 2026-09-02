@@ -8,8 +8,13 @@ THREAD_FLAGS ?= -pthread
 BUILD_DIR := build
 FLOWC := $(BUILD_DIR)/flowc
 FLOWY := $(BUILD_DIR)/flowy
+LIBFLOW_A := $(BUILD_DIR)/libflow.a
 
 SRC_LIB := $(filter-out src/flowc.c src/flowy_main.c,$(wildcard src/*.c))
+LIB_OBJS := $(patsubst src/%.c,$(BUILD_DIR)/obj/%.o,$(SRC_LIB))
+
+AR ?= ar
+RANLIB ?= ranlib
 
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
@@ -17,9 +22,9 @@ INCLUDEDIR ?= $(PREFIX)/include/flow
 
 PLUGINS_SO := $(BUILD_DIR)/libflow_embodied.so $(BUILD_DIR)/libflow_smt.so $(BUILD_DIR)/libflow_security.so $(BUILD_DIR)/libflow_swarm.so $(BUILD_DIR)/libflow_genetic.so
 
-.PHONY: all clean test demos demo benchmark security-test reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test plugin-test reload-stress-test reload-stress-nightly autopoiesis-check acceptance install uninstall fuzz-test fuzz ensemble-test smt-test mlir-llvm-test topology-test ebpf-pmu-test jit-migration-test bootstrap-sandbox-test quantum-dimension-test two-tier-chaos-test zero-tlb-shootdown-test epigenetic-mask-test dynamic-mask-superposition-test mtd-defense-test swarm-federation-test genetic-programming-test dynamic-env-morph-test qsbr-unified-test bitset-genome-test async-jit-worker-test orchestrator-test enterprise-production-test embodied-physics-test flowy-test mechanism-audit-test audit-mechanisms decision-explain-test hardened-production-test decoupling-test plugins flowy polytope-projection-test plugin-abi-v2-test autonomous-orchestration-test flowy-level5-crucible level5-contest sync-book flowy-i18n-test
+.PHONY: all clean test demos demo benchmark security-test reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test plugin-test reload-stress-test reload-stress-nightly autopoiesis-check acceptance install uninstall fuzz-test fuzz ensemble-test smt-test mlir-llvm-test topology-test ebpf-pmu-test jit-migration-test bootstrap-sandbox-test quantum-dimension-test two-tier-chaos-test zero-tlb-shootdown-test epigenetic-mask-test dynamic-mask-superposition-test mtd-defense-test swarm-federation-test genetic-programming-test dynamic-env-morph-test qsbr-unified-test bitset-genome-test async-jit-worker-test orchestrator-test enterprise-production-test embodied-physics-test flowy-test mechanism-audit-test audit-mechanisms decision-explain-test hardened-production-test decoupling-test plugins flowy libflow polytope-projection-test plugin-abi-v2-test autonomous-orchestration-test flowy-level5-crucible level5-contest sync-book flowy-i18n-test vault-test serverless-coldstart-test fleet-immune-test semantic-rag-test tidal-morph-test cross-hardware-transfer-test predictive-jit-test generative-architecture-test fvec-format-test fvec-curator-test fvec-flowc-apply-test immune-promotion-test
 
-all: src/generated_book_knowledge.h $(FLOWC) $(FLOWY) plugins
+all: src/generated_book_knowledge.h $(LIBFLOW_A) $(FLOWC) $(FLOWY) plugins
 
 sync-book: src/generated_book_knowledge.h
 
@@ -27,25 +32,37 @@ src/generated_book_knowledge.h: tools/sync-flow-book.c $(wildcard flow-book/src/
 	$(CC) $(CFLAGS) tools/sync-flow-book.c -o $(BUILD_DIR)/sync-flow-book
 	$(BUILD_DIR)/sync-flow-book $@
 
-install: $(FLOWC) $(FLOWY)
+install: $(FLOWC) $(FLOWY) $(LIBFLOW_A)
 	mkdir -p $(DESTDIR)$(BINDIR)
 	install -m 755 $(FLOWC) $(DESTDIR)$(BINDIR)/flowc
 	install -m 755 $(FLOWY) $(DESTDIR)$(BINDIR)/flowy
+	mkdir -p $(DESTDIR)$(PREFIX)/lib
+	install -m 644 $(LIBFLOW_A) $(DESTDIR)$(PREFIX)/lib/libflow.a
 	mkdir -p $(DESTDIR)$(INCLUDEDIR)
 	install -m 644 src/*.h $(DESTDIR)$(INCLUDEDIR)
 
 uninstall:
-	rm -f $(DESTDIR)$(BINDIR)/flowc $(DESTDIR)$(BINDIR)/flowy
+	rm -f $(DESTDIR)$(BINDIR)/flowc $(DESTDIR)$(BINDIR)/flowy $(DESTDIR)$(PREFIX)/lib/libflow.a
 	rm -rf $(DESTDIR)$(INCLUDEDIR)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-$(FLOWC): $(SRC_LIB) src/flowc.c $(wildcard src/*.h) src/generated_book_knowledge.h | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(SRC_LIB) src/flowc.c -o $@ $(LDLIBS) $(THREAD_FLAGS)
+$(BUILD_DIR)/obj/%.o: src/%.c src/generated_book_knowledge.h $(wildcard src/*.h) | $(BUILD_DIR)
+	@mkdir -p $(BUILD_DIR)/obj
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc -c $< -o $@
 
-$(FLOWY): $(SRC_LIB) src/flowy_main.c $(wildcard src/*.h) src/generated_book_knowledge.h | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(SRC_LIB) src/flowy_main.c -o $@ $(LDLIBS) $(THREAD_FLAGS)
+$(LIBFLOW_A): $(LIB_OBJS)
+	$(AR) rcs $@ $^
+	$(RANLIB) $@
+
+libflow: $(LIBFLOW_A)
+
+$(FLOWC): src/flowc.c $(LIBFLOW_A) src/generated_book_knowledge.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -Isrc src/flowc.c $(LIBFLOW_A) -o $@ $(LDLIBS) $(THREAD_FLAGS)
+
+$(FLOWY): src/flowy_main.c $(LIBFLOW_A) src/generated_book_knowledge.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -Isrc src/flowy_main.c $(LIBFLOW_A) -o $@ $(LDLIBS) $(THREAD_FLAGS)
 
 flowy: $(FLOWY)
 
@@ -81,183 +98,183 @@ demos: $(FLOWC)
 benchmark: demos
 	./tools/benchmark-suite.sh 1000
 
-security-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/security-test.c -o $(BUILD_DIR)/security-test -lm
+security-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/security-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/security-test $(LDLIBS)
 	$(BUILD_DIR)/security-test
 
-reload-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/reload-test.c -o $(BUILD_DIR)/reload-test -lm
+reload-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/reload-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/reload-test $(LDLIBS)
 	$(BUILD_DIR)/reload-test
 
-live-reload-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/live-reload-test.c -o $(BUILD_DIR)/live-reload-test -lm
+live-reload-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/live-reload-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/live-reload-test $(LDLIBS)
 	$(BUILD_DIR)/live-reload-test
 
-backend-reload-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/backend-reload-test.c -o $(BUILD_DIR)/backend-reload-test -lm
+backend-reload-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/backend-reload-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/backend-reload-test $(LDLIBS)
 	$(BUILD_DIR)/backend-reload-test
 
-generated-reload-test: $(FLOWC) | $(BUILD_DIR)
+generated-reload-test: $(FLOWC) $(LIBFLOW_A) | $(BUILD_DIR)
 	$(FLOWC) examples/rank.flow -o /tmp/flow-rank-reload.c --search --iterations 50 --seed 42 --reload-adapter
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/generated-reload-test.c /tmp/flow-rank-reload.c -o $(BUILD_DIR)/generated-reload-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/generated-reload-test.c /tmp/flow-rank-reload.c $(LIBFLOW_A) -o $(BUILD_DIR)/generated-reload-test $(LDLIBS)
 	$(BUILD_DIR)/generated-reload-test
 	$(FLOWC) examples/small.flow -o /tmp/flow-small-reload.c --reload-adapter
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc -c /tmp/flow-small-reload.c -o /tmp/flow-small-reload.o
 
-adaptive-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/adaptive-test.c -o $(BUILD_DIR)/adaptive-test -lm
+adaptive-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/adaptive-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/adaptive-test $(LDLIBS)
 	$(BUILD_DIR)/adaptive-test
 
-bitspace-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/bitspace-test.c -o $(BUILD_DIR)/bitspace-test -lm
+bitspace-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/bitspace-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/bitspace-test $(LDLIBS)
 	$(BUILD_DIR)/bitspace-test
 
-plugin-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/plugin-test.c -o $(BUILD_DIR)/plugin-test -lm
+plugin-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/plugin-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/plugin-test $(LDLIBS)
 	$(BUILD_DIR)/plugin-test
 
-project-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/project-test.c -o $(BUILD_DIR)/project-test -lm
+project-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/project-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/project-test $(LDLIBS)
 	$(BUILD_DIR)/project-test
 
-abi-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/abi-test.c -o $(BUILD_DIR)/abi-test -lm
+abi-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/abi-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/abi-test $(LDLIBS)
 	$(BUILD_DIR)/abi-test
 
-vertical-slice-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/vertical-slice-test.c -o $(BUILD_DIR)/vertical-slice-test -lm
+vertical-slice-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/vertical-slice-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/vertical-slice-test $(LDLIBS)
 	$(BUILD_DIR)/vertical-slice-test
 
-fuzz-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/fuzz-test.c -o $(BUILD_DIR)/fuzz-test -lm
+fuzz-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/fuzz-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/fuzz-test $(LDLIBS)
 	$(BUILD_DIR)/fuzz-test
 
-ensemble-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/ensemble-test.c -o $(BUILD_DIR)/ensemble-test -lm
+ensemble-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/ensemble-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/ensemble-test $(LDLIBS)
 	$(BUILD_DIR)/ensemble-test
 
-smt-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/smt-test.c -o $(BUILD_DIR)/smt-test -lm
+smt-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/smt-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/smt-test $(LDLIBS)
 	$(BUILD_DIR)/smt-test
 
-mlir-llvm-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/mlir-llvm-test.c -o $(BUILD_DIR)/mlir-llvm-test -lm
+mlir-llvm-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/mlir-llvm-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/mlir-llvm-test $(LDLIBS)
 	$(BUILD_DIR)/mlir-llvm-test
 
-topology-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/topology-test.c -o $(BUILD_DIR)/topology-test -lm
+topology-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/topology-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/topology-test $(LDLIBS)
 	$(BUILD_DIR)/topology-test
 
-ebpf-pmu-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/ebpf-pmu-test.c -o $(BUILD_DIR)/ebpf-pmu-test -lm
+ebpf-pmu-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/ebpf-pmu-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/ebpf-pmu-test $(LDLIBS)
 	$(BUILD_DIR)/ebpf-pmu-test
 
-jit-migration-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/jit-migration-test.c -o $(BUILD_DIR)/jit-migration-test -lm
+jit-migration-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/jit-migration-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/jit-migration-test $(LDLIBS)
 	$(BUILD_DIR)/jit-migration-test
 
-bootstrap-sandbox-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/bootstrap-sandbox-test.c -o $(BUILD_DIR)/bootstrap-sandbox-test -lm
+bootstrap-sandbox-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/bootstrap-sandbox-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/bootstrap-sandbox-test $(LDLIBS)
 	$(BUILD_DIR)/bootstrap-sandbox-test
 
-quantum-dimension-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/quantum-dimension-test.c -o $(BUILD_DIR)/quantum-dimension-test -lm
+quantum-dimension-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/quantum-dimension-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/quantum-dimension-test $(LDLIBS)
 	$(BUILD_DIR)/quantum-dimension-test
 
-two-tier-chaos-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/two-tier-chaos-test.c -o $(BUILD_DIR)/two-tier-chaos-test -lm
+two-tier-chaos-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/two-tier-chaos-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/two-tier-chaos-test $(LDLIBS)
 	$(BUILD_DIR)/two-tier-chaos-test
 
-zero-tlb-shootdown-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/zero-tlb-shootdown-test.c -o $(BUILD_DIR)/zero-tlb-shootdown-test -lm
+zero-tlb-shootdown-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/zero-tlb-shootdown-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/zero-tlb-shootdown-test $(LDLIBS)
 	$(BUILD_DIR)/zero-tlb-shootdown-test
 
-epigenetic-mask-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/epigenetic-mask-test.c -o $(BUILD_DIR)/epigenetic-mask-test -lm
+epigenetic-mask-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/epigenetic-mask-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/epigenetic-mask-test $(LDLIBS)
 	$(BUILD_DIR)/epigenetic-mask-test
 
-dynamic-mask-superposition-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/dynamic-mask-superposition-test.c -o $(BUILD_DIR)/dynamic-mask-superposition-test -lm
+dynamic-mask-superposition-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/dynamic-mask-superposition-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/dynamic-mask-superposition-test $(LDLIBS)
 	$(BUILD_DIR)/dynamic-mask-superposition-test
 
-mtd-defense-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/mtd-defense-test.c -o $(BUILD_DIR)/mtd-defense-test -lm
+mtd-defense-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/mtd-defense-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/mtd-defense-test $(LDLIBS)
 	$(BUILD_DIR)/mtd-defense-test
 
-swarm-federation-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/swarm-federation-test.c -o $(BUILD_DIR)/swarm-federation-test -lm
+swarm-federation-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/swarm-federation-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/swarm-federation-test $(LDLIBS)
 	$(BUILD_DIR)/swarm-federation-test
 
-genetic-programming-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/genetic-programming-test.c -o $(BUILD_DIR)/genetic-programming-test -lm
+genetic-programming-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/genetic-programming-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/genetic-programming-test $(LDLIBS)
 	$(BUILD_DIR)/genetic-programming-test
 
-dynamic-env-morph-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/dynamic-env-morph-test.c -o $(BUILD_DIR)/dynamic-env-morph-test -lm
+dynamic-env-morph-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/dynamic-env-morph-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/dynamic-env-morph-test $(LDLIBS)
 	$(BUILD_DIR)/dynamic-env-morph-test
 
-qsbr-unified-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/qsbr-unified-test.c -o $(BUILD_DIR)/qsbr-unified-test -lm
+qsbr-unified-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/qsbr-unified-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/qsbr-unified-test $(LDLIBS)
 	$(BUILD_DIR)/qsbr-unified-test
 
-bitset-genome-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/bitset-genome-test.c -o $(BUILD_DIR)/bitset-genome-test -lm
+bitset-genome-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/bitset-genome-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/bitset-genome-test $(LDLIBS)
 	$(BUILD_DIR)/bitset-genome-test
 
-async-jit-worker-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/async-jit-worker-test.c -o $(BUILD_DIR)/async-jit-worker-test -lm
+async-jit-worker-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/async-jit-worker-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/async-jit-worker-test $(LDLIBS)
 	$(BUILD_DIR)/async-jit-worker-test
 
-orchestrator-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/orchestrator-test.c -o $(BUILD_DIR)/orchestrator-test -lm
+orchestrator-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/orchestrator-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/orchestrator-test $(LDLIBS)
 	$(BUILD_DIR)/orchestrator-test
 
-enterprise-production-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/enterprise-production-test.c -o $(BUILD_DIR)/enterprise-production-test -lm
+enterprise-production-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/enterprise-production-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/enterprise-production-test $(LDLIBS)
 	$(BUILD_DIR)/enterprise-production-test
 
-embodied-physics-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/embodied-physics-test.c -o $(BUILD_DIR)/embodied-physics-test -lm
+embodied-physics-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/embodied-physics-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/embodied-physics-test $(LDLIBS)
 	$(BUILD_DIR)/embodied-physics-test
 
-flowy-test: $(FLOWY) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/flowy-test.c -o $(BUILD_DIR)/flowy-test -lm
+flowy-test: $(FLOWY) $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/flowy-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/flowy-test $(LDLIBS)
 	$(BUILD_DIR)/flowy-test
 
-mechanism-audit-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/mechanism-audit-test.c -o $(BUILD_DIR)/mechanism-audit-test -lm
+mechanism-audit-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/mechanism-audit-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/mechanism-audit-test $(LDLIBS)
 	$(BUILD_DIR)/mechanism-audit-test
 
-decision-explain-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/decision-explain-test.c -o $(BUILD_DIR)/decision-explain-test -lm
+decision-explain-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/decision-explain-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/decision-explain-test $(LDLIBS)
 	$(BUILD_DIR)/decision-explain-test
 
-hardened-production-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/hardened-production-test.c -o $(BUILD_DIR)/hardened-production-test -lm
+hardened-production-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/hardened-production-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/hardened-production-test $(LDLIBS)
 	$(BUILD_DIR)/hardened-production-test
 
-decoupling-test: $(FLOWC) $(FLOWY) plugins | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/decoupling-test.c -o $(BUILD_DIR)/decoupling-test -lm
+decoupling-test: $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/decoupling-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/decoupling-test $(LDLIBS)
 	$(BUILD_DIR)/decoupling-test
 
-polytope-projection-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/polytope-projection-test.c -o $(BUILD_DIR)/polytope-projection-test -lm
+polytope-projection-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/polytope-projection-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/polytope-projection-test $(LDLIBS)
 	$(BUILD_DIR)/polytope-projection-test
 
-plugin-abi-v2-test: plugins | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/plugin-abi-v2-test.c -o $(BUILD_DIR)/plugin-abi-v2-test -lm
+plugin-abi-v2-test: plugins $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/plugin-abi-v2-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/plugin-abi-v2-test $(LDLIBS)
 	$(BUILD_DIR)/plugin-abi-v2-test
 
-autonomous-orchestration-test: $(FLOWY) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/autonomous-orchestration-test.c -o $(BUILD_DIR)/autonomous-orchestration-test -lm
+autonomous-orchestration-test: $(FLOWY) $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/autonomous-orchestration-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/autonomous-orchestration-test $(LDLIBS)
 	$(BUILD_DIR)/autonomous-orchestration-test
 
-flowy-level5-crucible: $(FLOWY) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/flowy-level5-crucible.c -o $(BUILD_DIR)/flowy-level5-crucible -lm
+flowy-level5-crucible: $(FLOWY) $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/flowy-level5-crucible.c $(LIBFLOW_A) -o $(BUILD_DIR)/flowy-level5-crucible $(LDLIBS)
 	$(BUILD_DIR)/flowy-level5-crucible
 
-flowy-i18n-test: $(FLOWY) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/flowy-i18n-test.c -o $(BUILD_DIR)/flowy-i18n-test -lm
+flowy-i18n-test: $(FLOWY) $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/flowy-i18n-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/flowy-i18n-test $(LDLIBS)
 	$(BUILD_DIR)/flowy-i18n-test
 
 level5-contest: flowy-level5-crucible
@@ -270,8 +287,8 @@ fuzz: | $(BUILD_DIR)
 	@echo "Running LLVM libFuzzer for 5 seconds..."
 	$(BUILD_DIR)/fuzzer-engine -max_total_time=5
 
-reload-stress-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/reload-stress-test.c -o $(BUILD_DIR)/reload-stress-test -lm
+reload-stress-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/reload-stress-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/reload-stress-test $(LDLIBS)
 	$(BUILD_DIR)/reload-stress-test
 
 reload-stress-nightly: reload-stress-test
@@ -283,7 +300,56 @@ autopoiesis-check: $(FLOWY)
 
 acceptance: test benchmark autopoiesis-check security-test
 
-test: $(FLOWC) $(FLOWY) plugins reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test bitspace-test plugin-test project-test abi-test vertical-slice-test reload-stress-test fuzz-test ensemble-test smt-test mlir-llvm-test topology-test ebpf-pmu-test jit-migration-test bootstrap-sandbox-test quantum-dimension-test two-tier-chaos-test zero-tlb-shootdown-test epigenetic-mask-test dynamic-mask-superposition-test mtd-defense-test swarm-federation-test genetic-programming-test dynamic-env-morph-test qsbr-unified-test bitset-genome-test async-jit-worker-test orchestrator-test enterprise-production-test embodied-physics-test flowy-test mechanism-audit-test decision-explain-test hardened-production-test decoupling-test polytope-projection-test plugin-abi-v2-test autonomous-orchestration-test flowy-level5-crucible flowy-i18n-test
+vault-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/vault-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/vault-test $(LDLIBS)
+	$(BUILD_DIR)/vault-test
+
+serverless-coldstart-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/serverless-coldstart-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/serverless-coldstart-test $(LDLIBS)
+	$(BUILD_DIR)/serverless-coldstart-test
+
+fleet-immune-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/fleet-immune-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/fleet-immune-test $(LDLIBS)
+	$(BUILD_DIR)/fleet-immune-test
+
+semantic-rag-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/semantic-rag-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/semantic-rag-test $(LDLIBS)
+	$(BUILD_DIR)/semantic-rag-test
+
+tidal-morph-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/tidal-morph-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/tidal-morph-test $(LDLIBS)
+	$(BUILD_DIR)/tidal-morph-test
+
+cross-hardware-transfer-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/cross-hardware-transfer-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/cross-hardware-transfer-test $(LDLIBS)
+	$(BUILD_DIR)/cross-hardware-transfer-test
+
+predictive-jit-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/predictive-jit-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/predictive-jit-test $(LDLIBS)
+	$(BUILD_DIR)/predictive-jit-test
+
+generative-architecture-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/generative-architecture-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/generative-architecture-test $(LDLIBS)
+	$(BUILD_DIR)/generative-architecture-test
+
+fvec-format-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/fvec-format-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/fvec-format-test $(LDLIBS)
+	$(BUILD_DIR)/fvec-format-test
+
+fvec-curator-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/fvec-curator-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/fvec-curator-test $(LDLIBS)
+	$(BUILD_DIR)/fvec-curator-test
+
+immune-promotion-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/immune-promotion-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/immune-promotion-test $(LDLIBS)
+	$(BUILD_DIR)/immune-promotion-test
+
+fvec-flowc-apply-test: $(FLOWC) $(FLOWY) | $(BUILD_DIR)
+	$(FLOWY) fvec seed .flow/vecs
+	$(FLOWC) examples/bounded_queue.flow -o generated/fvec-applied.c --apply-fvec .flow/vecs/hft_ultra_low_latency.fvec
+	grep -q 'flow: bounded_queue' generated/fvec-applied.c
+
+test: $(FLOWC) $(FLOWY) plugins reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test bitspace-test plugin-test project-test abi-test vertical-slice-test reload-stress-test fuzz-test ensemble-test smt-test mlir-llvm-test topology-test ebpf-pmu-test jit-migration-test bootstrap-sandbox-test quantum-dimension-test two-tier-chaos-test zero-tlb-shootdown-test epigenetic-mask-test dynamic-mask-superposition-test mtd-defense-test swarm-federation-test genetic-programming-test dynamic-env-morph-test qsbr-unified-test bitset-genome-test async-jit-worker-test orchestrator-test enterprise-production-test embodied-physics-test flowy-test mechanism-audit-test decision-explain-test hardened-production-test decoupling-test polytope-projection-test plugin-abi-v2-test autonomous-orchestration-test flowy-level5-crucible flowy-i18n-test vault-test serverless-coldstart-test fleet-immune-test semantic-rag-test tidal-morph-test cross-hardware-transfer-test predictive-jit-test generative-architecture-test fvec-format-test fvec-curator-test fvec-flowc-apply-test immune-promotion-test
 	! grep -E -q 'heavy-tail|flip_bit_block|Black Swan' src/search.c README.md ACCEPTANCE.md
 	grep -E -q 'one chaotic 1-bit mutation' src/search.c
 	$(FLOWC) examples/rank.flow -o generated/rank.c

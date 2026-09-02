@@ -51,4 +51,16 @@ int flow_swarm_search(const FlowBitSpace *space, size_t particle_count,
 
 void flow_swarm_report(const FlowSwarmCluster *cluster, FILE *out);
 
+/* ------------------------------------------------------------------------- */
+/* Swarm Lymphatic Broadcasting (9-Byte Fleet-Wide Antibody Propagation)     */
+/* ------------------------------------------------------------------------- */
+#define FLOW_SWARM_MSG_ANTIBODY 0xAA
+#define FLOW_SWARM_LYMPH_PKT_SIZE 9
+
+int flow_swarm_lymphatic_encode(uint64_t content_hash, uint8_t out_packet[FLOW_SWARM_LYMPH_PKT_SIZE]);
+int flow_swarm_lymphatic_decode(const uint8_t in_packet[FLOW_SWARM_LYMPH_PKT_SIZE], uint64_t *out_content_hash);
+int flow_swarm_lymphatic_assimilate(const char *local_vec_dir,
+                                    const char *peer_vec_dir,
+                                    uint64_t content_hash);
+
 #endif

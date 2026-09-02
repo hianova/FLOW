@@ -32,3 +32,8 @@
 # 第六部：實戰與基準測試 (Crucible & Benchmarks)
 - [16. Level 5 絕對死局測試 (解析 Kobayashi Maru 壓測：並發風暴與 OOM 雙重束縛下的生存實錄)](ch16_level5_crucible_test.md)
 - [17. 效能評測 (為何 FLOW 的 JIT 產出能與 Firefox 引擎持平)](ch17_performance_benchmarks.md)
+
+# 第七部：長期記憶與特徵流形 (Hippocampus & Feature Manifolds)
+- [18. 海馬迴長期記憶與 Canva-to-Vec (向量化、餘弦相似度與肌肉記憶的誕生)](ch18_hippocampus_long_term_memory.md)
+- [19. 高維流形四大進階典範 (潮汐形變、跨硬體移植、時序預熱與架構物種生成)](ch19_advanced_manifold_paradigms.md)
+

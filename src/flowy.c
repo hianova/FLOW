@@ -12,178 +12,7 @@
 #include <string.h>
 #include <time.h>
 
-static const FlowModuleKnowledge CODEBASE_KNOWLEDGE[] = {
-    {
-        .module_id = "bitspace",
-        .title = "Orthogonal Polytope BitSpace & 3-Tier Mask Canvas",
-        .header_file = "src/bitspace.h",
-        .source_file = "src/bitspace.c",
-        .layer = 0,
-        .responsibilities = "Manages orthogonal polytope hypercube projections Pi_P({0,1}^N), constant-time O(1) 1-bit chaotic annealing, and 3-Tier Dynamic Mask Canvas (Hard Safety, Telemetry Bias, Domain Preferences).",
-        .algorithmic_guarantee = "O(1) 1-bit mutation (<2.5 ns/op) exploring Pareto frontiers on discrete manifolds; 1-cycle bitwise pruning eliminates 99.9% illegal states.",
-        .memory_concurrency_model = "Native uint64_t register genome; zero heap allocation on search fast-path.",
-        .key_apis = "flow_polyhedron_project_mask, flow_mask_canvas_compose, flow_bitspace_search_configured",
-        .keywords = "bitspace genome 1bit chaos mutation mask canvas polytope projection dimension pareto 混沌 幾何 遮罩 突變"
-    },
-    {
-        .module_id = "reload",
-        .title = "Unified QSBR (Quiescent-State Based Reclamation) & Live Hot Reload",
-        .header_file = "src/reload.h",
-        .source_file = "src/reload.c",
-        .layer = 0,
-        .responsibilities = "Provides lock-free, zero-atomic-write RCU memory reclamation, sub-microsecond atomic pointer live migration, circular mutation audit trail, and offline reader immunity.",
-        .algorithmic_guarantee = "Read throughput > 356M ops/s across 16 cores (24.1x faster than pthread_rwlock); hot-swap pointer switch < 1us (70-200ns).",
-        .memory_concurrency_model = "64-byte cache-line aligned FlowReloadReader structs with false-sharing isolation buffer; memory_order_acquire/release atomics.",
-        .key_apis = "flow_reload_call, flow_reload_begin, flow_reload_end, flow_reload_publish, flow_audit_replay",
-        .keywords = "qsbr reload rcu lock-free atomic hot-swap audit trail snapshot cache-aligned 无锁 讀寫 換熱 審計"
-    },
-    {
-        .module_id = "orchestrator",
-        .title = "Living Topology Orchestrator & State/Constraint Synthesizer",
-        .header_file = "src/orchestrator.h",
-        .source_file = "src/orchestrator.c",
-        .layer = 0,
-        .responsibilities = "Orchestrates the living codebase suite: Semantic Merge (flow absorb), Global Chaotic Annealing (flow anneal), Continuous Entropy Reduction (flow refactor), and State Time-Travel (flow morph).",
-        .algorithmic_guarantee = "Mathematically detects intent mutual exclusions via SMT; minimizes global constraint energy and topological entropy continuously.",
-        .memory_concurrency_model = "Global orchestrator state encapsulating multi-spec SemanticIR registry and epoch snapshots.",
-        .key_apis = "flow_orchestrator_absorb, flow_orchestrator_anneal, flow_orchestrator_refactor_entropy, flow_orchestrator_landscape",
-        .keywords = "orchestrator absorb anneal refactor landscape morph semantic merge living codebase 拓樸 吸收 退火 熵減"
-    },
-    {
-        .module_id = "embodied",
-        .title = "Embodied Physical Intelligence & Robotics Plugin Interface",
-        .header_file = "src/embodied.h",
-        .source_file = "src/embodied.c",
-        .layer = 0,
-        .responsibilities = "Separates Mechanism from Policy: Ingests external physical policies (torque limits, ZMP stability, latency constraints) and translates them into BitSpace Dynamic Mask Canvases for the 1-bit chaotic engine.",
-        .algorithmic_guarantee = "Newton-Euler dynamics simulation verifies torque limits and ZMP stability in < 2.5us; Kalman filter rejects sensor vibration spikes; 0W steady-state sleep.",
-        .memory_concurrency_model = "Dual-rate frequency separation: high-speed 1kHz synchronous spinal tick + 1Hz asynchronous cortical reconfiguration.",
-        .key_apis = "flow_physics_simulate_step, flow_physics_get_safety_mask, flow_dual_rate_spinal_tick, flow_sensor_fusion_update_imu, flow_energy_governor_check_wakeup",
-        .keywords = "embodied physics sim-to-real robot spinal reflex kalman sensor fusion thermal energy 具身 機器人 物理 質心 關節"
-    },
-    {
-        .module_id = "smt",
-        .title = "Formal SMT-LIB2 Mathematical Proof Engine",
-        .header_file = "src/smt.h",
-        .source_file = "src/smt.c",
-        .layer = 0,
-        .responsibilities = "Generates and verifies mathematical theorems for Zero-Defect guarantees: Buffer Bounds Safety, Memory Quota Limits, Shard Non-Aliasing, and Functional Determinism.",
-        .algorithmic_guarantee = "Outputs formal SMT-LIB2 QF_LIA theories; UNSAT guarantees zero runtime buffer overflows and strict shard isolation.",
-        .memory_concurrency_model = "Deterministic string theorem synthesizer operating on SemanticIR constraints.",
-        .key_apis = "flow_smt_prove, flow_smt_generate_proof_text, flow_smt_verify_theorem",
-        .keywords = "smt proof prove theorem formal math z3 unsat formal verification 形式化 證明 數學 定理"
-    },
-    {
-        .module_id = "jit",
-        .title = "Asynchronous JIT Compilation Pool",
-        .header_file = "src/jit.h",
-        .source_file = "src/jit.c",
-        .layer = 0,
-        .responsibilities = "Asynchronously compiles specialized native code in background worker threads without stalling the main execution thread. Physical constraint: requires_ram_mb > 100.",
-        .algorithmic_guarantee = "Main-thread P99 call latency < 34us during live compilation (1029x lower than 35ms synchronous JIT blocking); forking compiler disabled when RAM < 100MB to prevent OOM.",
-        .memory_concurrency_model = "Thread pool with lock-free job queue and condition-variable task dispatch; dual-mapped W^X pages.",
-        .key_apis = "flow_jit_pool_create, flow_jit_pool_submit, flow_jit_compile_llvm_ir",
-        .keywords = "jit async background compile worker pool latency thread requires_ram_mb 即時編譯 非同步 延遲"
-    },
-    {
-        .module_id = "adaptive",
-        .title = "Dynamic Adaptation & Layout Morphing",
-        .header_file = "src/adaptive.h",
-        .source_file = "src/adaptive.c",
-        .layer = 0,
-        .responsibilities = "Collects eBPF/PMU telemetry and triggers instant zero-downtime memory layout morphing (AoS <-> SoA <-> Columnar) under memory pressure, with Golden Baseline fallback.",
-        .algorithmic_guarantee = "96.9% RAM reduction under memory pressure (128MB -> 3.9MB); sub-microsecond fallback on 3 consecutive OOD errors.",
-        .memory_concurrency_model = "Atomic telemetry counters and atomic golden baseline function pointer switch.",
-        .key_apis = "flow_adaptive_observe_telemetry, flow_adaptive_check_morph, flow_adaptive_set_golden_baseline, flow_adaptive_fallback_to_golden_baseline",
-        .keywords = "adaptive morph soa aos columnar layout memory reduction golden baseline 自適應 佈局 降解 遙測"
-    },
-    {
-        .module_id = "security",
-        .title = "Bounded Chaos Security & Moving Target Defense (MTD)",
-        .header_file = "src/security.h",
-        .source_file = "src/security.c",
-        .layer = 0,
-        .responsibilities = "Enforces Bounded Chaos compliance modes (FLOW_COMPLIANCE_STRICT_PROD), verifies cryptographic immutable mutation snapshots, and generates MTD polymorphic struct layouts.",
-        .algorithmic_guarantee = "> 2.46 bits of Shannon layout entropy disrupts ROP gadget attacks with 0% runtime overhead; locks structural bits in production.",
-        .memory_concurrency_model = "Cryptographic PRNG field permutation and canary offset verification.",
-        .key_apis = "flow_security_get_compliance_mask, flow_security_verify_snapshot, flow_mtd_generate_polymorphic_layout",
-        .keywords = "security mtd compliance audit snapshot polymorphic rpc rop safety 守護 安全 合規 混淆 防禦"
-    },
-    {
-        .module_id = "swarm",
-        .title = "Swarm Intelligence & Federated Chaos Search",
-        .header_file = "src/swarm.h",
-        .source_file = "src/swarm.c",
-        .layer = 0,
-        .responsibilities = "Coordinates federated multi-particle chaotic exploration with pheromone diffusion and quantum-tunneling 2-bit jumps.",
-        .algorithmic_guarantee = "Escapes deep Lorenz saddle points with > 92% escape rate; achieves consensus global Pareto optimum.",
-        .memory_concurrency_model = "Array of independent particle genomes with asynchronous pheromone matrix diffusion.",
-        .key_apis = "flow_swarm_init, flow_swarm_step, flow_swarm_get_consensus_mask",
-        .keywords = "swarm particle federation pheromone saddle point quantum tunneling 粒子群 聯邦 費洛蒙 鞍點"
-    },
-    {
-        .module_id = "genetic",
-        .title = "AST Micro-Opcode Genetic Programming",
-        .header_file = "src/genetic.h",
-        .source_file = "src/genetic.c",
-        .layer = 0,
-        .responsibilities = "Synthesizes low-level micro-opcodes (ALU, bitwise, memory) directly from 1-bit chaotic mutations for pure arithmetic algorithms.",
-        .algorithmic_guarantee = "100% sound AST correctness with formal SMT verifier in the evolutionary fitness loop.",
-        .memory_concurrency_model = "Bounded register-machine bytecode interpreter and C AST emitter.",
-        .key_apis = "flow_genetic_evolve_bytecode, flow_genetic_emit_c",
-        .keywords = "genetic programming ast micro-opcode evolution synthesis bytecode 基因 演化 字節碼 語法樹"
-    },
-    {
-        .module_id = "registry",
-        .title = "Plugin Registry & Declarative Contracts",
-        .header_file = "src/registry.h",
-        .source_file = "src/registry.c",
-        .layer = 1,
-        .responsibilities = "Maintains domain component registry and synthesizes zero-C-callback extensions from FlowPluginContract descriptors.",
-        .algorithmic_guarantee = "Auto-synthesizes dimension enumeration, verification, cost models, and hardware capabilities without manual C function pointers.",
-        .memory_concurrency_model = "Thread-safe plugin lookup table and dynamic DSO module loader.",
-        .key_apis = "flow_registry_register, flow_registry_lookup, flow_plugin_create_from_contract, flow_registry_load_dso",
-        .keywords = "registry plugin declarative contract dso component extension 註冊 外掛 宣告式 合約"
-    },
-    {
-        .module_id = "abi",
-        .title = "Cross-Language Zero-Copy ABI Emitter",
-        .header_file = "src/abi.h",
-        .source_file = "src/abi.c",
-        .layer = 1,
-        .responsibilities = "Generates synchronized multi-language Zero-Copy ABI bindings: ANSI C headers, Safe Rust repr(C) crates, and Python memoryview wrappers.",
-        .algorithmic_guarantee = "Zero memory copies across language boundaries with identical struct field alignments.",
-        .memory_concurrency_model = "Standard C99/C11 struct layout matching Rust/Python FFI ABIs.",
-        .key_apis = "flow_abi_emit_c_header, flow_abi_emit_rust_binding, flow_abi_emit_python_binding",
-        .keywords = "abi ffi rust python zero-copy cross-language c bindings 接口 跨語言 綁定"
-    },
-    {
-        .module_id = "topology",
-        .title = "Codebase Architecture Knowledge Graph & Firewall Audit",
-        .header_file = "src/topology.h",
-        .source_file = "src/topology.c",
-        .layer = 0,
-        .responsibilities = "Maintains the 22-node architectural dependency graph, enforces clean layer separation firewalls, and audits modularity scores.",
-        .algorithmic_guarantee = "Modularity = 1.00, Cross-Layer Leaks = 0, Upward Dependency Violations = 0.",
-        .memory_concurrency_model = "Adjacency list directed acyclic graph representation.",
-        .key_apis = "flow_topology_build_codebase_graph, flow_topology_audit_codebase, flow_topology_export_dot",
-        .keywords = "topology graph architecture modularity leaks firewalls layers 拓樸 圖譜 架構 模組化"
-    },
-    {
-        .module_id = "verifier",
-        .title = "Semantic & Hardware Contract Verifier",
-        .header_file = "src/verifier.h",
-        .source_file = "src/verifier.c",
-        .layer = 0,
-        .responsibilities = "Verifies input capacity bounds, memory constraints, and resource requirements against selected component capabilities.",
-        .algorithmic_guarantee = "Static proofs (VERIFIER_PROVEN) or synthesis of minimal runtime safety guards (VERIFIER_RUNTIME_CHECK).",
-        .memory_concurrency_model = "Pure analytical verification on SemanticIR and FlowPlanAssignment.",
-        .key_apis = "verify_plan, verify_component_spec",
-        .keywords = "verifier verify capacity memory safety contract guards 驗證 靜態證明 邊界"
-    }
-};
-
-static const size_t KNOWLEDGE_COUNT = sizeof(CODEBASE_KNOWLEDGE) / sizeof(CODEBASE_KNOWLEDGE[0]);
+#include "generated_knowledge.h"
 
 #define FLOW_MAX_DYNAMIC_KNOWLEDGE 64
 static FlowModuleKnowledge g_dynamic_knowledge[FLOW_MAX_DYNAMIC_KNOWLEDGE];
@@ -315,263 +144,7 @@ const char *flowy_language_name(FlowLanguage lang) {
     return (lang == FLOW_LANG_EN) ? "English (en)" : "Traditional Chinese / 繁體中文 (zh)";
 }
 
-typedef struct {
-    const char *keyword;
-    const char *target_module_id;
-    uint32_t weight;
-} FlowKeywordAlias;
 
-static const FlowKeywordAlias INPUT_ALIAS_DICTIONARY[] = {
-    /* Reload / QSBR / Hot-Swap / RCU */
-    { "qsbr", "reload", 50 },
-    { "rcu", "reload", 50 },
-    { "reload", "reload", 50 },
-    { "hotswap", "reload", 40 },
-    { "hot-swap", "reload", 40 },
-    { "lockfree", "reload", 40 },
-    { "lock-free", "reload", 40 },
-    { "quiescent", "reload", 40 },
-    { "無鎖", "reload", 50 },
-    { "无锁", "reload", 50 },
-    { "熱替換", "reload", 50 },
-    { "热替换", "reload", 50 },
-    { "熱換", "reload", 40 },
-    { "熱切換", "reload", 40 },
-    { "讀寫", "reload", 30 },
-    { "讀者", "reload", 30 },
-    { "記憶體回收", "reload", 40 },
-    { "内存回收", "reload", 40 },
-
-    /* BitSpace / 1-Bit Chaos / Annealing / Mask Canvas */
-    { "bitspace", "bitspace", 50 },
-    { "chaos", "bitspace", 50 },
-    { "1bit", "bitspace", 50 },
-    { "1-bit", "bitspace", 50 },
-    { "xorshift", "bitspace", 40 },
-    { "polytope", "bitspace", 40 },
-    { "hypercube", "bitspace", 40 },
-    { "canvas", "bitspace", 40 },
-    { "mutation", "bitspace", 35 },
-    { "annealing", "bitspace", 35 },
-    { "混沌", "bitspace", 50 },
-    { "退火", "bitspace", 45 },
-    { "遮罩", "bitspace", 40 },
-    { "畫布", "bitspace", 40 },
-    { "超立方", "bitspace", 40 },
-    { "多面體", "bitspace", 40 },
-    { "多面体", "bitspace", 40 },
-    { "突變", "bitspace", 35 },
-    { "突变", "bitspace", 35 },
-
-    /* SMT / Formal Verification / Theorem Prover */
-    { "smt", "smt", 50 },
-    { "proof", "smt", 40 },
-    { "prove", "smt", 40 },
-    { "theorem", "smt", 40 },
-    { "formal", "smt", 40 },
-    { "bit-blasting", "smt", 40 },
-    { "bitblasting", "smt", 40 },
-    { "z3", "smt", 35 },
-    { "unsat", "smt", 35 },
-    { "形式化", "smt", 50 },
-    { "證明", "smt", 45 },
-    { "证明", "smt", 45 },
-    { "定理", "smt", 40 },
-    { "最高法院", "smt", 40 },
-    { "零缺陷", "smt", 35 },
-
-    /* JIT / Memory High Watermark / Survival Mode */
-    { "jit", "jit", 50 },
-    { "oom", "jit", 45 },
-    { "watermark", "jit", 40 },
-    { "survival", "jit", 40 },
-    { "backpressure", "jit", 35 },
-    { "high_watermark", "jit", 40 },
-    { "記憶體", "jit", 30 },
-    { "內存", "jit", 30 },
-    { "高水位", "jit", 45 },
-    { "生存模式", "jit", 45 },
-    { "避難所", "jit", 40 },
-    { "背壓", "jit", 35 },
-    { "背压", "jit", 35 },
-
-    /* Adaptive / Morphing / AoS / SoA */
-    { "adaptive", "adaptive", 50 },
-    { "morph", "adaptive", 45 },
-    { "morphing", "adaptive", 45 },
-    { "soa", "adaptive", 40 },
-    { "aos", "adaptive", 40 },
-    { "columnar", "adaptive", 40 },
-    { "mremap", "adaptive", 40 },
-    { "自適應", "adaptive", 50 },
-    { "自适应", "adaptive", 50 },
-    { "幾何變形", "adaptive", 45 },
-    { "几何变形", "adaptive", 45 },
-    { "變形", "adaptive", 35 },
-    { "重映射", "adaptive", 35 },
-
-    /* Embodied / Robotics / Sim-to-Real / Physics */
-    { "embodied", "embodied", 50 },
-    { "robot", "embodied", 45 },
-    { "robotics", "embodied", 45 },
-    { "torque", "embodied", 40 },
-    { "zmp", "embodied", 40 },
-    { "kalman", "embodied", 35 },
-    { "smith", "embodied", 35 },
-    { "sim-to-real", "embodied", 40 },
-    { "具身", "embodied", 50 },
-    { "機器人", "embodied", 45 },
-    { "机器人", "embodied", 45 },
-    { "物理", "embodied", 40 },
-    { "力矩", "embodied", 35 },
-    { "質心", "embodied", 35 },
-    { "關節", "embodied", 35 },
-    { "步態", "embodied", 35 },
-
-    /* Orchestrator / Living Codebase */
-    { "orchestrator", "orchestrator", 50 },
-    { "absorb", "orchestrator", 40 },
-    { "anneal", "orchestrator", 40 },
-    { "refactor", "orchestrator", 35 },
-    { "landscape", "orchestrator", 35 },
-    { "編排", "orchestrator", 40 },
-    { "編排器", "orchestrator", 40 },
-    { "吸收", "orchestrator", 35 },
-    { "重構", "orchestrator", 35 },
-
-    /* Swarm / Pheromone */
-    { "swarm", "swarm", 50 },
-    { "pheromone", "swarm", 45 },
-    { "federation", "swarm", 40 },
-    { "群體", "swarm", 45 },
-    { "群體智能", "swarm", 50 },
-    { "費洛蒙", "swarm", 45 },
-    { "费洛蒙", "swarm", 45 },
-    { "粒子群", "swarm", 40 },
-
-    /* Genetic / Epistasis */
-    { "genetic", "genetic", 50 },
-    { "epistasis", "genetic", 50 },
-    { "levy", "genetic", 40 },
-    { "bytecode", "genetic", 35 },
-    { "基因", "genetic", 45 },
-    { "上位效應", "genetic", 50 },
-    { "上位效应", "genetic", 50 },
-    { "萊維飛行", "genetic", 40 },
-
-    /* Security / MTD */
-    { "security", "security", 50 },
-    { "mtd", "security", 45 },
-    { "compliance", "security", 40 },
-    { "polymorphic", "security", 40 },
-    { "安全", "security", 45 },
-    { "防禦", "security", 40 },
-    { "合規", "security", 40 },
-    { "混淆", "security", 35 },
-
-    /* Plugins / Registry / ABI */
-    { "plugin", "registry", 45 },
-    { "registry", "registry", 50 },
-    { "abi", "abi", 50 },
-    { "ffi", "abi", 40 },
-    { "外掛", "registry", 45 },
-    { "插件", "registry", 45 },
-    { "註冊", "registry", 40 },
-    { "介面", "abi", 40 },
-    { "接口", "abi", 40 },
-
-    /* Topology */
-    { "topology", "topology", 50 },
-    { "graph", "topology", 40 },
-    { "modularity", "topology", 35 },
-    { "firewall", "topology", 35 },
-    { "拓樸", "topology", 50 },
-    { "拓扑", "topology", 50 },
-    { "圖譜", "topology", 40 },
-    { "模組化", "topology", 35 },
-    { "防火牆", "topology", 35 }
-};
-
-static const size_t INPUT_ALIAS_COUNT = sizeof(INPUT_ALIAS_DICTIONARY) / sizeof(INPUT_ALIAS_DICTIONARY[0]);
-
-typedef struct {
-    const char *report_header;
-    const char *label_module;
-    const char *label_source_files;
-    const char *label_title;
-    const char *sec1_title;
-    const char *sec2_title;
-    const char *sec3_title;
-    const char *sec4_title;
-    const char *sec5_title;
-    const char *sec6_title;
-    const char *decision_header;
-    const char *decision_causal_reasoning_title;
-    const char *decision_book_title;
-    const char *bottleneck_header;
-    const char *bottleneck_sec1_title;
-    const char *bottleneck_sec2_title;
-    const char *bottleneck_sec3_title;
-    const char *book_toc_header;
-    const char *book_toc_footer;
-    const char *book_doc_header;
-    const char *book_doc_path;
-    const char *book_doc_why;
-    const char *book_doc_excerpt;
-} FlowyLocaleTemplate;
-
-static const FlowyLocaleTemplate LOCALE_TEMPLATES[2] = {
-    [FLOW_LANG_ZH] = {
-        .report_header = "=== FLOW 代碼庫內省式架構推論報告 ===",
-        .label_module = "核心模組",
-        .label_source_files = "原始碼檔案",
-        .label_title = "子系統標題",
-        .sec1_title = "1. 核心系統職責 (Core Responsibilities):",
-        .sec2_title = "2. 演算法與形式化保證 (Algorithmic & Theoretical Guarantees):",
-        .sec3_title = "3. 記憶體佈局與並發模型 (Memory Layout & Concurrency Model):",
-        .sec4_title = "4. 關鍵權威 API (Key Authoritative APIs):",
-        .sec5_title = "5. 💡 設計哲學與成因 (Why - 摘自《The FLOW Book》):",
-        .sec6_title = "6. 📖 文檔拓樸章節索引與精華 (Book Chapter Reference & Excerpt):",
-        .decision_header = "=== FLOW 即時決策與因果解釋 (Real-Time Causal Explanation) ===",
-        .decision_causal_reasoning_title = "確定性因果推論 (打破物理黑盒子 / Deterministic Causal Reasoning):",
-        .decision_book_title = "💡 《The FLOW Book》延伸閱讀與設計哲學 (Design Philosophy):",
-        .bottleneck_header = "=== FLOW 下意識神經遙測與效能瓶頸報告 (Subconscious Telemetry) ===",
-        .bottleneck_sec1_title = "1. 架構角色與定位 (Architectural Role):",
-        .bottleneck_sec2_title = "2. 確定性診斷與成因推論 (Deterministic Diagnosis):",
-        .bottleneck_sec3_title = "3. 自主修復機制 (Autonomous Remedy):",
-        .book_toc_header = "               《The FLOW Book: 意圖驅動的活體系統》 全書目錄                     ",
-        .book_toc_footer = "使用 'flowy book <chapter_number|module_name>' 閱讀特定章節摘錄與設計哲學。",
-        .book_doc_header = "《The FLOW Book》 知識庫索引",
-        .book_doc_path = "檔案位置",
-        .book_doc_why = "💡 設計哲學 (Why):",
-        .book_doc_excerpt = "📖 核心段落摘要 (Excerpt):"
-    },
-    [FLOW_LANG_EN] = {
-        .report_header = "=== FLOW INTROSPECTIVE CODEBASE ARCHITECTURE REPORT ===",
-        .label_module = "Module",
-        .label_source_files = "Source Files",
-        .label_title = "Title",
-        .sec1_title = "1. CORE RESPONSIBILITIES:",
-        .sec2_title = "2. ALGORITHMIC & THEORETICAL GUARANTEES:",
-        .sec3_title = "3. MEMORY LAYOUT & CONCURRENCY MODEL:",
-        .sec4_title = "4. KEY AUTHORITATIVE APIS:",
-        .sec5_title = "5. 💡 DESIGN PHILOSOPHY & WHY (From 《The FLOW Book》):",
-        .sec6_title = "6. 📖 BOOK CHAPTER REFERENCE & EXCERPT:",
-        .decision_header = "=== FLOW INTROSPECTIVE REAL-TIME DECISION & CAUSAL EXPLANATION ===",
-        .decision_causal_reasoning_title = "DETERMINISTIC CAUSAL REASONING (Breaking Physical Black-Box):",
-        .decision_book_title = "💡 《The FLOW Book》 Further Reading & Design Philosophy:",
-        .bottleneck_header = "=== FLOW SUBCONSCIOUS NEURAL TELEMETRY & BOTTLENECK REPORT ===",
-        .bottleneck_sec1_title = "1. ARCHITECTURAL ROLE (From Codebase Knowledge):",
-        .bottleneck_sec2_title = "2. DETERMINISTIC DIAGNOSIS & REASONING (For Humans):",
-        .bottleneck_sec3_title = "3. AUTONOMOUS REMEDY (Zero Human Knobs Required):",
-        .book_toc_header = "               《The FLOW Book: Autopoietic Living Systems》 Table of Contents    ",
-        .book_toc_footer = "Use 'flowy book <chapter_number|module_name>' to view chapter excerpts and design philosophy.",
-        .book_doc_header = "《The FLOW Book》 Knowledge Graph Index",
-        .book_doc_path = "File Path",
-        .book_doc_why = "💡 Design Philosophy (Why):",
-        .book_doc_excerpt = "📖 Core Paragraph Excerpt:"
-    }
-};
 
 /* ========================================================================= */
 /* Real-Time Decision Logger & Causal Explainability                         */
@@ -887,28 +460,46 @@ int flowy_query_codebase_lang(const FlowTopologyGraph *graph,
         return 1;
     }
 
-    /* Core Reasoning: Map natural language input to language-agnostic module ID via Alias Dictionary */
+    /* Core Reasoning: Map natural language input to language-agnostic module ID via keywords in CODEBASE_KNOWLEDGE */
     const char *matched_module_id = NULL;
     uint32_t best_score = 0;
-
-    for (size_t a = 0; a < INPUT_ALIAS_COUNT; ++a) {
-        const FlowKeywordAlias *alias = &INPUT_ALIAS_DICTIONARY[a];
-        if (strstr(lower_q, alias->keyword) || strstr(query_text, alias->keyword)) {
-            if (alias->weight > best_score) {
-                best_score = alias->weight;
-                matched_module_id = alias->target_module_id;
-            }
-        }
-    }
-
-    /* Also check direct module ID matches */
     size_t total_k = flowy_knowledge_count();
+
+    /* 1. Direct module ID match */
     for (size_t i = 0; i < total_k; ++i) {
         const FlowModuleKnowledge *k = flowy_knowledge_at(i);
         if (k == NULL) continue;
         if (strstr(lower_q, k->module_id)) {
-            if (60 > best_score) {
-                best_score = 60;
+            best_score = 100;
+            matched_module_id = k->module_id;
+            break;
+        }
+    }
+
+    /* 2. Semantic Keyword & Title Token Matching */
+    if (matched_module_id == NULL) {
+        for (size_t i = 0; i < total_k; ++i) {
+            const FlowModuleKnowledge *k = flowy_knowledge_at(i);
+            if (k == NULL || k->keywords == NULL) continue;
+
+            uint32_t current_score = 0;
+            char kw_copy[512];
+            strncpy(kw_copy, k->keywords, sizeof(kw_copy) - 1);
+            kw_copy[sizeof(kw_copy) - 1] = '\0';
+
+            char *saveptr = NULL;
+            char *token = strtok_r(kw_copy, " ", &saveptr);
+            while (token != NULL) {
+                char lower_tok[64];
+                str_to_lower(token, lower_tok, sizeof(lower_tok));
+                if (strstr(lower_q, lower_tok) || strstr(query_text, token)) {
+                    current_score += 25;
+                }
+                token = strtok_r(NULL, " ", &saveptr);
+            }
+
+            if (current_score > best_score) {
+                best_score = current_score;
                 matched_module_id = k->module_id;
             }
         }

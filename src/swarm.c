@@ -365,3 +365,64 @@ const FlowPluginABI *flow_plugin_abi_v2(void) {
 const FlowPlugin *flow_swarm_plugin(void) {
     return &SWARM_PLUGIN;
 }
+
+/* ------------------------------------------------------------------------- */
+/* Swarm Lymphatic Broadcasting (9-Byte Fleet-Wide Antibody Propagation)     */
+/* ------------------------------------------------------------------------- */
+
+int flow_swarm_lymphatic_encode(uint64_t content_hash, uint8_t out_packet[FLOW_SWARM_LYMPH_PKT_SIZE]) {
+    if (out_packet == NULL) return 0;
+    out_packet[0] = FLOW_SWARM_MSG_ANTIBODY;
+    for (int i = 0; i < 8; i++) {
+        out_packet[1 + i] = (uint8_t)((content_hash >> (56 - i * 8)) & 0xFF);
+    }
+    return 1;
+}
+
+int flow_swarm_lymphatic_decode(const uint8_t in_packet[FLOW_SWARM_LYMPH_PKT_SIZE], uint64_t *out_content_hash) {
+    if (in_packet == NULL || out_content_hash == NULL) return 0;
+    if (in_packet[0] != FLOW_SWARM_MSG_ANTIBODY) return 0;
+    uint64_t h = 0;
+    for (int i = 0; i < 8; i++) {
+        h = (h << 8) | in_packet[1 + i];
+    }
+    *out_content_hash = h;
+    return 1;
+}
+
+int flow_swarm_lymphatic_assimilate(const char *local_vec_dir,
+                                    const char *peer_vec_dir,
+                                    uint64_t content_hash) {
+    if (local_vec_dir == NULL || peer_vec_dir == NULL) return 0;
+
+    char hash_str[32];
+    snprintf(hash_str, sizeof(hash_str), "%016llx", (unsigned long long)content_hash);
+
+    char src_path[512];
+    snprintf(src_path, sizeof(src_path), "%s/auto_promoted_%s.fvec", peer_vec_dir, hash_str);
+
+    FILE *f_src = fopen(src_path, "rb");
+    if (f_src == NULL) return 0;
+
+    char dst_path[512];
+    snprintf(dst_path, sizeof(dst_path), "%s/auto_promoted_%s.fvec", local_vec_dir, hash_str);
+
+    FILE *f_dst = fopen(dst_path, "wb");
+    if (f_dst == NULL) {
+        fclose(f_src);
+        return 0;
+    }
+
+    char buf[4096];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), f_src)) > 0) {
+        if (fwrite(buf, 1, n, f_dst) != n) {
+            fclose(f_src);
+            fclose(f_dst);
+            return 0;
+        }
+    }
+    fclose(f_src);
+    fclose(f_dst);
+    return 1;
+}

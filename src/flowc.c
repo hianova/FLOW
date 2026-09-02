@@ -5,6 +5,7 @@
 #include "bitspace.h"
 #include "abi.h"
 #include "smt.h"
+#include "fvec.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -61,6 +62,7 @@ int flowc_main(int argc, char **argv) {
     const char *target_python = NULL;
     const char *target_mlir = NULL;
     const char *target_llvm_ir = NULL;
+    const char *apply_fvec_path = NULL;
     size_t workload_bytes = 0;
     ProfileSeed profile = {0};
 
@@ -70,7 +72,7 @@ int flowc_main(int argc, char **argv) {
     }
 
     if (argc < 3) {
-        fprintf(stderr, "usage: flowc <input.flow> -o <output.c> [--search] [--iterations <N>] [--seed <N>] [--benchmark] [--reload-adapter] [--profile <file>] [--profile-out <file>] [--component <id>] [--workload-bytes <N>] [--target-c-header <file.h>] [--target-rust <file.rs>] [--target-python <file.py>] [--target-mlir <file.mlir>] [--target-llvm-ir <file.ll>]\n");
+        fprintf(stderr, "usage: flowc <input.flow> -o <output.c> [--search] [--iterations <N>] [--seed <N>] [--benchmark] [--reload-adapter] [--profile <file>] [--profile-out <file>] [--component <id>] [--apply-fvec <file.fvec>] [--workload-bytes <N>] [--target-c-header <file.h>] [--target-rust <file.rs>] [--target-python <file.py>] [--target-mlir <file.mlir>] [--target-llvm-ir <file.ll>]\n");
         return EXIT_FAILURE;
     }
 
@@ -93,6 +95,9 @@ int flowc_main(int argc, char **argv) {
             profile_out = argv[++arg];
         } else if (strcmp(argv[arg], "--component") == 0 && arg + 1 < argc) {
             component_override = argv[++arg];
+        } else if ((strcmp(argv[arg], "--apply-fvec") == 0 ||
+                    strcmp(argv[arg], "--fvec") == 0) && arg + 1 < argc) {
+            apply_fvec_path = argv[++arg];
         } else if (strcmp(argv[arg], "--target-c-header") == 0 && arg + 1 < argc) {
             target_c_header = argv[++arg];
         } else if (strcmp(argv[arg], "--target-rust") == 0 && arg + 1 < argc) {
@@ -279,8 +284,36 @@ int flowc_main(int argc, char **argv) {
         }
     }
 
-    /* 1-Bit Chaos Search Engine with Multimodal Domain Masks */
-    if (use_search) {
+    /* Apply Pre-baked .fvec Architecture Feature Model (Skip Chaos Search) */
+    if (apply_fvec_path != NULL) {
+        FlowVecHeader fvec_hdr;
+        FlowVecPayload fvec_payload;
+        if (!flow_fvec_read_file(apply_fvec_path, &fvec_hdr, &fvec_payload)) {
+            fprintf(stderr, "flowc: failed to load .fvec file '%s'\n", apply_fvec_path);
+            flow_ir_cleanup(&ir);
+            return EXIT_FAILURE;
+        }
+
+        FlowBitSpace space;
+        if (!flow_bitspace_init_for_ir(&ir, &space)) {
+            fprintf(stderr, "flowc: failed to initialize BitSpace for spec '%s'\n", input_path);
+            flow_ir_cleanup(&ir);
+            return EXIT_FAILURE;
+        }
+
+        FlowPlan plan;
+        space.decode(&space, fvec_payload.pure_genome, &plan);
+        space.evaluate(&space, &plan, &plan.eval);
+        component = plan.component;
+        flow_plan_to_search_result(&plan, &ir, seed, &search);
+        use_search = 1;
+
+        printf("  fvec: applied '%s' [%s]\n", fvec_hdr.name, apply_fvec_path);
+        printf("        -> Genome: 0x%016llx | Component: %s | Energy: %.2f | SMT: %s\n",
+               (unsigned long long)plan.genome, component ? component->id : "(auto)",
+               plan.eval.energy, fvec_hdr.smt_signature);
+    } else if (use_search) {
+        /* 1-Bit Chaos Search Engine with Multimodal Domain Masks */
         search = search_best(&ir, iterations, seed, use_benchmark,
                              profile.available ? &profile : NULL);
         component = search.component;

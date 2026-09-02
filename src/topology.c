@@ -1,4 +1,5 @@
 #include "topology.h"
+#include "fvec.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -249,6 +250,7 @@ static const char *flow_node_type_name(FlowNodeType type) {
         case FLOW_NODE_DIMENSION: return "Dimension";
         case FLOW_NODE_SHARD_GROUP: return "ShardGroup";
         case FLOW_NODE_DOC_CHAPTER: return "DocChapter";
+        case FLOW_NODE_FVEC_EXPERIENCE: return "FVecExperience";
         default: return "Unknown";
     }
 }
@@ -262,6 +264,7 @@ static const char *flow_edge_type_name(FlowEdgeType type) {
         case FLOW_EDGE_DATA_FLOW: return "DATA_FLOW";
         case FLOW_EDGE_SHARD_AFFINITY: return "SHARD_AFFINITY";
         case FLOW_EDGE_DOCUMENTS: return "DOCUMENTS";
+        case FLOW_EDGE_MEMORIALIZES: return "MEMORIALIZES";
         default: return "RELATED_TO";
     }
 }
@@ -347,4 +350,30 @@ const FlowTopologyNode *flow_topology_get_peak_hotspot(const FlowTopologyGraph *
     }
     return peak;
 }
+
+int flow_topology_attach_fvec_store(FlowTopologyGraph *graph, const void *store_ptr) {
+    if (graph == NULL || store_ptr == NULL) return 0;
+    const FlowVecStore *store = (const FlowVecStore *)store_ptr;
+    int attached = 0;
+
+    for (size_t i = 0; i < store->count; ++i) {
+        const FlowVecRecord *rec = &store->records[i];
+        /* Add .fvec experience node to Layer 2 (Plugin/Experience Layer) */
+        uint32_t fvec_node_id = flow_topology_add_node(graph, FLOW_NODE_FVEC_EXPERIENCE,
+                                                       rec->header.id, rec->header.trigger_intent, 0, 2);
+
+        /* Find matching architectural component node and connect via FLOW_EDGE_MEMORIALIZES */
+        for (size_t n = 0; n < graph->node_count; ++n) {
+            if (graph->nodes[n].type == FLOW_NODE_COMPONENT &&
+                strcmp(graph->nodes[n].name, rec->header.component_id) == 0) {
+                flow_topology_add_edge(graph, fvec_node_id, graph->nodes[n].id,
+                                       FLOW_EDGE_MEMORIALIZES, 1.0, "memorializes");
+                break;
+            }
+        }
+        attached++;
+    }
+    return attached;
+}
+
 
