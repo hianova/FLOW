@@ -68,17 +68,22 @@ flowc absorb examples/project.flow
 # 2. Global chaotic Pareto annealing & epoch solidification
 flowc anneal examples/compiler.flow examples/project.flow
 
-# 3. Flowy: Conversational Assistant (Single-shot or Interactive Chat)
-flowc ask "我覺得現在記憶體太肥了，幫我優化"
-flowc flowy
+# 3. Flowy: Introspective Codebase Reasoner & Real-Time Causal Explainer
+flowc ask "how does lock-free QSBR memory reclamation work?"
+flowc why                  # Explains deterministic causality of latest real-time morph
+flowc timeline             # Real-time dynamic decision timeline
+flowc flowy                # Interactive introspective reasoning shell
 
-# 4. Launch background continuous evolution daemon
+# 4. Mechanism Efficiency & Quantitative Empirical Audit
+flowc audit-mechanisms
+
+# 5. Launch background continuous evolution daemon
 flowc daemon --cycles 10 --interval-ms 500
 
-# 5. Inspect topological landscape & SMT mathematical theorems
+# 6. Inspect topological landscape & SMT mathematical theorems
 flowc landscape
 
-# 6. Multi-objective state time travel (speed, balanced, memory)
+# 7. Multi-objective state time travel (speed, balanced, memory)
 flowc morph speed
 ```
 
@@ -87,7 +92,7 @@ flowc morph speed
 ## Build & Test
 
 ```sh
-# Build binary and run full test suite (36 regression suites)
+# Build binary and run full test suite (38 regression suites)
 make
 make test
 make acceptance

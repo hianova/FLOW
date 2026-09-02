@@ -46,6 +46,20 @@ int flowc_main(int argc, char **argv) {
         return EXIT_SUCCESS;
     }
 
+    /* Flowy: Explain Real-Time Decision (flowc why) */
+    if (argc >= 2 && (strcmp(argv[1], "why") == 0 || strcmp(argv[1], "--why") == 0)) {
+        const FlowDecisionEvent *ev = flow_decision_logger_latest(NULL);
+        flowy_print_decision_explanation(ev, stdout);
+        return EXIT_SUCCESS;
+    }
+
+    /* Flowy: Real-Time Decision Timeline (flowc timeline / flowc explain-decisions) */
+    if (argc >= 2 && (strcmp(argv[1], "timeline") == 0 || strcmp(argv[1], "--timeline") == 0 ||
+                      strcmp(argv[1], "explain-decisions") == 0)) {
+        flowy_print_decision_timeline(NULL, stdout);
+        return EXIT_SUCCESS;
+    }
+
     /* Quantitative Mechanism Efficiency Audit (flowc audit-mechanisms) */
     if (argc >= 2 && (strcmp(argv[1], "audit-mechanisms") == 0 || strcmp(argv[1], "--audit-mechanisms") == 0)) {
         FlowMechanismAuditReport rep;
