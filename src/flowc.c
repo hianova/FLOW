@@ -11,6 +11,7 @@
 #include "genetic.h"
 #include "orchestrator.h"
 #include "flowy.h"
+#include "benchmark.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -50,6 +51,14 @@ int flowc_main(int argc, char **argv) {
         flowy_render_response(&response, stdout);
 
         flow_orchestrator_destroy(orch);
+        return EXIT_SUCCESS;
+    }
+
+    /* Quantitative Mechanism Efficiency Audit (flowc audit-mechanisms) */
+    if (argc >= 2 && (strcmp(argv[1], "audit-mechanisms") == 0 || strcmp(argv[1], "--audit-mechanisms") == 0)) {
+        FlowMechanismAuditReport rep;
+        flow_benchmark_run_mechanism_audit(&rep);
+        flow_benchmark_print_mechanism_audit(&rep, stdout);
         return EXIT_SUCCESS;
     }
 
