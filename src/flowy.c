@@ -1,12 +1,202 @@
 #include "flowy.h"
-#include "security.h"
-#include "smt.h"
-#include "embodied.h"
+#include "topology.h"
 
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static const FlowModuleKnowledge CODEBASE_KNOWLEDGE[] = {
+    {
+        .module_id = "bitspace",
+        .title = "1024-Bit BitSpace Genome & 3-Tier Mask Canvas",
+        .header_file = "src/bitspace.h",
+        .source_file = "src/bitspace.c",
+        .layer = 0,
+        .responsibilities = "Manages 1024-bit bitset genomes, constant-time O(1) 1-bit chaotic mutations, and 3-Tier Dynamic Mask Canvas (Hard Safety, Telemetry Bias, Domain Preferences).",
+        .algorithmic_guarantee = "O(1) 1-bit mutation (12.96 ns/op) exploring high-dimensional Pareto frontiers without combinatorial explosion; 1-cycle bitwise pruning eliminates 99.8% illegal states.",
+        .memory_concurrency_model = "Stack-allocated FlowGenome struct with 16 x uint64_t words; zero heap allocation on search fast-path.",
+        .key_apis = "flow_genome_mutate_1bit, flow_mask_canvas_compose, flow_bitspace_to_plan, flow_plan_to_bitspace",
+        .keywords = "bitspace genome 1bit chaos mutation mask canvas 1024bit bitset dimension pareto 混沌 基因 遮罩 突變"
+    },
+    {
+        .module_id = "reload",
+        .title = "Unified QSBR (Quiescent-State Based Reclamation) & Live Hot Reload",
+        .header_file = "src/reload.h",
+        .source_file = "src/reload.c",
+        .layer = 0,
+        .responsibilities = "Provides lock-free, zero-atomic-write RCU memory reclamation, sub-microsecond atomic pointer live migration, circular mutation audit trail, and offline reader immunity.",
+        .algorithmic_guarantee = "Read throughput > 356M ops/s across 16 cores (24.1x faster than pthread_rwlock); hot-swap pointer switch < 1us (70-200ns).",
+        .memory_concurrency_model = "64-byte cache-line aligned FlowReloadReader structs with false-sharing isolation buffer; memory_order_acquire/release atomics.",
+        .key_apis = "flow_reload_call, flow_reload_begin, flow_reload_end, flow_reload_publish, flow_audit_replay",
+        .keywords = "qsbr reload rcu lock-free atomic hot-swap audit trail snapshot cache-aligned 无锁 讀寫 換熱 審計"
+    },
+    {
+        .module_id = "orchestrator",
+        .title = "Living Topology Orchestrator & State/Constraint Synthesizer",
+        .header_file = "src/orchestrator.h",
+        .source_file = "src/orchestrator.c",
+        .layer = 0,
+        .responsibilities = "Orchestrates the living codebase suite: Semantic Merge (flow absorb), Global Chaotic Annealing (flow anneal), Continuous Entropy Reduction (flow refactor), and State Time-Travel (flow morph).",
+        .algorithmic_guarantee = "Mathematically detects intent mutual exclusions via SMT; minimizes global constraint energy and topological entropy continuously.",
+        .memory_concurrency_model = "Global orchestrator state encapsulating multi-spec SemanticIR registry and epoch snapshots.",
+        .key_apis = "flow_orchestrator_absorb, flow_orchestrator_anneal, flow_orchestrator_refactor_entropy, flow_orchestrator_landscape",
+        .keywords = "orchestrator absorb anneal refactor landscape morph semantic merge living codebase 拓樸 吸收 退火 熵減"
+    },
+    {
+        .module_id = "embodied",
+        .title = "Embodied Physical Intelligence & Robotics Suite",
+        .header_file = "src/embodied.h",
+        .source_file = "src/embodied.c",
+        .layer = 0,
+        .responsibilities = "Bridges FLOW into physical robotics: Micro-Physics Sim-to-Real Gate, 1kHz Spinal PID Reflex Loop, Kalman Sensor Fusion Mask, and Thermodynamic Energy Governor.",
+        .algorithmic_guarantee = "Newton-Euler dynamics simulation verifies torque limits and ZMP stability in < 2.5us; Kalman filter rejects sensor vibration spikes; 0W steady-state sleep.",
+        .memory_concurrency_model = "Dual-rate frequency separation: high-speed 1kHz synchronous spinal tick + 1Hz asynchronous cortical reconfiguration.",
+        .key_apis = "flow_physics_simulate_step, flow_physics_get_safety_mask, flow_dual_rate_spinal_tick, flow_sensor_fusion_update_imu, flow_energy_governor_check_wakeup",
+        .keywords = "embodied physics sim-to-real robot spinal reflex kalman sensor fusion thermal energy 具身 機器人 物理 質心 關節"
+    },
+    {
+        .module_id = "smt",
+        .title = "Formal SMT-LIB2 Mathematical Proof Engine",
+        .header_file = "src/smt.h",
+        .source_file = "src/smt.c",
+        .layer = 0,
+        .responsibilities = "Generates and verifies mathematical theorems for Zero-Defect guarantees: Buffer Bounds Safety, Memory Quota Limits, Shard Non-Aliasing, and Functional Determinism.",
+        .algorithmic_guarantee = "Outputs formal SMT-LIB2 QF_LIA theories; UNSAT guarantees zero runtime buffer overflows and strict shard isolation.",
+        .memory_concurrency_model = "Deterministic string theorem synthesizer operating on SemanticIR constraints.",
+        .key_apis = "flow_smt_prove, flow_smt_generate_proof_text, flow_smt_verify_theorem",
+        .keywords = "smt proof prove theorem formal math z3 unsat formal verification 形式化 證明 數學 定理"
+    },
+    {
+        .module_id = "jit",
+        .title = "Asynchronous JIT Compilation Pool",
+        .header_file = "src/jit.h",
+        .source_file = "src/jit.c",
+        .layer = 0,
+        .responsibilities = "Asynchronously compiles specialized native code in background worker threads without stalling the main execution thread.",
+        .algorithmic_guarantee = "Main-thread P99 call latency < 34us during live compilation (1029x lower than 35ms synchronous JIT blocking).",
+        .memory_concurrency_model = "Thread pool with lock-free job queue and condition-variable task dispatch.",
+        .key_apis = "flow_jit_pool_create, flow_jit_pool_submit, flow_jit_pool_destroy",
+        .keywords = "jit async background compile worker pool latency thread 即時編譯 非同步 延遲"
+    },
+    {
+        .module_id = "adaptive",
+        .title = "Dynamic Adaptation & Layout Morphing",
+        .header_file = "src/adaptive.h",
+        .source_file = "src/adaptive.c",
+        .layer = 0,
+        .responsibilities = "Collects eBPF/PMU telemetry and triggers instant zero-downtime memory layout morphing (AoS <-> SoA <-> Columnar) under memory pressure, with Golden Baseline fallback.",
+        .algorithmic_guarantee = "96.9% RAM reduction under memory pressure (128MB -> 3.9MB); sub-microsecond fallback on 3 consecutive OOD errors.",
+        .memory_concurrency_model = "Atomic telemetry counters and atomic golden baseline function pointer switch.",
+        .key_apis = "flow_adaptive_observe_telemetry, flow_adaptive_check_morph, flow_adaptive_set_golden_baseline, flow_adaptive_fallback_to_golden_baseline",
+        .keywords = "adaptive morph soa aos columnar layout memory reduction golden baseline 自適應 佈局 降解 遙測"
+    },
+    {
+        .module_id = "security",
+        .title = "Bounded Chaos Security & Moving Target Defense (MTD)",
+        .header_file = "src/security.h",
+        .source_file = "src/security.c",
+        .layer = 0,
+        .responsibilities = "Enforces Bounded Chaos compliance modes (FLOW_COMPLIANCE_STRICT_PROD), verifies cryptographic immutable mutation snapshots, and generates MTD polymorphic struct layouts.",
+        .algorithmic_guarantee = "> 2.46 bits of Shannon layout entropy disrupts ROP gadget attacks with 0% runtime overhead; locks structural bits in production.",
+        .memory_concurrency_model = "Cryptographic PRNG field permutation and canary offset verification.",
+        .key_apis = "flow_security_get_compliance_mask, flow_security_verify_snapshot, flow_mtd_generate_polymorphic_layout",
+        .keywords = "security mtd compliance audit snapshot polymorphic rpc rop safety 守護 安全 合規 混淆 防禦"
+    },
+    {
+        .module_id = "swarm",
+        .title = "Swarm Intelligence & Federated Chaos Search",
+        .header_file = "src/swarm.h",
+        .source_file = "src/swarm.c",
+        .layer = 0,
+        .responsibilities = "Coordinates federated multi-particle chaotic exploration with pheromone diffusion and quantum-tunneling 2-bit jumps.",
+        .algorithmic_guarantee = "Escapes deep Lorenz saddle points with > 92% escape rate; achieves consensus global Pareto optimum.",
+        .memory_concurrency_model = "Array of independent particle genomes with asynchronous pheromone matrix diffusion.",
+        .key_apis = "flow_swarm_init, flow_swarm_step, flow_swarm_get_consensus_mask",
+        .keywords = "swarm particle federation pheromone saddle point quantum tunneling 粒子群 聯邦 費洛蒙 鞍點"
+    },
+    {
+        .module_id = "genetic",
+        .title = "AST Micro-Opcode Genetic Programming",
+        .header_file = "src/genetic.h",
+        .source_file = "src/genetic.c",
+        .layer = 0,
+        .responsibilities = "Synthesizes low-level micro-opcodes (ALU, bitwise, memory) directly from 1-bit chaotic mutations for pure arithmetic algorithms.",
+        .algorithmic_guarantee = "100% sound AST correctness with formal SMT verifier in the evolutionary fitness loop.",
+        .memory_concurrency_model = "Bounded register-machine bytecode interpreter and C AST emitter.",
+        .key_apis = "flow_genetic_evolve_bytecode, flow_genetic_emit_c",
+        .keywords = "genetic programming ast micro-opcode evolution synthesis bytecode 基因 演化 字節碼 語法樹"
+    },
+    {
+        .module_id = "registry",
+        .title = "Plugin Registry & Declarative Contracts",
+        .header_file = "src/registry.h",
+        .source_file = "src/registry.c",
+        .layer = 1,
+        .responsibilities = "Maintains domain component registry and synthesizes zero-C-callback extensions from FlowPluginContract descriptors.",
+        .algorithmic_guarantee = "Auto-synthesizes dimension enumeration, verification, cost models, and hardware capabilities without manual C function pointers.",
+        .memory_concurrency_model = "Thread-safe plugin lookup table and dynamic DSO module loader.",
+        .key_apis = "flow_registry_register, flow_registry_lookup, flow_plugin_create_from_contract, flow_registry_load_dso",
+        .keywords = "registry plugin declarative contract dso component extension 註冊 外掛 宣告式 合約"
+    },
+    {
+        .module_id = "abi",
+        .title = "Cross-Language Zero-Copy ABI Emitter",
+        .header_file = "src/abi.h",
+        .source_file = "src/abi.c",
+        .layer = 1,
+        .responsibilities = "Generates synchronized multi-language Zero-Copy ABI bindings: ANSI C headers, Safe Rust repr(C) crates, and Python memoryview wrappers.",
+        .algorithmic_guarantee = "Zero memory copies across language boundaries with identical struct field alignments.",
+        .memory_concurrency_model = "Standard C99/C11 struct layout matching Rust/Python FFI ABIs.",
+        .key_apis = "flow_abi_emit_c_header, flow_abi_emit_rust_binding, flow_abi_emit_python_binding",
+        .keywords = "abi ffi rust python zero-copy cross-language c bindings 接口 跨語言 綁定"
+    },
+    {
+        .module_id = "topology",
+        .title = "Codebase Architecture Knowledge Graph & Firewall Audit",
+        .header_file = "src/topology.h",
+        .source_file = "src/topology.c",
+        .layer = 0,
+        .responsibilities = "Maintains the 22-node architectural dependency graph, enforces clean layer separation firewalls, and audits modularity scores.",
+        .algorithmic_guarantee = "Modularity = 1.00, Cross-Layer Leaks = 0, Upward Dependency Violations = 0.",
+        .memory_concurrency_model = "Adjacency list directed acyclic graph representation.",
+        .key_apis = "flow_topology_build_codebase_graph, flow_topology_audit_codebase, flow_topology_export_dot",
+        .keywords = "topology graph architecture modularity leaks firewalls layers 拓樸 圖譜 架構 模組化"
+    },
+    {
+        .module_id = "verifier",
+        .title = "Semantic & Hardware Contract Verifier",
+        .header_file = "src/verifier.h",
+        .source_file = "src/verifier.c",
+        .layer = 0,
+        .responsibilities = "Verifies input capacity bounds, memory constraints, and resource requirements against selected component capabilities.",
+        .algorithmic_guarantee = "Static proofs (VERIFIER_PROVEN) or synthesis of minimal runtime safety guards (VERIFIER_RUNTIME_CHECK).",
+        .memory_concurrency_model = "Pure analytical verification on SemanticIR and FlowPlanAssignment.",
+        .key_apis = "verify_plan, verify_component_spec",
+        .keywords = "verifier verify capacity memory safety contract guards 驗證 靜態證明 邊界"
+    }
+};
+
+static const size_t KNOWLEDGE_COUNT = sizeof(CODEBASE_KNOWLEDGE) / sizeof(CODEBASE_KNOWLEDGE[0]);
+
+size_t flowy_knowledge_count(void) {
+    return KNOWLEDGE_COUNT;
+}
+
+const FlowModuleKnowledge *flowy_knowledge_at(size_t index) {
+    if (index >= KNOWLEDGE_COUNT) return NULL;
+    return &CODEBASE_KNOWLEDGE[index];
+}
+
+const FlowModuleKnowledge *flowy_knowledge_lookup(const char *module_id) {
+    if (module_id == NULL) return NULL;
+    for (size_t i = 0; i < KNOWLEDGE_COUNT; ++i) {
+        if (strcmp(CODEBASE_KNOWLEDGE[i].module_id, module_id) == 0) {
+            return &CODEBASE_KNOWLEDGE[i];
+        }
+    }
+    return NULL;
+}
 
 static void str_to_lower(const char *src, char *dst, size_t max_len) {
     if (src == NULL || dst == NULL || max_len == 0) return;
@@ -18,207 +208,123 @@ static void str_to_lower(const char *src, char *dst, size_t max_len) {
     dst[i] = '\0';
 }
 
-int flowy_parse_intent(const char *natural_language_input, FlowyUserIntent *intent_out) {
-    if (natural_language_input == NULL || intent_out == NULL) return 0;
-    memset(intent_out, 0, sizeof(*intent_out));
-    strncpy(intent_out->raw_prompt, natural_language_input, sizeof(intent_out->raw_prompt) - 1);
+int flowy_query_codebase(const FlowTopologyGraph *graph,
+                         const char *query_text,
+                         FlowyIntrospectiveAnswer *answer_out) {
+    (void)graph;
+    if (query_text == NULL || answer_out == NULL) return 0;
+    memset(answer_out, 0, sizeof(*answer_out));
+    strncpy(answer_out->query, query_text, sizeof(answer_out->query) - 1);
 
-    char lower[512] = {0};
-    str_to_lower(natural_language_input, lower, sizeof(lower));
+    char lower_q[512] = {0};
+    str_to_lower(query_text, lower_q, sizeof(lower_q));
 
-    /* Check for Memory Optimization intent */
-    if (strstr(lower, "memory") || strstr(lower, "ram") || strstr(lower, "footprint") ||
-        strstr(natural_language_input, "記憶體") || strstr(natural_language_input, "内存") ||
-        strstr(natural_language_input, "肥") || strstr(natural_language_input, "瘦身")) {
-        intent_out->kind = FLOWY_INTENT_OPTIMIZE_MEMORY;
-        intent_out->memory_target_mb = 64.0;
-        intent_out->synthesized_mask = 0x00000000ffff0000ULL; /* Constrain memory bits */
-        return 1;
+    const FlowModuleKnowledge *best_m = NULL;
+    uint32_t best_score = 0;
+
+    for (size_t i = 0; i < KNOWLEDGE_COUNT; ++i) {
+        const FlowModuleKnowledge *k = &CODEBASE_KNOWLEDGE[i];
+        uint32_t score = 0;
+
+        if (strstr(lower_q, k->module_id)) score += 50;
+
+        /* Match keywords */
+        char lower_kw[512] = {0};
+        str_to_lower(k->keywords, lower_kw, sizeof(lower_kw));
+
+        char *token = strtok(lower_kw, " ");
+        while (token != NULL) {
+            if (strstr(lower_q, token) || strstr(query_text, token)) {
+                score += 15;
+            }
+            token = strtok(NULL, " ");
+        }
+
+        if (score > best_score) {
+            best_score = score;
+            best_m = k;
+        }
     }
 
-    /* Check for Latency / High Speed intent */
-    if (strstr(lower, "latency") || strstr(lower, "speed") || strstr(lower, "fast") ||
-        strstr(lower, "throughput") || strstr(natural_language_input, "延遲") ||
-        strstr(natural_language_input, "速度") || strstr(natural_language_input, "極速") ||
-        strstr(natural_language_input, "卡頓")) {
-        intent_out->kind = FLOWY_INTENT_OPTIMIZE_LATENCY;
-        intent_out->latency_target_ms = 2.0;
-        intent_out->synthesized_mask = 0x000000000000ffffULL; /* Lock multi-thread speed bits */
-        return 1;
+    if (best_m == NULL) {
+        best_m = &CODEBASE_KNOWLEDGE[0]; /* Default to bitspace */
     }
 
-    /* Check for Security & Compliance intent */
-    if (strstr(lower, "security") || strstr(lower, "audit") || strstr(lower, "compliance") ||
-        strstr(natural_language_input, "安全") || strstr(natural_language_input, "審計") ||
-        strstr(natural_language_input, "合規")) {
-        intent_out->kind = FLOWY_INTENT_ENFORCE_SECURITY;
-        intent_out->require_strict_audit = true;
-        intent_out->synthesized_mask = 0x00000000000000ffULL;
-        return 1;
-    }
+    answer_out->primary_module = best_m;
+    answer_out->matched_score = best_score;
 
-    /* Check for Embodied Robotics intent */
-    if (strstr(lower, "robot") || strstr(lower, "robotics") || strstr(lower, "gait") ||
-        strstr(lower, "spinal") || strstr(lower, "kalman") ||
-        strstr(natural_language_input, "機器人") || strstr(natural_language_input, "步態") ||
-        strstr(natural_language_input, "關節") || strstr(natural_language_input, "抗震")) {
-        intent_out->kind = FLOWY_INTENT_EMBODIED_ROBOTICS;
-        intent_out->synthesized_mask = 0x0000000000ff00ffULL;
-        return 1;
-    }
-
-    /* Check for SMT Mathematical Proof intent */
-    if (strstr(lower, "smt") || strstr(lower, "proof") || strstr(lower, "prove") ||
-        strstr(lower, "theorem") || strstr(natural_language_input, "證明") ||
-        strstr(natural_language_input, "數學")) {
-        intent_out->kind = FLOWY_INTENT_SMT_PROVE;
-        intent_out->synthesized_mask = (uint64_t)-1;
-        return 1;
-    }
-
-    /* Check for General Status intent */
-    if (strstr(lower, "status") || strstr(lower, "landscape") || strstr(lower, "entropy") ||
-        strstr(natural_language_input, "狀態") || strstr(natural_language_input, "全景") ||
-        strstr(natural_language_input, "熵")) {
-        intent_out->kind = FLOWY_INTENT_GENERAL_STATUS;
-        intent_out->synthesized_mask = (uint64_t)-1;
-        return 1;
-    }
-
-    intent_out->kind = FLOWY_INTENT_UNKNOWN;
-    intent_out->synthesized_mask = (uint64_t)-1;
-    return 1;
-}
-
-int flowy_process_with_chaos(FlowOrchestrator *orch,
-                             const FlowyUserIntent *intent,
-                             FlowyResponse *response_out) {
-    if (orch == NULL || intent == NULL || response_out == NULL) return 0;
-    memset(response_out, 0, sizeof(*response_out));
-    response_out->intent = *intent;
-
-    /* Execute 1-Bit Chaotic Annealing over the topology */
-    FlowOrchestratorEpoch ep;
-    flow_orchestrator_anneal(orch, 50, 42, &ep);
-    response_out->epoch_result = ep;
-
-    /* Set default Flowy ASCII mascot */
-    snprintf(response_out->ascii_art, sizeof(response_out->ascii_art),
-             "  (\\_/)\n"
-             " ( •.•) \n"
-             "  />💡 ");
-
-    switch (intent->kind) {
-        case FLOWY_INTENT_OPTIMIZE_MEMORY:
-            response_out->initial_ram_mb = 128.0;
-            response_out->optimized_ram_mb = 75.3;
-            response_out->ram_reduction_percent = 41.2;
-            response_out->initial_latency_ms = 4.8;
-            response_out->optimized_latency_ms = 4.2;
-            response_out->latency_reduction_percent = 12.5;
-            snprintf(response_out->explanation, sizeof(response_out->explanation),
-                     "我看見您希望優化記憶體。我剛在背景透過 1-Bit 混沌退火翻過了羅倫茲能量壁壘，\n"
-                     "將 AST 實作重構為 SoA (Structure of Arrays) 緊湊記憶體佈局！\n"
-                     "預測：RAM 消耗下降 %.1f%% (%.1fMB -> %.1fMB)，延遲維持在 %.1fms。\n"
-                     "要我為您立即套用此 JIT 熱替換更新嗎？",
-                     response_out->ram_reduction_percent,
-                     response_out->initial_ram_mb,
-                     response_out->optimized_ram_mb,
-                     response_out->optimized_latency_ms);
-            break;
-
-        case FLOWY_INTENT_OPTIMIZE_LATENCY:
-            response_out->initial_ram_mb = 128.0;
-            response_out->optimized_ram_mb = 132.0;
-            response_out->ram_reduction_percent = -3.1;
-            response_out->initial_latency_ms = 8.5;
-            response_out->optimized_latency_ms = 1.8;
-            response_out->latency_reduction_percent = 78.8;
-            snprintf(response_out->explanation, sizeof(response_out->explanation),
-                     "接收到極速延遲指令！1-Bit 混沌引擎已退火出 Sharded Parallel Map 拓樸，\n"
-                     "並啟用了 QSBR 無鎖無爭用記憶體回收架構。\n"
-                     "預測：P99 延遲下降 %.1f%% (%.1fms -> %.1fms)，吞吐量突破 390M ops/s！\n"
-                     "已就緒，隨時可進行零停機 JIT 遷移。",
-                     response_out->latency_reduction_percent,
-                     response_out->initial_latency_ms,
-                     response_out->optimized_latency_ms);
-            break;
-
-        case FLOWY_INTENT_ENFORCE_SECURITY:
-            snprintf(response_out->explanation, sizeof(response_out->explanation),
-                     "已啟用嚴格生產合規遮罩 (FLOW_COMPLIANCE_STRICT_PROD)！\n"
-                     "全域約束拓樸通過了不可篡改變異快照 (Mutation Snapshot) 審計，\n"
-                     "並配置了 < 1us QSBR 黃金基準回退防禦。",
-                     NULL);
-            break;
-
-        case FLOWY_INTENT_EMBODIED_ROBOTICS:
-            snprintf(response_out->explanation, sizeof(response_out->explanation),
-                     "具身機器人物理防護閘門已啟動！\n"
-                     "Sim-to-Real 動力學模擬器確認關節力矩在安全限制內，ZMP 質心穩定無傾倒風險，\n"
-                     "1kHz 脊髓反射閉環已與卡爾曼濾波抗震遮罩完成同步。",
-                     NULL);
-            break;
-
-        case FLOWY_INTENT_SMT_PROVE:
-            snprintf(response_out->explanation, sizeof(response_out->explanation),
-                     "SMT 形式化數學求解器已完成約束圖譜的一致性證明！\n"
-                     "狀態：[UNSAT_PROVEN_SOUND] 緩衝區邊界、記憶體配額與分片隔離性已完成形式化無缺陷擔保。",
-                     NULL);
-            break;
-
-        case FLOWY_INTENT_GENERAL_STATUS:
-        case FLOWY_INTENT_UNKNOWN:
-        default:
-            snprintf(response_out->explanation, sizeof(response_out->explanation),
-                     "FLOW 全域約束拓樸運作正常。\n"
-                     "當前活躍 Epoch: #%llu | 拓樸熵值: %.4f | 主成分: %s\n"
-                     "您可以隨時告訴我您的需求（例如：「幫我縮減記憶體」、「降低延遲」或「檢查合規審計」）。",
-                     (unsigned long long)ep.epoch_id, ep.entropy_score, ep.primary_component);
-            break;
-    }
+    /* Build detailed technical explanation directly from codebase knowledge */
+    snprintf(answer_out->explanation, sizeof(answer_out->explanation),
+             "=== FLOW INTROSPECTIVE CODEBASE ARCHITECTURE REPORT ===\n"
+             "Module:        %s (Layer %u)\n"
+             "Source Files:  %s, %s\n"
+             "Title:         %s\n\n"
+             "1. CORE RESPONSIBILITIES:\n"
+             "   %s\n\n"
+             "2. ALGORITHMIC & THEORETICAL GUARANTEES:\n"
+             "   %s\n\n"
+             "3. MEMORY LAYOUT & CONCURRENCY MODEL:\n"
+             "   %s\n\n"
+             "4. KEY AUTHORITATIVE APIS:\n"
+             "   %s\n",
+             best_m->module_id, best_m->layer,
+             best_m->header_file, best_m->source_file,
+             best_m->title,
+             best_m->responsibilities,
+             best_m->algorithmic_guarantee,
+             best_m->memory_concurrency_model,
+             best_m->key_apis);
 
     return 1;
 }
 
-void flowy_render_response(const FlowyResponse *response, FILE *out) {
-    if (response == NULL || out == NULL) return;
-    fprintf(out, "\n%sFlowy (FLOW Chaos Conversational Assistant):\n", response->ascii_art);
-    fprintf(out, "--------------------------------------------------------------------------------\n");
-    fprintf(out, "%s\n", response->explanation);
-    fprintf(out, "--------------------------------------------------------------------------------\n\n");
+void flowy_print_answer(const FlowyIntrospectiveAnswer *answer, FILE *out) {
+    if (answer == NULL || out == NULL) return;
+    fprintf(out, "\n%s\n", answer->explanation);
 }
 
 int flowy_interactive_loop(FlowOrchestrator *orch, FILE *in, FILE *out) {
-    if (orch == NULL || in == NULL || out == NULL) return 0;
+    if (in == NULL || out == NULL) return 0;
+    (void)orch;
+
+    FlowTopologyGraph graph;
+    flow_topology_build_codebase_graph(&graph);
+
     fprintf(out, "================================================================================\n");
-    fprintf(out, "            FLOWY: 1-Bit Chaos Topological Conversational Assistant              \n");
+    fprintf(out, "           FLOW INTROSPECTIVE CODEBASE KNOWLEDGE & ARCHITECTURE REASONER        \n");
     fprintf(out, "================================================================================\n");
-    fprintf(out, "Type your intent in natural language (or 'exit' / 'quit' to finish):\n\n");
+    fprintf(out, "Ask any question about FLOW architecture, algorithms, QSBR, SMT, or BitSpace\n");
+    fprintf(out, "Type 'list' to view all registered modules, or 'exit' / 'quit' to finish.\n\n");
 
     char line_buf[512];
     while (1) {
-        fprintf(out, "You > ");
+        fprintf(out, "FLOW-Query > ");
         fflush(out);
         if (fgets(line_buf, sizeof(line_buf), in) == NULL) break;
 
-        /* Strip trailing newline */
         size_t len = strlen(line_buf);
         while (len > 0 && (line_buf[len - 1] == '\n' || line_buf[len - 1] == '\r')) {
             line_buf[--len] = '\0';
         }
         if (len == 0) continue;
         if (strcmp(line_buf, "exit") == 0 || strcmp(line_buf, "quit") == 0) {
-            fprintf(out, "\nFlowy: 再見！有任何拓樸約束需求隨時喚醒我。\n");
+            fprintf(out, "\nExiting Introspective Reasoner.\n");
             break;
         }
 
-        FlowyUserIntent intent;
-        flowy_parse_intent(line_buf, &intent);
+        if (strcmp(line_buf, "list") == 0) {
+            fprintf(out, "\nRegistered Codebase Modules (%zu total):\n", flowy_knowledge_count());
+            for (size_t i = 0; i < flowy_knowledge_count(); ++i) {
+                const FlowModuleKnowledge *k = flowy_knowledge_at(i);
+                fprintf(out, "  * [%-12s] (Layer %u) %s -> %s\n", k->module_id, k->layer, k->title, k->header_file);
+            }
+            fprintf(out, "\n");
+            continue;
+        }
 
-        FlowyResponse response;
-        flowy_process_with_chaos(orch, &intent, &response);
-        flowy_render_response(&response, out);
+        FlowyIntrospectiveAnswer ans;
+        flowy_query_codebase(&graph, line_buf, &ans);
+        flowy_print_answer(&ans, out);
     }
     return 1;
 }

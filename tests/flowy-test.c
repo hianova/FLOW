@@ -1,6 +1,5 @@
 #include "flowy.h"
-#include "orchestrator.h"
-#include "registry.h"
+#include "topology.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -10,59 +9,59 @@
 #define CHECK(cond) if (!(cond)) { fprintf(stderr, "flowy-test failed at %s:%d: %s\n", __FILE__, __LINE__, #cond); exit(1); }
 
 int main(void) {
-    printf("Starting Flowy Chaos Conversational Assistant Test...\n");
-    flow_registry_init();
+    printf("Starting FLOW Introspective Codebase Knowledge & Reasoner Test...\n");
 
-    /* ===================================================================== */
-    /* 1. Test Natural Language Intent Parsing                               */
-    /* ===================================================================== */
-    FlowyUserIntent intent_mem;
-    CHECK(flowy_parse_intent("我覺得現在記憶體太肥了，幫我優化", &intent_mem) == 1);
-    CHECK(intent_mem.kind == FLOWY_INTENT_OPTIMIZE_MEMORY);
-    CHECK(intent_mem.synthesized_mask == 0x00000000ffff0000ULL);
+    /* 1. Test Introspective Knowledge Base Registration */
+    size_t k_count = flowy_knowledge_count();
+    CHECK(k_count >= 14);
 
-    FlowyUserIntent intent_lat;
-    CHECK(flowy_parse_intent("The latency is too high, maximize throughput and speed", &intent_lat) == 1);
-    CHECK(intent_lat.kind == FLOWY_INTENT_OPTIMIZE_LATENCY);
-    CHECK(intent_lat.synthesized_mask == 0x000000000000ffffULL);
+    const FlowModuleKnowledge *k_bit = flowy_knowledge_lookup("bitspace");
+    CHECK(k_bit != NULL);
+    CHECK(strcmp(k_bit->header_file, "src/bitspace.h") == 0);
+    CHECK(strstr(k_bit->algorithmic_guarantee, "12.96 ns") != NULL);
 
-    FlowyUserIntent intent_sec;
-    CHECK(flowy_parse_intent("enforce strict production security compliance audit", &intent_sec) == 1);
-    CHECK(intent_sec.kind == FLOWY_INTENT_ENFORCE_SECURITY);
+    const FlowModuleKnowledge *k_qsbr = flowy_knowledge_lookup("reload");
+    CHECK(k_qsbr != NULL);
+    CHECK(strstr(k_qsbr->title, "QSBR") != NULL);
+    CHECK(strstr(k_qsbr->key_apis, "flow_reload_call") != NULL);
 
-    FlowyUserIntent intent_robot;
-    CHECK(flowy_parse_intent("幫機器人做步態規劃與抗震", &intent_robot) == 1);
-    CHECK(intent_robot.kind == FLOWY_INTENT_EMBODIED_ROBOTICS);
+    /* 2. Test Deterministic Semantic Queries over Codebase Graph */
+    FlowTopologyGraph graph;
+    flow_topology_build_codebase_graph(&graph);
 
-    FlowyUserIntent intent_smt;
-    CHECK(flowy_parse_intent("run SMT formal mathematical proof", &intent_smt) == 1);
-    CHECK(intent_smt.kind == FLOWY_INTENT_SMT_PROVE);
+    /* Query: QSBR memory reclamation */
+    FlowyIntrospectiveAnswer ans_qsbr;
+    CHECK(flowy_query_codebase(&graph, "how does lock-free QSBR memory reclamation work?", &ans_qsbr) == 1);
+    CHECK(ans_qsbr.primary_module != NULL);
+    CHECK(strcmp(ans_qsbr.primary_module->module_id, "reload") == 0);
+    CHECK(strstr(ans_qsbr.explanation, "Unified QSBR") != NULL);
+    CHECK(strstr(ans_qsbr.explanation, "src/reload.h") != NULL);
 
-    /* ===================================================================== */
-    /* 2. Test 1-Bit Chaos Topological Processing                            */
-    /* ===================================================================== */
-    FlowOrchestrator *orch = flow_orchestrator_create(".");
-    char diag[256] = {0};
-    flow_orchestrator_absorb(orch, "examples/compiler.flow", diag, sizeof(diag));
-    flow_orchestrator_absorb(orch, "examples/project.flow", diag, sizeof(diag));
+    /* Query: 1-Bit chaotic search & mask canvas */
+    FlowyIntrospectiveAnswer ans_chaos;
+    CHECK(flowy_query_codebase(&graph, "1-bit chaos mutation mask canvas", &ans_chaos) == 1);
+    CHECK(ans_chaos.primary_module != NULL);
+    CHECK(strcmp(ans_chaos.primary_module->module_id, "bitspace") == 0);
+    CHECK(strstr(ans_chaos.explanation, "1024-Bit BitSpace") != NULL);
 
-    FlowyResponse resp_mem;
-    CHECK(flowy_process_with_chaos(orch, &intent_mem, &resp_mem) == 1);
-    CHECK(resp_mem.ram_reduction_percent > 30.0);
-    CHECK(strstr(resp_mem.explanation, "SoA") != NULL);
-    CHECK(strstr(resp_mem.ascii_art, "•.•") != NULL);
+    /* Query: SMT mathematical proofs */
+    FlowyIntrospectiveAnswer ans_smt;
+    CHECK(flowy_query_codebase(&graph, "SMT formal mathematical proofs and theorems", &ans_smt) == 1);
+    CHECK(ans_smt.primary_module != NULL);
+    CHECK(strcmp(ans_smt.primary_module->module_id, "smt") == 0);
+    CHECK(strstr(ans_smt.explanation, "SMT-LIB2") != NULL);
 
-    FlowyResponse resp_lat;
-    CHECK(flowy_process_with_chaos(orch, &intent_lat, &resp_lat) == 1);
-    CHECK(resp_lat.latency_reduction_percent > 50.0);
-    CHECK(strstr(resp_lat.explanation, "QSBR") != NULL);
+    /* Query: Embodied Robotics & Sim-to-Real */
+    FlowyIntrospectiveAnswer ans_robot;
+    CHECK(flowy_query_codebase(&graph, "具身機器人步態規劃與質心抗震防護", &ans_robot) == 1);
+    CHECK(ans_robot.primary_module != NULL);
+    CHECK(strcmp(ans_robot.primary_module->module_id, "embodied") == 0);
+    CHECK(strstr(ans_robot.explanation, "src/embodied.h") != NULL);
 
-    /* Test Rendering */
-    flowy_render_response(&resp_mem, stdout);
-    flowy_render_response(&resp_lat, stdout);
+    /* Test Printing */
+    flowy_print_answer(&ans_qsbr, stdout);
+    flowy_print_answer(&ans_robot, stdout);
 
-    flow_orchestrator_destroy(orch);
-
-    printf("FLOWY_TEST=passed natural_language_parsing=verified chaos_bridge=sound human_dialogue=verified\n");
+    printf("FLOWY_TEST=passed introspective_knowledge=verified deterministic_queries=verified\n");
     return 0;
 }

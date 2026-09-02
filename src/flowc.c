@@ -31,26 +31,18 @@ int flowc_main(int argc, char **argv) {
         return res ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
-    /* Flowy: Single-Shot Natural Language Query (flowc ask "...") */
+    /* Flowy: Single-Shot Introspective Codebase Query (flowc ask "...") */
     if (argc >= 2 && (strcmp(argv[1], "ask") == 0 || strcmp(argv[1], "--ask") == 0)) {
         if (argc < 3) {
-            fprintf(stderr, "usage: flowc ask \"<natural language request>\"\n");
+            fprintf(stderr, "usage: flowc ask \"<query about architecture, algorithms, or invariants>\"\n");
             return EXIT_FAILURE;
         }
-        flow_registry_init();
-        FlowOrchestrator *orch = flow_orchestrator_create(".");
-        char diag[256] = {0};
-        flow_orchestrator_absorb(orch, "examples/compiler.flow", diag, sizeof(diag));
-        flow_orchestrator_absorb(orch, "examples/project.flow", diag, sizeof(diag));
+        FlowTopologyGraph graph;
+        flow_topology_build_codebase_graph(&graph);
 
-        FlowyUserIntent intent;
-        flowy_parse_intent(argv[2], &intent);
-
-        FlowyResponse response;
-        flowy_process_with_chaos(orch, &intent, &response);
-        flowy_render_response(&response, stdout);
-
-        flow_orchestrator_destroy(orch);
+        FlowyIntrospectiveAnswer ans;
+        flowy_query_codebase(&graph, argv[2], &ans);
+        flowy_print_answer(&ans, stdout);
         return EXIT_SUCCESS;
     }
 

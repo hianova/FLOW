@@ -2,58 +2,47 @@
 #define FLOW_FLOWY_H
 
 #include "flow.h"
+#include "topology.h"
 #include "orchestrator.h"
-#include "bitspace.h"
+
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
-
-typedef enum {
-    FLOWY_INTENT_OPTIMIZE_MEMORY = 0,
-    FLOWY_INTENT_OPTIMIZE_LATENCY = 1,
-    FLOWY_INTENT_ENFORCE_SECURITY = 2,
-    FLOWY_INTENT_EMBODIED_ROBOTICS = 3,
-    FLOWY_INTENT_SMT_PROVE = 4,
-    FLOWY_INTENT_GENERAL_STATUS = 5,
-    FLOWY_INTENT_UNKNOWN = 6
-} FlowyIntentKind;
+#include <stdio.h>
 
 typedef struct {
-    FlowyIntentKind kind;
-    char raw_prompt[512];
-    char target_component[64];
-    uint64_t synthesized_mask;
-    double memory_target_mb;
-    double latency_target_ms;
-    bool require_strict_audit;
-    bool request_jit_apply;
-} FlowyUserIntent;
+    const char *module_id;
+    const char *title;
+    const char *header_file;
+    const char *source_file;
+    uint32_t layer; /* 0=Core, 1=Interface, 2=Plugin */
+    const char *responsibilities;
+    const char *algorithmic_guarantee;
+    const char *memory_concurrency_model;
+    const char *key_apis;
+    const char *keywords;
+} FlowModuleKnowledge;
 
 typedef struct {
-    FlowyUserIntent intent;
-    FlowOrchestratorEpoch epoch_result;
-    double initial_ram_mb;
-    double optimized_ram_mb;
-    double ram_reduction_percent;
-    double initial_latency_ms;
-    double optimized_latency_ms;
-    double latency_reduction_percent;
-    char explanation[1024];
-    char ascii_art[512];
-} FlowyResponse;
+    const FlowModuleKnowledge *primary_module;
+    const FlowModuleKnowledge *related_modules[4];
+    size_t related_count;
+    char query[256];
+    char explanation[2048];
+    uint32_t matched_score;
+} FlowyIntrospectiveAnswer;
 
-/* 1. Natural Language Intent Parser */
-int flowy_parse_intent(const char *natural_language_input, FlowyUserIntent *intent_out);
+/* Introspective Knowledge Base */
+size_t flowy_knowledge_count(void);
+const FlowModuleKnowledge *flowy_knowledge_at(size_t index);
+const FlowModuleKnowledge *flowy_knowledge_lookup(const char *module_id);
 
-/* 2. 1-Bit Chaos Annealing & Constraint Optimization Bridge */
-int flowy_process_with_chaos(FlowOrchestrator *orch,
-                             const FlowyUserIntent *intent,
-                             FlowyResponse *response_out);
+/* Deterministic Semantic Query & Topological Reasoner */
+int flowy_query_codebase(const FlowTopologyGraph *graph,
+                         const char *query_text,
+                         FlowyIntrospectiveAnswer *answer_out);
 
-/* 3. Human-Centric Topological Dialogue Renderer */
-void flowy_render_response(const FlowyResponse *response, FILE *out);
-
-/* 4. Interactive CLI Assistant Loop */
+void flowy_print_answer(const FlowyIntrospectiveAnswer *answer, FILE *out);
 int flowy_interactive_loop(FlowOrchestrator *orch, FILE *in, FILE *out);
 
 #endif
