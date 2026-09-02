@@ -38,22 +38,27 @@ fi
 
 echo "Building FLOW compiler (flowc) using $CC..."
 mkdir -p "$TMPDIR/build"
+CORE_SRCS=$(find "$SRCDIR/src" -maxdepth 1 -name "*.c" ! -name "flowc.c" ! -name "flowy_main.c")
 "$CC" -std=c17 -Wall -Wextra -Wpedantic -O3 -pthread \
-    -DFLOW_TEMPLATE_PATH="\"$SRCDIR/tools/self-host-stage2.c\"" \
-    "$SRCDIR"/src/*.c -o "$TMPDIR/build/flowc" -lm
+    $CORE_SRCS "$SRCDIR/src/flowc.c" -o "$TMPDIR/build/flowc" -lm
 
-echo "Installing flowc to $BINDIR..."
+echo "Building FLOW introspective assistant (flowy) using $CC..."
+"$CC" -std=c17 -Wall -Wextra -Wpedantic -O3 -pthread \
+    $CORE_SRCS "$SRCDIR/src/flowy_main.c" -o "$TMPDIR/build/flowy" -lm
+
+echo "Installing flowc and flowy to $BINDIR..."
 mkdir -p "$BINDIR"
 install -m 755 "$TMPDIR/build/flowc" "$BINDIR/flowc"
+install -m 755 "$TMPDIR/build/flowy" "$BINDIR/flowy"
 
 mkdir -p "$INCLUDEDIR"
 install -m 644 "$SRCDIR"/src/*.h "$INCLUDEDIR/"
 
 echo ""
 echo "=========================================================="
-echo "  FLOW Compiler (flowc) successfully installed!"
-echo "  Binary:  $BINDIR/flowc"
-echo "  Headers: $INCLUDEDIR"
+echo "  FLOW Toolchain (flowc + flowy) successfully installed!"
+echo "  Binaries: $BINDIR/flowc, $BINDIR/flowy"
+echo "  Headers:  $INCLUDEDIR"
 echo "=========================================================="
 echo ""
 

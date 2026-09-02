@@ -6,29 +6,34 @@
 
 > **Living Topology Orchestrator & Autonomous Continuous Evolution Engine**
 
-FLOW manages declarative intents and constraint topologies (`.flow`). Using **1-Bit Chaotic Annealing**, **Declarative Plugin Contracts**, **Asynchronous JIT**, and **Unified QSBR**, FLOW continuously searches, verifies, and hot-swaps optimal machine code with zero runtime latency.
+FLOW compiles declarative intents (`.flow`) into zero-overhead native code. Using **1-Bit Chaotic Annealing**, **Declarative Dynamic Plugins (DSO)**, **Unified QSBR with Watchdog Quarantine**, **SMT Epistatic Gene Linkage**, and **Smith Predictor Dual-Rate Control**, FLOW explores, verifies, and hot-swaps optimal machine implementations with zero runtime latency.
 
 ```text
  ┌────────────────────────────────────────────────────────────────────────┐
- │                      LIVING CODEBASE SUITE                             │
+ │                      FLOW DECOUPLED ARCHITECTURE                       │
  │                                                                        │
- │ [flow absorb] ──► Global Constraint Topology ──► 1024-Bit BitSpace     │
- │                           │                              │             │
- │                           ▼                              ▼             │
- │ [flow daemon] ◄── Continuous Annealing ──► Async JIT & Unified QSBR   │
+ │ [flowc] (Minimal Compiler) ──► 1-Bit Chaos Engine ──► C / IR / ABI     │
+ │                                        ▲                               │
+ │                                        │ (On-Demand DSO Masks)         │
+ │                        [Dynamic Plugins: libflow_*.so]                 │
+ │                                                                        │
+ │ [flowy] (Introspective CLI) ──► Topology Graph ──► Formal SMT & Audit  │
  └────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Key Features
+## Key Subsystems & Guarantees
 
-- **Living Topology Orchestrator**: `flow absorb` unifies multi-intent constraint graphs via Semantic Merge; `flow daemon` runs continuous background annealing to minimize entropy.
-- **Declarative Plugin Contracts**: Zero-C-callback plugin architecture (`FlowPluginContract`) synthesizes domain verification, dimension spaces, and cost models automatically.
-- **1024-Bit Chaotic Search (`FlowGenome`)**: Constant-time $O(1)$ mutation ($12.96\text{ ns/op}$) exploring high-dimensional Pareto implementation frontiers without combinatorial explosion.
-- **3-Tier Dynamic Mask Canvas (`FlowMaskCanvas`)**: Superposes Tier-1 hard safety masks, Tier-2 eBPF/PMU telemetry, and Tier-3 domain preferences for 1-cycle early pruning.
-- **Enterprise Production Suite**: Features Deterministic Audit Trails with 100% exact time-travel replay, sub-microsecond ($< 1\mu\text{s}$) QSBR Golden Baseline fallback, and Bounded Chaos compliance gating.
-- **Asynchronous JIT & Unified QSBR**: Background worker pool eliminating compilation latency with zero-atomic-write lock-free QSBR memory reclamation ($> 390\text{M ops/s}$).
+- **Occam's Razor Decoupled Core**:
+  - `build/flowc`: Ultra-minimal ahead-of-time compiler (Parser, 1-Bit Chaos Engine, Multi-Target Emitters).
+  - `build/flowy`: Standalone introspection assistant for architecture querying, causal explanation, neural telemetry, and living documentation.
+  - `build/libflow_*.so`: Dynamic DSO plugins (`flow.embodied`, `flow.smt`, `flow.security`, `flow.swarm`, `flow.genetic`) loaded on-demand.
+- **1-Bit Chaotic Annealing (`FlowGenome`)**: Constant-time $O(1)$ mutation ($12.96\text{ ns/op}$) exploring high-dimensional Pareto implementation frontiers without combinatorial explosion.
+- **SMT Epistatic Gene Linkage (`FlowSMT`)**: Automated SMT analysis identifies tightly coupled bit groups, mutating them atomically to eliminate epistasis barriers.
+- **Unified QSBR with Watchdog Quarantine**: Lock-free epoch reclamation ($> 390\text{M ops/s}$) featuring an Epoch Watchdog and memory page isolation (`mprotect`) preventing straggler-induced memory leaks.
+- **Virtual Memory Zero-Copy Page Remap**: Instantaneous sub-microsecond hot-swap page-remapping with zero memcpy overhead.
+- **Embodied AI & Smith Predictor (`FlowEmbodied`)**: Micro-physics ZMP zero-fall simulator, dual-rate 10kHz spinal reflex, and 3ms dead-time phase lag compensation.
 
 ---
 
@@ -59,34 +64,52 @@ prefer {
 
 ---
 
-## Quickstart & CLI
+## Quickstart & CLI Usage
+
+### 1. Minimal Ahead-of-Time Compilation (`flowc`)
 
 ```sh
-# 1. Absorb intent into global constraint topology
-flowc absorb examples/project.flow
+# Basic compilation to native C
+flowc examples/rank.flow -o generated/rank.c
 
-# 2. Global chaotic Pareto annealing & epoch solidification
-flowc anneal examples/compiler.flow examples/project.flow
+# 1-Bit Chaotic Search optimization with profile feedback
+flowc examples/rank.flow -o generated/rank.c --search --iterations 250 --seed 42
 
-# 3. Flowy: Living Introspection, Causal Explanation & Living Docs
-flowc ask "how does lock-free QSBR memory reclamation work?"
-flowc why                  # Explains deterministic causality of latest real-time morph
-flowc bottleneck           # Identifies neural telemetry peak hotspot & self-healing action
-flowc timeline             # Real-time dynamic decision timeline
-flowc doc bitspace         # Living codebase API & invariant documentation
-flowc flowy                # Interactive introspective reasoning shell
+# Multi-target cross-language and IR code generation
+flowc examples/rank.flow -o generated/rank.c \
+    --target-c-header generated/rank.h \
+    --target-rust generated/rank.rs \
+    --target-python generated/rank.py \
+    --target-mlir generated/rank.mlir \
+    --target-llvm-ir generated/rank.ll
+```
 
-# 4. Unified Architectural & SMT Formal Invariant Audit
-flowc audit
+### 2. Standalone Introspection & Architecture Assistant (`flowy`)
 
-# 5. Mechanism Efficiency & Quantitative Empirical Audit
-flowc audit-mechanisms
+```sh
+# Introspective Codebase Q&A
+flowy ask "how does lock-free QSBR memory reclamation work?"
 
-# 6. Launch background continuous evolution daemon
-flowc daemon --cycles 10 --interval-ms 500
+# Real-Time Causal Decision & Hotspot Explanations
+flowy why                  # Explains deterministic causality of latest real-time morph
+flowy bottleneck           # Identifies neural telemetry peak hotspot & self-healing action
+flowy timeline             # Real-time dynamic decision timeline
 
-# 7. Multi-objective state time travel (speed, balanced, memory)
-flowc morph speed
+# Living Codebase Documentation
+flowy doc all              # Complete living architecture docs
+flowy doc bitspace         # Specific module documentation
+
+# Living Topology Orchestration & Global Annealing
+flowy absorb examples/compiler.flow
+flowy anneal examples/compiler.flow examples/project.flow
+flowy landscape            # Pareto multi-objective topology report
+
+# Unified Architectural & Formal SMT Invariant Audit
+flowy audit                # Comprehensive 22-node codebase & theorem prover audit
+flowy audit-mechanisms     # Quantitative mechanism efficiency audit
+
+# Interactive Living Assistant Shell
+flowy shell
 ```
 
 ---
@@ -94,14 +117,17 @@ flowc morph speed
 ## Build & Test
 
 ```sh
-# Build binary and run full test suite (38 regression suites)
-make
+# Build flowc, flowy, and dynamic plugins
+make all
+
+# Run full test suite (40 regression & hardening suites)
 make test
+
+# Run end-to-end acceptance & benchmark verification
 make acceptance
 
-# Install via Cargo or POSIX make
-cargo install --path .
-# or: sudo make install
+# System installation
+sudo make install
 ```
 
 ---

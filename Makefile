@@ -341,4 +341,4 @@ test: $(FLOWC) $(FLOWY) plugins reload-test live-reload-test backend-reload-test
 	! $(FLOWC) examples/invalid_no_input.flow -o /tmp/flow-invalid-no-input.c
 
 clean:
-	rm -rf $(BUILD_DIR) generated/*.c
+	rm -rf $(BUILD_DIR) generated/*.c generated/*.h generated/*.rs generated/*.py generated/*.profile generated/*.lock generated/*.dot generated/*.json /tmp/flow-* /tmp/d_* /tmp/test_*

@@ -69,7 +69,7 @@ Pass:
 make autopoiesis-check
 ```
 
-The autopoiesis check verifies that the compiler's own intent (`examples/compiler.flow`) is absorbed into the State/Topology Orchestrator canvas (`flow absorb`), unified into the global topology, and annealed into a verified self-evolving Epoch (`flow anneal`). The codebase manages its own meta-intent without external static bootstrap templates.
+The autopoiesis check verifies that the compiler's own intent (`examples/compiler.flow`) is absorbed into the State/Topology Orchestrator canvas (`flowy absorb`), unified into the global topology, and annealed into a verified self-evolving Epoch (`flowy anneal`). The codebase manages its own meta-intent without external static bootstrap templates.
 
 ## M5 — reload and migration
 
