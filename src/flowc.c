@@ -10,6 +10,7 @@
 #include "swarm.h"
 #include "genetic.h"
 #include "orchestrator.h"
+#include "flowy.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -17,6 +18,41 @@
 #include <string.h>
 
 int flowc_main(int argc, char **argv) {
+    /* Flowy: 1-Bit Chaos Conversational Assistant (Interactive Mode) */
+    if (argc >= 2 && (strcmp(argv[1], "flowy") == 0 || strcmp(argv[1], "--flowy") == 0)) {
+        flow_registry_init();
+        FlowOrchestrator *orch = flow_orchestrator_create(".");
+        char diag[256] = {0};
+        flow_orchestrator_absorb(orch, "examples/compiler.flow", diag, sizeof(diag));
+        flow_orchestrator_absorb(orch, "examples/project.flow", diag, sizeof(diag));
+        int res = flowy_interactive_loop(orch, stdin, stdout);
+        flow_orchestrator_destroy(orch);
+        return res ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
+    /* Flowy: Single-Shot Natural Language Query (flowc ask "...") */
+    if (argc >= 2 && (strcmp(argv[1], "ask") == 0 || strcmp(argv[1], "--ask") == 0)) {
+        if (argc < 3) {
+            fprintf(stderr, "usage: flowc ask \"<natural language request>\"\n");
+            return EXIT_FAILURE;
+        }
+        flow_registry_init();
+        FlowOrchestrator *orch = flow_orchestrator_create(".");
+        char diag[256] = {0};
+        flow_orchestrator_absorb(orch, "examples/compiler.flow", diag, sizeof(diag));
+        flow_orchestrator_absorb(orch, "examples/project.flow", diag, sizeof(diag));
+
+        FlowyUserIntent intent;
+        flowy_parse_intent(argv[2], &intent);
+
+        FlowyResponse response;
+        flowy_process_with_chaos(orch, &intent, &response);
+        flowy_render_response(&response, stdout);
+
+        flow_orchestrator_destroy(orch);
+        return EXIT_SUCCESS;
+    }
+
     /* Living Topology Orchestrator Background Continuous Evolution Daemon */
     if (argc >= 2 && (strcmp(argv[1], "daemon") == 0 || strcmp(argv[1], "--daemon") == 0)) {
         size_t interval_ms = 100;

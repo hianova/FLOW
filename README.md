@@ -68,13 +68,17 @@ flowc absorb examples/project.flow
 # 2. Global chaotic Pareto annealing & epoch solidification
 flowc anneal examples/compiler.flow examples/project.flow
 
-# 3. Launch background continuous evolution daemon
+# 3. Flowy: Conversational Assistant (Single-shot or Interactive Chat)
+flowc ask "我覺得現在記憶體太肥了，幫我優化"
+flowc flowy
+
+# 4. Launch background continuous evolution daemon
 flowc daemon --cycles 10 --interval-ms 500
 
-# 4. Inspect topological landscape & SMT mathematical theorems
+# 5. Inspect topological landscape & SMT mathematical theorems
 flowc landscape
 
-# 5. Multi-objective state time travel (speed, balanced, memory)
+# 6. Multi-objective state time travel (speed, balanced, memory)
 flowc morph speed
 ```
 
@@ -83,7 +87,7 @@ flowc morph speed
 ## Build & Test
 
 ```sh
-# Build binary and run full test suite (34 regression suites)
+# Build binary and run full test suite (36 regression suites)
 make
 make test
 make acceptance
