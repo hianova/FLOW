@@ -108,4 +108,29 @@ void flowy_print_remediation_proposal(const FlowRemediationProposal *proposal, F
 /* Closed-Loop Level 5 Autopilot Incident Formatter */
 void flowy_print_autopilot_incident(const FlowAutopilotIncident *incident, FILE *out);
 
+/* ========================================================================= */
+/* Level 5 Autonomy Crucible Contest Engine                                  */
+/* ========================================================================= */
+
+typedef struct {
+    int stage1_smt_rejected;
+    char stage1_rejection_log[256];
+
+    int stage2_jit_vetoed;
+    char stage2_jit_log[256];
+    char stage2_routing_log[256];
+
+    int stage3_hotswap_success;
+    uint64_t stage3_latency_ms;
+    uint64_t dropped_requests;
+    int oom_killer_triggered;
+    double energy_delta;
+    char stage3_narrative_log[512];
+
+    int stage4_recovery_success;
+    char stage4_recovery_log[256];
+} FlowyCrucibleResult;
+
+int flowy_crucible_run(FlowyCrucibleResult *result_out, FILE *log_stream);
+
 #endif
