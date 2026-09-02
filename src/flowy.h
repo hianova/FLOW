@@ -99,4 +99,13 @@ void flowy_print_bottleneck_explanation(const FlowTopologyGraph *graph, FILE *ou
 /* Interactive Loop */
 int flowy_interactive_loop(FlowOrchestrator *orch, FILE *in, FILE *out);
 
+/* Counterfactual "What-If" Simulation Formatter */
+void flowy_print_counterfactual_report(const FlowCounterfactualReport *report, FILE *out);
+
+/* Topological Auto-Remediation Formatter */
+void flowy_print_remediation_proposal(const FlowRemediationProposal *proposal, FILE *out);
+
+/* Closed-Loop Level 5 Autopilot Incident Formatter */
+void flowy_print_autopilot_incident(const FlowAutopilotIncident *incident, FILE *out);
+
 #endif

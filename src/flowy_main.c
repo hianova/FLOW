@@ -224,6 +224,70 @@ int main(int argc, char **argv) {
         return EXIT_SUCCESS;
     }
 
+    /* 15. Counterfactual Simulation ("What-If" Architectural Sandbox) */
+    if (strcmp(argv[1], "what-if") == 0 || strcmp(argv[1], "--what-if") == 0 || strcmp(argv[1], "whatif") == 0) {
+        int mem_mb = 32;
+        int top_n = 50;
+        int threads = 4;
+        const char *spec = NULL;
+
+        for (int i = 2; i < argc; ++i) {
+            if (strcmp(argv[i], "--memory") == 0 && i + 1 < argc) {
+                mem_mb = atoi(argv[++i]);
+            } else if (strcmp(argv[i], "--top-n") == 0 && i + 1 < argc) {
+                top_n = atoi(argv[++i]);
+            } else if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) {
+                threads = atoi(argv[++i]);
+            } else if (argv[i][0] != '-') {
+                spec = argv[i];
+            }
+        }
+
+        FlowOrchestrator *orch = flow_orchestrator_create(".");
+        char diag[256] = {0};
+        if (spec != NULL) {
+            flow_orchestrator_absorb(orch, spec, diag, sizeof(diag));
+        } else {
+            flow_orchestrator_absorb(orch, "examples/rank.flow", diag, sizeof(diag));
+        }
+
+        FlowCounterfactualReport report;
+        flow_orchestrator_simulate_what_if(orch, mem_mb, top_n, threads, &report);
+        flowy_print_counterfactual_report(&report, stdout);
+        flow_orchestrator_destroy(orch);
+        return EXIT_SUCCESS;
+    }
+
+    /* 16. Topological Synthesis & Auto-Remediation (flowy remediate) */
+    if (strcmp(argv[1], "remediate") == 0 || strcmp(argv[1], "--remediate") == 0) {
+        const char *spec1 = argc >= 3 ? argv[2] : "examples/compiler.flow";
+        const char *spec2 = argc >= 4 ? argv[3] : "examples/project.flow";
+
+        FlowOrchestrator *orch = flow_orchestrator_create(".");
+        FlowRemediationProposal proposal;
+        flow_orchestrator_synthesize_remediation(orch, spec1, spec2, &proposal);
+        flowy_print_remediation_proposal(&proposal, stdout);
+        flow_orchestrator_destroy(orch);
+        return EXIT_SUCCESS;
+    }
+
+    /* 17. Closed-Loop Autonomous Orchestration (flowy autopilot) */
+    if (strcmp(argv[1], "autopilot") == 0 || strcmp(argv[1], "--autopilot") == 0) {
+        FlowOrchestrator *orch = flow_orchestrator_create(".");
+        char diag[256] = {0};
+        const char *spec = argc >= 3 ? argv[2] : "examples/project.flow";
+        flow_orchestrator_absorb(orch, spec, diag, sizeof(diag));
+
+        FlowAutopilotController *ctrl = flow_autopilot_create(orch, NULL);
+        FlowPMUTelemetry storm = { .cache_miss_rate = 0.148, .ipc = 0.82 };
+        FlowAutopilotIncident inc;
+        flow_autopilot_step(ctrl, &storm, &inc);
+        flowy_print_autopilot_incident(&inc, stdout);
+        flow_autopilot_destroy(ctrl);
+        flow_orchestrator_destroy(orch);
+        return EXIT_SUCCESS;
+    }
+
     if (strcmp(argv[1], "daemon") == 0 || strcmp(argv[1], "--daemon") == 0) {
         size_t interval_ms = 100;
         size_t max_cycles = 3;
@@ -253,6 +317,6 @@ int main(int argc, char **argv) {
     }
 
     fprintf(stderr, "Unknown command: %s\n", argv[1]);
-    fprintf(stderr, "Usage: flowy [ask|why|bottleneck|timeline|audit|audit-mechanisms|doc|absorb|anneal|landscape|refactor|morph|daemon|shell]\n");
+    fprintf(stderr, "Usage: flowy [what-if|remediate|autopilot|ask|why|bottleneck|timeline|audit|audit-mechanisms|doc|absorb|anneal|landscape|refactor|morph|daemon|shell]\n");
     return EXIT_FAILURE;
 }

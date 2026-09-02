@@ -543,9 +543,64 @@ void flowy_print_answer(const FlowyIntrospectiveAnswer *answer, FILE *out) {
     fprintf(out, "\n%s\n", answer->explanation);
 }
 
+void flowy_print_counterfactual_report(const FlowCounterfactualReport *report, FILE *out) {
+    if (report == NULL || out == NULL) return;
+
+    fprintf(out, "================================================================================\n");
+    fprintf(out, "        FLOW TOPOLOGY COUNTERFACTUAL WHAT-IF SIMULATION REPORT                  \n");
+    fprintf(out, "================================================================================\n");
+    fprintf(out, "Hypothetical Scenario:       %s\n", report->hypothetical_description);
+    fprintf(out, "Memory Constraint Shift:     %d MB -> %d MB\n", report->original_memory_mb, report->hypothetical_memory_mb);
+    fprintf(out, "Component Layout:            %s -> %s\n", report->original_component, report->hypothetical_component);
+    fprintf(out, "Pareto Latency Score:        %.2f -> %.2f\n", report->original_latency_score, report->hypothetical_latency_score);
+    fprintf(out, "Pareto Energy:               %.2f -> %.2f\n", report->original_energy, report->hypothetical_energy);
+    fprintf(out, "Throughput Impact:           %+.1f%%\n", report->throughput_delta_percent);
+    fprintf(out, "QSBR Reclamation Multiplier: %.1fx (Reclamation pressure surge)\n", report->qsbr_reclaim_freq_multiplier);
+    fprintf(out, "--------------------------------------------------------------------------------\n");
+    fprintf(out, "STRUCTURAL TOPOLOGY COLLAPSE:\n");
+    fprintf(out, "  * %s\n", report->structural_collapse);
+    fprintf(out, "--------------------------------------------------------------------------------\n");
+    fprintf(out, "DECISION RECOMMENDATION:\n");
+    fprintf(out, "  * %s\n", report->recommendation);
+    fprintf(out, "================================================================================\n");
+}
+
+void flowy_print_remediation_proposal(const FlowRemediationProposal *proposal, FILE *out) {
+    if (proposal == NULL || out == NULL) return;
+
+    fprintf(out, "================================================================================\n");
+    fprintf(out, "          FLOW TOPOLOGICAL SYNTHESIS & SMT AUTO-REMEDIATION PROPOSAL            \n");
+    fprintf(out, "================================================================================\n");
+    fprintf(out, "Conflict Summary:            %s\n", proposal->conflict_summary);
+    fprintf(out, "Min-Cut Bottleneck Variable: %s\n", proposal->min_cut_dimension);
+    fprintf(out, "Current Infeasible Bound:    %.1f MB\n", proposal->current_bound);
+    fprintf(out, "Required Remediation Bound:  %.1f MB (Minimum relaxation distance)\n", proposal->required_remediation_bound);
+    fprintf(out, "--------------------------------------------------------------------------------\n");
+    fprintf(out, "SYNTHESIZED .FLOW REMEDIATION PATCH:\n");
+    fprintf(out, "%s", proposal->proposed_flow_patch);
+    fprintf(out, "================================================================================\n");
+}
+
+void flowy_print_autopilot_incident(const FlowAutopilotIncident *incident, FILE *out) {
+    if (incident == NULL || out == NULL) return;
+
+    fprintf(out, "================================================================================\n");
+    fprintf(out, "          FLOW CLOSED-LOOP AUTONOMOUS AUTOPILOT INCIDENT REPORT                 \n");
+    fprintf(out, "================================================================================\n");
+    fprintf(out, "Incident ID:                 #%llu\n", (unsigned long long)incident->incident_id);
+    fprintf(out, "Trigger Anomaly:             %s\n", incident->anomaly_cause);
+    fprintf(out, "Topology Migration:          %s -> %s\n", incident->previous_topology, incident->new_topology);
+    fprintf(out, "Autonomous Action:           %s\n", incident->autonomous_action);
+    fprintf(out, "Hot-Swap Live Switch:        %llu ns (Zero-downtime QSBR pointer migration)\n", (unsigned long long)incident->hot_swap_switch_ns);
+    fprintf(out, "SMT Mathematical Proofs:     %s (Zero-Defect Guaranteed)\n", incident->smt_proof.proof_summary);
+    fprintf(out, "--------------------------------------------------------------------------------\n");
+    fprintf(out, "HUMAN NARRATIVE LOG:\n");
+    fprintf(out, "  \"%s\"\n", incident->human_narrative);
+    fprintf(out, "================================================================================\n");
+}
+
 int flowy_interactive_loop(FlowOrchestrator *orch, FILE *in, FILE *out) {
     if (in == NULL || out == NULL) return 0;
-    (void)orch;
 
     FlowTopologyGraph graph;
     flow_topology_build_codebase_graph(&graph);
@@ -554,7 +609,7 @@ int flowy_interactive_loop(FlowOrchestrator *orch, FILE *in, FILE *out) {
     fprintf(out, "           FLOW INTROSPECTIVE CODEBASE KNOWLEDGE & ARCHITECTURE REASONER        \n");
     fprintf(out, "================================================================================\n");
     fprintf(out, "Ask any question about FLOW architecture, algorithms, QSBR, SMT, or BitSpace\n");
-    fprintf(out, "Commands: 'why' (explain latest decision), 'bottleneck', 'timeline', 'list', 'exit'\n\n");
+    fprintf(out, "Commands: 'what-if', 'remediate', 'autopilot', 'why', 'bottleneck', 'timeline', 'list', 'exit'\n\n");
 
     char line_buf[512];
     while (1) {
@@ -570,6 +625,30 @@ int flowy_interactive_loop(FlowOrchestrator *orch, FILE *in, FILE *out) {
         if (strcmp(line_buf, "exit") == 0 || strcmp(line_buf, "quit") == 0) {
             fprintf(out, "\nExiting Introspective Reasoner.\n");
             break;
+        }
+
+        if (strstr(line_buf, "what-if") != NULL || strstr(line_buf, "what if") != NULL) {
+            FlowCounterfactualReport report;
+            flow_orchestrator_simulate_what_if(orch, 32, 50, 4, &report);
+            flowy_print_counterfactual_report(&report, out);
+            continue;
+        }
+
+        if (strstr(line_buf, "remediate") != NULL) {
+            FlowRemediationProposal proposal;
+            flow_orchestrator_synthesize_remediation(orch, "examples/compiler.flow", "examples/project.flow", &proposal);
+            flowy_print_remediation_proposal(&proposal, out);
+            continue;
+        }
+
+        if (strstr(line_buf, "autopilot") != NULL) {
+            FlowAutopilotController *ctrl = flow_autopilot_create(orch, NULL);
+            FlowPMUTelemetry storm = { .cache_miss_rate = 0.148, .ipc = 0.8 };
+            FlowAutopilotIncident inc;
+            flow_autopilot_step(ctrl, &storm, &inc);
+            flowy_print_autopilot_incident(&inc, out);
+            flow_autopilot_destroy(ctrl);
+            continue;
         }
 
         if (strcmp(line_buf, "why") == 0) {

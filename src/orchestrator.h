@@ -89,4 +89,81 @@ size_t flow_orchestrator_intent_count(const FlowOrchestrator *orch);
 
 const char *flow_absorb_status_name(FlowAbsorbStatus status);
 
+/* ========================================================================= */
+/* 6. Counterfactual Simulation ("What-If" Architectural Sandbox)             */
+/* ========================================================================= */
+
+typedef struct {
+    char hypothetical_description[128];
+    int original_memory_mb;
+    int hypothetical_memory_mb;
+    char original_component[64];
+    char hypothetical_component[64];
+    double original_latency_score;
+    double hypothetical_latency_score;
+    double original_energy;
+    double hypothetical_energy;
+    double throughput_delta_percent;
+    double qsbr_reclaim_freq_multiplier;
+    char structural_collapse[128];
+    char recommendation[256];
+    int feasible;
+} FlowCounterfactualReport;
+
+int flow_orchestrator_simulate_what_if(FlowOrchestrator *orch,
+                                       int hypothetical_memory_mb,
+                                       int hypothetical_top_n,
+                                       int hypothetical_threads,
+                                       FlowCounterfactualReport *report_out);
+
+/* ========================================================================= */
+/* 7. Topological Synthesis & Auto-Remediation (Min-Cut & Patch Synthesis)   */
+/* ========================================================================= */
+
+typedef struct {
+    char conflict_summary[256];
+    char min_cut_dimension[64];
+    double current_bound;
+    double required_remediation_bound;
+    char proposed_flow_patch[1024];
+    int can_auto_remediate;
+} FlowRemediationProposal;
+
+int flow_orchestrator_synthesize_remediation(FlowOrchestrator *orch,
+                                             const char *spec_file_a,
+                                             const char *spec_file_b,
+                                             FlowRemediationProposal *proposal_out);
+
+/* ========================================================================= */
+/* 8. Closed-Loop Autonomous Orchestration (Level 5 Software Autopilot)      */
+/* ========================================================================= */
+
+typedef struct {
+    uint64_t incident_id;
+    uint64_t timestamp_ns;
+    char anomaly_cause[128];
+    char previous_topology[64];
+    char autonomous_action[128];
+    char new_topology[64];
+    FlowSMTProofAttestation smt_proof;
+    uint64_t hot_swap_switch_ns;
+    char human_narrative[512];
+    int hot_swap_success;
+} FlowAutopilotIncident;
+
+typedef struct FlowAutopilotController FlowAutopilotController;
+
+struct FlowAutopilotController {
+    FlowOrchestrator *orch;
+    struct FlowReloadContext *reload_ctx;
+    FlowPMUTelemetry pmu_baseline;
+    double thermal_drift_threshold;
+    size_t incidents_count;
+    FlowAutopilotIncident incident_history[16];
+};
+
+FlowAutopilotController *flow_autopilot_create(FlowOrchestrator *orch, struct FlowReloadContext *reload_ctx);
+void flow_autopilot_destroy(FlowAutopilotController *ctrl);
+int flow_autopilot_step(FlowAutopilotController *ctrl, const FlowPMUTelemetry *current_pmu, FlowAutopilotIncident *incident_out);
+
 #endif
