@@ -153,10 +153,10 @@ int flow_registry_load_dso(const char *so_path, char *err_msg, size_t err_size) 
         dlclose(handle);
         return 0;
     }
-    if (desc->descriptor_size != sizeof(FlowPluginDescriptor)) {
+    if (desc->descriptor_size < 64) {
         if (err_msg && err_size) {
-            snprintf(err_msg, err_size, "descriptor size mismatch: plugin %zu != host %zu",
-                     desc->descriptor_size, sizeof(FlowPluginDescriptor));
+            snprintf(err_msg, err_size, "descriptor size mismatch: plugin %zu < min 64",
+                     desc->descriptor_size);
         }
         dlclose(handle);
         return 0;

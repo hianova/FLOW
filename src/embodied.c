@@ -469,6 +469,83 @@ static uint64_t embodied_env_mask(const SemanticIR *ir, const Component *c, cons
     return UINT64_MAX;
 }
 
+/* ========================================================================= */
+/* Standardized FLOW Plugin ABI v2 (Canonical 4-Function Contract)          */
+/* ========================================================================= */
+
+static size_t flow_embodied_get_genome_bit_size(void) {
+    return 16; /* 16 bits: 4 bits torque limit, 4 bits velocity, 4 bits reflex freq, 4 bits delay */
+}
+
+static uint64_t flow_embodied_get_valid_mask(const FlowEnvironmentState *env) {
+    /* Non-linear Kinetic Energy Inequality Precomputation:
+     * E = c1 * v^2 + c2 * log(m) <= E_max
+     * Under thermal throttling or low battery, E_max is restricted.
+     */
+    double e_max = 100.0;
+    if (env != NULL && env->measured_miss_rate > 0.05) {
+        /* Thermal / cache pressure: reduce available power budget */
+        e_max = 40.0;
+    }
+    double c1 = 2.5;
+    double c2 = 1.0;
+    double m = 12.0; /* 12kg robot body mass */
+    double log_m = log(m > 1.0 ? m : 1.0);
+    double max_v_sq = (e_max - c2 * log_m) / c1;
+    double v_max = max_v_sq > 0.0 ? sqrt(max_v_sq) : 1.0;
+
+    /* Bitwise projection:
+     * Bits [0..3]: Torque scale
+     * Bits [4..7]: Velocity limit (masked if exceeds v_max)
+     * Bits [8..11]: Reflex frequency (1kHz ~ 10kHz)
+     * Bits [12..15]: Smith predictor delay steps
+     */
+    uint64_t mask = 0x0000FFFFULL;
+    if (v_max < 4.0) {
+        /* High velocity bits (bit 6 and 7) violate non-linear kinetic boundary -> 0 (Invalid) */
+        mask &= ~(0x00C0ULL);
+    }
+    return mask;
+}
+
+static double flow_embodied_evaluate_energy(uint64_t genome) {
+    unsigned torque_raw = (unsigned)(genome & 0x0F);
+    unsigned vel_raw = (unsigned)((genome >> 4) & 0x0F);
+    unsigned freq_raw = (unsigned)((genome >> 8) & 0x0F);
+    unsigned delay_raw = (unsigned)((genome >> 12) & 0x0F);
+
+    /* Kinetic cost + phase lag penalty */
+    double torque_energy = (double)torque_raw * 1.5;
+    double vel_cost = (double)vel_raw * 2.0;
+    double latency_penalty = (double)(16 - freq_raw) * 0.8 + (double)delay_raw * 1.2;
+    return torque_energy + vel_cost + latency_penalty;
+}
+
+static void flow_embodied_emit_llvm_ir(uint64_t genome, void *module_or_out) {
+    if (module_or_out == NULL) return;
+    FILE *out = (FILE *)module_or_out;
+    unsigned torque_raw = (unsigned)(genome & 0x0F);
+    unsigned vel_raw = (unsigned)((genome >> 4) & 0x0F);
+    unsigned freq_raw = (unsigned)((genome >> 8) & 0x0F);
+    unsigned delay_raw = (unsigned)((genome >> 12) & 0x0F);
+
+    fprintf(out, "/* [flow.embodied] Native Reflex Code (Genome: 0x%04llx) */\n", (unsigned long long)genome);
+    fprintf(out, "/* Torque Max: %u Nm, Vel Cap: %u rad/s, Loop Freq: %u kHz, Delay Comp: %u steps */\n",
+            torque_raw * 10, vel_raw * 2, freq_raw + 1, delay_raw);
+    fprintf(out, "void flow_embodied_step(const double *angles, const double *vels, double *torques_out) {\n");
+    fprintf(out, "    for (int j = 0; j < %d; ++j) {\n", FLOW_MAX_JOINTS);
+    fprintf(out, "        torques_out[j] = -%f * angles[j] - %f * vels[j];\n", (double)(torque_raw + 1) * 2.5, (double)(vel_raw + 1) * 0.5);
+    fprintf(out, "    }\n");
+    fprintf(out, "}\n");
+}
+
+static const FlowPluginABI EMBODIED_ABI_V2 = {
+    .get_genome_bit_size = flow_embodied_get_genome_bit_size,
+    .get_valid_mask = flow_embodied_get_valid_mask,
+    .evaluate_energy = flow_embodied_evaluate_energy,
+    .emit_llvm_ir = flow_embodied_emit_llvm_ir
+};
+
 static const FlowPlugin EMBODIED_PLUGIN = {
     .name = "flow.embodied",
     .version = "1.0",
@@ -510,6 +587,7 @@ static const FlowPluginDescriptor EMBODIED_DESCRIPTOR = {
     .module_version = "1.0",
     .module_hash = 0xEB0D1ED1,
     .plugin = &EMBODIED_PLUGIN,
+    .abi_v2 = &EMBODIED_ABI_V2,
     .dso_handle = NULL,
     .active_references = 0
 };
@@ -518,9 +596,17 @@ const FlowPluginDescriptor *flow_embodied_entry_v1(void) {
     return &EMBODIED_DESCRIPTOR;
 }
 
+const FlowPluginABI *flow_embodied_abi_v2(void) {
+    return &EMBODIED_ABI_V2;
+}
+
 #ifdef FLOW_PLUGIN_DSO
 const FlowPluginDescriptor *flow_plugin_entry_v1(void) {
     return &EMBODIED_DESCRIPTOR;
+}
+
+const FlowPluginABI *flow_plugin_abi_v2(void) {
+    return &EMBODIED_ABI_V2;
 }
 #endif
 

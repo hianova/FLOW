@@ -278,6 +278,26 @@ struct FlowPlugin {
 #define FLOW_PLUGIN_ABI_MAJOR 1
 #define FLOW_PLUGIN_ABI_MINOR 0
 
+/* ========================================================================= */
+/* Standardized FLOW Plugin ABI v2 (Canonical 4-Function Pure Contract)      */
+/* ========================================================================= */
+
+typedef struct FlowPluginABI {
+    /* 1. Dimension Declaration: returns total bits required for domain genome */
+    size_t (*get_genome_bit_size)(void);
+
+    /* 2. Constraint Projection: pre-computes non-linear/physical polytope into 1-Bit Mask */
+    uint64_t (*get_valid_mask)(const FlowEnvironmentState *env);
+
+    /* 3. Energy Scoring: evaluates scalar domain energy for candidate genome */
+    double (*evaluate_energy)(uint64_t genome);
+
+    /* 4. Code Emission: lowers candidate genome into native LLVM IR / C AST */
+    void (*emit_llvm_ir)(uint64_t genome, void *module_or_out);
+} FlowPluginABI;
+
+typedef const FlowPluginABI *(*FlowPluginABIv2EntryFn)(void);
+
 typedef struct FlowPluginDescriptor {
     uint32_t abi_major;
     uint32_t abi_minor;
@@ -286,6 +306,7 @@ typedef struct FlowPluginDescriptor {
     const char *module_version;
     uint64_t module_hash;
     const FlowPlugin *plugin;
+    const FlowPluginABI *abi_v2;
     void *dso_handle;
     _Atomic uint64_t active_references;
 } FlowPluginDescriptor;
