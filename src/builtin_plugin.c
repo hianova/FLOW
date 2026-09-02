@@ -742,6 +742,12 @@ static const FlowPlugin BUILTIN_PLUGIN = {
     NULL,
     builtin_environment_mask,
     builtin_create_unit,
+    "Builtin Algorithms & Data Structures",
+    "Provides linear_array, sharded_hash, parallel_map, and basic primitives",
+    "Formal QF_LIA verified sound bounds",
+    "Pthread lock-free / QSBR shared memory",
+    "flow_component_evaluate, flow_component_verify_plan",
+    0,
     NULL
 };
 

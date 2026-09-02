@@ -44,7 +44,8 @@ typedef enum {
     FLOW_DECISION_TRIGGER_CACHE_MISS_SPIKE = 4,
     FLOW_DECISION_TRIGGER_SMT_COUNTEREXAMPLE = 5,
     FLOW_DECISION_TRIGGER_THERMAL_SHOCK = 6,
-    FLOW_DECISION_TRIGGER_GOLDEN_FALLBACK = 7
+    FLOW_DECISION_TRIGGER_GOLDEN_FALLBACK = 7,
+    FLOW_DECISION_TRIGGER_STRAGGLER_QUARANTINE = 8
 } FlowDecisionTriggerType;
 
 typedef struct {
@@ -74,6 +75,7 @@ typedef struct {
 size_t flowy_knowledge_count(void);
 const FlowModuleKnowledge *flowy_knowledge_at(size_t index);
 const FlowModuleKnowledge *flowy_knowledge_lookup(const char *module_id);
+int flowy_register_dynamic_module(const FlowModuleKnowledge *knowledge);
 
 /* Deterministic Semantic Query & Topological Reasoner */
 int flowy_query_codebase(const FlowTopologyGraph *graph,

@@ -179,13 +179,34 @@ static const FlowModuleKnowledge CODEBASE_KNOWLEDGE[] = {
 
 static const size_t KNOWLEDGE_COUNT = sizeof(CODEBASE_KNOWLEDGE) / sizeof(CODEBASE_KNOWLEDGE[0]);
 
+#define FLOW_MAX_DYNAMIC_KNOWLEDGE 64
+static FlowModuleKnowledge g_dynamic_knowledge[FLOW_MAX_DYNAMIC_KNOWLEDGE];
+static size_t g_dynamic_knowledge_count = 0;
+
+int flowy_register_dynamic_module(const FlowModuleKnowledge *knowledge) {
+    if (knowledge == NULL || knowledge->module_id == NULL) return 0;
+    for (size_t i = 0; i < g_dynamic_knowledge_count; ++i) {
+        if (strcmp(g_dynamic_knowledge[i].module_id, knowledge->module_id) == 0) {
+            g_dynamic_knowledge[i] = *knowledge;
+            return 1;
+        }
+    }
+    if (g_dynamic_knowledge_count < FLOW_MAX_DYNAMIC_KNOWLEDGE) {
+        g_dynamic_knowledge[g_dynamic_knowledge_count++] = *knowledge;
+        return 1;
+    }
+    return 0;
+}
+
 size_t flowy_knowledge_count(void) {
-    return KNOWLEDGE_COUNT;
+    return KNOWLEDGE_COUNT + g_dynamic_knowledge_count;
 }
 
 const FlowModuleKnowledge *flowy_knowledge_at(size_t index) {
-    if (index >= KNOWLEDGE_COUNT) return NULL;
-    return &CODEBASE_KNOWLEDGE[index];
+    if (index < KNOWLEDGE_COUNT) return &CODEBASE_KNOWLEDGE[index];
+    size_t dyn_idx = index - KNOWLEDGE_COUNT;
+    if (dyn_idx < g_dynamic_knowledge_count) return &g_dynamic_knowledge[dyn_idx];
+    return NULL;
 }
 
 const FlowModuleKnowledge *flowy_knowledge_lookup(const char *module_id) {
@@ -193,6 +214,11 @@ const FlowModuleKnowledge *flowy_knowledge_lookup(const char *module_id) {
     for (size_t i = 0; i < KNOWLEDGE_COUNT; ++i) {
         if (strcmp(CODEBASE_KNOWLEDGE[i].module_id, module_id) == 0) {
             return &CODEBASE_KNOWLEDGE[i];
+        }
+    }
+    for (size_t i = 0; i < g_dynamic_knowledge_count; ++i) {
+        if (strcmp(g_dynamic_knowledge[i].module_id, module_id) == 0) {
+            return &g_dynamic_knowledge[i];
         }
     }
     return NULL;
@@ -453,16 +479,18 @@ int flowy_query_codebase(const FlowTopologyGraph *graph,
 
     const FlowModuleKnowledge *best_m = NULL;
     uint32_t best_score = 0;
+    size_t total_k = flowy_knowledge_count();
 
-    for (size_t i = 0; i < KNOWLEDGE_COUNT; ++i) {
-        const FlowModuleKnowledge *k = &CODEBASE_KNOWLEDGE[i];
+    for (size_t i = 0; i < total_k; ++i) {
+        const FlowModuleKnowledge *k = flowy_knowledge_at(i);
+        if (k == NULL) continue;
         uint32_t score = 0;
 
         if (strstr(lower_q, k->module_id)) score += 50;
 
         /* Match keywords */
         char lower_kw[512] = {0};
-        str_to_lower(k->keywords, lower_kw, sizeof(lower_kw));
+        if (k->keywords) str_to_lower(k->keywords, lower_kw, sizeof(lower_kw));
 
         char *token = strtok(lower_kw, " ");
         while (token != NULL) {

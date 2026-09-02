@@ -53,6 +53,26 @@ void flow_genome_flip_bit(FlowGenome *g, uint32_t bit_idx);
 void flow_genome_mutate_1bit(FlowGenome *g, uint64_t *rng_state, uint32_t *mutated_bit_out);
 int flow_genome_equals(const FlowGenome *a, const FlowGenome *b);
 
+/* SMT-Driven Epistatic Gene Linkage Groups & Super-Bit Coordinated Mutations */
+#define FLOW_MAX_LINKAGE_GROUPS 16
+#define FLOW_MAX_LINKED_BITS 8
+
+typedef struct {
+    uint32_t bit_indices[FLOW_MAX_LINKED_BITS];
+    size_t bit_count;
+    char rationale[64]; /* e.g., "threads_shards_epistatic_synergy" */
+} FlowGeneLinkageGroup;
+
+typedef struct {
+    FlowGeneLinkageGroup groups[FLOW_MAX_LINKAGE_GROUPS];
+    size_t group_count;
+} FlowGeneLinkageMap;
+
+void flow_linkage_map_init(FlowGeneLinkageMap *map);
+int flow_linkage_map_add_group(FlowGeneLinkageMap *map, const uint32_t *bits, size_t count, const char *rationale);
+void flow_genome_mutate_with_linkage(FlowGenome *g, const FlowGeneLinkageMap *linkage,
+                                    uint64_t *rng_state, uint32_t *primary_bit_out, size_t *linked_flips_out);
+
 typedef struct {
     const Component *component;
     FlowPlanDimensionSet dimension_set;

@@ -482,6 +482,56 @@ void flow_genome_mutate_1bit(FlowGenome *g, uint64_t *rng_state, uint32_t *mutat
     if (mutated_bit_out != NULL) *mutated_bit_out = bit_idx;
 }
 
+void flow_linkage_map_init(FlowGeneLinkageMap *map) {
+    if (map == NULL) return;
+    memset(map, 0, sizeof(*map));
+}
+
+int flow_linkage_map_add_group(FlowGeneLinkageMap *map, const uint32_t *bits, size_t count, const char *rationale) {
+    if (map == NULL || bits == NULL || count == 0 || count > FLOW_MAX_LINKED_BITS) return 0;
+    if (map->group_count >= FLOW_MAX_LINKAGE_GROUPS) return 0;
+    FlowGeneLinkageGroup *grp = &map->groups[map->group_count++];
+    grp->bit_count = count;
+    for (size_t i = 0; i < count; ++i) {
+        grp->bit_indices[i] = bits[i];
+    }
+    if (rationale) strncpy(grp->rationale, rationale, sizeof(grp->rationale) - 1);
+    return 1;
+}
+
+void flow_genome_mutate_with_linkage(FlowGenome *g, const FlowGeneLinkageMap *linkage,
+                                    uint64_t *rng_state, uint32_t *primary_bit_out, size_t *linked_flips_out) {
+    if (g == NULL || g->total_bits == 0) return;
+    uint64_t rnd = xorshift64(rng_state);
+    uint32_t bit_idx = (uint32_t)(rnd % (uint64_t)g->total_bits);
+    flow_genome_flip_bit(g, bit_idx);
+    if (primary_bit_out != NULL) *primary_bit_out = bit_idx;
+
+    size_t flips = 1;
+    if (linkage != NULL) {
+        for (size_t grp_idx = 0; grp_idx < linkage->group_count; ++grp_idx) {
+            const FlowGeneLinkageGroup *grp = &linkage->groups[grp_idx];
+            int is_member = 0;
+            for (size_t i = 0; i < grp->bit_count; ++i) {
+                if (grp->bit_indices[i] == bit_idx) {
+                    is_member = 1;
+                    break;
+                }
+            }
+            if (is_member) {
+                for (size_t i = 0; i < grp->bit_count; ++i) {
+                    if (grp->bit_indices[i] != bit_idx) {
+                        flow_genome_flip_bit(g, grp->bit_indices[i]);
+                        flips++;
+                    }
+                }
+                break;
+            }
+        }
+    }
+    if (linked_flips_out != NULL) *linked_flips_out = flips;
+}
+
 int flow_genome_equals(const FlowGenome *a, const FlowGenome *b) {
     if (a == NULL || b == NULL) return 0;
     if (a->total_bits != b->total_bits) return 0;

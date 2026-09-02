@@ -145,4 +145,34 @@ double flow_energy_governor_compute_objective_penalty(const FlowThermalEnergyGov
                                                       double base_latency_score,
                                                       double compute_energy_joules);
 
+/* ========================================================================= */
+/* 5. Phase-Lag & Dead-Time Smith Predictor (CAN/EtherCAT Jitter Compensator)*/
+/* ========================================================================= */
+
+#define FLOW_SMITH_MAX_DELAY_STEPS 32
+
+typedef struct {
+    double delay_seconds;                      /* e.g. 0.003s (3ms bus latency) */
+    size_t delay_steps;                        /* e.g. 3 steps at 1kHz */
+    double history_torques[FLOW_SMITH_MAX_DELAY_STEPS][FLOW_MAX_JOINTS];
+    double history_angles[FLOW_SMITH_MAX_DELAY_STEPS][FLOW_MAX_JOINTS];
+    size_t head_idx;
+    size_t joint_count;
+    double damping_gain;
+    uint64_t phase_corrections_total;
+} FlowSmithPredictor;
+
+int flow_smith_predictor_init(FlowSmithPredictor *sp, size_t joint_count, double delay_seconds, double dt);
+int flow_smith_predictor_push_and_predict(FlowSmithPredictor *sp,
+                                          const double *delayed_angles,
+                                          const double *applied_torques,
+                                          double *predicted_future_angles_out,
+                                          double *predicted_future_vels_out,
+                                          double dt);
+bool flow_physics_is_future_state_safe(FlowPhysicsEngine *engine,
+                                       const FlowSmithPredictor *predictor,
+                                       const double *delayed_angles,
+                                       const double *candidate_torques,
+                                       double dt);
+
 #endif

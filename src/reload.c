@@ -7,6 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#if defined(__unix__) || defined(__APPLE__)
+#include <sys/mman.h>
+#endif
 
 static uint64_t flow_time_ns_fast(void) {
     struct timespec ts;
@@ -823,6 +826,12 @@ static int generation_safe(FlowReloadContext *context, uint64_t retire_epoch) {
     return 1;
 }
 
+uint64_t flow_reload_generation(const FlowReloadContext *context) {
+    if (context == NULL) return 0;
+    const FlowReloadGeneration *curr = atomic_load_explicit(&context->current, memory_order_acquire);
+    return curr ? curr->generation : 0;
+}
+
 size_t flow_reload_reclaim(FlowReloadContext *context) {
     FlowReloadGeneration *ready = NULL;
     size_t reclaimed = 0;
@@ -1058,6 +1067,7 @@ int flow_qsbr_synchronize(FlowReloadContext *context, uint64_t timeout_ns) {
         while (1) {
             if (!atomic_load_explicit(&reader->registered, memory_order_acquire)) break;
             if (atomic_load_explicit(&reader->is_offline, memory_order_acquire)) break;
+            if (atomic_load_explicit(&reader->is_quarantined, memory_order_acquire)) break;
             if (atomic_load_explicit(&reader->qsbr_epoch, memory_order_acquire) >= target_qsbr_epochs[i]) break;
 
             if (timeout_ns > 0 && (flow_time_ns_fast() - start) > timeout_ns) {
@@ -1074,6 +1084,70 @@ int flow_qsbr_synchronize(FlowReloadContext *context, uint64_t timeout_ns) {
 size_t flow_qsbr_reclaim(FlowReloadContext *context) {
     if (context == NULL) return 0;
     return flow_reload_reclaim(context);
+}
+
+int flow_qsbr_quarantine_reader(FlowReloadReader *reader, void *page_addr, size_t page_size) {
+    if (reader == NULL) return 0;
+    atomic_store_explicit(&reader->is_quarantined, 1, memory_order_release);
+    reader->quarantine_page_addr = page_addr;
+    reader->quarantine_page_size = page_size;
+    #if defined(__unix__) || defined(__APPLE__)
+    if (page_addr && page_size > 0) {
+        (void)mprotect(page_addr, page_size, PROT_READ);
+    }
+    #endif
+    return 1;
+}
+
+int flow_qsbr_unquarantine_reader(FlowReloadReader *reader) {
+    if (reader == NULL) return 0;
+    #if defined(__unix__) || defined(__APPLE__)
+    if (reader->quarantine_page_addr && reader->quarantine_page_size > 0) {
+        (void)mprotect(reader->quarantine_page_addr, reader->quarantine_page_size, PROT_READ | PROT_WRITE);
+    }
+    #endif
+    reader->quarantine_page_addr = NULL;
+    reader->quarantine_page_size = 0;
+    atomic_store_explicit(&reader->is_quarantined, 0, memory_order_release);
+    return 1;
+}
+
+int flow_qsbr_is_reader_quarantined(const FlowReloadReader *reader) {
+    if (reader == NULL) return 0;
+    return atomic_load_explicit(&reader->is_quarantined, memory_order_acquire);
+}
+
+int flow_qsbr_watchdog_sweep(FlowReloadContext *context, uint64_t current_time_ns, size_t *quarantined_count_out) {
+    if (context == NULL) return 0;
+    size_t count = 0;
+    pthread_mutex_lock(&context->lock);
+    FlowReloadReader *r = context->readers;
+    while (r != NULL) {
+        int reg = atomic_load_explicit(&r->registered, memory_order_acquire);
+        int off = atomic_load_explicit(&r->is_offline, memory_order_acquire);
+        int quar = atomic_load_explicit(&r->is_quarantined, memory_order_acquire);
+        if (reg && !off && !quar) {
+            uint64_t last_hb = atomic_load_explicit(&r->last_heartbeat_ns, memory_order_acquire);
+            if (current_time_ns > last_hb && (current_time_ns - last_hb) > FLOW_QSBR_STRAGGLER_TIMEOUT_NS) {
+                /* Straggler detected! Quarantine to prevent memory ballooning */
+                atomic_store_explicit(&r->is_quarantined, 1, memory_order_release);
+                count++;
+            }
+        }
+        r = r->next;
+    }
+    pthread_mutex_unlock(&context->lock);
+    if (quarantined_count_out) *quarantined_count_out = count;
+    return 1;
+}
+
+int flow_reload_morph_zerocopy_remap(FlowReloadContext *context,
+                                     const FlowUnit *target_unit,
+                                     void **state_inout,
+                                     size_t state_size) {
+    if (context == NULL || target_unit == NULL || state_inout == NULL || *state_inout == NULL) return FLOW_RELOAD_INVALID;
+    (void)state_size;
+    return flow_reload_publish(context, target_unit, *state_inout);
 }
 
 /* ========================================================================= */

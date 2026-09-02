@@ -1,4 +1,5 @@
 #include "registry.h"
+#include "flowy.h"
 
 #include <dlfcn.h>
 #include <stdio.h>
@@ -67,7 +68,42 @@ static int add_plugin(const FlowPlugin *plugin) {
         if (component_id_registered(plugin->components[i].id)) return 0;
     }
     PLUGINS[plugin_count_value++] = plugin;
+
+    /* Auto-synthesize Living Knowledge into Flowy Introspection Engine */
+    if (plugin->name != NULL) {
+        FlowModuleKnowledge dyn_k = {
+            .module_id = plugin->name,
+            .title = plugin->doc_title ? plugin->doc_title : plugin->name,
+            .header_file = "src/plugin.h",
+            .source_file = "dynamic_dso",
+            .layer = plugin->doc_layer > 0 ? plugin->doc_layer : 2,
+            .responsibilities = plugin->doc_responsibilities ? plugin->doc_responsibilities : "Dynamic domain plugin component",
+            .algorithmic_guarantee = plugin->doc_algorithmic_guarantee ? plugin->doc_algorithmic_guarantee : "Verified plugin contract",
+            .memory_concurrency_model = plugin->doc_memory_concurrency_model ? plugin->doc_memory_concurrency_model : "Plugin managed memory",
+            .key_apis = plugin->doc_key_apis ? plugin->doc_key_apis : "flow_component_evaluate, flow_component_verify_plan",
+            .keywords = plugin->name
+        };
+        flowy_register_dynamic_module(&dyn_k);
+    }
+
     return 1;
+}
+
+int flow_registry_register_contract(const FlowPluginContract *contract) {
+    if (contract == NULL || contract->module_name == NULL) return 0;
+    FlowModuleKnowledge dyn_k = {
+        .module_id = contract->module_name,
+        .title = contract->doc_title ? contract->doc_title : contract->module_name,
+        .header_file = "declarative_contract",
+        .source_file = "contract.flow",
+        .layer = 2,
+        .responsibilities = contract->doc_responsibilities ? contract->doc_responsibilities : "Declarative zero-C plugin contract",
+        .algorithmic_guarantee = contract->doc_algorithmic_guarantee ? contract->doc_algorithmic_guarantee : "Declarative QF_LIA verified bounds",
+        .memory_concurrency_model = contract->doc_memory_model ? contract->doc_memory_model : "Contract bounded memory allocation",
+        .key_apis = contract->doc_key_apis ? contract->doc_key_apis : "declarative_eval, declarative_verify",
+        .keywords = contract->module_name
+    };
+    return flowy_register_dynamic_module(&dyn_k);
 }
 
 int flow_registry_init(void) {

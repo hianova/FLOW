@@ -113,7 +113,10 @@ struct FlowReloadReader {
     _Atomic uint64_t last_heartbeat_ns;
     _Atomic uint64_t qsbr_epoch;
     _Atomic int is_offline;
-    uint8_t _cache_pad[24]; /* Explicit false-sharing buffer aligned to 64 bytes */
+    _Atomic int is_quarantined;      /* 1 if thread is quarantined due to straggler timeout */
+    void *quarantine_page_addr;      /* Read-barrier protected old generation memory page */
+    size_t quarantine_page_size;
+    uint8_t _cache_pad[8];           /* Explicit false-sharing buffer aligned to 64 bytes */
 } FLOW_CACHE_ALIGNED;
 
 typedef struct {
@@ -159,6 +162,12 @@ int flow_reload_live_finish_or_fallback(FlowReloadContext *context);
 /* Finish replays the bounded journal and publishes, or aborts on failure. */
 int flow_reload_live_abort(FlowReloadContext *context);
 
+/* Virtual Memory Zero-Copy Page Remap Morphing (OOM-Resistant under 99% RAM Pressure) */
+int flow_reload_morph_zerocopy_remap(FlowReloadContext *context,
+                                     const FlowUnit *target_unit,
+                                     void **state_inout,
+                                     size_t state_size);
+
 /* Dynamic plan artifact reload integration */
 int flow_reload_plan(FlowReloadContext *context, const struct FlowPlanArtifact *artifact,
                      const struct SemanticIR *ir, FlowMigrationMode mode);
@@ -171,17 +180,23 @@ int flow_reload_call(FlowReloadContext *context, FlowReloadReader *reader,
                      const void *input, void *output);
 int flow_reload_apply(FlowReloadContext *context, FlowReloadReader *reader,
                       const FlowMutation *mutation);
+uint64_t flow_reload_generation(const FlowReloadContext *context);
+int flow_reload_is_active(const FlowReloadContext *context);
+const FlowUnit *flow_reload_current_unit(const FlowReloadContext *context);
+void *flow_reload_current_state(const FlowReloadContext *context);
+const char *flow_reload_status_name(FlowReloadStatus status);
 
 size_t flow_reload_reclaim(FlowReloadContext *context);
 uint64_t flow_schema_hash(const FlowSchema *schema);
 int flow_schema_migration_compatible(const FlowSchema *old_schema,
                                      const FlowSchema *new_schema);
 int flow_reload_compatible(const FlowUnit *current, const FlowUnit *candidate);
-const char *flow_reload_status_name(FlowReloadStatus status);
 
 /* ========================================================================= */
 /* Unified QSBR (Quiescent State Based Reclamation) - Zero-Write Read Path   */
 /* ========================================================================= */
+
+#define FLOW_QSBR_STRAGGLER_TIMEOUT_NS 10000000ULL /* 10 ms heartbeat timeout */
 
 /* Reader thread announces a quiescent state (safe point) at event loop boundary */
 void flow_qsbr_checkpoint(FlowReloadReader *reader);
@@ -200,6 +215,12 @@ int flow_qsbr_synchronize(FlowReloadContext *context, uint64_t timeout_ns);
 
 /* Reclaims all retired generations that have passed the QSBR grace period */
 size_t flow_qsbr_reclaim(FlowReloadContext *context);
+
+/* QSBR Straggler Watchdog & Quarantine System (Prevents Silent Memory Ballooning) */
+int flow_qsbr_watchdog_sweep(FlowReloadContext *context, uint64_t current_time_ns, size_t *quarantined_count_out);
+int flow_qsbr_quarantine_reader(FlowReloadReader *reader, void *page_addr, size_t page_size);
+int flow_qsbr_unquarantine_reader(FlowReloadReader *reader);
+int flow_qsbr_is_reader_quarantined(const FlowReloadReader *reader);
 
 /* ========================================================================= */
 /* Deterministic Audit Trail & Mutation Snapshots                            */

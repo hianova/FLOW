@@ -347,3 +347,90 @@ double flow_energy_governor_compute_objective_penalty(const FlowThermalEnergyGov
 
     return base_latency_score + (lambda_energy * compute_energy_joules) + (lambda_thermal * thermal_penalty);
 }
+
+/* ========================================================================= */
+/* 5. Phase-Lag & Dead-Time Smith Predictor Implementation                   */
+/* ========================================================================= */
+
+int flow_smith_predictor_init(FlowSmithPredictor *sp, size_t joint_count, double delay_seconds, double dt) {
+    if (sp == NULL) return 0;
+    memset(sp, 0, sizeof(*sp));
+    sp->joint_count = (joint_count > 0 && joint_count <= FLOW_MAX_JOINTS) ? joint_count : FLOW_MAX_JOINTS;
+    sp->delay_seconds = delay_seconds > 0.0 ? delay_seconds : 0.003; /* 3ms default bus delay */
+    double step_dt = dt > 0.0 ? dt : 0.001;
+    size_t steps = (size_t)(sp->delay_seconds / step_dt);
+    sp->delay_steps = (steps > 0 && steps < FLOW_SMITH_MAX_DELAY_STEPS) ? steps : 3;
+    sp->damping_gain = 0.85;
+    return 1;
+}
+
+int flow_smith_predictor_push_and_predict(FlowSmithPredictor *sp,
+                                          const double *delayed_angles,
+                                          const double *applied_torques,
+                                          double *predicted_future_angles_out,
+                                          double *predicted_future_vels_out,
+                                          double dt) {
+    if (sp == NULL || delayed_angles == NULL) return 0;
+    double step_dt = dt > 0.0 ? dt : 0.001;
+
+    /* Store current observation and control into ring buffer */
+    size_t slot = sp->head_idx;
+    for (size_t j = 0; j < sp->joint_count; ++j) {
+        sp->history_angles[slot][j] = delayed_angles[j];
+        sp->history_torques[slot][j] = applied_torques ? applied_torques[j] : 0.0;
+    }
+    sp->head_idx = (sp->head_idx + 1) % sp->delay_steps;
+    sp->phase_corrections_total++;
+
+    /* Internal Forward Model Prediction over Dead-Time Horizon (tau_delay = N * dt) */
+    for (size_t j = 0; j < sp->joint_count; ++j) {
+        double angle_est = delayed_angles[j];
+        double vel_est = 0.0;
+        double link_inertia = 0.15; /* Approximate joint link inertia (kg*m^2) */
+
+        for (size_t s = 0; s < sp->delay_steps; ++s) {
+            double tau_hist = sp->history_torques[s][j];
+            double accel = tau_hist / link_inertia;
+            vel_est += accel * step_dt * sp->damping_gain;
+            angle_est += vel_est * step_dt;
+        }
+
+        if (predicted_future_angles_out) predicted_future_angles_out[j] = angle_est;
+        if (predicted_future_vels_out) predicted_future_vels_out[j] = vel_est;
+    }
+    return 1;
+}
+
+bool flow_physics_is_future_state_safe(FlowPhysicsEngine *engine,
+                                       const FlowSmithPredictor *predictor,
+                                       const double *delayed_angles,
+                                       const double *candidate_torques,
+                                       double dt) {
+    if (engine == NULL || predictor == NULL || delayed_angles == NULL || candidate_torques == NULL) return false;
+
+    /* 1. Check direct torque limits */
+    if (!flow_physics_is_torque_safe(&engine->current_state, candidate_torques)) {
+        return false;
+    }
+
+    /* 2. Predict Future Angle and Velocity at horizon (t + delay_seconds) */
+    double future_angles[FLOW_MAX_JOINTS] = {0};
+    double future_vels[FLOW_MAX_JOINTS] = {0};
+    FlowSmithPredictor temp_sp = *predictor;
+    flow_smith_predictor_push_and_predict(&temp_sp, delayed_angles, candidate_torques, future_angles, future_vels, dt);
+
+    /* 3. Check Dynamic ZMP on Future Horizon State */
+    FlowRigidBodyState future_state = engine->current_state;
+    for (size_t j = 0; j < future_state.joint_count; ++j) {
+        future_state.joint_angles[j] = future_angles[j];
+        future_state.joint_velocities[j] = future_vels[j];
+        future_state.joint_torques[j] = candidate_torques[j];
+    }
+    future_state.zmp_position[0] = 0.0;
+    future_state.zmp_position[1] = 0.0;
+    for (size_t j = 0; j < future_state.joint_count; ++j) {
+        future_state.zmp_position[0] += (future_angles[j] * 0.05);
+    }
+
+    return flow_physics_is_zmp_stable(&future_state);
+}

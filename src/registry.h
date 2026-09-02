@@ -12,6 +12,7 @@
  * lifetime. */
 int flow_registry_init(void);
 int flow_registry_register(const FlowPlugin *plugin);
+int flow_registry_register_contract(const FlowPluginContract *contract);
 int flow_registry_load_dso(const char *so_path, char *err_msg, size_t err_size);
 const FlowPlugin *flow_registry_lookup(const char *name);
 size_t flow_registry_plugin_count(void);

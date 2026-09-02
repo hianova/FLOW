@@ -265,6 +265,13 @@ struct FlowPlugin {
                        const SemanticIR *ir,
                        const Component *component,
                        struct FlowUnit *unit_out);
+    /* Declarative Knowledge Self-Synthesis Metadata (for Zero-Maintenance Flowy Introspection) */
+    const char *doc_title;
+    const char *doc_responsibilities;
+    const char *doc_algorithmic_guarantee;
+    const char *doc_memory_concurrency_model;
+    const char *doc_key_apis;
+    uint32_t doc_layer;
     void *domain_context;
 };
 
@@ -323,6 +330,11 @@ typedef struct {
     const char *module_version;
     const char *target_domain;          /* E.g. "finance", "telemetry", "ai_pipeline" */
     const char *target_contract;        /* E.g. "low_latency", "bounded_memory" */
+    const char *doc_title;              /* Living doc title */
+    const char *doc_responsibilities;   /* Subsystem responsibilities */
+    const char *doc_algorithmic_guarantee; /* Complexity & invariants */
+    const char *doc_memory_model;       /* Concurrency & memory layout */
+    const char *doc_key_apis;           /* Authoritative APIs */
     size_t component_count;
     FlowContractComponent components[FLOW_CONTRACT_MAX_COMPONENTS];
 } FlowPluginContract;
