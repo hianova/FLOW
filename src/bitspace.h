@@ -12,18 +12,58 @@
 #define FLOW_PARETO_MAX 16
 #define FLOW_BITSPACE_MAX_CANDIDATES 32
 
-/* 3-Tier Dynamic Mask Canvas (Superposition Architecture) */
+/* 3-Tier Dynamic Mask Canvas (Superposition Architecture & Polyhedral Projection) */
 typedef struct {
     uint64_t hard_safety_mask;       /* src/security.c (Ownership, FD limits, Sanitizer safety) */
     uint64_t hard_contract_mask;     /* src/verifier.c (IR contracts, sequential/parallel semantics) */
     uint64_t hard_resource_mask;     /* src/verifier.c (Hard memory quota ceiling) */
     uint64_t hard_plugin_mask;       /* src/plugin.h (Domain-declared hard mutation limits) */
-    uint64_t hard_composite_mask;    /* Bitwise AND: 1-Cycle Physical Early Pruning */
+    uint64_t hard_polytope_mask;     /* Orthogonal projection of Polyhedron P = {Ax <= b} on {0,1}^N */
+    uint64_t hard_composite_mask;    /* Mathematical Composite Hard Mask */
 
     uint64_t domain_preference_mask; /* src/plugin.h (Expert domain knowledge guidance) */
     uint64_t dynamic_telemetry_bias; /* src/adaptive.c (eBPF / PMU real-time signals) */
     uint64_t soft_composite_bias;    /* Superposition: Probability-Biasing Manifold */
 } FlowMaskCanvas;
+
+/* ========================================================================= */
+/* Mathematical Polyhedral Constraint & Hypercube Projection Engine         */
+/* Linear Inequality System: \mathcal{P} = { x \in R^D | A x <= b }          */
+/* Orthogonal Projection Operator: \Pi_{\mathcal{P}} : R^D -> {0, 1}^N       */
+/* ========================================================================= */
+
+#define FLOW_POLYTOPE_MAX_CONSTRAINTS 32
+#define FLOW_POLYTOPE_MAX_DIMS 16
+
+typedef enum {
+    FLOW_CONSTRAINT_LEQ = 0, /* a^T x <= b */
+    FLOW_CONSTRAINT_GEQ = 1, /* a^T x >= b */
+    FLOW_CONSTRAINT_EQ  = 2, /* a^T x == b */
+    FLOW_CONSTRAINT_INTERVAL = 3 /* b_min <= a^T x <= b_max */
+} FlowConstraintOp;
+
+typedef struct {
+    double coefficients[FLOW_POLYTOPE_MAX_DIMS];
+    FlowConstraintOp op;
+    double rhs_min;
+    double rhs_max;
+    char symbolic_tag[64];
+} FlowLinearConstraint;
+
+typedef struct {
+    FlowLinearConstraint constraints[FLOW_POLYTOPE_MAX_CONSTRAINTS];
+    size_t constraint_count;
+    size_t dimension_count;
+    double lower_bounds[FLOW_POLYTOPE_MAX_DIMS];
+    double upper_bounds[FLOW_POLYTOPE_MAX_DIMS];
+} FlowPolyhedronSystem;
+
+/* Polyhedron Lifecycle & Hypercube Projection */
+void flow_polyhedron_init(FlowPolyhedronSystem *poly, size_t dim_count);
+int flow_polyhedron_add_box_bounds(FlowPolyhedronSystem *poly, size_t dim_idx, double min_val, double max_val, const char *tag);
+int flow_polyhedron_add_inequality(FlowPolyhedronSystem *poly, const double *coeffs, FlowConstraintOp op, double bound, const char *tag);
+int flow_polyhedron_from_ir(const SemanticIR *ir, const Component *comp, const FlowPlanDimensionSet *dims, FlowPolyhedronSystem *poly);
+uint64_t flow_polyhedron_project_mask(const FlowPolyhedronSystem *poly, const FlowPlanDimensionSet *dims, uint32_t total_bits);
 
 typedef struct {
     double energy;

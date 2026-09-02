@@ -196,8 +196,6 @@ int flow_reload_compatible(const FlowUnit *current, const FlowUnit *candidate);
 /* Unified QSBR (Quiescent State Based Reclamation) - Zero-Write Read Path   */
 /* ========================================================================= */
 
-#define FLOW_QSBR_STRAGGLER_TIMEOUT_NS 10000000ULL /* 10 ms heartbeat timeout */
-
 /* Reader thread announces a quiescent state (safe point) at event loop boundary */
 void flow_qsbr_checkpoint(FlowReloadReader *reader);
 
@@ -216,7 +214,9 @@ int flow_qsbr_synchronize(FlowReloadContext *context, uint64_t timeout_ns);
 /* Reclaims all retired generations that have passed the QSBR grace period */
 size_t flow_qsbr_reclaim(FlowReloadContext *context);
 
-/* QSBR Straggler Watchdog & Quarantine System (Prevents Silent Memory Ballooning) */
+/* QSBR Straggler Watchdog & Quarantine System (Dynamically Derived from SLA / Chebyshev Bounds) */
+void flow_reload_set_sla_latency(FlowReloadContext *context, uint64_t sla_latency_ns);
+uint64_t flow_qsbr_compute_adaptive_timeout(const FlowReloadContext *context);
 int flow_qsbr_watchdog_sweep(FlowReloadContext *context, uint64_t current_time_ns, size_t *quarantined_count_out);
 int flow_qsbr_quarantine_reader(FlowReloadReader *reader, void *page_addr, size_t page_size);
 int flow_qsbr_unquarantine_reader(FlowReloadReader *reader);

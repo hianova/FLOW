@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <math.h>
 #if defined(__unix__) || defined(__APPLE__)
 #include <sys/mman.h>
 #endif
@@ -57,6 +58,10 @@ struct FlowReloadContext {
     FlowReloadGeneration *retired;
     FlowLiveMigration live;
     FlowAuditTrail audit_trail;
+    uint64_t sla_latency_ns;
+    uint64_t heartbeat_samples;
+    uint64_t heartbeat_sum_ns;
+    uint64_t heartbeat_sum_sq_ns;
 };
 
 static uint64_t schema_mix(uint64_t hash, const void *data, size_t size) {
@@ -1015,10 +1020,46 @@ int flow_reload_plan(FlowReloadContext *context, const FlowPlanArtifact *artifac
 /* Unified QSBR (Quiescent State Based Reclamation) Implementation          */
 /* ========================================================================= */
 
+void flow_reload_set_sla_latency(FlowReloadContext *context, uint64_t sla_latency_ns) {
+    if (context == NULL) return;
+    pthread_mutex_lock(&context->lock);
+    context->sla_latency_ns = sla_latency_ns;
+    pthread_mutex_unlock(&context->lock);
+}
+
+uint64_t flow_qsbr_compute_adaptive_timeout(const FlowReloadContext *context) {
+    if (context == NULL) return 1000000ULL; /* 1ms statistical fallback */
+    if (context->sla_latency_ns > 0) {
+        return context->sla_latency_ns * 2ULL;
+    }
+    if (context->heartbeat_samples >= 4) {
+        double mean = (double)context->heartbeat_sum_ns / (double)context->heartbeat_samples;
+        double mean_sq = (double)context->heartbeat_sum_sq_ns / (double)context->heartbeat_samples;
+        double variance = mean_sq - (mean * mean);
+        double stddev = variance > 0.0 ? sqrt(variance) : 0.0;
+        /* Chebyshev 4-sigma bound: P(|X - mu| >= 4 sigma) <= 1/16 (6.25%) */
+        uint64_t bound = (uint64_t)(mean + 4.0 * stddev);
+        if (bound < 100000ULL) bound = 100000ULL; /* Minimum 100us */
+        return bound;
+    }
+    return 1000000ULL; /* 1ms default statistical start */
+}
+
 void flow_qsbr_checkpoint(FlowReloadReader *reader) {
     if (reader == NULL) return;
+    uint64_t now = flow_time_ns_fast();
+    uint64_t last = atomic_load_explicit(&reader->last_heartbeat_ns, memory_order_relaxed);
+    if (last > 0 && now > last && reader->context != NULL) {
+        uint64_t delta = now - last;
+        FlowReloadContext *ctx = reader->context;
+        pthread_mutex_lock(&ctx->lock);
+        ctx->heartbeat_samples++;
+        ctx->heartbeat_sum_ns += delta;
+        ctx->heartbeat_sum_sq_ns += (delta * delta);
+        pthread_mutex_unlock(&ctx->lock);
+    }
     atomic_fetch_add_explicit(&reader->qsbr_epoch, 1, memory_order_release);
-    atomic_store_explicit(&reader->last_heartbeat_ns, flow_time_ns_fast(), memory_order_relaxed);
+    atomic_store_explicit(&reader->last_heartbeat_ns, now, memory_order_relaxed);
 }
 
 void flow_qsbr_offline(FlowReloadReader *reader) {
@@ -1120,6 +1161,8 @@ int flow_qsbr_is_reader_quarantined(const FlowReloadReader *reader) {
 int flow_qsbr_watchdog_sweep(FlowReloadContext *context, uint64_t current_time_ns, size_t *quarantined_count_out) {
     if (context == NULL) return 0;
     size_t count = 0;
+    uint64_t adaptive_timeout_ns = flow_qsbr_compute_adaptive_timeout(context);
+
     pthread_mutex_lock(&context->lock);
     FlowReloadReader *r = context->readers;
     while (r != NULL) {
@@ -1128,7 +1171,7 @@ int flow_qsbr_watchdog_sweep(FlowReloadContext *context, uint64_t current_time_n
         int quar = atomic_load_explicit(&r->is_quarantined, memory_order_acquire);
         if (reg && !off && !quar) {
             uint64_t last_hb = atomic_load_explicit(&r->last_heartbeat_ns, memory_order_acquire);
-            if (current_time_ns > last_hb && (current_time_ns - last_hb) > FLOW_QSBR_STRAGGLER_TIMEOUT_NS) {
+            if (current_time_ns > last_hb && (current_time_ns - last_hb) > adaptive_timeout_ns) {
                 /* Straggler detected! Quarantine to prevent memory ballooning */
                 atomic_store_explicit(&r->is_quarantined, 1, memory_order_release);
                 count++;

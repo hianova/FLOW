@@ -356,10 +356,15 @@ int flow_smith_predictor_init(FlowSmithPredictor *sp, size_t joint_count, double
     if (sp == NULL) return 0;
     memset(sp, 0, sizeof(*sp));
     sp->joint_count = (joint_count > 0 && joint_count <= FLOW_MAX_JOINTS) ? joint_count : FLOW_MAX_JOINTS;
-    sp->delay_seconds = delay_seconds > 0.0 ? delay_seconds : 0.003; /* 3ms default bus delay */
+    sp->delay_seconds = delay_seconds >= 0.0 ? delay_seconds : 0.0;
     double step_dt = dt > 0.0 ? dt : 0.001;
-    size_t steps = (size_t)(sp->delay_seconds / step_dt);
-    sp->delay_steps = (steps > 0 && steps < FLOW_SMITH_MAX_DELAY_STEPS) ? steps : 3;
+    if (sp->delay_seconds > 0.0) {
+        size_t steps = (size_t)ceil(sp->delay_seconds / step_dt);
+        if (steps >= FLOW_SMITH_MAX_DELAY_STEPS) steps = FLOW_SMITH_MAX_DELAY_STEPS - 1;
+        sp->delay_steps = steps;
+    } else {
+        sp->delay_steps = 0;
+    }
     sp->damping_gain = 0.85;
     return 1;
 }

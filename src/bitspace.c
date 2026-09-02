@@ -253,7 +253,133 @@ void flow_search_heatmap_report(const FlowSearchHeatmap *heatmap, FILE *out) {
     }
 }
 
-/* 3-Tier Dynamic Mask Canvas Composition & Superposition */
+/* ========================================================================= */
+/* Mathematical Polyhedral Constraint & Hypercube Projection Implementation  */
+/* ========================================================================= */
+
+void flow_polyhedron_init(FlowPolyhedronSystem *poly, size_t dim_count) {
+    if (poly == NULL) return;
+    memset(poly, 0, sizeof(*poly));
+    poly->dimension_count = dim_count < FLOW_POLYTOPE_MAX_DIMS ? dim_count : FLOW_POLYTOPE_MAX_DIMS;
+    for (size_t d = 0; d < poly->dimension_count; ++d) {
+        poly->lower_bounds[d] = 0.0;
+        poly->upper_bounds[d] = 1e12;
+    }
+}
+
+int flow_polyhedron_add_box_bounds(FlowPolyhedronSystem *poly, size_t dim_idx, double min_val, double max_val, const char *tag) {
+    if (poly == NULL || dim_idx >= poly->dimension_count) return 0;
+    if (min_val > poly->lower_bounds[dim_idx]) poly->lower_bounds[dim_idx] = min_val;
+    if (max_val < poly->upper_bounds[dim_idx]) poly->upper_bounds[dim_idx] = max_val;
+
+    if (poly->constraint_count < FLOW_POLYTOPE_MAX_CONSTRAINTS) {
+        FlowLinearConstraint *c = &poly->constraints[poly->constraint_count++];
+        memset(c, 0, sizeof(*c));
+        c->coefficients[dim_idx] = 1.0;
+        c->op = FLOW_CONSTRAINT_INTERVAL;
+        c->rhs_min = min_val;
+        c->rhs_max = max_val;
+        if (tag) snprintf(c->symbolic_tag, sizeof(c->symbolic_tag), "%s", tag);
+    }
+    return 1;
+}
+
+int flow_polyhedron_add_inequality(FlowPolyhedronSystem *poly, const double *coeffs, FlowConstraintOp op, double bound, const char *tag) {
+    if (poly == NULL || coeffs == NULL || poly->constraint_count >= FLOW_POLYTOPE_MAX_CONSTRAINTS) return 0;
+    FlowLinearConstraint *c = &poly->constraints[poly->constraint_count++];
+    memset(c, 0, sizeof(*c));
+    for (size_t d = 0; d < poly->dimension_count; ++d) {
+        c->coefficients[d] = coeffs[d];
+    }
+    c->op = op;
+    if (op == FLOW_CONSTRAINT_LEQ) c->rhs_max = bound;
+    else if (op == FLOW_CONSTRAINT_GEQ) c->rhs_min = bound;
+    else if (op == FLOW_CONSTRAINT_EQ) { c->rhs_min = bound; c->rhs_max = bound; }
+    if (tag) snprintf(c->symbolic_tag, sizeof(c->symbolic_tag), "%s", tag);
+    return 1;
+}
+
+int flow_polyhedron_from_ir(const SemanticIR *ir, const Component *comp, const FlowPlanDimensionSet *dims, FlowPolyhedronSystem *poly) {
+    if (poly == NULL || dims == NULL) return 0;
+    flow_polyhedron_init(poly, dims->count);
+
+    for (size_t i = 0; i < dims->count; ++i) {
+        double min_v = (double)dims->dimensions[i].min_val;
+        double max_v = (double)dims->dimensions[i].max_val;
+
+        if (dims->dimensions[i].kind == FLOW_DIM_EXPONENT) {
+            min_v = (double)(1ULL << dims->dimensions[i].min_val);
+            max_v = (double)(1ULL << dims->dimensions[i].max_val);
+        }
+
+        /* 1. Constraint: capacity >= top_n */
+        if (strcmp(dims->dimensions[i].name, "capacity") == 0 && ir != NULL && ir->top_n > 0) {
+            if ((double)ir->top_n > min_v) min_v = (double)ir->top_n;
+        }
+
+        /* 2. Constraint: capacity >= input_max_count */
+        if (strcmp(dims->dimensions[i].name, "capacity") == 0 && ir != NULL && ir->input_max_count > 0 && ir->state_bounded) {
+            if ((double)ir->input_max_count > min_v) min_v = (double)ir->input_max_count;
+        }
+
+        /* 3. Constraint: memory footprint <= memory_limit_mb */
+        if (strcmp(dims->dimensions[i].name, "capacity") == 0 && ir != NULL && ir->memory_limit_mb > 0 && comp != NULL) {
+            size_t bytes_per_elem = comp->memory_bytes_per_capacity > 0 ? comp->memory_bytes_per_capacity : 8;
+            double max_cap_from_mem = (double)(ir->memory_limit_mb * 1024 * 1024 - (int)comp->memory_fixed_bytes) / (double)bytes_per_elem;
+            if (max_cap_from_mem > 0.0 && max_cap_from_mem < max_v) max_v = max_cap_from_mem;
+        }
+
+        /* 4. Concurrency Constraint: threads == 1 if component does not support parallel/shared */
+        if (strcmp(dims->dimensions[i].name, "threads") == 0 && comp != NULL && (!comp->supports_parallelizable && !comp->supports_shared)) {
+            max_v = 1.0;
+        }
+
+        flow_polyhedron_add_box_bounds(poly, i, min_v, max_v, dims->dimensions[i].name);
+    }
+    return 1;
+}
+
+uint64_t flow_polyhedron_project_mask(const FlowPolyhedronSystem *poly, const FlowPlanDimensionSet *dims, uint32_t total_bits) {
+    if (poly == NULL || dims == NULL) return (total_bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << total_bits) - 1);
+
+    uint64_t projection_mask = 0;
+    unsigned bit_offset = 0;
+
+    for (size_t d = 0; d < dims->count && d < poly->dimension_count; ++d) {
+        unsigned bits = dimension_bits(&dims->dimensions[d]);
+        double upper = poly->upper_bounds[d];
+
+        for (unsigned b = 0; b < bits; ++b) {
+            unsigned global_bit = bit_offset + b;
+            if (global_bit >= 64 || global_bit >= total_bits) break;
+
+            int bit_feasible = 1;
+
+            if (dims->dimensions[d].kind == FLOW_DIM_EXPONENT) {
+                uint64_t bit_weight = (1ULL << b);
+                if (dims->dimensions[d].min_val + bit_weight > dims->dimensions[d].max_val) {
+                    bit_feasible = 0;
+                }
+            } else {
+                uint64_t step = dims->dimensions[d].step > 0 ? dims->dimensions[d].step : 1;
+                uint64_t bit_val = (1ULL << b) * step;
+                if (dims->dimensions[d].min_val + bit_val > (uint64_t)upper && upper > 0) {
+                    bit_feasible = 0;
+                }
+            }
+
+            if (bit_feasible) {
+                projection_mask |= (1ULL << global_bit);
+            }
+        }
+        bit_offset += bits;
+    }
+
+    if (projection_mask == 0) projection_mask = (total_bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << total_bits) - 1);
+    return projection_mask;
+}
+
+/* 3-Tier Dynamic Mask Canvas Composition & Polyhedral Superposition */
 int flow_mask_canvas_compose(const SemanticIR *ir, const Component *comp,
                             const FlowPlanDimensionSet *dims,
                             const FlowPMUTelemetry *pmu,
@@ -261,16 +387,22 @@ int flow_mask_canvas_compose(const SemanticIR *ir, const Component *comp,
     if (canvas_out == NULL) return 0;
     memset(canvas_out, 0, sizeof(*canvas_out));
 
-    /* 1. Hard Constraints (AND / Zero-Defect Physical Pruning) */
+    /* 1. Hard Constraints (AND / Zero-Defect Polyhedral Manifold) */
     canvas_out->hard_safety_mask = flow_security_get_safety_mask(ir, comp, dims);
     canvas_out->hard_contract_mask = flow_verifier_get_contract_mask(ir, comp, dims);
     canvas_out->hard_resource_mask = flow_verifier_get_resource_mask(ir, comp, dims);
     canvas_out->hard_plugin_mask = flow_component_mutation_mask(ir, comp, dims);
 
+    /* Mathematical Orthogonal Projection of Polyhedral Constraints on {0, 1}^N */
+    FlowPolyhedronSystem poly;
+    flow_polyhedron_from_ir(ir, comp, dims, &poly);
+    canvas_out->hard_polytope_mask = flow_polyhedron_project_mask(&poly, dims, 64);
+
     canvas_out->hard_composite_mask = canvas_out->hard_safety_mask &
                                       canvas_out->hard_contract_mask &
                                       canvas_out->hard_resource_mask &
-                                      canvas_out->hard_plugin_mask;
+                                      canvas_out->hard_plugin_mask &
+                                      canvas_out->hard_polytope_mask;
 
     /* 2. Soft Dynamic Telemetry & Domain Preferences */
     canvas_out->domain_preference_mask = flow_component_preference_mask(ir, comp, dims);
@@ -298,6 +430,8 @@ void flow_mask_canvas_report(const FlowMaskCanvas *canvas, FILE *out) {
             (unsigned long long)canvas->hard_resource_mask);
     fprintf(out, "  [Tier 1 Hard Plugin]      0x%016llx (plugin domain constraints)\n",
             (unsigned long long)canvas->hard_plugin_mask);
+    fprintf(out, "  [Tier 1 Hard Polytope]    0x%016llx (orthogonal projection of {Ax <= b} on {0,1}^N)\n",
+            (unsigned long long)canvas->hard_polytope_mask);
     fprintf(out, "  => COMPOSITE HARD MASK    0x%016llx (1-cycle physical early pruning)\n",
             (unsigned long long)canvas->hard_composite_mask);
     fprintf(out, "  [Tier 2 Dynamic PMU Bias] 0x%016llx (hardware telemetry feedback)\n",
