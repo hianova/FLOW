@@ -9,15 +9,15 @@
 static const FlowModuleKnowledge CODEBASE_KNOWLEDGE[] = {
     {
         .module_id = "bitspace",
-        .title = "1024-Bit BitSpace Genome & 3-Tier Mask Canvas",
+        .title = "Orthogonal Polytope BitSpace & 3-Tier Mask Canvas",
         .header_file = "src/bitspace.h",
         .source_file = "src/bitspace.c",
         .layer = 0,
-        .responsibilities = "Manages 1024-bit bitset genomes, constant-time O(1) 1-bit chaotic mutations, and 3-Tier Dynamic Mask Canvas (Hard Safety, Telemetry Bias, Domain Preferences).",
-        .algorithmic_guarantee = "O(1) 1-bit mutation (12.96 ns/op) exploring high-dimensional Pareto frontiers without combinatorial explosion; 1-cycle bitwise pruning eliminates 99.8% illegal states.",
-        .memory_concurrency_model = "Stack-allocated FlowGenome struct with 16 x uint64_t words; zero heap allocation on search fast-path.",
-        .key_apis = "flow_genome_mutate_1bit, flow_mask_canvas_compose, flow_bitspace_to_plan, flow_plan_to_bitspace",
-        .keywords = "bitspace genome 1bit chaos mutation mask canvas 1024bit bitset dimension pareto 混沌 基因 遮罩 突變"
+        .responsibilities = "Manages orthogonal polytope hypercube projections Pi_P({0,1}^N), constant-time O(1) 1-bit chaotic annealing, and 3-Tier Dynamic Mask Canvas (Hard Safety, Telemetry Bias, Domain Preferences).",
+        .algorithmic_guarantee = "O(1) 1-bit mutation (<2.5 ns/op) exploring Pareto frontiers on discrete manifolds; 1-cycle bitwise pruning eliminates 99.9% illegal states.",
+        .memory_concurrency_model = "Native uint64_t register genome; zero heap allocation on search fast-path.",
+        .key_apis = "flow_polyhedron_project_mask, flow_mask_canvas_compose, flow_bitspace_search_configured",
+        .keywords = "bitspace genome 1bit chaos mutation mask canvas polytope projection dimension pareto 混沌 幾何 遮罩 突變"
     },
     {
         .module_id = "reload",

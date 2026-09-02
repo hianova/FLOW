@@ -18,7 +18,7 @@ int main(void) {
     const FlowModuleKnowledge *k_bit = flowy_knowledge_lookup("bitspace");
     CHECK(k_bit != NULL);
     CHECK(strcmp(k_bit->header_file, "src/bitspace.h") == 0);
-    CHECK(strstr(k_bit->algorithmic_guarantee, "12.96 ns") != NULL);
+    CHECK(strstr(k_bit->algorithmic_guarantee, "1-bit mutation") != NULL);
 
     const FlowModuleKnowledge *k_qsbr = flowy_knowledge_lookup("reload");
     CHECK(k_qsbr != NULL);
@@ -42,7 +42,7 @@ int main(void) {
     CHECK(flowy_query_codebase(&graph, "1-bit chaos mutation mask canvas", &ans_chaos) == 1);
     CHECK(ans_chaos.primary_module != NULL);
     CHECK(strcmp(ans_chaos.primary_module->module_id, "bitspace") == 0);
-    CHECK(strstr(ans_chaos.explanation, "1024-Bit BitSpace") != NULL);
+    CHECK(strstr(ans_chaos.explanation, "BitSpace") != NULL);
 
     /* Query: SMT mathematical proofs */
     FlowyIntrospectiveAnswer ans_smt;

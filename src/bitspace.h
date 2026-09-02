@@ -119,7 +119,6 @@ typedef struct {
     FlowPlanAssignment assignment;
     FlowEvaluation eval;
     uint64_t genome;
-    FlowGenome genome_multiword;
     uint32_t bit_count;
     uint64_t schema_hash;
     uint64_t contract_hash;
