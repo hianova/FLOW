@@ -61,17 +61,15 @@ The current genome is intentionally small and inspectable. It is an engine
 implementation detail, not the public definition of a domain's candidate
 matrix; separating those two layers is part of the deep refactor.
 
-## M4 — legacy bootstrap regression (self-hosting check)
+## M4 — autopoiesis & meta-intent self-evolution (ouroboros)
 
 Pass:
 
 ```sh
-make self-host-check
+make autopoiesis-check
 ```
 
-The bootstrap path verifies that `flowc` can emit an inspectable C compiler capable of parsing, lowering, verifying, and emitting generic `.flow` benchmark shapes. This check is isolated as a legacy bootstrap regression gate to prevent template-based prototype assumptions from constraining the core planner.
-
-The future self-host upgrade will transition this path to a native compiler supporting `import`, domain semantic modules, hierarchical `FlowBitSpace`, and `FlowPlanArtifact` persistence.
+The autopoiesis check verifies that the compiler's own intent (`examples/compiler.flow`) is absorbed into the State/Topology Orchestrator canvas (`flow absorb`), unified into the global topology, and annealed into a verified self-evolving Epoch (`flow anneal`). The codebase manages its own meta-intent without external static bootstrap templates.
 
 ## M5 — reload and migration
 

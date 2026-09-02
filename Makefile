@@ -7,13 +7,12 @@ THREAD_FLAGS ?= -pthread
 
 BUILD_DIR := build
 FLOWC := $(BUILD_DIR)/flowc
-FLOW_TEMPLATE_PATH := $(CURDIR)/tools/self-host-stage2.c
 
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 INCLUDEDIR ?= $(PREFIX)/include/flow
 
-.PHONY: all clean test demos demo benchmark security-test reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test plugin-test reload-stress-test reload-stress-nightly self-host-check acceptance install uninstall fuzz-test fuzz ensemble-test smt-test mlir-llvm-test topology-test ebpf-pmu-test lsp-test jit-migration-test bootstrap-sandbox-test quantum-dimension-test two-tier-chaos-test zero-tlb-shootdown-test epigenetic-mask-test dynamic-mask-superposition-test mtd-defense-test swarm-federation-test genetic-programming-test dynamic-env-morph-test qsbr-unified-test bitset-genome-test async-jit-worker-test orchestrator-test
+.PHONY: all clean test demos demo benchmark security-test reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test plugin-test reload-stress-test reload-stress-nightly autopoiesis-check acceptance install uninstall fuzz-test fuzz ensemble-test smt-test mlir-llvm-test topology-test ebpf-pmu-test lsp-test jit-migration-test bootstrap-sandbox-test quantum-dimension-test two-tier-chaos-test zero-tlb-shootdown-test epigenetic-mask-test dynamic-mask-superposition-test mtd-defense-test swarm-federation-test genetic-programming-test dynamic-env-morph-test qsbr-unified-test bitset-genome-test async-jit-worker-test orchestrator-test
 
 all: $(FLOWC)
 
@@ -30,8 +29,8 @@ uninstall:
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-$(FLOWC): $(wildcard src/*.c) $(wildcard src/*.h) tools/self-host-stage2.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -DFLOW_TEMPLATE_PATH=\"$(FLOW_TEMPLATE_PATH)\" $(wildcard src/*.c) -o $@ $(LDLIBS) $(THREAD_FLAGS)
+$(FLOWC): $(wildcard src/*.c) $(wildcard src/*.h) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(wildcard src/*.c) -o $@ $(LDLIBS) $(THREAD_FLAGS)
 
 demo: $(FLOWC)
 	$(FLOWC) examples/rank.flow -o generated/rank.c
@@ -195,10 +194,11 @@ reload-stress-test: | $(BUILD_DIR)
 reload-stress-nightly: reload-stress-test
 	FLOW_STRESS_THREADS=32 FLOW_STRESS_CALLS=312500 FLOW_STRESS_PUBLISHES=1000 $(BUILD_DIR)/reload-stress-test
 
-self-host-check: $(FLOWC)
-	./tools/self-host-check.sh
+autopoiesis-check: $(FLOWC)
+	$(FLOWC) absorb examples/compiler.flow
+	$(FLOWC) anneal examples/compiler.flow examples/project.flow
 
-acceptance: test benchmark self-host-check security-test
+acceptance: test benchmark autopoiesis-check security-test
 
 test: $(FLOWC) reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test bitspace-test plugin-test project-test abi-test vertical-slice-test reload-stress-test fuzz-test ensemble-test smt-test mlir-llvm-test topology-test ebpf-pmu-test lsp-test jit-migration-test bootstrap-sandbox-test quantum-dimension-test two-tier-chaos-test zero-tlb-shootdown-test epigenetic-mask-test dynamic-mask-superposition-test mtd-defense-test swarm-federation-test genetic-programming-test dynamic-env-morph-test qsbr-unified-test bitset-genome-test async-jit-worker-test orchestrator-test
 	! grep -E -q 'heavy-tail|flip_bit_block|Black Swan' src/search.c README.md ACCEPTANCE.md
