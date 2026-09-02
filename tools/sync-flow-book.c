@@ -80,8 +80,8 @@ static const ChapterInfo ALL_CHAPTERS[] = {
         "Chapter 7: QSBR Lock-Free Hot-Swap (The Secret to Sub-Microsecond Zero-Downtime Migration)",
         "在每秒數千萬次請求的高並發伺服器中，獲取哪怕一把讀寫鎖（RWLock）都會造成災難性的快取一致性風暴。FLOW 採用統一 QSBR 無鎖架構，實現了讀取路徑零原子寫入、熱替換微秒級無損遷移。",
         "In servers processing millions of requests/sec, acquiring even one RWLock triggers catastrophic cache-line bouncing. FLOW QSBR achieves zero atomic writes on read paths and sub-microsecond migration.",
-        "QSBR 透過靜止狀態檢測與 64 位元世代演進，讀取吞吐量高達 356M ops/s（比 pthread_rwlock 快 24.1 倍），指標熱切換延遲小於 1 微秒且保證 0 請求丟失。",
-        "QSBR leverages quiescent-state tracking and 64-bit epoch evolution to deliver 356M ops/s read throughput (24.1x faster than rwlocks) with <1us pointer switch and 0 dropped requests."
+        "QSBR 透過靜止狀態檢測與 64 位元世代演進實現 356M ops/s 讀取吞吐量。看門狗以 mprotect 隔離掉隊者並以客製化 sigaction 攔截 SIGSEGV 達成優雅降級與 0 丟失遷移。",
+        "QSBR achieves 356M ops/s read throughput. Epoch watchdogs isolate stragglers via mprotect, with custom sigaction catching SIGSEGV to guarantee graceful degradation and 0 dropped requests."
     },
     {
         "ch08_memory_high_watermark_survival.md",

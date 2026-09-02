@@ -103,6 +103,15 @@ $$T_{\text{grace}} = \max\left(\text{SLA\_Latency} \times 2, \quad \mu_{\text{la
 
 一旦掉隊者被看門狗隔離，系統立即安全回收已退役的舊代記憶體，徹底解決了無鎖系統的長尾延遲與記憶體膨脹難題。
 
+### 🛡️ 隔離後的優雅降級 (Graceful Degradation via Signal Handling)
+
+在極端生產環境中，當那個陷入 500ms 阻塞的「讀者 B」突然被喚醒，若其程式邏輯嘗試修改（Write）這塊已被看門狗透過 `mprotect(page, PROT_READ)` 鎖定的隔離記憶體時，作業系統核心會對該執行緒拋出 `SIGSEGV` (Segmentation Fault) 記憶體保護異常。
+
+對於傳統應用程式，此訊號會直接導致整個 Process 崩潰；但在 FLOW 活體架構中：
+1. **客製化訊號攔截 (`sigaction`)**：FLOW 核心註冊了專屬的 `SIGSEGV` 訊號處理常式，透過 `siginfo_t` 即時分析故障位址是否位於已退役之舊世代頁面。
+2. **失控執行緒安全隔離與重置**：確認為掉隊者違規寫入後，FLOW 攔截異常並安全終止/重置該失效 Worker 執行緒，防止記憶體踩踏。
+3. **無感任務轉移**：主協調器 (Orchestrator) 自動接管並將其負載轉移至健康節點，確保主行程與其他健康執行緒完全不受干擾，達成 OS 級別的高可用容錯閉環。
+
 ---
 
 ## 7.5 完整突變審計軌跡 (Deterministic Audit Trail)
