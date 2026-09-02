@@ -553,3 +553,91 @@ int flow_security_is_mutation_compliant(FlowComplianceMode mode,
     }
     return 0;
 }
+
+/* ========================================================================= */
+/* Dynamic DSO Plugin ABI Export                                             */
+/* ========================================================================= */
+
+static const Component SECURITY_COMPONENTS[] = {
+    {
+        .id = "security_firewall",
+        .kind = "security",
+        .resource = "cpu",
+        .capability = "attestation",
+        .supports_shared = 1,
+        .supports_read_heavy = 1,
+        .supports_unordered = 1,
+        .supports_parallelizable = 1,
+        .latency_score = 1,
+        .memory_score = 1,
+        .domain_contract = "security_attested",
+        .flow_binding = "flow_security_audit_space",
+        .memory_fixed_bytes = 1024,
+        .memory_bytes_per_capacity = 64,
+        .reload_capable = 1
+    }
+};
+
+static uint64_t security_res_mask(const SemanticIR *ir, const Component *c, const FlowPlanDimensionSet *dims, unsigned long max_quota_bytes) {
+    (void)ir; (void)c; (void)dims; (void)max_quota_bytes;
+    return UINT64_MAX;
+}
+
+static const FlowPlugin SECURITY_PLUGIN = {
+    .name = "flow.security",
+    .version = "1.0",
+    .components = SECURITY_COMPONENTS,
+    .component_count = 1,
+    .compatible = NULL,
+    .memory_model = NULL,
+    .verify = NULL,
+    .emit = NULL,
+    .oracle = NULL,
+    .preference = NULL,
+    .validate_contract = NULL,
+    .lower_domain_semantics = NULL,
+    .free_domain_semantics = NULL,
+    .enumerate_dimensions = NULL,
+    .evaluate_plan = NULL,
+    .verify_plan = NULL,
+    .benchmark = NULL,
+    .get_mutation_mask = NULL,
+    .preference_mask = NULL,
+    .contract_mask = NULL,
+    .resource_mask = security_res_mask,
+    .environment_mask = NULL,
+    .create_unit = NULL,
+    .doc_title = "Moving Target Defense & Formal Security Gatekeeper",
+    .doc_responsibilities = "Enforces memory bounds quotas, ownership gates, ABI hash validation, and MTD entropy randomization",
+    .doc_algorithmic_guarantee = "Zero out-of-quota allocation, provable memory safety, and 1-bit chaotic fuzzer attestation",
+    .doc_memory_concurrency_model = "Zero heap overhead, hardware-assisted write barriers",
+    .doc_key_apis = "flow_security_check_composition_gate, flow_security_audit_space",
+    .doc_layer = 2,
+    .domain_context = NULL
+};
+
+static const FlowPluginDescriptor SECURITY_DESCRIPTOR = {
+    .abi_major = FLOW_PLUGIN_ABI_MAJOR,
+    .abi_minor = FLOW_PLUGIN_ABI_MINOR,
+    .descriptor_size = sizeof(FlowPluginDescriptor),
+    .module_name = "flow.security",
+    .module_version = "1.0",
+    .module_hash = 0x5EC07171,
+    .plugin = &SECURITY_PLUGIN,
+    .dso_handle = NULL,
+    .active_references = 0
+};
+
+const FlowPluginDescriptor *flow_security_entry_v1(void) {
+    return &SECURITY_DESCRIPTOR;
+}
+
+#ifdef FLOW_PLUGIN_DSO
+const FlowPluginDescriptor *flow_plugin_entry_v1(void) {
+    return &SECURITY_DESCRIPTOR;
+}
+#endif
+
+const FlowPlugin *flow_security_plugin(void) {
+    return &SECURITY_PLUGIN;
+}

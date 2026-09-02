@@ -231,3 +231,91 @@ void flow_swarm_report(const FlowSwarmCluster *cluster, FILE *out) {
                 p->id, p->best_energy, (unsigned long long)p->best_genome, p->stagnation_steps);
     }
 }
+
+/* ========================================================================= */
+/* Dynamic DSO Plugin ABI Export                                             */
+/* ========================================================================= */
+
+static const Component SWARM_COMPONENTS[] = {
+    {
+        .id = "swarm_optimizer",
+        .kind = "algorithm",
+        .resource = "cpu",
+        .capability = "pthread",
+        .supports_shared = 1,
+        .supports_read_heavy = 1,
+        .supports_unordered = 1,
+        .supports_parallelizable = 1,
+        .latency_score = 2,
+        .memory_score = 2,
+        .domain_contract = "swarm_federation",
+        .flow_binding = "flow_swarm_search",
+        .memory_fixed_bytes = sizeof(FlowSwarmCluster),
+        .memory_bytes_per_capacity = sizeof(FlowSwarmParticle),
+        .reload_capable = 0
+    }
+};
+
+static uint64_t swarm_pref_mask(const SemanticIR *ir, const Component *c, const FlowPlanDimensionSet *dims) {
+    (void)ir; (void)c; (void)dims;
+    return UINT64_MAX;
+}
+
+static const FlowPlugin SWARM_PLUGIN = {
+    .name = "flow.swarm",
+    .version = "1.0",
+    .components = SWARM_COMPONENTS,
+    .component_count = 1,
+    .compatible = NULL,
+    .memory_model = NULL,
+    .verify = NULL,
+    .emit = NULL,
+    .oracle = NULL,
+    .preference = NULL,
+    .validate_contract = NULL,
+    .lower_domain_semantics = NULL,
+    .free_domain_semantics = NULL,
+    .enumerate_dimensions = NULL,
+    .evaluate_plan = NULL,
+    .verify_plan = NULL,
+    .benchmark = NULL,
+    .get_mutation_mask = NULL,
+    .preference_mask = swarm_pref_mask,
+    .contract_mask = NULL,
+    .resource_mask = NULL,
+    .environment_mask = NULL,
+    .create_unit = NULL,
+    .doc_title = "Particle Swarm & Federated 1-Bit Chaos Optimizer",
+    .doc_responsibilities = "Executes multi-agent particle swarm search with pheromone consensus and saddle-point escape",
+    .doc_algorithmic_guarantee = "Guarantees global Pareto frontier convergence under multimodal fitness landscapes",
+    .doc_memory_concurrency_model = "Lock-free atomic particle state replication",
+    .doc_key_apis = "flow_swarm_search, flow_swarm_step",
+    .doc_layer = 2,
+    .domain_context = NULL
+};
+
+static const FlowPluginDescriptor SWARM_DESCRIPTOR = {
+    .abi_major = FLOW_PLUGIN_ABI_MAJOR,
+    .abi_minor = FLOW_PLUGIN_ABI_MINOR,
+    .descriptor_size = sizeof(FlowPluginDescriptor),
+    .module_name = "flow.swarm",
+    .module_version = "1.0",
+    .module_hash = 0x54A83001,
+    .plugin = &SWARM_PLUGIN,
+    .dso_handle = NULL,
+    .active_references = 0
+};
+
+const FlowPluginDescriptor *flow_swarm_entry_v1(void) {
+    return &SWARM_DESCRIPTOR;
+}
+
+#ifdef FLOW_PLUGIN_DSO
+const FlowPluginDescriptor *flow_plugin_entry_v1(void) {
+    return &SWARM_DESCRIPTOR;
+}
+#endif
+
+const FlowPlugin *flow_swarm_plugin(void) {
+    return &SWARM_PLUGIN;
+}

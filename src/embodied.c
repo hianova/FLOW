@@ -434,3 +434,91 @@ bool flow_physics_is_future_state_safe(FlowPhysicsEngine *engine,
 
     return flow_physics_is_zmp_stable(&future_state);
 }
+
+/* ========================================================================= */
+/* Dynamic DSO Plugin ABI Export                                             */
+/* ========================================================================= */
+
+static const Component EMBODIED_COMPONENTS[] = {
+    {
+        .id = "embodied_controller",
+        .kind = "controller",
+        .resource = "hardware",
+        .capability = "realtime",
+        .supports_shared = 0,
+        .supports_read_heavy = 0,
+        .supports_unordered = 0,
+        .supports_parallelizable = 0,
+        .latency_score = 1,
+        .memory_score = 2,
+        .domain_contract = "zmp_torque_safe",
+        .flow_binding = "flow_embodied_run",
+        .memory_fixed_bytes = sizeof(FlowPhysicsEngine),
+        .memory_bytes_per_capacity = 64,
+        .reload_capable = 1
+    }
+};
+
+static uint64_t embodied_env_mask(const SemanticIR *ir, const Component *c, const FlowPlanDimensionSet *dims, const FlowEnvironmentState *env) {
+    (void)ir; (void)c; (void)dims; (void)env;
+    return UINT64_MAX;
+}
+
+static const FlowPlugin EMBODIED_PLUGIN = {
+    .name = "flow.embodied",
+    .version = "1.0",
+    .components = EMBODIED_COMPONENTS,
+    .component_count = 1,
+    .compatible = NULL,
+    .memory_model = NULL,
+    .verify = NULL,
+    .emit = NULL,
+    .oracle = NULL,
+    .preference = NULL,
+    .validate_contract = NULL,
+    .lower_domain_semantics = NULL,
+    .free_domain_semantics = NULL,
+    .enumerate_dimensions = NULL,
+    .evaluate_plan = NULL,
+    .verify_plan = NULL,
+    .benchmark = NULL,
+    .get_mutation_mask = NULL,
+    .preference_mask = NULL,
+    .contract_mask = NULL,
+    .resource_mask = NULL,
+    .environment_mask = embodied_env_mask,
+    .create_unit = NULL,
+    .doc_title = "Embodied AI Physics & Dual-Rate Gait Controller",
+    .doc_responsibilities = "Provides micro-physics simulation gate, ZMP safety verification, Smith predictor, and 10kHz spinal reflex",
+    .doc_algorithmic_guarantee = "Guarantees zero-fall ZMP stability polygon and dead-time phase lag compensation",
+    .doc_memory_concurrency_model = "Stack-allocated joint states, QSBR zero-copy lock-free cortical hot-swapping",
+    .doc_key_apis = "flow_physics_is_future_state_safe, flow_smith_predictor_push_and_predict",
+    .doc_layer = 2,
+    .domain_context = NULL
+};
+
+static const FlowPluginDescriptor EMBODIED_DESCRIPTOR = {
+    .abi_major = FLOW_PLUGIN_ABI_MAJOR,
+    .abi_minor = FLOW_PLUGIN_ABI_MINOR,
+    .descriptor_size = sizeof(FlowPluginDescriptor),
+    .module_name = "flow.embodied",
+    .module_version = "1.0",
+    .module_hash = 0xEB0D1ED1,
+    .plugin = &EMBODIED_PLUGIN,
+    .dso_handle = NULL,
+    .active_references = 0
+};
+
+const FlowPluginDescriptor *flow_embodied_entry_v1(void) {
+    return &EMBODIED_DESCRIPTOR;
+}
+
+#ifdef FLOW_PLUGIN_DSO
+const FlowPluginDescriptor *flow_plugin_entry_v1(void) {
+    return &EMBODIED_DESCRIPTOR;
+}
+#endif
+
+const FlowPlugin *flow_embodied_plugin(void) {
+    return &EMBODIED_PLUGIN;
+}

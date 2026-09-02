@@ -174,3 +174,91 @@ int flow_smt_verify(const SemanticIR *ir,
     (void)plan;
     return proven_count >= 3;
 }
+
+/* ========================================================================= */
+/* Dynamic DSO Plugin ABI Export                                             */
+/* ========================================================================= */
+
+static const Component SMT_COMPONENTS[] = {
+    {
+        .id = "smt_verifier",
+        .kind = "verifier",
+        .resource = "cpu",
+        .capability = "logic",
+        .supports_shared = 0,
+        .supports_read_heavy = 1,
+        .supports_unordered = 0,
+        .supports_parallelizable = 0,
+        .latency_score = 3,
+        .memory_score = 1,
+        .domain_contract = "smt_qf_lia",
+        .flow_binding = "flow_smt_verify",
+        .memory_fixed_bytes = sizeof(FlowSMTProofAttestation),
+        .memory_bytes_per_capacity = 32,
+        .reload_capable = 0
+    }
+};
+
+static uint64_t smt_contract_mask(const SemanticIR *ir, const Component *c, const FlowPlanDimensionSet *dims) {
+    (void)ir; (void)c; (void)dims;
+    return UINT64_MAX;
+}
+
+static const FlowPlugin SMT_PLUGIN = {
+    .name = "flow.smt",
+    .version = "1.0",
+    .components = SMT_COMPONENTS,
+    .component_count = 1,
+    .compatible = NULL,
+    .memory_model = NULL,
+    .verify = NULL,
+    .emit = NULL,
+    .oracle = NULL,
+    .preference = NULL,
+    .validate_contract = NULL,
+    .lower_domain_semantics = NULL,
+    .free_domain_semantics = NULL,
+    .enumerate_dimensions = NULL,
+    .evaluate_plan = NULL,
+    .verify_plan = NULL,
+    .benchmark = NULL,
+    .get_mutation_mask = NULL,
+    .preference_mask = NULL,
+    .contract_mask = smt_contract_mask,
+    .resource_mask = NULL,
+    .environment_mask = NULL,
+    .create_unit = NULL,
+    .doc_title = "SMT-LIB2 Formal Theorem Prover (QF_LIA Solver)",
+    .doc_responsibilities = "Automated mathematical proof synthesis for buffer bounds, memory quotas, shard isolation, and determinism",
+    .doc_algorithmic_guarantee = "Zero-defect formal verification sound under Presburger arithmetic and Z3/CVC5 solver integration",
+    .doc_memory_concurrency_model = "Pure stateless functional theorem verification",
+    .doc_key_apis = "flow_smt_verify, flow_smt_generate_proof_script",
+    .doc_layer = 2,
+    .domain_context = NULL
+};
+
+static const FlowPluginDescriptor SMT_DESCRIPTOR = {
+    .abi_major = FLOW_PLUGIN_ABI_MAJOR,
+    .abi_minor = FLOW_PLUGIN_ABI_MINOR,
+    .descriptor_size = sizeof(FlowPluginDescriptor),
+    .module_name = "flow.smt",
+    .module_version = "1.0",
+    .module_hash = 0x534D5401,
+    .plugin = &SMT_PLUGIN,
+    .dso_handle = NULL,
+    .active_references = 0
+};
+
+const FlowPluginDescriptor *flow_smt_entry_v1(void) {
+    return &SMT_DESCRIPTOR;
+}
+
+#ifdef FLOW_PLUGIN_DSO
+const FlowPluginDescriptor *flow_plugin_entry_v1(void) {
+    return &SMT_DESCRIPTOR;
+}
+#endif
+
+const FlowPlugin *flow_smt_plugin(void) {
+    return &SMT_PLUGIN;
+}

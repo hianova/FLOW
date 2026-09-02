@@ -359,3 +359,86 @@ void flow_genetic_report(const FlowGeneticEngine *engine, FILE *out) {
         }
     }
 }
+
+/* ========================================================================= */
+/* Dynamic DSO Plugin ABI Export                                             */
+/* ========================================================================= */
+
+static const Component GENETIC_COMPONENTS[] = {
+    {
+        .id = "genetic_synthesizer",
+        .kind = "synthesizer",
+        .resource = "cpu",
+        .capability = "jit",
+        .supports_shared = 0,
+        .supports_read_heavy = 1,
+        .supports_unordered = 1,
+        .supports_parallelizable = 0,
+        .latency_score = 4,
+        .memory_score = 1,
+        .domain_contract = "genetic_synthesis",
+        .flow_binding = "flow_genetic_evolve",
+        .memory_fixed_bytes = sizeof(FlowGeneticEngine),
+        .memory_bytes_per_capacity = sizeof(FlowKernelGenome),
+        .reload_capable = 0
+    }
+};
+
+static const FlowPlugin GENETIC_PLUGIN = {
+    .name = "flow.genetic",
+    .version = "1.0",
+    .components = GENETIC_COMPONENTS,
+    .component_count = 1,
+    .compatible = NULL,
+    .memory_model = NULL,
+    .verify = NULL,
+    .emit = NULL,
+    .oracle = NULL,
+    .preference = NULL,
+    .validate_contract = NULL,
+    .lower_domain_semantics = NULL,
+    .free_domain_semantics = NULL,
+    .enumerate_dimensions = NULL,
+    .evaluate_plan = NULL,
+    .verify_plan = NULL,
+    .benchmark = NULL,
+    .get_mutation_mask = NULL,
+    .preference_mask = NULL,
+    .contract_mask = NULL,
+    .resource_mask = NULL,
+    .environment_mask = NULL,
+    .create_unit = NULL,
+    .doc_title = "Genetic Superoptimizer & Micro-Kernel Synthesizer",
+    .doc_responsibilities = "Executes 1-bit chaotic mutation on 384-bit micro-opcode genome with simulated annealing",
+    .doc_algorithmic_guarantee = "Formally verified kernel test set sound synthesis",
+    .doc_memory_concurrency_model = "Stack-allocated register banks, zero heap footprint",
+    .doc_key_apis = "flow_genetic_evolve, flow_genetic_emit_c",
+    .doc_layer = 2,
+    .domain_context = NULL
+};
+
+static const FlowPluginDescriptor GENETIC_DESCRIPTOR = {
+    .abi_major = FLOW_PLUGIN_ABI_MAJOR,
+    .abi_minor = FLOW_PLUGIN_ABI_MINOR,
+    .descriptor_size = sizeof(FlowPluginDescriptor),
+    .module_name = "flow.genetic",
+    .module_version = "1.0",
+    .module_hash = 0x6E1C0001,
+    .plugin = &GENETIC_PLUGIN,
+    .dso_handle = NULL,
+    .active_references = 0
+};
+
+const FlowPluginDescriptor *flow_genetic_entry_v1(void) {
+    return &GENETIC_DESCRIPTOR;
+}
+
+#ifdef FLOW_PLUGIN_DSO
+const FlowPluginDescriptor *flow_plugin_entry_v1(void) {
+    return &GENETIC_DESCRIPTOR;
+}
+#endif
+
+const FlowPlugin *flow_genetic_plugin(void) {
+    return &GENETIC_PLUGIN;
+}

@@ -7,30 +7,58 @@ THREAD_FLAGS ?= -pthread
 
 BUILD_DIR := build
 FLOWC := $(BUILD_DIR)/flowc
+FLOWY := $(BUILD_DIR)/flowy
+
+SRC_LIB := $(filter-out src/flowc.c src/flowy_main.c,$(wildcard src/*.c))
 
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 INCLUDEDIR ?= $(PREFIX)/include/flow
 
-.PHONY: all clean test demos demo benchmark security-test reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test plugin-test reload-stress-test reload-stress-nightly autopoiesis-check acceptance install uninstall fuzz-test fuzz ensemble-test smt-test mlir-llvm-test topology-test ebpf-pmu-test jit-migration-test bootstrap-sandbox-test quantum-dimension-test two-tier-chaos-test zero-tlb-shootdown-test epigenetic-mask-test dynamic-mask-superposition-test mtd-defense-test swarm-federation-test genetic-programming-test dynamic-env-morph-test qsbr-unified-test bitset-genome-test async-jit-worker-test orchestrator-test enterprise-production-test embodied-physics-test flowy-test mechanism-audit-test audit-mechanisms decision-explain-test hardened-production-test
+PLUGINS_SO := $(BUILD_DIR)/libflow_embodied.so $(BUILD_DIR)/libflow_smt.so $(BUILD_DIR)/libflow_security.so $(BUILD_DIR)/libflow_swarm.so $(BUILD_DIR)/libflow_genetic.so
 
-all: $(FLOWC)
+.PHONY: all clean test demos demo benchmark security-test reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test plugin-test reload-stress-test reload-stress-nightly autopoiesis-check acceptance install uninstall fuzz-test fuzz ensemble-test smt-test mlir-llvm-test topology-test ebpf-pmu-test jit-migration-test bootstrap-sandbox-test quantum-dimension-test two-tier-chaos-test zero-tlb-shootdown-test epigenetic-mask-test dynamic-mask-superposition-test mtd-defense-test swarm-federation-test genetic-programming-test dynamic-env-morph-test qsbr-unified-test bitset-genome-test async-jit-worker-test orchestrator-test enterprise-production-test embodied-physics-test flowy-test mechanism-audit-test audit-mechanisms decision-explain-test hardened-production-test decoupling-test plugins flowy
 
-install: $(FLOWC)
+all: $(FLOWC) $(FLOWY) plugins
+
+install: $(FLOWC) $(FLOWY)
 	mkdir -p $(DESTDIR)$(BINDIR)
 	install -m 755 $(FLOWC) $(DESTDIR)$(BINDIR)/flowc
+	install -m 755 $(FLOWY) $(DESTDIR)$(BINDIR)/flowy
 	mkdir -p $(DESTDIR)$(INCLUDEDIR)
 	install -m 644 src/*.h $(DESTDIR)$(INCLUDEDIR)
 
 uninstall:
-	rm -f $(DESTDIR)$(BINDIR)/flowc
+	rm -f $(DESTDIR)$(BINDIR)/flowc $(DESTDIR)$(BINDIR)/flowy
 	rm -rf $(DESTDIR)$(INCLUDEDIR)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-$(FLOWC): $(wildcard src/*.c) $(wildcard src/*.h) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(wildcard src/*.c) -o $@ $(LDLIBS) $(THREAD_FLAGS)
+$(FLOWC): $(SRC_LIB) src/flowc.c $(wildcard src/*.h) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(SRC_LIB) src/flowc.c -o $@ $(LDLIBS) $(THREAD_FLAGS)
+
+$(FLOWY): $(SRC_LIB) src/flowy_main.c $(wildcard src/*.h) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(SRC_LIB) src/flowy_main.c -o $@ $(LDLIBS) $(THREAD_FLAGS)
+
+flowy: $(FLOWY)
+
+plugins: $(PLUGINS_SO)
+
+$(BUILD_DIR)/libflow_embodied.so: src/embodied.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -shared -fPIC -DFLOW_PLUGIN_DSO -undefined dynamic_lookup $(THREAD_FLAGS) -Isrc src/embodied.c -o $@ $(LDLIBS)
+
+$(BUILD_DIR)/libflow_smt.so: src/smt.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -shared -fPIC -DFLOW_PLUGIN_DSO -undefined dynamic_lookup $(THREAD_FLAGS) -Isrc src/smt.c -o $@ $(LDLIBS)
+
+$(BUILD_DIR)/libflow_security.so: src/security.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -shared -fPIC -DFLOW_PLUGIN_DSO -undefined dynamic_lookup $(THREAD_FLAGS) -Isrc src/security.c -o $@ $(LDLIBS)
+
+$(BUILD_DIR)/libflow_swarm.so: src/swarm.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -shared -fPIC -DFLOW_PLUGIN_DSO -undefined dynamic_lookup $(THREAD_FLAGS) -Isrc src/swarm.c -o $@ $(LDLIBS)
+
+$(BUILD_DIR)/libflow_genetic.so: src/genetic.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -shared -fPIC -DFLOW_PLUGIN_DSO -undefined dynamic_lookup $(THREAD_FLAGS) -Isrc src/genetic.c -o $@ $(LDLIBS)
 
 demo: $(FLOWC)
 	$(FLOWC) examples/rank.flow -o generated/rank.c
@@ -48,182 +76,186 @@ benchmark: demos
 	./tools/benchmark-suite.sh 1000
 
 security-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/security-test.c -o $(BUILD_DIR)/security-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/security-test.c -o $(BUILD_DIR)/security-test -lm
 	$(BUILD_DIR)/security-test
 
 reload-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/reload-test.c -o $(BUILD_DIR)/reload-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/reload-test.c -o $(BUILD_DIR)/reload-test -lm
 	$(BUILD_DIR)/reload-test
 
 live-reload-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/live-reload-test.c -o $(BUILD_DIR)/live-reload-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/live-reload-test.c -o $(BUILD_DIR)/live-reload-test -lm
 	$(BUILD_DIR)/live-reload-test
 
 backend-reload-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/backend-reload-test.c -o $(BUILD_DIR)/backend-reload-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/backend-reload-test.c -o $(BUILD_DIR)/backend-reload-test -lm
 	$(BUILD_DIR)/backend-reload-test
 
 generated-reload-test: $(FLOWC) | $(BUILD_DIR)
 	$(FLOWC) examples/rank.flow -o /tmp/flow-rank-reload.c --search --iterations 50 --seed 42 --reload-adapter
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/generated-reload-test.c /tmp/flow-rank-reload.c -o $(BUILD_DIR)/generated-reload-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/generated-reload-test.c /tmp/flow-rank-reload.c -o $(BUILD_DIR)/generated-reload-test -lm
 	$(BUILD_DIR)/generated-reload-test
 	$(FLOWC) examples/small.flow -o /tmp/flow-small-reload.c --reload-adapter
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc -c /tmp/flow-small-reload.c -o /tmp/flow-small-reload.o
 
 adaptive-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/adaptive-test.c -o $(BUILD_DIR)/adaptive-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/adaptive-test.c -o $(BUILD_DIR)/adaptive-test -lm
 	$(BUILD_DIR)/adaptive-test
 
 bitspace-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/bitspace-test.c -o $(BUILD_DIR)/bitspace-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/bitspace-test.c -o $(BUILD_DIR)/bitspace-test -lm
 	$(BUILD_DIR)/bitspace-test
 
 plugin-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/plugin-test.c -o $(BUILD_DIR)/plugin-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/plugin-test.c -o $(BUILD_DIR)/plugin-test -lm
 	$(BUILD_DIR)/plugin-test
 
 project-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/project-test.c -o $(BUILD_DIR)/project-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/project-test.c -o $(BUILD_DIR)/project-test -lm
 	$(BUILD_DIR)/project-test
 
 abi-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/abi-test.c -o $(BUILD_DIR)/abi-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/abi-test.c -o $(BUILD_DIR)/abi-test -lm
 	$(BUILD_DIR)/abi-test
 
-vertical-slice-test: $(FLOWC) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/vertical-slice-test.c -o $(BUILD_DIR)/vertical-slice-test -lm
+vertical-slice-test: | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/vertical-slice-test.c -o $(BUILD_DIR)/vertical-slice-test -lm
 	$(BUILD_DIR)/vertical-slice-test
 
 fuzz-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/fuzz-test.c -o $(BUILD_DIR)/fuzz-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/fuzz-test.c -o $(BUILD_DIR)/fuzz-test -lm
 	$(BUILD_DIR)/fuzz-test
 
 ensemble-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/ensemble-test.c -o $(BUILD_DIR)/ensemble-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/ensemble-test.c -o $(BUILD_DIR)/ensemble-test -lm
 	$(BUILD_DIR)/ensemble-test
 
 smt-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/smt-test.c -o $(BUILD_DIR)/smt-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/smt-test.c -o $(BUILD_DIR)/smt-test -lm
 	$(BUILD_DIR)/smt-test
 
 mlir-llvm-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/mlir-llvm-test.c -o $(BUILD_DIR)/mlir-llvm-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/mlir-llvm-test.c -o $(BUILD_DIR)/mlir-llvm-test -lm
 	$(BUILD_DIR)/mlir-llvm-test
 
 topology-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/topology-test.c -o $(BUILD_DIR)/topology-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/topology-test.c -o $(BUILD_DIR)/topology-test -lm
 	$(BUILD_DIR)/topology-test
 
 ebpf-pmu-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/ebpf-pmu-test.c -o $(BUILD_DIR)/ebpf-pmu-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/ebpf-pmu-test.c -o $(BUILD_DIR)/ebpf-pmu-test -lm
 	$(BUILD_DIR)/ebpf-pmu-test
 
 jit-migration-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/jit-migration-test.c -o $(BUILD_DIR)/jit-migration-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/jit-migration-test.c -o $(BUILD_DIR)/jit-migration-test -lm
 	$(BUILD_DIR)/jit-migration-test
 
 bootstrap-sandbox-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/bootstrap-sandbox-test.c -o $(BUILD_DIR)/bootstrap-sandbox-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/bootstrap-sandbox-test.c -o $(BUILD_DIR)/bootstrap-sandbox-test -lm
 	$(BUILD_DIR)/bootstrap-sandbox-test
 
 quantum-dimension-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/quantum-dimension-test.c -o $(BUILD_DIR)/quantum-dimension-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/quantum-dimension-test.c -o $(BUILD_DIR)/quantum-dimension-test -lm
 	$(BUILD_DIR)/quantum-dimension-test
 
 two-tier-chaos-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/two-tier-chaos-test.c -o $(BUILD_DIR)/two-tier-chaos-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/two-tier-chaos-test.c -o $(BUILD_DIR)/two-tier-chaos-test -lm
 	$(BUILD_DIR)/two-tier-chaos-test
 
 zero-tlb-shootdown-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/zero-tlb-shootdown-test.c -o $(BUILD_DIR)/zero-tlb-shootdown-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/zero-tlb-shootdown-test.c -o $(BUILD_DIR)/zero-tlb-shootdown-test -lm
 	$(BUILD_DIR)/zero-tlb-shootdown-test
 
 epigenetic-mask-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/epigenetic-mask-test.c -o $(BUILD_DIR)/epigenetic-mask-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/epigenetic-mask-test.c -o $(BUILD_DIR)/epigenetic-mask-test -lm
 	$(BUILD_DIR)/epigenetic-mask-test
 
 dynamic-mask-superposition-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/dynamic-mask-superposition-test.c -o $(BUILD_DIR)/dynamic-mask-superposition-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/dynamic-mask-superposition-test.c -o $(BUILD_DIR)/dynamic-mask-superposition-test -lm
 	$(BUILD_DIR)/dynamic-mask-superposition-test
 
 mtd-defense-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/mtd-defense-test.c -o $(BUILD_DIR)/mtd-defense-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/mtd-defense-test.c -o $(BUILD_DIR)/mtd-defense-test -lm
 	$(BUILD_DIR)/mtd-defense-test
 
 swarm-federation-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/swarm-federation-test.c -o $(BUILD_DIR)/swarm-federation-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/swarm-federation-test.c -o $(BUILD_DIR)/swarm-federation-test -lm
 	$(BUILD_DIR)/swarm-federation-test
 
 genetic-programming-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/genetic-programming-test.c -o $(BUILD_DIR)/genetic-programming-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/genetic-programming-test.c -o $(BUILD_DIR)/genetic-programming-test -lm
 	$(BUILD_DIR)/genetic-programming-test
 
 dynamic-env-morph-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/dynamic-env-morph-test.c -o $(BUILD_DIR)/dynamic-env-morph-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/dynamic-env-morph-test.c -o $(BUILD_DIR)/dynamic-env-morph-test -lm
 	$(BUILD_DIR)/dynamic-env-morph-test
 
 qsbr-unified-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/qsbr-unified-test.c -o $(BUILD_DIR)/qsbr-unified-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/qsbr-unified-test.c -o $(BUILD_DIR)/qsbr-unified-test -lm
 	$(BUILD_DIR)/qsbr-unified-test
 
 bitset-genome-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/bitset-genome-test.c -o $(BUILD_DIR)/bitset-genome-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/bitset-genome-test.c -o $(BUILD_DIR)/bitset-genome-test -lm
 	$(BUILD_DIR)/bitset-genome-test
 
 async-jit-worker-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/async-jit-worker-test.c -o $(BUILD_DIR)/async-jit-worker-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/async-jit-worker-test.c -o $(BUILD_DIR)/async-jit-worker-test -lm
 	$(BUILD_DIR)/async-jit-worker-test
 
 orchestrator-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/orchestrator-test.c -o $(BUILD_DIR)/orchestrator-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/orchestrator-test.c -o $(BUILD_DIR)/orchestrator-test -lm
 	$(BUILD_DIR)/orchestrator-test
 
 enterprise-production-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/enterprise-production-test.c -o $(BUILD_DIR)/enterprise-production-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/enterprise-production-test.c -o $(BUILD_DIR)/enterprise-production-test -lm
 	$(BUILD_DIR)/enterprise-production-test
 
 embodied-physics-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/embodied-physics-test.c -o $(BUILD_DIR)/embodied-physics-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/embodied-physics-test.c -o $(BUILD_DIR)/embodied-physics-test -lm
 	$(BUILD_DIR)/embodied-physics-test
 
-flowy-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/flowy-test.c -o $(BUILD_DIR)/flowy-test -lm
+flowy-test: $(FLOWY) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/flowy-test.c -o $(BUILD_DIR)/flowy-test -lm
 	$(BUILD_DIR)/flowy-test
 
 mechanism-audit-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/mechanism-audit-test.c -o $(BUILD_DIR)/mechanism-audit-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/mechanism-audit-test.c -o $(BUILD_DIR)/mechanism-audit-test -lm
 	$(BUILD_DIR)/mechanism-audit-test
 
 decision-explain-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/decision-explain-test.c -o $(BUILD_DIR)/decision-explain-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/decision-explain-test.c -o $(BUILD_DIR)/decision-explain-test -lm
 	$(BUILD_DIR)/decision-explain-test
 
 hardened-production-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/hardened-production-test.c -o $(BUILD_DIR)/hardened-production-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/hardened-production-test.c -o $(BUILD_DIR)/hardened-production-test -lm
 	$(BUILD_DIR)/hardened-production-test
 
-audit-mechanisms: $(FLOWC)
-	$(FLOWC) audit-mechanisms
+decoupling-test: $(FLOWC) $(FLOWY) plugins | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/decoupling-test.c -o $(BUILD_DIR)/decoupling-test -lm
+	$(BUILD_DIR)/decoupling-test
+
+audit-mechanisms: $(FLOWY)
+	$(FLOWY) audit-mechanisms
 
 fuzz: | $(BUILD_DIR)
-	clang -std=c17 -O2 -fsanitize=fuzzer,address,undefined -DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/fuzz-test.c -o $(BUILD_DIR)/fuzzer-engine -lm
+	clang -std=c17 -O2 -fsanitize=fuzzer,address,undefined -DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION -Isrc $(SRC_LIB) tests/fuzz-test.c -o $(BUILD_DIR)/fuzzer-engine -lm
 	@echo "Running LLVM libFuzzer for 5 seconds..."
 	$(BUILD_DIR)/fuzzer-engine -max_total_time=5
 
 reload-stress-test: | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(filter-out src/flowc.c,$(wildcard src/*.c)) tests/reload-stress-test.c -o $(BUILD_DIR)/reload-stress-test -lm
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $(SRC_LIB) tests/reload-stress-test.c -o $(BUILD_DIR)/reload-stress-test -lm
 	$(BUILD_DIR)/reload-stress-test
 
 reload-stress-nightly: reload-stress-test
 	FLOW_STRESS_THREADS=32 FLOW_STRESS_CALLS=312500 FLOW_STRESS_PUBLISHES=1000 $(BUILD_DIR)/reload-stress-test
 
-autopoiesis-check: $(FLOWC)
-	$(FLOWC) absorb examples/compiler.flow
-	$(FLOWC) anneal examples/compiler.flow examples/project.flow
+autopoiesis-check: $(FLOWY)
+	$(FLOWY) absorb examples/compiler.flow
+	$(FLOWY) anneal examples/compiler.flow examples/project.flow
 
 acceptance: test benchmark autopoiesis-check security-test
 
-test: $(FLOWC) reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test bitspace-test plugin-test project-test abi-test vertical-slice-test reload-stress-test fuzz-test ensemble-test smt-test mlir-llvm-test topology-test ebpf-pmu-test jit-migration-test bootstrap-sandbox-test quantum-dimension-test two-tier-chaos-test zero-tlb-shootdown-test epigenetic-mask-test dynamic-mask-superposition-test mtd-defense-test swarm-federation-test genetic-programming-test dynamic-env-morph-test qsbr-unified-test bitset-genome-test async-jit-worker-test orchestrator-test enterprise-production-test embodied-physics-test flowy-test mechanism-audit-test decision-explain-test hardened-production-test
+test: $(FLOWC) $(FLOWY) plugins reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test bitspace-test plugin-test project-test abi-test vertical-slice-test reload-stress-test fuzz-test ensemble-test smt-test mlir-llvm-test topology-test ebpf-pmu-test jit-migration-test bootstrap-sandbox-test quantum-dimension-test two-tier-chaos-test zero-tlb-shootdown-test epigenetic-mask-test dynamic-mask-superposition-test mtd-defense-test swarm-federation-test genetic-programming-test dynamic-env-morph-test qsbr-unified-test bitset-genome-test async-jit-worker-test orchestrator-test enterprise-production-test embodied-physics-test flowy-test mechanism-audit-test decision-explain-test hardened-production-test decoupling-test
 	! grep -E -q 'heavy-tail|flip_bit_block|Black Swan' src/search.c README.md ACCEPTANCE.md
 	grep -E -q 'one chaotic 1-bit mutation' src/search.c
 	$(FLOWC) examples/rank.flow -o generated/rank.c

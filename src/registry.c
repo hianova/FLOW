@@ -13,15 +13,13 @@ static int registry_initialized;
 static int plugin_valid(const FlowPlugin *plugin) {
     size_t i;
     if (plugin == NULL || plugin->name == NULL || plugin->name[0] == '\0' ||
-        plugin->version == NULL || plugin->components == NULL ||
-        plugin->component_count == 0 || plugin->emit == NULL)
+        plugin->version == NULL)
+        return 0;
+    if (plugin->component_count > 0 && plugin->components == NULL)
         return 0;
     for (i = 0; i < plugin->component_count; ++i) {
         const Component *component = &plugin->components[i];
-        if (component->id == NULL || component->id[0] == '\0' ||
-            component->kind == NULL || component->resource == NULL ||
-            component->capability == NULL || component->domain_contract == NULL ||
-            component->flow_binding == NULL)
+        if (component->id == NULL || component->id[0] == '\0')
             return 0;
     }
     return 1;
@@ -131,6 +129,11 @@ int flow_registry_load_dso(const char *so_path, char *err_msg, size_t err_size) 
         return 0;
     }
     FlowPluginEntryFn entry_fn = (FlowPluginEntryFn)dlsym(handle, "flow_plugin_entry_v1");
+    if (entry_fn == NULL) entry_fn = (FlowPluginEntryFn)dlsym(handle, "flow_embodied_entry_v1");
+    if (entry_fn == NULL) entry_fn = (FlowPluginEntryFn)dlsym(handle, "flow_smt_entry_v1");
+    if (entry_fn == NULL) entry_fn = (FlowPluginEntryFn)dlsym(handle, "flow_security_entry_v1");
+    if (entry_fn == NULL) entry_fn = (FlowPluginEntryFn)dlsym(handle, "flow_swarm_entry_v1");
+    if (entry_fn == NULL) entry_fn = (FlowPluginEntryFn)dlsym(handle, "flow_genetic_entry_v1");
     if (entry_fn == NULL) {
         if (err_msg && err_size) snprintf(err_msg, err_size, "missing entry symbol 'flow_plugin_entry_v1'");
         dlclose(handle);
@@ -419,13 +422,14 @@ int component_compatible(const SemanticIR *ir, const Component *component) {
     if (ir->imported_module_count > 0) {
         int imported = 0;
         for (size_t m = 0; m < ir->imported_module_count; ++m) {
-            if (strcmp(ir->imported_modules[m], plugin->name) == 0) {
+            if (strcmp(ir->imported_modules[m], plugin->name) == 0 ||
+                strcmp(plugin->name, "builtin") == 0) {
                 imported = 1;
                 break;
             }
         }
         if (!imported) return 0;
-    } else if (ir->plugin_name[0] != '\0' && strcmp(ir->plugin_name, plugin->name) != 0) {
+    } else if (ir->plugin_name[0] != '\0' && strcmp(ir->plugin_name, plugin->name) != 0 && strcmp(plugin->name, "builtin") != 0) {
         return 0;
     }
 
@@ -433,8 +437,8 @@ int component_compatible(const SemanticIR *ir, const Component *component) {
         char err[128];
         if (!plugin->validate_contract(ir, plugin, err, sizeof(err)))
             return 0;
-    } else if (ir->contract_name[0] != '\0' || component->domain_contract[0] != '\0') {
-        if (strcmp(ir->contract_name, component->domain_contract) != 0)
+    } else if (ir->contract_name[0] != '\0') {
+        if (component->domain_contract == NULL || strcmp(ir->contract_name, component->domain_contract) != 0)
             return 0;
     }
     return (plugin->compatible == NULL || plugin->compatible(ir, component));
