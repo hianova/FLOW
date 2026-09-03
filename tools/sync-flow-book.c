@@ -222,7 +222,11 @@ static const ModuleMap MODULE_BINDINGS[] = {
     { "benchmark", "ch17_performance_benchmarks.md" },
     { "flowc", "ch01_what_is_flow.md" },
     { "vault", "ch18_hippocampus_long_term_memory.md" },
-    { "fvec", "ch18_hippocampus_long_term_memory.md" }
+    { "fvec", "ch18_hippocampus_long_term_memory.md" },
+    { "primitive", "ch12_dynamic_plugins_abi.md" },
+    { "flowy_fvec", "ch18_hippocampus_long_term_memory.md" },
+    { "audit", "ch10_meet_flowy.md" },
+    { "flowy_cli", "ch10_meet_flowy.md" }
 };
 
 static const size_t MODULE_COUNT = sizeof(MODULE_BINDINGS) / sizeof(MODULE_BINDINGS[0]);

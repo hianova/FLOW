@@ -4,12 +4,22 @@
 #include "flow.h"
 #include "topology.h"
 #include "orchestrator.h"
+#include "audit.h"
 
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
 
+#ifndef FLOW_LANG_ENUM_DEFINED
+#define FLOW_LANG_ENUM_DEFINED
+typedef enum {
+    FLOW_LANG_ZH = 0, /* Traditional Chinese (預設 / Default) */
+    FLOW_LANG_EN = 1  /* English */
+} FlowLanguage;
+#endif
+
+/* Introspective Knowledge Node Definition */
 typedef struct {
     const char *module_id;
     const char *title;
@@ -38,69 +48,16 @@ typedef struct {
 } FlowyIntrospectiveAnswer;
 
 /* ========================================================================= */
-/* Real-Time Telemetry & Deterministic Decision Explanation Engine           */
+/* Pure Architectural Inference Brain (Calculation & Topology Traversal)    */
 /* ========================================================================= */
 
-typedef enum {
-    FLOW_DECISION_TRIGGER_NONE = 0,
-    FLOW_DECISION_TRIGGER_TORQUE_ANOMALY = 1,
-    FLOW_DECISION_TRIGGER_ZMP_INSTABILITY = 2,
-    FLOW_DECISION_TRIGGER_MEMORY_PRESSURE = 3,
-    FLOW_DECISION_TRIGGER_CACHE_MISS_SPIKE = 4,
-    FLOW_DECISION_TRIGGER_SMT_COUNTEREXAMPLE = 5,
-    FLOW_DECISION_TRIGGER_THERMAL_SHOCK = 6,
-    FLOW_DECISION_TRIGGER_GOLDEN_FALLBACK = 7,
-    FLOW_DECISION_TRIGGER_STRAGGLER_QUARANTINE = 8
-} FlowDecisionTriggerType;
-
-typedef struct {
-    uint64_t timestamp_ns;
-    FlowDecisionTriggerType trigger_type;
-    char trigger_source[64];       /* e.g., "left_leg_motor", "arena_allocator", "pmu_l3_cache" */
-    double observed_metric_value;  /* e.g., 85.4 N*m */
-    double threshold_limit_value;  /* e.g., 80.0 N*m */
-    char metric_unit[16];          /* e.g., "N*m", "MB", "miss_rate" */
-    char violated_constraint[128]; /* e.g., "Center of Mass (CoM) & Joint Torque Safe Limit" */
-    uint32_t flipped_genome_bit;   /* e.g., 14 */
-    char pre_topology[64];         /* e.g., "AoS_LinearArray" */
-    char post_topology[64];        /* e.g., "SoA_Sharded_LoadBalance" */
-    char causal_rationale[512];    /* Deterministic explanation of WHY the transition occurred */
-    uint64_t hot_swap_grace_ns;    /* e.g., 84 ns under QSBR */
-} FlowDecisionEvent;
-
-#define FLOW_MAX_DECISION_LOGS 64
-
-typedef struct {
-    FlowDecisionEvent events[FLOW_MAX_DECISION_LOGS];
-    size_t head;
-    size_t total_recorded;
-} FlowDecisionLogger;
-
-/* ========================================================================= */
-/* Multi-Lingual Presentation & Render Mask (Data-Template Separation)       */
-/* ========================================================================= */
-
-#ifndef FLOW_LANG_ENUM_DEFINED
-#define FLOW_LANG_ENUM_DEFINED
-typedef enum {
-    FLOW_LANG_ZH = 0, /* Traditional Chinese (預設 / Default) */
-    FLOW_LANG_EN = 1  /* English */
-} FlowLanguage;
-#endif
-
-void flowy_set_language(FlowLanguage lang);
-FlowLanguage flowy_get_language(void);
-FlowLanguage flowy_detect_system_language(void);
-FlowLanguage flowy_parse_language(const char *lang_str);
-const char *flowy_language_name(FlowLanguage lang);
-
-/* Introspective Knowledge Base */
+/* Introspective Knowledge Base Registry */
 size_t flowy_knowledge_count(void);
 const FlowModuleKnowledge *flowy_knowledge_at(size_t index);
 const FlowModuleKnowledge *flowy_knowledge_lookup(const char *module_id);
 int flowy_register_dynamic_module(const FlowModuleKnowledge *knowledge);
 
-/* Deterministic Semantic Query & Topological Reasoner */
+/* Deterministic Semantic Query & Topological Graph Reasoner */
 int flowy_query_codebase(const FlowTopologyGraph *graph,
                          const char *query_text,
                          FlowyIntrospectiveAnswer *answer_out);
@@ -109,61 +66,15 @@ int flowy_query_codebase_lang(const FlowTopologyGraph *graph,
                               FlowLanguage lang,
                               FlowyIntrospectiveAnswer *answer_out);
 
-void flowy_print_answer(const FlowyIntrospectiveAnswer *answer, FILE *out);
-
-/* Living Documentation & The FLOW Book Viewer */
-int flowy_show_book(const char *target, FILE *out);
-int flowy_show_book_lang(const char *target, FlowLanguage lang, FILE *out);
-
-/* Real-Time Decision Causal Explanation */
-void flow_decision_logger_init(FlowDecisionLogger *logger);
-int flow_decision_logger_record(FlowDecisionLogger *logger, const FlowDecisionEvent *event);
-const FlowDecisionEvent *flow_decision_logger_latest(const FlowDecisionLogger *logger);
+/* Real-Time Telemetry & Decision Causal Derivation */
 void flowy_explain_decision(const FlowDecisionEvent *event, char *buf_out, size_t max_len);
 void flowy_explain_decision_lang(const FlowDecisionEvent *event, FlowLanguage lang, char *buf_out, size_t max_len);
-void flowy_print_decision_explanation(const FlowDecisionEvent *event, FILE *out);
-void flowy_print_decision_timeline(const FlowDecisionLogger *logger, FILE *out);
 
-/* Subconscious Neural Telemetry Reasoning (Bottleneck / Hotspot Reasoner) */
+/* Subconscious Neural Telemetry & Hotspot Reasoner */
 int flowy_explain_bottleneck(const FlowTopologyGraph *graph, char *buf_out, size_t max_len);
 int flowy_explain_bottleneck_lang(const FlowTopologyGraph *graph, FlowLanguage lang, char *buf_out, size_t max_len);
-void flowy_print_bottleneck_explanation(const FlowTopologyGraph *graph, FILE *out);
 
-/* Interactive Loop */
-int flowy_interactive_loop(FlowOrchestrator *orch, FILE *in, FILE *out);
+/* Forward CLI formatters & REPL headers */
+#include "flowy_cli.h"
 
-/* Counterfactual "What-If" Simulation Formatter */
-void flowy_print_counterfactual_report(const FlowCounterfactualReport *report, FILE *out);
-
-/* Topological Auto-Remediation Formatter */
-void flowy_print_remediation_proposal(const FlowRemediationProposal *proposal, FILE *out);
-
-/* Closed-Loop Level 5 Autopilot Incident Formatter */
-void flowy_print_autopilot_incident(const FlowAutopilotIncident *incident, FILE *out);
-
-/* ========================================================================= */
-/* Level 5 Autonomy Crucible Contest Engine                                  */
-/* ========================================================================= */
-
-typedef struct {
-    int stage1_smt_rejected;
-    char stage1_rejection_log[512];
-
-    int stage2_jit_vetoed;
-    char stage2_jit_log[512];
-    char stage2_routing_log[512];
-
-    int stage3_hotswap_success;
-    uint64_t stage3_latency_ms;
-    uint64_t dropped_requests;
-    int oom_killer_triggered;
-    double energy_delta;
-    char stage3_narrative_log[1024];
-
-    int stage4_recovery_success;
-    char stage4_recovery_log[512];
-} FlowyCrucibleResult;
-
-int flowy_crucible_run(FlowyCrucibleResult *result_out, FILE *log_stream);
-
-#endif
+#endif /* FLOW_FLOWY_H */

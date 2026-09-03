@@ -46,4 +46,15 @@ int flow_smt_verify_with_budget(const SemanticIR *ir,
 
 const char *flow_smt_result_name(FlowSMTResult res);
 
+/* Pre-emptive SMT Verifier Masks & Boundary Checks (Unified Verification Supreme Court) */
+int verify_candidate(const SemanticIR *ir, const Component *component,
+                     const SearchResult *search, VerificationReport *report);
+const char *verification_status_name(VerificationStatus status);
+uint64_t flow_verifier_get_contract_mask(const SemanticIR *ir,
+                                         const Component *comp,
+                                         const FlowPlanDimensionSet *dims);
+uint64_t flow_verifier_get_resource_mask(const SemanticIR *ir,
+                                         const Component *comp,
+                                         const FlowPlanDimensionSet *dims);
+
 #endif

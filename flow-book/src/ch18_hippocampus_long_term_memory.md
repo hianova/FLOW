@@ -26,7 +26,7 @@
 
 FLOW 在架構上實現了關鍵的認知躍遷：**Canva-to-Vec（畫布向量化）**。
 
-系統不再每次臨場重新尋優，而是將遮罩畫布（Mask Canvas）、約束邊界、硬體 PMU 遙測訊號與拓樸佈局，壓縮成連續的 **16 維高維特徵向量（Embedding Vector，$\mathbf{v} \in \mathbb{R}^{16}$）**，並持久化至本地或分散式海馬迴記憶庫（`.flow_hippocampus.vault`）。
+系統不再每次臨場重新尋優，而是將遮罩畫布（Mask Canvas）、約束邊界、硬體 PMU 遙測訊號與拓樸佈局，壓縮成連續的 **16 維高維特徵向量（Embedding Vector，$\mathbf{v} \in \mathbb{R}^{16}$）**，並持久化至 GitOps 檔案目錄架構庫（`.flow/vecs/*.fvec`）。
 
 當系統再次遭遇類似情境時，直接從海馬迴中在 **38 奈秒** 內檢索出餘弦相似度最高、且已經通過 SMT 形式化最高法院審查的**「純 State（Pure State）」**。1-Bit 混沌引擎只需在此純 State 周圍進行極微幅的局部微調。這就是活體系統的**「肌肉記憶（Muscle Memory）」**。
 

@@ -108,3 +108,36 @@ flowy audit-mechanisms
 ```
 
 透過 Flowy，FLOW 實現了軟體系統的**「自我意識（Self-Awareness）」**——系統永遠知道自己的每一塊記憶體如何分配、每一個決策由誰做出、每一條定理如何被證明。
+
+---
+
+## 10.5 奧坎剃刀與職責分離：大腦、審計設施與表現層
+
+在系統早期演進中，`flowy.c` 曾一度膨脹為包辦「推論、測試治具、UI排版、全域日誌」的上帝物件（God Object）。為貫徹「非必要勿增實體」，FLOW 實施了關鍵架構重構，將職責清晰劃分：
+
+```text
+┌────────────────────────────────────────────────────────────────────────┐
+│                        FLOWY 職責分離純粹架構                          │
+├────────────────────────────────────────────────────────────────────────┤
+│                                                                        │
+│   🧠【純粹智慧大腦】src/flowy.h (80 行) & src/flowy.c                  │
+│      • flowy_query_codebase()     : 走訪拓樸圖與語意關聯檢索            │
+│      • flowy_explain_decision()   : 因果決策歸因運算 (Data In -> Data Out)│
+│      • flowy_explain_bottleneck() : 神經網絡遙測與熱點多面體分析        │
+│      • 零 UI 渲染、零 printf、零測試治具、零全域日誌                   │
+│                                                                        │
+│   🖥️【前端 CLI 與 UI 渲染】src/flowy_cli.h & src/flowy_cli.c          │
+│      • flowy_print_*()            : 決策解釋、熱點報告、反事實模擬排版 │
+│      • flowy_show_book()          : 《The FLOW Book》終端閱讀器        │
+│      • flowy_interactive_loop()   : REPL 互動式 Prompt 迴圈            │
+│      • flowy_set/get_language()   : 多語系偵測與字串模板層             │
+│                                                                        │
+│   📜【全域決策審計設施】src/audit.h & src/audit.c                      │
+│      • FlowDecisionLogger         : 跨模組日誌基礎設施                 │
+│      • flow_decision_logger_*()   : 1-bit 混沌、QSBR 與控制器共享調用  │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+大腦只負責「計算與推論」，表現層負責「終端呈現」，基礎設施負責「全域事件沉澱」——三者各司其職，實現了極致的高內聚與低耦合。
+

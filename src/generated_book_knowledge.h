@@ -29,7 +29,7 @@ typedef struct {
 } FlowModuleBookBinding;
 
 #define FLOW_BOOK_CHAPTER_COUNT 19
-#define FLOW_MODULE_BOOK_BINDING_COUNT 22
+#define FLOW_MODULE_BOOK_BINDING_COUNT 26
 
 static const FlowBookChapterDoc FLOW_BOOK_CHAPTERS_ZH[FLOW_BOOK_CHAPTER_COUNT] = {
     {
@@ -421,6 +421,34 @@ static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_ZH[FLOW_MODULE_BOOK
         .chapter_title = "第十八章：海馬迴長期記憶與 Canva-to-Vec (向量化、餘弦相似度與肌肉記憶的誕生)",
         .philosophy_why = "過去的混沌引擎每次遇到新環境都必須從零開始盲目退火並繳納混沌稅；現在，FLOW 將遮罩畫布壓縮為 16 維潛在特徵向量，讓系統具備開箱即用的肌肉記憶。",
         .book_excerpt = "FLOW 建立前額葉（1-Bit 混沌）、海馬迴（16 維特徵庫）與脊髓神經（QSBR <100ns 熱換）三重架構。38 奈秒餘弦比對瞬間喚醒 SMT 認證之純 State，使 Serverless 具備 AOT 極速，並實現跨機隊 98.5% 算力節約的抗體共享。"
+    },
+    {
+        .module_id = "primitive",
+        .chapter_ref = "ch12_dynamic_plugins_abi.md",
+        .chapter_title = "第十二章：動態外掛與 ABI 契約 (如何撰寫您的第一個 FLOW Plugin，從宣告到發射 LLVM IR)",
+        .philosophy_why = "一個偉大的活體系統必須具備無限擴展的生態。FLOW 定義了極簡的 Standardized Plugin ABI v2，將策略與機制徹底分離，讓任何 C/Rust 模組都能在 4 個函數內無縫融入活體超立方體。",
+        .book_excerpt = "Plugin ABI v2 包含能力枚舉、成本模型評估、SMT 契約驗證與 IR 發射 4 個核心進入點。FLOW 核心提供退火搜尋機制，外掛只需定義自身領域策略。"
+    },
+    {
+        .module_id = "flowy_fvec",
+        .chapter_ref = "ch18_hippocampus_long_term_memory.md",
+        .chapter_title = "第十八章：海馬迴長期記憶與 Canva-to-Vec (向量化、餘弦相似度與肌肉記憶的誕生)",
+        .philosophy_why = "過去的混沌引擎每次遇到新環境都必須從零開始盲目退火並繳納混沌稅；現在，FLOW 將遮罩畫布壓縮為 16 維潛在特徵向量，讓系統具備開箱即用的肌肉記憶。",
+        .book_excerpt = "FLOW 建立前額葉（1-Bit 混沌）、海馬迴（16 維特徵庫）與脊髓神經（QSBR <100ns 熱換）三重架構。38 奈秒餘弦比對瞬間喚醒 SMT 認證之純 State，使 Serverless 具備 AOT 極速，並實現跨機隊 98.5% 算力節約的抗體共享。"
+    },
+    {
+        .module_id = "audit",
+        .chapter_ref = "ch10_meet_flowy.md",
+        .chapter_title = "第十章：認識 Flowy (拋棄 Chatbot，擁抱決定論式的 Codebase Reasoner)",
+        .philosophy_why = "我們不需要一個會胡言亂語的機率型 Chatbot 來解釋系統架構。FLOW 打造了 Flowy——一個內建於二進位中、100% 決定論、零幻覺的代碼庫因果推論器。",
+        .book_excerpt = "Flowy 直接構建於 FlowTopologyGraph 與因果決策日誌之上。每次詢問均以純圖論遍歷與 SMT 不變量為依據，輸出具備完整形式化證明的代碼庫審計報告。"
+    },
+    {
+        .module_id = "flowy_cli",
+        .chapter_ref = "ch10_meet_flowy.md",
+        .chapter_title = "第十章：認識 Flowy (拋棄 Chatbot，擁抱決定論式的 Codebase Reasoner)",
+        .philosophy_why = "我們不需要一個會胡言亂語的機率型 Chatbot 來解釋系統架構。FLOW 打造了 Flowy——一個內建於二進位中、100% 決定論、零幻覺的代碼庫因果推論器。",
+        .book_excerpt = "Flowy 直接構建於 FlowTopologyGraph 與因果決策日誌之上。每次詢問均以純圖論遍歷與 SMT 不變量為依據，輸出具備完整形式化證明的代碼庫審計報告。"
     }
 };
 
@@ -578,6 +606,34 @@ static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_EN[FLOW_MODULE_BOOK
         .chapter_title = "Chapter 18: Hippocampus Long-Term Memory & Canva-to-Vec (Vectorization, Cosine Similarity & Muscle Memory)",
         .philosophy_why = "The 1-bit chaos engine once paid heavy chaos taxes solving cold starts from scratch; FLOW compresses canvases into 16-D embedding vectors, granting instant muscle memory.",
         .book_excerpt = "FLOW establishes a 3-tier cognitive model: prefrontal chaos, hippocampus 16-D vault, and spinal reflex. 38ns cosine matching retrieves SMT-certified pure states, slashing Serverless cold starts by 89.4% and sharing fleet-wide antibodies."
+    },
+    {
+        .module_id = "primitive",
+        .chapter_ref = "ch12_dynamic_plugins_abi.md",
+        .chapter_title = "Chapter 12: Dynamic Plugins & ABI Contracts (Writing Your First FLOW Plugin & Emitting IR)",
+        .philosophy_why = "A great living system must possess boundless extensibility. FLOW ABI v2 decouples Mechanism from Policy, enabling any C/Rust module to integrate seamlessly via 4 pure functions.",
+        .book_excerpt = "Plugin ABI v2 features 4 core function hooks: dimension enumeration, cost modeling, SMT contract verification, and IR emission, keeping domain policies cleanly decoupled from core mechanics."
+    },
+    {
+        .module_id = "flowy_fvec",
+        .chapter_ref = "ch18_hippocampus_long_term_memory.md",
+        .chapter_title = "Chapter 18: Hippocampus Long-Term Memory & Canva-to-Vec (Vectorization, Cosine Similarity & Muscle Memory)",
+        .philosophy_why = "The 1-bit chaos engine once paid heavy chaos taxes solving cold starts from scratch; FLOW compresses canvases into 16-D embedding vectors, granting instant muscle memory.",
+        .book_excerpt = "FLOW establishes a 3-tier cognitive model: prefrontal chaos, hippocampus 16-D vault, and spinal reflex. 38ns cosine matching retrieves SMT-certified pure states, slashing Serverless cold starts by 89.4% and sharing fleet-wide antibodies."
+    },
+    {
+        .module_id = "audit",
+        .chapter_ref = "ch10_meet_flowy.md",
+        .chapter_title = "Chapter 10: Meet Flowy (Ditching Probabilistic Chatbots for Deterministic Codebase Reasoners)",
+        .philosophy_why = "We do not need a hallucinating probabilistic chatbot to explain system architecture. FLOW built Flowy: a 100% deterministic, zero-hallucination causal codebase reasoner in pure C.",
+        .book_excerpt = "Flowy operates directly on the FlowTopologyGraph and deterministic causal decision logs, producing formal architectural audit reports without relying on external cloud APIs."
+    },
+    {
+        .module_id = "flowy_cli",
+        .chapter_ref = "ch10_meet_flowy.md",
+        .chapter_title = "Chapter 10: Meet Flowy (Ditching Probabilistic Chatbots for Deterministic Codebase Reasoners)",
+        .philosophy_why = "We do not need a hallucinating probabilistic chatbot to explain system architecture. FLOW built Flowy: a 100% deterministic, zero-hallucination causal codebase reasoner in pure C.",
+        .book_excerpt = "Flowy operates directly on the FlowTopologyGraph and deterministic causal decision logs, producing formal architectural audit reports without relying on external cloud APIs."
     }
 };
 

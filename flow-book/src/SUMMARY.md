@@ -24,7 +24,7 @@
 - [11. 語意推論與沙盤推演 (如何讓 Flowy 模擬與解釋架構變化)](ch11_semantic_reasoning_sandbox.md)
 
 # 第五部：進階擴展 (Advanced Ecosystem)
-- [12. 動態外掛與 ABI 契約 (如何撰寫您的第一個 FLOW Plugin，從宣告到發射 LLVM IR)](ch12_dynamic_plugins_abi.md)
+- [12. 硬體原語驅動 (Hardware Primitive Drivers) (大腦的感官手腳：奧坎剃刀下的 3-Function 極簡驅動)](ch12_dynamic_plugins_abi.md)
 - [13. 跨越上位效應壁壘 (Epistasis、萊維飛行與動態機率偏移)](ch13_overcoming_epistasis.md)
 - [14. 群體智能 (Swarm) (9-Byte UDP 拓樸費洛蒙與分散式尋優)](ch14_swarm_intelligence.md)
 - [15. 具身智能與物理閘門 (Embodied) (相延遲、史密斯預測器與 Sim-to-Real 降級)](ch15_embodied_physical_gates.md)

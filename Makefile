@@ -20,9 +20,9 @@ PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 INCLUDEDIR ?= $(PREFIX)/include/flow
 
-PLUGINS_SO := $(BUILD_DIR)/libflow_embodied.so $(BUILD_DIR)/libflow_smt.so $(BUILD_DIR)/libflow_security.so $(BUILD_DIR)/libflow_swarm.so $(BUILD_DIR)/libflow_genetic.so
+PLUGINS_SO := $(BUILD_DIR)/libflow_embodied.so $(BUILD_DIR)/libflow_smt.so $(BUILD_DIR)/libflow_security.so $(BUILD_DIR)/libflow_swarm.so
 
-.PHONY: all clean test demos demo benchmark security-test reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test plugin-test reload-stress-test reload-stress-nightly autopoiesis-check acceptance install uninstall fuzz-test fuzz ensemble-test smt-test mlir-llvm-test topology-test ebpf-pmu-test jit-migration-test bootstrap-sandbox-test quantum-dimension-test two-tier-chaos-test zero-tlb-shootdown-test epigenetic-mask-test dynamic-mask-superposition-test mtd-defense-test swarm-federation-test genetic-programming-test dynamic-env-morph-test qsbr-unified-test bitset-genome-test async-jit-worker-test orchestrator-test enterprise-production-test embodied-physics-test flowy-test mechanism-audit-test audit-mechanisms decision-explain-test hardened-production-test decoupling-test plugins flowy libflow polytope-projection-test plugin-abi-v2-test autonomous-orchestration-test flowy-level5-crucible level5-contest sync-book flowy-i18n-test vault-test serverless-coldstart-test fleet-immune-test semantic-rag-test tidal-morph-test cross-hardware-transfer-test predictive-jit-test generative-architecture-test fvec-format-test fvec-curator-test fvec-flowc-apply-test immune-promotion-test
+.PHONY: all clean test demos demo benchmark security-test reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test plugin-test reload-stress-test reload-stress-nightly autopoiesis-check acceptance install uninstall fuzz-test fuzz ensemble-test smt-test mlir-llvm-test topology-test ebpf-pmu-test jit-migration-test bootstrap-sandbox-test quantum-dimension-test two-tier-chaos-test zero-tlb-shootdown-test epigenetic-mask-test dynamic-mask-superposition-test mtd-defense-test swarm-federation-test genetic-programming-test dynamic-env-morph-test qsbr-unified-test bitset-genome-test async-jit-worker-test orchestrator-test enterprise-production-test embodied-physics-test flowy-test mechanism-audit-test audit-mechanisms decision-explain-test hardened-production-test decoupling-test plugins flowy libflow polytope-projection-test plugin-abi-v2-test autonomous-orchestration-test flowy-level5-crucible level5-contest sync-book flowy-i18n-test vault-test serverless-coldstart-test fleet-immune-test semantic-rag-test tidal-morph-test cross-hardware-transfer-test predictive-jit-test generative-architecture-test fvec-format-test fvec-curator-test fvec-flowc-apply-test immune-promotion-test primitive-driver-test fvec-hub-test snapshot-replay-test
 
 all: src/generated_book_knowledge.h $(LIBFLOW_A) $(FLOWC) $(FLOWY) plugins
 
@@ -79,9 +79,6 @@ $(BUILD_DIR)/libflow_security.so: src/security.c | $(BUILD_DIR)
 
 $(BUILD_DIR)/libflow_swarm.so: src/swarm.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -shared -fPIC -DFLOW_PLUGIN_DSO -undefined dynamic_lookup $(THREAD_FLAGS) -Isrc src/swarm.c -o $@ $(LDLIBS)
-
-$(BUILD_DIR)/libflow_genetic.so: src/genetic.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -shared -fPIC -DFLOW_PLUGIN_DSO -undefined dynamic_lookup $(THREAD_FLAGS) -Isrc src/genetic.c -o $@ $(LDLIBS)
 
 demo: $(FLOWC)
 	$(FLOWC) examples/rank.flow -o generated/rank.c
@@ -344,12 +341,24 @@ immune-promotion-test: $(LIBFLOW_A) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/immune-promotion-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/immune-promotion-test $(LDLIBS)
 	$(BUILD_DIR)/immune-promotion-test
 
+primitive-driver-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/primitive-driver-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/primitive-driver-test $(LDLIBS)
+	$(BUILD_DIR)/primitive-driver-test
+
+fvec-hub-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/fvec-hub-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/fvec-hub-test $(LDLIBS)
+	$(BUILD_DIR)/fvec-hub-test
+
+snapshot-replay-test: $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/snapshot-replay-test.c $(LIBFLOW_A) -o $(BUILD_DIR)/snapshot-replay-test $(LDLIBS)
+	$(BUILD_DIR)/snapshot-replay-test
+
 fvec-flowc-apply-test: $(FLOWC) $(FLOWY) | $(BUILD_DIR)
 	$(FLOWY) fvec seed .flow/vecs
 	$(FLOWC) examples/bounded_queue.flow -o generated/fvec-applied.c --apply-fvec .flow/vecs/hft_ultra_low_latency.fvec
 	grep -q 'flow: bounded_queue' generated/fvec-applied.c
 
-test: $(FLOWC) $(FLOWY) plugins reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test bitspace-test plugin-test project-test abi-test vertical-slice-test reload-stress-test fuzz-test ensemble-test smt-test mlir-llvm-test topology-test ebpf-pmu-test jit-migration-test bootstrap-sandbox-test quantum-dimension-test two-tier-chaos-test zero-tlb-shootdown-test epigenetic-mask-test dynamic-mask-superposition-test mtd-defense-test swarm-federation-test genetic-programming-test dynamic-env-morph-test qsbr-unified-test bitset-genome-test async-jit-worker-test orchestrator-test enterprise-production-test embodied-physics-test flowy-test mechanism-audit-test decision-explain-test hardened-production-test decoupling-test polytope-projection-test plugin-abi-v2-test autonomous-orchestration-test flowy-level5-crucible flowy-i18n-test vault-test serverless-coldstart-test fleet-immune-test semantic-rag-test tidal-morph-test cross-hardware-transfer-test predictive-jit-test generative-architecture-test fvec-format-test fvec-curator-test fvec-flowc-apply-test immune-promotion-test
+test: $(FLOWC) $(FLOWY) plugins reload-test live-reload-test backend-reload-test generated-reload-test adaptive-test bitspace-test plugin-test project-test abi-test vertical-slice-test reload-stress-test fuzz-test ensemble-test smt-test mlir-llvm-test topology-test ebpf-pmu-test jit-migration-test bootstrap-sandbox-test quantum-dimension-test two-tier-chaos-test zero-tlb-shootdown-test epigenetic-mask-test dynamic-mask-superposition-test mtd-defense-test swarm-federation-test genetic-programming-test dynamic-env-morph-test qsbr-unified-test bitset-genome-test async-jit-worker-test orchestrator-test enterprise-production-test embodied-physics-test flowy-test mechanism-audit-test decision-explain-test hardened-production-test decoupling-test polytope-projection-test plugin-abi-v2-test autonomous-orchestration-test flowy-level5-crucible flowy-i18n-test vault-test serverless-coldstart-test fleet-immune-test semantic-rag-test tidal-morph-test cross-hardware-transfer-test predictive-jit-test generative-architecture-test fvec-format-test fvec-curator-test fvec-flowc-apply-test immune-promotion-test primitive-driver-test fvec-hub-test snapshot-replay-test
 	! grep -E -q 'heavy-tail|flip_bit_block|Black Swan' src/search.c README.md ACCEPTANCE.md
 	grep -E -q 'one chaotic 1-bit mutation' src/search.c
 	$(FLOWC) examples/rank.flow -o generated/rank.c
