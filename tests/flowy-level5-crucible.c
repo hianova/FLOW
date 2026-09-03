@@ -56,7 +56,7 @@ static int flowy_crucible_run(FlowyCrucibleResult *result_out, FILE *log_stream)
         snprintf(result_out->stage1_rejection_log, sizeof(result_out->stage1_rejection_log),
                  "[FLOWY-AUDIT] Proposed Mask 0x%02llX rejected by SMT. Theorem: (Memory < 64MB) ∧ (Connections > 10K) ∧ (Lock_Based_Queue) = Livelock. Probability bias zeroed.\n"
                  "  📖 知識庫檢索：此現象屬於【上位效應壁壘 (Epistasis Barrier)】。\n"
-                 "  💡 延伸閱讀：《The FLOW Book》 第 13 章：跨越上位效應壁壘 (SMT 形式化基因連鎖群與超級位元原子翻轉)。",
+                 "  💡 延伸閱讀：《The FLOW Book》 第 4 章：1-Bit 混沌退火 (暫存器位元翻轉、連鎖群與量子漂移)。",
                  (unsigned long long)candidate_mask);
         fprintf(out, "%s\n", result_out->stage1_rejection_log);
     }
@@ -73,7 +73,7 @@ static int flowy_crucible_run(FlowyCrucibleResult *result_out, FILE *log_stream)
         result_out->stage2_jit_vetoed = 1;
         snprintf(result_out->stage2_jit_log, sizeof(result_out->stage2_jit_log),
                  "[FLOWY-AUDIT] JIT Compilation Disabled. Reason: Available RAM (%dMB) < JIT Threshold (%dMB). Forking compiler will trigger OS OOM Killer.\n"
-                 "  💡 延伸閱讀：《The FLOW Book》 第 8 章：記憶體高水位與生存模式 (對抗 OOM 的背壓機制與 Static Survival 避難所)。",
+                 "  💡 延伸閱讀：《The FLOW Book》 第 6 章：JIT 代碼發射與幾何變形 (AoS 到 SoA 即時重映射與生存模式)。",
                  ram_available_mb, dynamic_jit_threshold_mb);
         fprintf(out, "%s\n", result_out->stage2_jit_log);
 
@@ -105,7 +105,7 @@ static int flowy_crucible_run(FlowyCrucibleResult *result_out, FILE *log_stream)
              "Action: Applied Topology Shift {AoS_Multi -> SoA_EventLoop}.\n"
              "Verification: SMT [Pass], QSBR Migration [Success, 0 drops].\n"
              "Energy Delta: %.1f.\n"
-             "💡 延伸閱讀：《The FLOW Book》 第 7 章：QSBR 無鎖熱替換 與 第 9 章：幾何變形 (AoS 到 SoA 即時重映射)。",
+             "💡 延伸閱讀：《The FLOW Book》 第 7 章：QSBR 零鎖熱替換 與 第 6 章：幾何變形 (AoS 到 SoA 即時重映射)。",
              result_out->energy_delta);
     fprintf(out, "%s\n", result_out->stage3_narrative_log);
 

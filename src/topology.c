@@ -41,26 +41,27 @@ void flow_topology_build_codebase_graph(FlowTopologyGraph *graph) {
     if (graph == NULL) return;
     flow_topology_init(graph);
 
-    /* Layer 0: Core Modules */
-    uint32_t n_parser   = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "parser", "core", 1, 0);
-    uint32_t n_semantic = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "semantic", "core", 1, 0);
-    uint32_t n_bitspace = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "bitspace", "core", 1, 0);
-    uint32_t n_search   = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "search", "core", 1, 0);
-    uint32_t n_verifier = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "verifier", "core", 1, 0);
-    uint32_t n_security = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "security", "core", 1, 0);
-    uint32_t n_adaptive = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "adaptive", "core", 1, 0);
-    uint32_t n_reload   = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "reload", "core", 1, 0);
-    uint32_t n_jit      = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "jit", "core", 1, 0);
-    uint32_t n_smt      = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "smt", "core", 1, 0);
-    uint32_t n_backend  = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "backend", "core", 1, 0);
+    /* Layer 0: Core Modules (Pure Brain & Core Engines) */
+    uint32_t n_parser       = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "parser", "core", 1, 0);
+    uint32_t n_bitspace     = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "bitspace", "core", 1, 0);
+    uint32_t n_search       = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "search", "core", 1, 0);
+    uint32_t n_security     = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "security", "core", 1, 0);
+    uint32_t n_adaptive     = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "adaptive", "core", 1, 0);
+    uint32_t n_reload       = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "reload", "core", 1, 0);
+    uint32_t n_jit          = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "jit", "core", 1, 0);
+    uint32_t n_smt          = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "smt", "core", 1, 0);
+    uint32_t n_backend      = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "backend", "core", 1, 0);
     uint32_t n_swarm        = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "swarm", "core", 1, 0);
-    uint32_t n_genetic      = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "genetic", "core", 1, 0);
     uint32_t n_orchestrator = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "orchestrator", "core", 1, 0);
     uint32_t n_embodied     = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "embodied", "core", 1, 0);
+    uint32_t n_audit        = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "audit", "core", 1, 0);
+    uint32_t n_flowy_fvec   = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "flowy_fvec", "core", 1, 0);
 
-    /* Layer 1: ABI & Registry Interface Boundary */
-    uint32_t n_registry = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "registry", "interface", 1, 1);
-    uint32_t n_abi      = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "abi", "interface", 1, 1);
+    /* Layer 1: ABI, Registry & Presentation Interface Boundary */
+    uint32_t n_registry     = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "registry", "interface", 1, 1);
+    uint32_t n_abi          = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "abi", "interface", 1, 1);
+    uint32_t n_primitive    = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "primitive", "interface", 1, 1);
+    uint32_t n_flowy_cli    = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "flowy_cli", "interface", 1, 1);
 
     /* Layer 2: Domain Plugins & Components */
     uint32_t n_plugin_builtin = flow_topology_add_node(graph, FLOW_NODE_PLUGIN, "builtin_plugin", "plugin", 0, 2);
@@ -69,31 +70,43 @@ void flow_topology_build_codebase_graph(FlowTopologyGraph *graph) {
     uint32_t n_comp_tree      = flow_topology_add_node(graph, FLOW_NODE_COMPONENT, "ordered_tree", "plugin", 0, 2);
     uint32_t n_comp_pmap      = flow_topology_add_node(graph, FLOW_NODE_COMPONENT, "parallel_map", "plugin", 0, 2);
 
+    /* Layer 4: Doc-as-Topology Knowledge Nodes (11 Canonical Chapters) */
+    uint32_t n_doc_ch01 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch01_what_is_flow", "book", 0, 4);
+    uint32_t n_doc_ch02 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch02_intent_vs_implementation", "book", 0, 4);
+    uint32_t n_doc_ch03 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch03_topology_graph", "book", 0, 4);
+    uint32_t n_doc_ch04 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch04_1bit_chaos_engine", "book", 0, 4);
+    uint32_t n_doc_ch05 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch05_smt_formal_verification", "book", 0, 4);
+    uint32_t n_doc_ch06 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch06_jit_and_geometric_morphing", "book", 0, 4);
+    uint32_t n_doc_ch07 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch07_qsbr_lockfree_hotswap", "book", 0, 4);
+    uint32_t n_doc_ch08 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch08_hardware_primitive_drivers", "book", 0, 4);
+    uint32_t n_doc_ch09 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch09_fvec_universal_lockfile", "book", 0, 4);
+    uint32_t n_doc_ch10 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch10_deterministic_flowy_reasoner", "book", 0, 4);
+    uint32_t n_doc_ch11 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch11_level5_crucible_and_benchmarks", "book", 0, 4);
+
     /* Internal Core Dependencies (Layer 0 -> Layer 0) */
-    flow_topology_add_edge(graph, n_parser, n_semantic, FLOW_EDGE_DATA_FLOW, 1.0, "lower_to_ir");
-    flow_topology_add_edge(graph, n_semantic, n_verifier, FLOW_EDGE_CALLS, 1.0, "verify_spec");
-    flow_topology_add_edge(graph, n_semantic, n_security, FLOW_EDGE_CALLS, 1.0, "security_attestation");
-    flow_topology_add_edge(graph, n_semantic, n_bitspace, FLOW_EDGE_CALLS, 1.0, "init_bitspace");
+    flow_topology_add_edge(graph, n_parser, n_smt, FLOW_EDGE_CALLS, 1.0, "lower_to_ir_verify");
     flow_topology_add_edge(graph, n_bitspace, n_security, FLOW_EDGE_CALLS, 1.0, "safety_mask_compose");
-    flow_topology_add_edge(graph, n_bitspace, n_verifier, FLOW_EDGE_CALLS, 1.0, "contract_resource_mask");
+    flow_topology_add_edge(graph, n_bitspace, n_smt, FLOW_EDGE_CALLS, 1.0, "polytope_pruning_mask");
     flow_topology_add_edge(graph, n_bitspace, n_adaptive, FLOW_EDGE_CALLS, 1.0, "telemetry_bias");
     flow_topology_add_edge(graph, n_bitspace, n_search, FLOW_EDGE_USES, 1.0, "search_dimensions");
-    flow_topology_add_edge(graph, n_search, n_verifier, FLOW_EDGE_CALLS, 1.0, "hard_gate_check");
+    flow_topology_add_edge(graph, n_search, n_smt, FLOW_EDGE_CALLS, 1.0, "formal_soundness_proof");
     flow_topology_add_edge(graph, n_swarm, n_bitspace, FLOW_EDGE_USES, 1.0, "particle_entanglement");
-    flow_topology_add_edge(graph, n_genetic, n_semantic, FLOW_EDGE_CALLS, 1.0, "ast_synthesis");
     flow_topology_add_edge(graph, n_adaptive, n_reload, FLOW_EDGE_CALLS, 1.0, "live_migration");
     flow_topology_add_edge(graph, n_adaptive, n_jit, FLOW_EDGE_CALLS, 1.0, "rejit_migration");
-    flow_topology_add_edge(graph, n_semantic, n_smt, FLOW_EDGE_CALLS, 1.0, "generate_proof");
-    flow_topology_add_edge(graph, n_backend, n_abi, FLOW_EDGE_USES, 1.0, "emit_abi_adapters");
     flow_topology_add_edge(graph, n_orchestrator, n_bitspace, FLOW_EDGE_CALLS, 1.0, "synthesize_topology");
     flow_topology_add_edge(graph, n_orchestrator, n_search, FLOW_EDGE_CALLS, 1.0, "global_anneal");
     flow_topology_add_edge(graph, n_orchestrator, n_smt, FLOW_EDGE_CALLS, 1.0, "invariant_attestation");
     flow_topology_add_edge(graph, n_embodied, n_bitspace, FLOW_EDGE_CALLS, 1.0, "physics_safety_mask");
     flow_topology_add_edge(graph, n_embodied, n_security, FLOW_EDGE_CALLS, 1.0, "sim_to_real_gate");
+    flow_topology_add_edge(graph, n_audit, n_reload, FLOW_EDGE_CALLS, 1.0, "audit_qsbr_events");
+    flow_topology_add_edge(graph, n_flowy_fvec, n_smt, FLOW_EDGE_CALLS, 1.0, "affinity_gate_verification");
 
     /* Boundary Firewalls (Layer 0 -> Layer 1) */
+    flow_topology_add_edge(graph, n_backend, n_abi, FLOW_EDGE_USES, 1.0, "emit_abi_adapters");
     flow_topology_add_edge(graph, n_search, n_registry, FLOW_EDGE_CALLS, 1.0, "lookup_components");
     flow_topology_add_edge(graph, n_backend, n_registry, FLOW_EDGE_CALLS, 1.0, "query_emitters");
+    flow_topology_add_edge(graph, n_primitive, n_registry, FLOW_EDGE_CALLS, 1.0, "register_primitive");
+    flow_topology_add_edge(graph, n_flowy_cli, n_audit, FLOW_EDGE_CALLS, 1.0, "render_telemetry_reports");
 
     /* Plugin Implementation Bindings (Layer 2 -> Layer 1) */
     flow_topology_add_edge(graph, n_plugin_builtin, n_registry, FLOW_EDGE_IMPLEMENTS, 1.0, "FlowPluginDescriptor");
@@ -102,45 +115,23 @@ void flow_topology_build_codebase_graph(FlowTopologyGraph *graph) {
     flow_topology_add_edge(graph, n_comp_tree, n_plugin_builtin, FLOW_EDGE_USES, 1.0, "declares_tree");
     flow_topology_add_edge(graph, n_comp_pmap, n_plugin_builtin, FLOW_EDGE_USES, 1.0, "declares_pmap");
 
-    /* Layer 4: Doc-as-Topology Knowledge Nodes & Philosophy Bindings */
-    uint32_t n_doc_ch01 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch01_what_is_flow", "book", 0, 4);
-    uint32_t n_doc_ch02 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch02_intent_vs_implementation", "book", 0, 4);
-    uint32_t n_doc_ch03 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch03_hello_chaos", "book", 0, 4);
-    uint32_t n_doc_ch04 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch04_topology_graph", "book", 0, 4);
-    uint32_t n_doc_ch05 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch05_1bit_chaos_engine", "book", 0, 4);
-    uint32_t n_doc_ch06 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch06_smt_formal_verification", "book", 0, 4);
-    uint32_t n_doc_ch07 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch07_qsbr_lockfree_hotswap", "book", 0, 4);
-    uint32_t n_doc_ch08 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch08_memory_high_watermark_survival", "book", 0, 4);
-    uint32_t n_doc_ch09 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch09_geometric_morphing_aos_soa", "book", 0, 4);
-    uint32_t n_doc_ch10 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch10_meet_flowy", "book", 0, 4);
-    uint32_t n_doc_ch11 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch11_semantic_reasoning_sandbox", "book", 0, 4);
-    uint32_t n_doc_ch12 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch12_dynamic_plugins_abi", "book", 0, 4);
-    uint32_t n_doc_ch13 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch13_overcoming_epistasis", "book", 0, 4);
-    uint32_t n_doc_ch14 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch14_swarm_intelligence", "book", 0, 4);
-    uint32_t n_doc_ch15 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch15_embodied_physical_gates", "book", 0, 4);
-    uint32_t n_doc_ch16 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch16_level5_crucible_test", "book", 0, 4);
-    uint32_t n_doc_ch17 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch17_performance_benchmarks", "book", 0, 4);
-
     /* Bi-directional Knowledge Edges (Code -> Book Chapter: "Why") */
+    flow_topology_add_edge(graph, n_backend, n_doc_ch01, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
     flow_topology_add_edge(graph, n_parser, n_doc_ch02, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
-    flow_topology_add_edge(graph, n_semantic, n_doc_ch02, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
-    flow_topology_add_edge(graph, n_backend, n_doc_ch03, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
-    flow_topology_add_edge(graph, n_bitspace, n_doc_ch05, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
-    flow_topology_add_edge(graph, n_search, n_doc_ch05, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
-    flow_topology_add_edge(graph, n_smt, n_doc_ch06, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
-    flow_topology_add_edge(graph, n_verifier, n_doc_ch06, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_bitspace, n_doc_ch04, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_search, n_doc_ch04, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_swarm, n_doc_ch04, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_smt, n_doc_ch05, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_jit, n_doc_ch06, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_adaptive, n_doc_ch06, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
     flow_topology_add_edge(graph, n_reload, n_doc_ch07, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
-    flow_topology_add_edge(graph, n_jit, n_doc_ch08, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
-    flow_topology_add_edge(graph, n_adaptive, n_doc_ch09, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
-    flow_topology_add_edge(graph, n_orchestrator, n_doc_ch11, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
-    flow_topology_add_edge(graph, n_registry, n_doc_ch12, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
-    flow_topology_add_edge(graph, n_abi, n_doc_ch12, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
-    flow_topology_add_edge(graph, n_security, n_doc_ch12, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
-    flow_topology_add_edge(graph, n_genetic, n_doc_ch13, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
-    flow_topology_add_edge(graph, n_swarm, n_doc_ch14, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
-    flow_topology_add_edge(graph, n_embodied, n_doc_ch15, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
-    flow_topology_add_edge(graph, n_comp_sharded, n_doc_ch16, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
-    (void)n_doc_ch01; (void)n_doc_ch04; (void)n_doc_ch10; (void)n_doc_ch17;
+    flow_topology_add_edge(graph, n_primitive, n_doc_ch08, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_embodied, n_doc_ch08, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_flowy_fvec, n_doc_ch09, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_audit, n_doc_ch10, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_orchestrator, n_doc_ch10, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_comp_sharded, n_doc_ch11, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    (void)n_doc_ch03;
 }
 
 void flow_topology_build_intent_graph(FlowTopologyGraph *graph, const SemanticIR *ir,

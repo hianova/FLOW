@@ -117,16 +117,16 @@ static const FlowModuleKnowledge CODEBASE_KNOWLEDGE[] = {
         .keywords = "swarm particle federation pheromone saddle point quantum tunneling 粒子群 聯邦 費洛蒙 鞍點 群體智能"
     },
     {
-        .module_id = "genetic",
-        .title = "AST Micro-Opcode Genetic Programming",
-        .header_file = "src/genetic.h",
-        .source_file = "src/genetic.c",
-        .layer = 0,
-        .responsibilities = "Synthesizes low-level micro-opcodes (ALU, bitwise, memory) directly from 1-bit chaotic mutations for pure arithmetic algorithms.",
-        .algorithmic_guarantee = "100% sound AST correctness with formal SMT verifier in the evolutionary fitness loop.",
-        .memory_concurrency_model = "Bounded register-machine bytecode interpreter and C AST emitter.",
-        .key_apis = "flow_genetic_evolve_bytecode, flow_genetic_emit_c",
-        .keywords = "genetic programming ast micro-opcode evolution synthesis bytecode epistasis levy 基因 演化 字節碼 語法樹 上位效應 萊維飛行"
+        .module_id = "primitive",
+        .title = "Hardware Primitive Drivers & Minimalist ABI",
+        .header_file = "src/primitive.h",
+        .source_file = "src/primitive.c",
+        .layer = 1,
+        .responsibilities = "Provides minimalist 3-function hardware primitive driver hooks (register_primitive, get_hardware_bounds, execute_primitive) interfacing to io_uring, RDMA, and eBPF Maps.",
+        .algorithmic_guarantee = "Zero-overhead direct hardware and syscall dispatch; strict physical boundaries verified by SMT.",
+        .memory_concurrency_model = "Pure hardware-boundary abstraction with zero compiler callback bloat.",
+        .key_apis = "flow_primitive_register, flow_primitive_get_bounds, flow_primitive_execute",
+        .keywords = "primitive driver io_uring rdma ebpf hardware bounds abi 原語 驅動 硬體 邊界"
     },
     {
         .module_id = "registry",
@@ -165,40 +165,40 @@ static const FlowModuleKnowledge CODEBASE_KNOWLEDGE[] = {
         .keywords = "topology graph architecture modularity leaks firewalls layers 拓樸 圖譜 架構 模組化 防火牆"
     },
     {
-        .module_id = "verifier",
-        .title = "Semantic & Hardware Contract Verifier",
-        .header_file = "src/verifier.h",
-        .source_file = "src/verifier.c",
+        .module_id = "audit",
+        .title = "Global Decision Audit Logger & Telemetry Infrastructure",
+        .header_file = "src/audit.h",
+        .source_file = "src/audit.c",
         .layer = 0,
-        .responsibilities = "Verifies input capacity bounds, memory constraints, and resource requirements against selected component capabilities.",
-        .algorithmic_guarantee = "Static proofs (VERIFIER_PROVEN) or synthesis of minimal runtime safety guards (VERIFIER_RUNTIME_CHECK).",
-        .memory_concurrency_model = "Pure analytical verification on SemanticIR and FlowPlanAssignment.",
-        .key_apis = "verify_plan, verify_component_spec",
-        .keywords = "verifier verify capacity memory safety contract guards 驗證 靜態證明 邊界 安全"
+        .responsibilities = "Global ring-buffer decision audit logger recording timestamps, triggers, metrics, flipped genome bits, and QSBR grace periods across chaos, QSBR, and autopilot subsystems.",
+        .algorithmic_guarantee = "Zero allocation on logging fast path; thread-safe circular event retention.",
+        .memory_concurrency_model = "Circular buffer of 64 FlowDecisionEvent records with atomic monotonic head counter.",
+        .key_apis = "flow_decision_logger_init, flow_decision_logger_record, flow_decision_logger_latest",
+        .keywords = "audit logger decision timeline causal telemetry event 審計 日誌 決策 時間線 因果 遙測"
     },
     {
-        .module_id = "vault",
-        .title = "Hippocampus Long-Term Memory & Canva-to-Vec Vault",
-        .header_file = "src/vault.h",
-        .source_file = "src/vault.c",
-        .layer = 2,
-        .responsibilities = "Maintains 16-D continuous embedding memory vault, performs 38ns cosine similarity matching, manages antibody gossip, and executes tidal morphing, cross-hardware transfer, and generative synthesis.",
-        .algorithmic_guarantee = "L2 normalized 16-D cosine similarity, 0ms calibration penalty, 100% SMT zero-defect theorem preservation.",
-        .memory_concurrency_model = "Fixed-capacity unit-vector table with atomic thread-safe lookups.",
-        .key_apis = "flow_vault_init, flow_vault_query_nearest, flow_vault_tidal_morph, flow_vault_import_dna, flow_vault_proactive_prewarm, flow_vault_generative_synthesis",
-        .keywords = "vault hippocampus memory embedding vector rag antibody tidal transfer predict generative 海馬迴 長期記憶 向量 肌肉記憶 抗體"
-    },
-    {
-        .module_id = "fvec",
-        .title = "Standard Flow Vector (.fvec) Format & Living Architecture Curator",
+        .module_id = "flowy_fvec",
+        .title = "Universal .fvec Architecture Repository & Vector Manifold",
         .header_file = "src/flowy_fvec.h",
         .source_file = "src/flowy_fvec.c",
         .layer = 2,
-        .responsibilities = "Standardized dual-layer architecture feature format (1024-byte ASCII metadata header + CRC32 binary payload), directory-wide living museum scanning, inverted intent indexing, and topology graph fusion.",
-        .algorithmic_guarantee = "Exact 1024-byte header alignment, CRC32 payload corruption rejection, and 100% SMT-certified zero-cold-start JIT bypass.",
+        .responsibilities = "Dual-layer .fvec format (1024-byte ASCII header + CRC32 binary payload), 16-D cosine similarity retrieval, 1ms hardware affinity gate, tidal morphing, cross-hardware transfer, and immune promotion.",
+        .algorithmic_guarantee = "38ns cosine matching, 1ms preflight hardware affinity rejection, 100% SMT zero-defect theorem preservation.",
         .memory_concurrency_model = "Fixed-memory inverted index store with read-only shared payload mappings.",
-        .key_apis = "flow_fvec_write_file, flow_fvec_read_file, flow_fvec_store_scan, flow_fvec_store_query, flow_fvec_remediate_check, flow_topology_attach_fvec_store",
-        .keywords = "fvec flow_vector feature model curator museum gene vault inverted index prompt to vector 特徵 模型 基因庫 博物館 館長 倒排索引"
+        .key_apis = "flow_fvec_write_file, flow_fvec_read_file, flow_fvec_store_scan, flow_fvec_store_query, flow_fvec_auto_promote",
+        .keywords = "fvec vector manifold lockfile affinity antibody tidal transfer immune promotion 特徵 向量 鎖定檔 親和度 抗體 肌肉記憶"
+    },
+    {
+        .module_id = "flowy_cli",
+        .title = "Flowy Presentation Layer, Formatters & Interactive REPL",
+        .header_file = "src/flowy_cli.h",
+        .source_file = "src/flowy_cli.c",
+        .layer = 1,
+        .responsibilities = "Decoupled presentation layer for terminal rendering, causal explanation formatters, The FLOW Book viewer, and interactive REPL shell loop.",
+        .algorithmic_guarantee = "Data-Template separation, zero business logic contamination, pure formatting.",
+        .memory_concurrency_model = "Stateless formatters writing to caller-provided FILE streams.",
+        .key_apis = "flowy_print_answer, flowy_print_decision_explanation, flowy_show_book, flowy_interactive_loop",
+        .keywords = "cli presentation format render repl shell interactive book 表現層 格式化 渲染 交互 終端 電子書"
     }
 };
 
