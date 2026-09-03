@@ -5,6 +5,7 @@
 #include "adaptive.h"
 
 #include <math.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -539,7 +540,38 @@ static uint64_t xorshift64(uint64_t *state) {
 }
 
 /* ========================================================================= */
-/* 1024-Bit Bitset Array Genome Operations (O(1) 1-Bit Chaotic Mutation)     */
+/* Fast Integer Boltzmann Lookup Table (4KB, L1D Cache Resident)             */
+/* ========================================================================= */
+#define FLOW_BOLTZMANN_LUT_SIZE 2048
+static uint16_t FLOW_BOLTZMANN_EXP_LUT[FLOW_BOLTZMANN_LUT_SIZE];
+static _Atomic int FLOW_BOLTZMANN_LUT_INITIALIZED = 0;
+
+static void flow_ensure_boltzmann_lut_initialized(void) {
+    if (atomic_load_explicit(&FLOW_BOLTZMANN_LUT_INITIALIZED, memory_order_acquire)) return;
+    for (int i = 0; i < FLOW_BOLTZMANN_LUT_SIZE; ++i) {
+        double val = (double)i / 256.0;
+        double p = exp(-val);
+        FLOW_BOLTZMANN_EXP_LUT[i] = (uint16_t)(p * 65535.0);
+    }
+    atomic_store_explicit(&FLOW_BOLTZMANN_LUT_INITIALIZED, 1, memory_order_release);
+}
+
+static inline int flow_boltzmann_accept_lut(double delta, double temp, uint64_t *rng) {
+    if (delta <= 0.0) return 1;
+    if (temp <= 0.001) return 0;
+
+    /* Saturated rejection: If delta >= 8.0 * temp, exp(-delta/temp) < 0.000335 */
+    double ratio = (delta * 256.0) / temp;
+    if (ratio >= 2048.0) return 0;
+
+    flow_ensure_boltzmann_lut_initialized();
+    uint16_t prob_threshold = FLOW_BOLTZMANN_EXP_LUT[(uint32_t)ratio];
+    uint16_t r = (uint16_t)xorshift64(rng);
+    return (r < prob_threshold);
+}
+
+/* ========================================================================= */
+/* 64-Bit Bitset Genome Operations (O(1) 1-Bit Chaotic Mutation)              */
 /* ========================================================================= */
 
 void flow_genome_init(FlowGenome *g, uint32_t total_bits) {
@@ -1043,8 +1075,7 @@ int flow_bitspace_search_two_tier(const FlowBitSpace *space,
             }
 
             double delta = cand_plan.eval.energy - current_plan.eval.energy;
-            double r = (double)(xorshift64(&rng) % 10000) / 10000.0;
-            if (delta < 0.0 || (temp > 0.001 && r < exp(-delta / temp))) {
+            if (flow_boltzmann_accept_lut(delta, temp, &rng)) {
                 current_genome = cand_genome;
                 current_plan = cand_plan;
                 if (cand_plan.eval.hard_gate_passed &&
@@ -1170,8 +1201,7 @@ int flow_bitspace_search_single_tier(const FlowBitSpace *space, size_t iteration
         }
 
         double delta = cand_plan.eval.energy - current_plan.eval.energy;
-        double r = (double)(xorshift64(&rng) % 10000) / 10000.0;
-        if (delta < 0.0 || (temp > 0.001 && r < exp(-delta / temp))) {
+        if (flow_boltzmann_accept_lut(delta, temp, &rng)) {
             current_genome = cand_genome;
             current_plan = cand_plan;
             if (cand_plan.eval.hard_gate_passed &&
@@ -1295,8 +1325,7 @@ int flow_bitspace_search_configured(const FlowBitSpace *space, size_t iterations
         }
 
         double delta = cand_plan.eval.energy - current_plan.eval.energy;
-        double r = (double)(xorshift64(&rng) % 10000) / 10000.0;
-        if (delta < 0.0 || (temp > 0.001 && r < exp(-delta / temp))) {
+        if (flow_boltzmann_accept_lut(delta, temp, &rng)) {
             current_genome = cand_genome;
             current_plan = cand_plan;
             if (cand_plan.eval.hard_gate_passed &&
@@ -1420,8 +1449,7 @@ int flow_bitspace_explain_seed(const FlowBitSpace *space, size_t iterations, uin
                     flow_gate_failure_name(cand_reason));
         } else {
             double delta = cand_plan.eval.energy - current_plan.eval.energy;
-            double r = (double)(xorshift64(&rng) % 10000) / 10000.0;
-            int accepted = (delta < 0.0 || (temp > 0.001 && r < exp(-delta / temp)));
+            int accepted = flow_boltzmann_accept_lut(delta, temp, &rng);
             fprintf(out, "  [Step %zu] Flipped bit %u -> Genome=0x%016llx Comp=%s -> PASS (Energy=%.2f, Delta=%.2f) [%s]\n",
                     iter + 1, flipped_bit, (unsigned long long)cand_genome,
                     cand_plan.component ? cand_plan.component->id : "none",

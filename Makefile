@@ -22,7 +22,7 @@ INCLUDEDIR ?= $(PREFIX)/include/flow
 
 PLUGINS_SO := $(BUILD_DIR)/libflow_embodied.so $(BUILD_DIR)/libflow_smt.so $(BUILD_DIR)/libflow_security.so $(BUILD_DIR)/libflow_swarm.so
 
-.PHONY: all clean test demos demo benchmark autopoiesis-check acceptance install uninstall fuzz test-build test-run test-e2e sync-book level5-contest audit-mechanisms fvec-flowc-apply-test reload-stress-nightly plugins flowy libflow
+.PHONY: all clean test demos demo benchmark chaos-benchmark autopoiesis-check acceptance install uninstall fuzz test-build test-run test-e2e sync-book level5-contest audit-mechanisms fvec-flowc-apply-test reload-stress-nightly plugins flowy libflow
 
 all: src/generated_book_knowledge.h $(LIBFLOW_A) $(FLOWC) $(FLOWY) plugins
 
@@ -94,6 +94,10 @@ demos: $(FLOWC)
 
 benchmark: demos
 	./tools/benchmark-suite.sh 1000
+
+chaos-benchmark: tests/chaos-fp-vs-int-benchmark.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $< -o $(BUILD_DIR)/chaos-fp-vs-int-benchmark -lm
+	$(BUILD_DIR)/chaos-fp-vs-int-benchmark
 
 # ==============================================================================
 # Two-Stage Native Makefile Test Pipeline (Native Hermetic Barrier)
