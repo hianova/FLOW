@@ -118,7 +118,7 @@ $$T_{\text{grace}} = \max\left(\text{SLA\_Latency} \times 2, \quad \mu_{\text{la
 
 每次熱替換均會記錄一個 256 項目的環形審計快照（`FlowMutationSnapshot`），保存：
 - `timestamp_ns`：奈秒級切換時間戳。
-- `genome_words`：1024-Bit 精確基因型。
+- `genome`：64-Bit 原生暫存器精確基因型。
 - `llvm_ir_hash`：機器碼 IR 密碼學雜湊。
 - `author_attestation`：SMT 形式化證明簽章。
 

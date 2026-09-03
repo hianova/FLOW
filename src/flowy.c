@@ -118,7 +118,7 @@ void flowy_explain_decision_lang(const FlowDecisionEvent *event, FlowLanguage la
              "Trigger Source:    %s\n"
              "Observed Telemetry:%10.2f %s (Threshold: %.2f %s)\n"
              "Violated Policy:   %s\n"
-             "1-Bit Chaos Action:Flipped Bit #%u in 1024-Bit BitSpace\n"
+             "1-Bit Chaos Action:Flipped Bit #%u in 64-Bit BitSpace\n"
              "Topology Mutation: %s -> %s\n"
              "Hot-Swap Latency:  %llu ns (Zero Stop-the-World under QSBR)\n\n"
              "%s\n"
