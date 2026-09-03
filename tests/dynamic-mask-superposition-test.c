@@ -1,6 +1,6 @@
 #include "bitspace.h"
 #include "security.h"
-#include "verifier.h"
+#include "smt.h"
 #include "adaptive.h"
 #include "registry.h"
 #include "flow.h"
@@ -51,7 +51,7 @@ int main(void) {
     }
 
     /* ========================================================================= */
-    /* 2. Tier 1: Hard Contract Mask (src/verifier.c)                            */
+    /* 2. Tier 1: Hard Contract Mask (src/smt.c)                                 */
     /* ========================================================================= */
     {
         SemanticIR ir;
@@ -85,7 +85,7 @@ int main(void) {
     }
 
     /* ========================================================================= */
-    /* 3. Tier 1: Hard Resource Quota Mask (src/verifier.c)                      */
+    /* 3. Tier 1: Hard Resource Quota Mask (src/smt.c)                           */
     /* ========================================================================= */
     {
         SemanticIR ir;

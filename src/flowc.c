@@ -5,7 +5,7 @@
 #include "bitspace.h"
 #include "abi.h"
 #include "smt.h"
-#include "fvec.h"
+#include "flowy_fvec.h"
 
 #include <errno.h>
 #include <stdio.h>

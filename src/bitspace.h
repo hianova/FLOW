@@ -15,8 +15,8 @@
 /* 3-Tier Dynamic Mask Canvas (Superposition Architecture & Polyhedral Projection) */
 typedef struct {
     uint64_t hard_safety_mask;       /* src/security.c (Ownership, FD limits, Sanitizer safety) */
-    uint64_t hard_contract_mask;     /* src/verifier.c (IR contracts, sequential/parallel semantics) */
-    uint64_t hard_resource_mask;     /* src/verifier.c (Hard memory quota ceiling) */
+    uint64_t hard_contract_mask;     /* src/smt.c (IR contracts, sequential/parallel semantics) */
+    uint64_t hard_resource_mask;     /* src/smt.c (Hard memory quota ceiling) */
     uint64_t hard_plugin_mask;       /* src/plugin.h (Domain-declared hard mutation limits) */
     uint64_t hard_polytope_mask;     /* Orthogonal projection of Polyhedron P = {Ax <= b} on {0,1}^N */
     uint64_t hard_composite_mask;    /* Mathematical Composite Hard Mask */

@@ -1,7 +1,7 @@
 #include "bitspace.h"
 #include "registry.h"
 #include "security.h"
-#include "verifier.h"
+#include "smt.h"
 #include "adaptive.h"
 
 #include <math.h>

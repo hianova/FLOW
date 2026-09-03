@@ -1,7 +1,6 @@
 #include "bitspace.h"
 #include "registry.h"
 #include "smt.h"
-#include "verifier.h"
 #include "security.h"
 #include "flow.h"
 

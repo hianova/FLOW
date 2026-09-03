@@ -1,7 +1,7 @@
 #include "registry.h"
 #include "search.h"
 #include "backend.h"
-#include "verifier.h"
+#include "smt.h"
 
 #include <stdio.h>
 #include <stdlib.h>

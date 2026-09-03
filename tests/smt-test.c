@@ -1,7 +1,6 @@
 #include "flow.h"
 #include "registry.h"
 #include "smt.h"
-#include "verifier.h"
 
 #include <assert.h>
 #include <stdio.h>

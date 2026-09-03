@@ -4,8 +4,6 @@
 #include "benchmark.h"
 #include "orchestrator.h"
 #include "generated_book_knowledge.h"
-#include "vault.h"
-#include "fvec.h"
 #include "flowy_fvec.h"
 #include "backend.h"
 

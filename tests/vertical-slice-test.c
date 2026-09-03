@@ -4,7 +4,7 @@
 #include "registry.h"
 #include "reload.h"
 #include "search.h"
-#include "verifier.h"
+#include "smt.h"
 
 #include <assert.h>
 #include <stdio.h>

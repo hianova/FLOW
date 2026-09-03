@@ -4,7 +4,7 @@
 #include "flow.h"
 #include "registry.h"
 #include "search.h"
-#include "verifier.h"
+#include "smt.h"
 
 int emit_c(FILE *output, const SemanticIR *ir, const Component *component,
            const SearchResult *search, const VerificationReport *verification,

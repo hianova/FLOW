@@ -1,5 +1,4 @@
 #include "flowy_fvec.h"
-#include "vault.h"
 #include "bitspace.h"
 #include "smt.h"
 #include "registry.h"

@@ -1,6 +1,5 @@
 #include "flowy_fvec.h"
 #include "swarm.h"
-#include "vault.h"
 #include "smt.h"
 #include "bitspace.h"
 #include "registry.h"

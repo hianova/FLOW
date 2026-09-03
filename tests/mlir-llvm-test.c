@@ -1,7 +1,7 @@
 #include "backend.h"
 #include "flow.h"
 #include "registry.h"
-#include "verifier.h"
+#include "smt.h"
 
 #include <assert.h>
 #include <stdio.h>
