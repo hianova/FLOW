@@ -133,7 +133,6 @@ int flow_registry_load_dso(const char *so_path, char *err_msg, size_t err_size) 
     if (entry_fn == NULL) entry_fn = (FlowPluginEntryFn)dlsym(handle, "flow_smt_entry_v1");
     if (entry_fn == NULL) entry_fn = (FlowPluginEntryFn)dlsym(handle, "flow_security_entry_v1");
     if (entry_fn == NULL) entry_fn = (FlowPluginEntryFn)dlsym(handle, "flow_swarm_entry_v1");
-    if (entry_fn == NULL) entry_fn = (FlowPluginEntryFn)dlsym(handle, "flow_genetic_entry_v1");
     if (entry_fn == NULL) {
         if (err_msg && err_size) snprintf(err_msg, err_size, "missing entry symbol 'flow_plugin_entry_v1'");
         dlclose(handle);

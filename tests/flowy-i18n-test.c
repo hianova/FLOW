@@ -85,7 +85,7 @@ int main(void) {
     CHECK(strstr(a_zh_qsbr.explanation, "=== FLOW 代碼庫內省式架構推論報告 ===") != NULL);
     CHECK(strstr(a_zh_qsbr.explanation, "1. 核心系統職責 (Core Responsibilities):") != NULL);
     CHECK(strstr(a_zh_qsbr.explanation, "5. 💡 設計哲學與成因 (Why - 摘自《The FLOW Book》):") != NULL);
-    CHECK(strstr(a_zh_qsbr.explanation, "第七章：QSBR 無鎖熱替換") != NULL);
+    CHECK(strstr(a_zh_qsbr.explanation, "第七章：QSBR 零鎖熱替換") != NULL);
     CHECK(strstr(a_zh_qsbr.explanation, "在每秒數千萬次請求的高並發伺服器中") != NULL);
 
     /* --------------------------------------------------------------------- */
@@ -96,17 +96,17 @@ int main(void) {
 
     FILE *mem_zh = fmemopen(buf_zh, sizeof(buf_zh), "w");
     CHECK(mem_zh != NULL);
-    CHECK(flowy_show_book_lang("13", FLOW_LANG_ZH, mem_zh) == 1);
+    CHECK(flowy_show_book_lang("4", FLOW_LANG_ZH, mem_zh) == 1);
     fclose(mem_zh);
-    CHECK(strstr(buf_zh, "第十三章：跨越上位效應壁壘") != NULL);
-    CHECK(strstr(buf_zh, "上位效應") != NULL);
+    CHECK(strstr(buf_zh, "第四章：1-Bit 混沌退火") != NULL);
+    CHECK(strstr(buf_zh, "混沌") != NULL);
 
     FILE *mem_en = fmemopen(buf_en, sizeof(buf_en), "w");
     CHECK(mem_en != NULL);
-    CHECK(flowy_show_book_lang("13", FLOW_LANG_EN, mem_en) == 1);
+    CHECK(flowy_show_book_lang("4", FLOW_LANG_EN, mem_en) == 1);
     fclose(mem_en);
-    CHECK(strstr(buf_en, "Chapter 13: Overcoming Epistasis Barriers") != NULL);
-    CHECK(strstr(buf_en, "Lévy flight") != NULL);
+    CHECK(strstr(buf_en, "Chapter 4: 1-Bit Chaotic Annealing") != NULL);
+    CHECK(strstr(buf_en, "Chaotic") != NULL);
 
     /* --------------------------------------------------------------------- */
     /* 5. Bilingual Decision & Bottleneck Explanations                       */
@@ -131,10 +131,10 @@ int main(void) {
     flowy_explain_decision_lang(&ev, FLOW_LANG_EN, dec_en, sizeof(dec_en));
 
     CHECK(strstr(dec_zh, "=== FLOW 即時決策與因果解釋") != NULL);
-    CHECK(strstr(dec_zh, "第十五章：具身智能與物理閘門") != NULL);
+    CHECK(strstr(dec_zh, "第八章：硬體原語驅動") != NULL);
 
     CHECK(strstr(dec_en, "=== FLOW INTROSPECTIVE REAL-TIME DECISION & CAUSAL EXPLANATION ===") != NULL);
-    CHECK(strstr(dec_en, "Chapter 15: Embodied Physical Intelligence & Gates") != NULL);
+    CHECK(strstr(dec_en, "Chapter 8: Hardware Primitive Drivers") != NULL);
 
     printf("FLOWY_I18N_TEST=passed language_agnostic_mapping=verified render_mask_separation=verified bilingual_book=verified\n");
     return 0;

@@ -15,7 +15,6 @@ extern const FlowPluginDescriptor *flow_embodied_entry_v1(void);
 extern const FlowPluginDescriptor *flow_smt_entry_v1(void);
 extern const FlowPluginDescriptor *flow_security_entry_v1(void);
 extern const FlowPluginDescriptor *flow_swarm_entry_v1(void);
-extern const FlowPluginDescriptor *flow_genetic_entry_v1(void);
 
 static uint64_t bench_time_ns(void) {
     struct timespec ts;
@@ -27,19 +26,18 @@ int main(void) {
     printf("Starting Standardized FlowPluginABI v2 & Non-linear Projection Verification Suite...\n");
 
     /* ========================================================================= */
-    /* 1. Universal 4-Function ABI v2 Contract Verification Across All 5 Plugins  */
+    /* 1. Universal 4-Function ABI v2 Contract Verification Across All 4 Plugins  */
     /* ========================================================================= */
     {
         printf("  [1/4] Verifying 4-function FlowPluginABI v2 contracts on all plugins...\n");
-        const FlowPluginDescriptor *descriptors[5] = {
+        const FlowPluginDescriptor *descriptors[4] = {
             flow_embodied_entry_v1(),
             flow_smt_entry_v1(),
             flow_security_entry_v1(),
-            flow_swarm_entry_v1(),
-            flow_genetic_entry_v1()
+            flow_swarm_entry_v1()
         };
 
-        for (int i = 0; i < 5; ++i) {
+        for (int i = 0; i < 4; ++i) {
             const FlowPluginDescriptor *d = descriptors[i];
             CHECK(d != NULL);
             CHECK(d->abi_v2 != NULL);

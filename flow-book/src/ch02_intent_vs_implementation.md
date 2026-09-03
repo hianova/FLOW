@@ -67,10 +67,10 @@ prefer {
 
 ## 2.2 核心解析與語意降維：`FlowSpec` 到 `SemanticIR`
 
-在 FLOW 核心庫中，語意剖析器（`src/parser.c`）與語意降維器（`src/semantic.c`）負責將純文字意圖轉化為形式化約束結構：
+在 FLOW 核心庫中，語意剖析器與語意降維器（`src/parser.c`）負責將純文字意圖轉化為形式化約束結構：
 
 ```text
-.flow 文本 ──► parse_spec() (src/parser.c) ──► FlowSpec ──► lower_to_ir() (src/semantic.c) ──► SemanticIR
+.flow 文本 ──► parse_spec() (src/parser.c) ──► FlowSpec ──► lower_to_ir() (src/parser.c) ──► SemanticIR
 ```
 
 ### 核心資料結構解析 (`src/flow.h`)
