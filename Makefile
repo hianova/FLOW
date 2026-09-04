@@ -111,93 +111,16 @@ frontier-benchmark: tests/frontier-4pillars-benchmark.c $(LIBFLOW_A) | $(BUILD_D
 # Two-Stage Native Makefile Test Pipeline (Native Hermetic Barrier)
 # ==============================================================================
 
+# 5 Consolidated Domain Test Suites (Brain, Body, Concurrency, Fvec-Swarm, System)
 TEST_BINARIES := \
-	$(BUILD_DIR)/security-test \
-	$(BUILD_DIR)/reload-test \
-	$(BUILD_DIR)/live-reload-test \
-	$(BUILD_DIR)/backend-reload-test \
-	$(BUILD_DIR)/generated-reload-test \
-	$(BUILD_DIR)/adaptive-test \
-	$(BUILD_DIR)/bitspace-test \
-	$(BUILD_DIR)/plugin-test \
-	$(BUILD_DIR)/project-test \
-	$(BUILD_DIR)/abi-test \
-	$(BUILD_DIR)/vertical-slice-test \
-	$(BUILD_DIR)/fuzz-test \
-	$(BUILD_DIR)/ensemble-test \
-	$(BUILD_DIR)/smt-test \
-	$(BUILD_DIR)/mlir-llvm-test \
-	$(BUILD_DIR)/topology-test \
-	$(BUILD_DIR)/ebpf-pmu-test \
-	$(BUILD_DIR)/jit-migration-test \
-	$(BUILD_DIR)/bootstrap-sandbox-test \
-	$(BUILD_DIR)/quantum-dimension-test \
-	$(BUILD_DIR)/two-tier-chaos-test \
-	$(BUILD_DIR)/zero-tlb-shootdown-test \
-	$(BUILD_DIR)/epigenetic-mask-test \
-	$(BUILD_DIR)/dynamic-mask-superposition-test \
-	$(BUILD_DIR)/mtd-defense-test \
-	$(BUILD_DIR)/swarm-federation-test \
-	$(BUILD_DIR)/genetic-programming-test \
-	$(BUILD_DIR)/dynamic-env-morph-test \
-	$(BUILD_DIR)/qsbr-unified-test \
-	$(BUILD_DIR)/bitset-genome-test \
-	$(BUILD_DIR)/async-jit-worker-test \
-	$(BUILD_DIR)/orchestrator-test \
-	$(BUILD_DIR)/enterprise-production-test \
-	$(BUILD_DIR)/embodied-physics-test \
-	$(BUILD_DIR)/flowy-test \
-	$(BUILD_DIR)/mechanism-audit-test \
-	$(BUILD_DIR)/decision-explain-test \
-	$(BUILD_DIR)/hardened-production-test \
-	$(BUILD_DIR)/decoupling-test \
-	$(BUILD_DIR)/polytope-projection-test \
-	$(BUILD_DIR)/plugin-abi-v2-test \
-	$(BUILD_DIR)/autonomous-orchestration-test \
-	$(BUILD_DIR)/flowy-level5-crucible \
-	$(BUILD_DIR)/flowy-i18n-test \
-	$(BUILD_DIR)/reload-stress-test \
-	$(BUILD_DIR)/vault-test \
-	$(BUILD_DIR)/serverless-coldstart-test \
-	$(BUILD_DIR)/fleet-immune-test \
-	$(BUILD_DIR)/semantic-rag-test \
-	$(BUILD_DIR)/tidal-morph-test \
-	$(BUILD_DIR)/cross-hardware-transfer-test \
-	$(BUILD_DIR)/predictive-jit-test \
-	$(BUILD_DIR)/generative-architecture-test \
-	$(BUILD_DIR)/fvec-format-test \
-	$(BUILD_DIR)/fvec-curator-test \
-	$(BUILD_DIR)/immune-promotion-test \
-	$(BUILD_DIR)/primitive-driver-test \
-	$(BUILD_DIR)/protocol-primitive-test \
-	$(BUILD_DIR)/fvec-hub-test \
-	$(BUILD_DIR)/hetero-swarm-mesh-test \
-	$(BUILD_DIR)/snapshot-replay-test \
-	$(BUILD_DIR)/gateway-autonomous-test \
-	$(BUILD_DIR)/edge-gateway-test \
-	$(BUILD_DIR)/fleet-swarm-test \
-	$(BUILD_DIR)/financial-matching-test \
-	$(BUILD_DIR)/cxl-llm-fabric-test \
-	$(BUILD_DIR)/isomorphic-primitives-test \
-	$(BUILD_DIR)/dev-infrastructure-kit-test \
-	$(BUILD_DIR)/dev-velocity-kit-test \
-	$(BUILD_DIR)/token-ring-test \
-	$(BUILD_DIR)/embodied-coordination-test \
-	$(BUILD_DIR)/six-pillars-math-test \
-	$(BUILD_DIR)/entropy-collapse-test \
-	$(BUILD_DIR)/doc-as-intent-test \
-	$(BUILD_DIR)/hardware-blindspot-test \
-	$(BUILD_DIR)/bus-hybrid-poll-test \
-	$(BUILD_DIR)/manifold-algebra-neuro-preplay-autopoiesis-test
+	$(BUILD_DIR)/test-brain \
+	$(BUILD_DIR)/test-body \
+	$(BUILD_DIR)/test-concurrency \
+	$(BUILD_DIR)/test-fvec-swarm \
+	$(BUILD_DIR)/test-system
 
-# Specific build prerequisites for targets with inter-module dependencies
-$(BUILD_DIR)/plugin-test: plugins
-$(BUILD_DIR)/plugin-abi-v2-test: plugins
-$(BUILD_DIR)/decoupling-test: $(FLOWC) $(FLOWY) plugins
-$(BUILD_DIR)/flowy-test: $(FLOWY)
-$(BUILD_DIR)/flowy-level5-crucible: $(FLOWY)
-$(BUILD_DIR)/flowy-i18n-test: $(FLOWY)
-$(BUILD_DIR)/autonomous-orchestration-test: $(FLOWY)
+$(BUILD_DIR)/test-%: tests/test_%.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
 $(BUILD_DIR)/generated-reload-test: tests/generated-reload-test.c $(FLOWC) $(LIBFLOW_A) | $(BUILD_DIR)
 	$(FLOWC) examples/rank.flow -o /tmp/flow-rank-reload.c --search --iterations 50 --seed 42 --reload-adapter
@@ -208,11 +131,17 @@ $(BUILD_DIR)/generated-reload-test: tests/generated-reload-test.c $(FLOWC) $(LIB
 $(BUILD_DIR)/flowy-level5-crucible: tests/flowy-level5-crucible.c $(LIBFLOW_A) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
-# Pattern rule: compiles any tests/%-test.c directly against libflow.a
+$(BUILD_DIR)/reload-stress-test: tests/reload-stress-test.c $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
+
+# Fallback pattern rules for archived micro-tests
 $(BUILD_DIR)/%-test: tests/%-test.c $(LIBFLOW_A) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
-# Backward-compatible convenience shortcuts to build & execute any single test
+$(BUILD_DIR)/%-test: tests/archive/%-test.c $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
+
+# Backward-compatible convenience shortcuts to build & execute any domain test
 TEST_NAMES := $(patsubst $(BUILD_DIR)/%,%,$(TEST_BINARIES))
 .PHONY: $(TEST_NAMES)
 $(TEST_NAMES): %: $(BUILD_DIR)/%
@@ -247,87 +176,16 @@ test-build: $(FLOWC) $(FLOWY) plugins $(TEST_BINARIES)
 
 # Phase 2: Pure Isolated Execution (Hardware Cache & SMT Soundness Protected)
 test-run: $(TEST_BINARIES) fvec-flowc-apply-test
-	@echo "=== [Phase 1/5] Running Core Units & Formal SMT Proofs ==="
-	@$(BUILD_DIR)/bitspace-test
-	@$(BUILD_DIR)/smt-test
-	@$(BUILD_DIR)/polytope-projection-test
-	@$(BUILD_DIR)/token-ring-test
-	@$(BUILD_DIR)/six-pillars-math-test
-	@$(BUILD_DIR)/entropy-collapse-test
-	@$(BUILD_DIR)/topology-test
-	@$(BUILD_DIR)/abi-test
-	@$(BUILD_DIR)/project-test
-	@$(BUILD_DIR)/fuzz-test
-	@$(BUILD_DIR)/ensemble-test
-	@$(BUILD_DIR)/mlir-llvm-test
-	@$(BUILD_DIR)/vertical-slice-test
-	@$(BUILD_DIR)/security-test
-	@$(BUILD_DIR)/doc-as-intent-test
-	@echo "=== [Phase 2/5] Running Concurrency, QSBR & State Morphing ==="
-	@$(BUILD_DIR)/reload-test
-	@$(BUILD_DIR)/live-reload-test
-	@$(BUILD_DIR)/backend-reload-test
-	@$(BUILD_DIR)/generated-reload-test
-	@$(BUILD_DIR)/adaptive-test
-	@$(BUILD_DIR)/dynamic-env-morph-test
-	@$(BUILD_DIR)/zero-tlb-shootdown-test
-	@$(BUILD_DIR)/epigenetic-mask-test
-	@$(BUILD_DIR)/dynamic-mask-superposition-test
-	@$(BUILD_DIR)/mtd-defense-test
-	@$(BUILD_DIR)/swarm-federation-test
-	@$(BUILD_DIR)/genetic-programming-test
-	@$(BUILD_DIR)/qsbr-unified-test
-	@$(BUILD_DIR)/bitset-genome-test
-	@$(BUILD_DIR)/async-jit-worker-test
-	@$(BUILD_DIR)/orchestrator-test
-	@$(BUILD_DIR)/jit-migration-test
-	@$(BUILD_DIR)/bootstrap-sandbox-test
-	@$(BUILD_DIR)/quantum-dimension-test
-	@$(BUILD_DIR)/two-tier-chaos-test
-	@$(BUILD_DIR)/ebpf-pmu-test
-	@echo "=== [Phase 3/5] Running Hardware Primitive Drivers & Embodied Gates ==="
-	@$(BUILD_DIR)/embodied-physics-test
-	@$(BUILD_DIR)/embodied-coordination-test
-	@$(BUILD_DIR)/fleet-swarm-test
-	@$(BUILD_DIR)/plugin-test
-	@$(BUILD_DIR)/plugin-abi-v2-test
-	@$(BUILD_DIR)/primitive-driver-test
-	@$(BUILD_DIR)/protocol-primitive-test
-	@$(BUILD_DIR)/gateway-autonomous-test
-	@$(BUILD_DIR)/edge-gateway-test
-	@$(BUILD_DIR)/financial-matching-test
-	@$(BUILD_DIR)/cxl-llm-fabric-test
-	@$(BUILD_DIR)/isomorphic-primitives-test
-	@$(BUILD_DIR)/dev-infrastructure-kit-test
-	@$(BUILD_DIR)/dev-velocity-kit-test
-	@$(BUILD_DIR)/enterprise-production-test
-	@$(BUILD_DIR)/hardened-production-test
-	@$(BUILD_DIR)/decoupling-test
-	@$(BUILD_DIR)/hardware-blindspot-test
-	@$(BUILD_DIR)/bus-hybrid-poll-test
-	@echo "=== [Phase 4/5] Running Architecture Memory (.fvec) & Herd Immunity ==="
-	@$(BUILD_DIR)/vault-test
-	@$(BUILD_DIR)/serverless-coldstart-test
-	@$(BUILD_DIR)/fleet-immune-test
-	@$(BUILD_DIR)/semantic-rag-test
-	@$(BUILD_DIR)/tidal-morph-test
-	@$(BUILD_DIR)/cross-hardware-transfer-test
-	@$(BUILD_DIR)/predictive-jit-test
-	@$(BUILD_DIR)/generative-architecture-test
-	@$(BUILD_DIR)/fvec-format-test
-	@$(BUILD_DIR)/fvec-curator-test
-	@$(BUILD_DIR)/immune-promotion-test
-	@$(BUILD_DIR)/fvec-hub-test
-	@$(BUILD_DIR)/hetero-swarm-mesh-test
-	@$(BUILD_DIR)/snapshot-replay-test
-	@echo "=== [Phase 5/5] Running Autopilot, Introspection & Hardware Stress Crucible ==="
-	@$(BUILD_DIR)/flowy-test
-	@$(BUILD_DIR)/mechanism-audit-test
-	@$(BUILD_DIR)/decision-explain-test
-	@$(BUILD_DIR)/autonomous-orchestration-test
-	@$(BUILD_DIR)/flowy-i18n-test
-	@$(BUILD_DIR)/reload-stress-test
-	@$(BUILD_DIR)/flowy-level5-crucible
+	@echo "=== [1/5] Brain: Bit-Manifold Form, SMT Supreme Court & Algebraic Geometry ==="
+	@$(BUILD_DIR)/test-brain
+	@echo "=== [2/5] Body: Physical Substrate, Telemetry, Drivers & Hardware Control ==="
+	@$(BUILD_DIR)/test-body
+	@echo "=== [3/5] Concurrency: QSBR RCU, Live Reload, Zero-TLB & Moving Target Defense ==="
+	@$(BUILD_DIR)/test-concurrency
+	@echo "=== [4/5] Fvec & Swarm: Architectural Memory, Swarm Federation, Neuro-Bridge & Pre-Play ==="
+	@$(BUILD_DIR)/test-fvec-swarm
+	@echo "=== [5/5] System: Compiler Pipeline, Plugin ABI, Edge Gateway, Finance & Doc-as-Intent ==="
+	@$(BUILD_DIR)/test-system
 
 # Phase 3: End-to-End Compiler CLI & Invariant Smoke Tests
 test-e2e: $(FLOWC) $(FLOWY) plugins
@@ -427,7 +285,7 @@ test: test-build
 	@$(MAKE) --no-print-directory test-run
 	@$(MAKE) --no-print-directory test-e2e
 	@echo "================================================================================"
-	@echo "          ALL 77 TEST SUITES & E2E VERIFICATIONS 100% SOUND & PASSED!           "
+	@echo "        ALL 5 DOMAIN TEST SUITES & E2E VERIFICATIONS 100% SOUND & PASSED!       "
 	@echo "================================================================================"
 
 clean:

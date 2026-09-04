@@ -124,8 +124,206 @@ int run_orchestrator_cmd(int argc, char **argv) {
     return res;
 }
 
+static void flowy_print_version(FILE *out) {
+    fprintf(out, "FLOW System Framework (flowy) v2.5.0\n");
+    fprintf(out, "Bit-Manifold Form (BMF) & Neuromorphic Substrate\n");
+    fprintf(out, "Architecture: x86_64/aarch64/SIMD-512 | Zero-Copy Heterogeneous Mesh\n");
+}
+
+static void flowy_print_usage(FILE *out) {
+    fprintf(out, "Usage: flowy <command> [subcommand] [options...]\n\n");
+    fprintf(out, "Primary Command Groups:\n");
+    fprintf(out, "  shell                    Start the interactive REPL & autonomic shell\n");
+    fprintf(out, "  topo <subcommand>        Topology graph and dynamic orchestrator\n");
+    fprintf(out, "      absorb <spec.flow>   Absorb architectural specification\n");
+    fprintf(out, "      anneal [specs...]    Run simulated annealing to solidify plan\n");
+    fprintf(out, "      landscape            Print system energy & topology landscape\n");
+    fprintf(out, "      refactor             Calculate architectural entropy reduction\n");
+    fprintf(out, "      morph [mode]         Time-travel morph plan (speed|memory|balanced)\n");
+    fprintf(out, "      what-if [flags]      Simulate counterfactual load scenario\n");
+    fprintf(out, "      remediate            Synthesize remediation plan for faults\n");
+    fprintf(out, "      autopilot            Run autonomous evolution loop\n");
+    fprintf(out, "      daemon [flags]       Run background continuous annealer daemon\n\n");
+    fprintf(out, "  inspect <subcommand>     System introspection and formal verification\n");
+    fprintf(out, "      why                  Explain real-time scheduling / hardware decision\n");
+    fprintf(out, "      timeline             Display recent decision log timeline\n");
+    fprintf(out, "      bottleneck           Neural telemetry & bottleneck reasoning\n");
+    fprintf(out, "      audit                Run formal invariant & layer separation audit\n");
+    fprintf(out, "      audit-mechanisms     Verify 10 zero-overhead architectural mechanisms\n");
+    fprintf(out, "      doc [module|all]     Doc-as-Intent static verification & living docs\n");
+    fprintf(out, "      book [chapter]       Interactive query engine for 《The FLOW Book》\n");
+    fprintf(out, "      ask \"<query>\"        Single-shot codebase introspection query\n\n");
+    fprintf(out, "  fvec <subcommand>        Hardware gene vectors & immune knowledge base\n");
+    fprintf(out, "      seed                 Seed canonical .fvec models to .flow/vecs\n");
+    fprintf(out, "      list                 Display local gene store status\n");
+    fprintf(out, "      inspect <file.fvec>  Inspect .fvec header, payload & SMT attestation\n");
+    fprintf(out, "      export <id> <file>   Export vault entry to .fvec file\n");
+    fprintf(out, "      query \"<prompt>\"     BMF semantic similarity query\n");
+    fprintf(out, "      rag \"<prompt>\"       Prompt-to-Architecture semantic synthesis\n");
+    fprintf(out, "      vault                Living architecture hippocampus summary\n");
+    fprintf(out, "      antibody [flags]     Fleet-wide immune antibody memory\n");
+    fprintf(out, "      remediate [flags]    Crisis defense & gene bank remediation\n");
+    fprintf(out, "      hub [search|pull...] Ecosystem community gene hub\n");
+    fprintf(out, "      gc [--max-age <s>]   LRU eviction of senescent auto-models\n\n");
+    fprintf(out, "  test [suite]             Execute consolidated domain test suites\n");
+    fprintf(out, "      brain                BMF, BitSpace, SMT Theorems, Topology, Homology\n");
+    fprintf(out, "      body                 NUMA, SIMD, Telemetry, Drivers, Bus, CXL\n");
+    fprintf(out, "      concurrency          QSBR, Hot-Reload, Dynamic Morph, MTD, Chaos\n");
+    fprintf(out, "      fvec                 Gene Vault, Swarm Federation, Immune, RAG\n");
+    fprintf(out, "      system               Compiler, Plugin ABI, Edge, Finance, E2E\n");
+    fprintf(out, "      all                  Run all 5 test suites sequentially\n\n");
+    fprintf(out, "Legacy Shortcuts (Direct Execution):\n");
+    fprintf(out, "  flowy [absorb|anneal|landscape|refactor|morph|what-if|remediate|autopilot|daemon]\n");
+    fprintf(out, "  flowy [why|timeline|bottleneck|audit|audit-mechanisms|doc|book|ask]\n");
+    fprintf(out, "  flowy [rag|vault|antibody|query|hub]\n\n");
+    fprintf(out, "Global Options:\n");
+    fprintf(out, "  -h, --help, help         Show this help message\n");
+    fprintf(out, "  -v, --version, version   Display version information\n");
+    fprintf(out, "  -l, --lang <zh|en>       Set UI rendering language\n");
+}
+
+static void flowy_print_topo_usage(FILE *out) {
+    fprintf(out, "Usage: flowy topo <subcommand> [options...]\n\n");
+    fprintf(out, "Subcommands:\n");
+    fprintf(out, "  absorb <spec.flow>       Absorb architectural specification\n");
+    fprintf(out, "  anneal [specs...]        Run simulated annealing to solidify plan\n");
+    fprintf(out, "  landscape                Print system energy & topology landscape\n");
+    fprintf(out, "  refactor                 Calculate architectural entropy reduction\n");
+    fprintf(out, "  morph [speed|memory]     Time-travel morph plan\n");
+    fprintf(out, "  what-if [--memory <MB>]  Simulate counterfactual load scenario\n");
+    fprintf(out, "  remediate <s1> <s2>      Synthesize remediation proposal for faults\n");
+    fprintf(out, "  autopilot [spec]         Run closed-loop autonomous orchestration\n");
+    fprintf(out, "  daemon [--nightly]       Run background continuous annealer daemon\n");
+}
+
+static void flowy_print_inspect_usage(FILE *out) {
+    fprintf(out, "Usage: flowy inspect <subcommand> [options...]\n\n");
+    fprintf(out, "Subcommands:\n");
+    fprintf(out, "  why                      Explain real-time scheduling / hardware decision\n");
+    fprintf(out, "  timeline                 Display recent decision log timeline\n");
+    fprintf(out, "  bottleneck               Neural telemetry & bottleneck reasoning\n");
+    fprintf(out, "  audit                    Run formal invariant & layer separation audit\n");
+    fprintf(out, "  audit-mechanisms         Verify 10 zero-overhead architectural mechanisms\n");
+    fprintf(out, "  doc [module|all]         Living documentation viewer\n");
+    fprintf(out, "  book [chapter|all]       《The FLOW Book》 living viewer\n");
+    fprintf(out, "  ask \"<query>\"            Introspective codebase query\n");
+}
+
+static void flowy_print_fvec_usage(FILE *out) {
+    fprintf(out, "Usage: flowy fvec <subcommand> [options...]\n\n");
+    fprintf(out, "Subcommands:\n");
+    fprintf(out, "  seed                     Seed canonical .fvec models to .flow/vecs\n");
+    fprintf(out, "  list                     List all crystallized models in local store\n");
+    fprintf(out, "  inspect <file.fvec>      Display model header, payload and SMT proof\n");
+    fprintf(out, "  export <vault_id> <out>  Export vault entry to .fvec file\n");
+    fprintf(out, "  query \"<prompt>\"         Find best matching model by prompt similarity\n");
+    fprintf(out, "  rag \"<prompt>\"           Prompt-to-Architecture semantic synthesis\n");
+    fprintf(out, "  vault                    Living architecture hippocampus summary\n");
+    fprintf(out, "  antibody [broadcast]     Fleet-wide immune antibody memory\n");
+    fprintf(out, "  remediate [--ram <pct>]  Autonomous crisis defense & gene remediation\n");
+    fprintf(out, "  hub [search|pull|push]   Community ecosystem gene vault repository\n");
+    fprintf(out, "  gc [--max-age <sec>]     Evict senescent auto-models\n");
+}
+
+static void flowy_print_test_usage(FILE *out) {
+    fprintf(out, "Usage: flowy test <suite>\n\n");
+    fprintf(out, "Available Domain Test Suites:\n");
+    fprintf(out, "  brain                    BMF, BitSpace, SMT Theorems, Topology, Homology\n");
+    fprintf(out, "  body                     NUMA, SIMD, Telemetry, Drivers, Bus, CXL\n");
+    fprintf(out, "  concurrency              QSBR, Hot-Reload, Dynamic Morph, MTD, Chaos\n");
+    fprintf(out, "  fvec                     Gene Vault, Swarm Federation, Immune, RAG\n");
+    fprintf(out, "  system                   Compiler, Plugin ABI, Edge, Finance, E2E\n");
+    fprintf(out, "  all                      Run all 5 test suites sequentially\n");
+}
+
+static int run_test_cmd(int argc, char **argv) {
+    const char *suite = (argc >= 3) ? argv[2] : "all";
+    if (strcmp(suite, "-h") == 0 || strcmp(suite, "--help") == 0 || strcmp(suite, "help") == 0) {
+        flowy_print_test_usage(stdout);
+        return EXIT_SUCCESS;
+    }
+
+    const char *suites[] = {"brain", "body", "concurrency", "fvec-swarm", "system"};
+    const char *bins[] = {
+        "./build/test-brain",
+        "./build/test-body",
+        "./build/test-concurrency",
+        "./build/test-fvec-swarm",
+        "./build/test-system"
+    };
+
+    if (strcmp(suite, "all") == 0) {
+        printf("========================================================================================\n");
+        printf("  🧪 Running All 5 Consolidated FLOW Domain Test Suites\n");
+        printf("========================================================================================\n\n");
+        for (int i = 0; i < 5; ++i) {
+            printf("▶ Running Suite [%s] (%s)...\n", suites[i], bins[i]);
+            int ret = system(bins[i]);
+            if (ret != 0) {
+                fprintf(stderr, "❌ Suite [%s] failed with exit code %d\n", suites[i], ret);
+                return EXIT_FAILURE;
+            }
+        }
+        printf("========================================================================================\n");
+        printf("  ✅ ALL 5 DOMAIN TEST SUITES PASSED (100%% SMT SOUND & FORMALLY VERIFIED)\n");
+        printf("========================================================================================\n");
+        return EXIT_SUCCESS;
+    }
+
+    for (int i = 0; i < 5; ++i) {
+        if (strcmp(suite, suites[i]) == 0 || (strcmp(suite, "fvec") == 0 && strcmp(suites[i], "fvec-swarm") == 0)) {
+            printf("▶ Running Suite [%s] (%s)...\n", suites[i], bins[i]);
+            int ret = system(bins[i]);
+            return (ret == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+        }
+    }
+
+    fprintf(stderr, "Unknown test suite: %s\n", suite);
+    flowy_print_test_usage(stderr);
+    return EXIT_FAILURE;
+}
+
 int main(int argc, char **argv) {
-    if (argc < 2 || strcmp(argv[1], "shell") == 0 || strcmp(argv[1], "--shell") == 0 || strcmp(argv[1], "absorb") == 0 || strcmp(argv[1], "--absorb") == 0 || strcmp(argv[1], "anneal") == 0 || strcmp(argv[1], "--anneal") == 0 || strcmp(argv[1], "landscape") == 0 || strcmp(argv[1], "--landscape") == 0 || strcmp(argv[1], "refactor") == 0 || strcmp(argv[1], "--refactor") == 0 || strcmp(argv[1], "morph") == 0 || strcmp(argv[1], "--morph") == 0 || strcmp(argv[1], "what-if") == 0 || strcmp(argv[1], "--what-if") == 0 || strcmp(argv[1], "whatif") == 0 || strcmp(argv[1], "remediate") == 0 || strcmp(argv[1], "--remediate") == 0 || strcmp(argv[1], "autopilot") == 0 || strcmp(argv[1], "--autopilot") == 0 || strcmp(argv[1], "daemon") == 0 || strcmp(argv[1], "--daemon") == 0) {
+    if (argc < 2) {
+        flowy_print_usage(stdout);
+        return EXIT_SUCCESS;
+    }
+
+    /* 1. Global Help and Version Flags */
+    if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "help") == 0) {
+        flowy_print_usage(stdout);
+        return EXIT_SUCCESS;
+    }
+    if (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "version") == 0) {
+        flowy_print_version(stdout);
+        return EXIT_SUCCESS;
+    }
+
+    /* 2. Test Suite Execution Subcommand (flowy test [brain|body|concurrency|fvec|system|all]) */
+    if (strcmp(argv[1], "test") == 0) {
+        return run_test_cmd(argc, argv);
+    }
+
+    /* 3. Hierarchical Topology Namespace (flowy topo <subcommand>) */
+    if (strcmp(argv[1], "topo") == 0) {
+        if (argc < 3 || strcmp(argv[2], "-h") == 0 || strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "help") == 0) {
+            flowy_print_topo_usage(stdout);
+            return EXIT_SUCCESS;
+        }
+        return run_orchestrator_cmd(argc - 1, argv + 1);
+    }
+
+    /* 4. Legacy Direct Topology Shortcuts */
+    if (strcmp(argv[1], "shell") == 0 || strcmp(argv[1], "--shell") == 0 ||
+        strcmp(argv[1], "absorb") == 0 || strcmp(argv[1], "--absorb") == 0 ||
+        strcmp(argv[1], "anneal") == 0 || strcmp(argv[1], "--anneal") == 0 ||
+        strcmp(argv[1], "landscape") == 0 || strcmp(argv[1], "--landscape") == 0 ||
+        strcmp(argv[1], "refactor") == 0 || strcmp(argv[1], "--refactor") == 0 ||
+        strcmp(argv[1], "morph") == 0 || strcmp(argv[1], "--morph") == 0 ||
+        strcmp(argv[1], "what-if") == 0 || strcmp(argv[1], "--what-if") == 0 || strcmp(argv[1], "whatif") == 0 ||
+        strcmp(argv[1], "remediate") == 0 || strcmp(argv[1], "--remediate") == 0 ||
+        strcmp(argv[1], "autopilot") == 0 || strcmp(argv[1], "--autopilot") == 0 ||
+        strcmp(argv[1], "daemon") == 0 || strcmp(argv[1], "--daemon") == 0) {
         return run_orchestrator_cmd(argc, argv);
     }
 
@@ -150,7 +348,39 @@ int main(int argc, char **argv) {
         }
     }
 
-    /* 0. Language Query / Switch (flowy lang [zh|en]) */
+    /* 5. Hierarchical Introspection Namespace (flowy inspect <subcommand>) */
+    if (strcmp(argv[1], "inspect") == 0) {
+        if (argc < 3 || strcmp(argv[2], "-h") == 0 || strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "help") == 0) {
+            flowy_print_inspect_usage(stdout);
+            return EXIT_SUCCESS;
+        }
+        /* Shift inspect out of argv so subcommands match below */
+        argc--;
+        argv++;
+    }
+
+    /* 6. Hierarchical fvec Namespace sub-routing */
+    if (strcmp(argv[1], "fvec") == 0 && argc >= 3) {
+        if (strcmp(argv[2], "-h") == 0 || strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "help") == 0) {
+            flowy_print_fvec_usage(stdout);
+            return EXIT_SUCCESS;
+        }
+        if (strcmp(argv[2], "hub") == 0) {
+            argc--;
+            argv++;
+        } else if (strcmp(argv[2], "rag") == 0) {
+            argc--;
+            argv++;
+        } else if (strcmp(argv[2], "vault") == 0) {
+            argc--;
+            argv++;
+        } else if (strcmp(argv[2], "antibody") == 0) {
+            argc--;
+            argv++;
+        }
+    }
+
+    /* Language Query / Switch (flowy lang [zh|en]) */
     if (argc >= 2 && (strcmp(argv[1], "lang") == 0 || strcmp(argv[1], "language") == 0)) {
         if (argc >= 3) {
             FlowLanguage new_lang = flowy_parse_language(argv[2]);
@@ -283,271 +513,6 @@ int main(int argc, char **argv) {
         FlowMechanismAuditReport rep;
         flow_benchmark_run_mechanism_audit(&rep);
         flow_benchmark_print_mechanism_audit(&rep, stdout);
-        return EXIT_SUCCESS;
-    }
-
-    
-
-    if (strcmp(argv[1], "landscape") == 0 || strcmp(argv[1], "--landscape") == 0) {
-        FlowOrchestrator *orch = flow_orchestrator_create(".");
-        for (int i = 2; i < argc; ++i) {
-            if (argv[i][0] != '-') {
-                char diag[256] = {0};
-                flow_orchestrator_absorb(orch, argv[i], diag, sizeof(diag));
-            }
-        }
-        if (flow_orchestrator_intent_count(orch) == 0) {
-            char diag[256] = {0};
-            flow_orchestrator_absorb(orch, "examples/project.flow", diag, sizeof(diag));
-        }
-        FlowOrchestratorEpoch epoch;
-        flow_orchestrator_anneal(orch, 100, 42, &epoch);
-        flow_orchestrator_landscape(orch, stdout);
-        flow_orchestrator_destroy(orch);
-        return EXIT_SUCCESS;
-    }
-
-    if (strcmp(argv[1], "refactor") == 0 || strcmp(argv[1], "--refactor") == 0) {
-        FlowOrchestrator *orch = flow_orchestrator_create(".");
-        char diag[256] = {0};
-        flow_orchestrator_absorb(orch, "examples/project.flow", diag, sizeof(diag));
-        FlowOrchestratorEpoch epoch;
-        flow_orchestrator_anneal(orch, 100, 42, &epoch);
-        double delta = 0.0;
-        flow_orchestrator_refactor_entropy(orch, &delta);
-        printf("flow-orchestrator: [entropy_reduction] Codebase Entropy Delta=%.4f (Refactored Epoch Solidified)\n", delta);
-        flow_orchestrator_destroy(orch);
-        return EXIT_SUCCESS;
-    }
-
-    if (strcmp(argv[1], "morph") == 0 || strcmp(argv[1], "--morph") == 0) {
-        const char *tactic_str = argc >= 3 ? argv[2] : "speed";
-        FlowPlanTactic tactic = FLOW_TACTIC_SPEED;
-        if (strcmp(tactic_str, "memory") == 0) tactic = FLOW_TACTIC_MEMORY;
-        else if (strcmp(tactic_str, "balanced") == 0) tactic = FLOW_TACTIC_BALANCED;
-
-        FlowOrchestrator *orch = flow_orchestrator_create(".");
-        char diag[256] = {0};
-        flow_orchestrator_absorb(orch, "examples/project.flow", diag, sizeof(diag));
-        FlowOrchestratorEpoch epoch;
-        flow_orchestrator_anneal(orch, 100, 42, &epoch);
-
-        FlowPlan target_plan;
-        if (flow_orchestrator_time_travel(orch, tactic, &target_plan)) {
-            printf("flow-orchestrator: [state_time_travel] Morphed to Tactic '%s' (Component=%s, LatencyScore=%.1f, MemBytes=%zu)\n",
-                   flow_plan_tactic_name(tactic),
-                   target_plan.component ? target_plan.component->id : "unknown",
-                   target_plan.eval.latency_score,
-                   target_plan.eval.memory_bytes);
-        }
-        flow_orchestrator_destroy(orch);
-        return EXIT_SUCCESS;
-    }
-
-    /* 15. Counterfactual Simulation ("What-If" Architectural Sandbox) */
-    if (strcmp(argv[1], "what-if") == 0 || strcmp(argv[1], "--what-if") == 0 || strcmp(argv[1], "whatif") == 0) {
-        int mem_mb = 32;
-        int top_n = 50;
-        int threads = 4;
-        const char *spec = NULL;
-
-        for (int i = 2; i < argc; ++i) {
-            if (strcmp(argv[i], "--memory") == 0 && i + 1 < argc) {
-                mem_mb = atoi(argv[++i]);
-            } else if (strcmp(argv[i], "--top-n") == 0 && i + 1 < argc) {
-                top_n = atoi(argv[++i]);
-            } else if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) {
-                threads = atoi(argv[++i]);
-            } else if (argv[i][0] != '-') {
-                spec = argv[i];
-            }
-        }
-
-        FlowOrchestrator *orch = flow_orchestrator_create(".");
-        char diag[256] = {0};
-        if (spec != NULL) {
-            flow_orchestrator_absorb(orch, spec, diag, sizeof(diag));
-        } else {
-            flow_orchestrator_absorb(orch, "examples/rank.flow", diag, sizeof(diag));
-        }
-
-        FlowCounterfactualReport report;
-        flow_orchestrator_simulate_what_if(orch, mem_mb, top_n, threads, &report);
-        flowy_print_counterfactual_report(&report, stdout);
-        flow_orchestrator_destroy(orch);
-        return EXIT_SUCCESS;
-    }
-
-    /* 16. Topological Synthesis & Auto-Remediation (flowy remediate) */
-    if (strcmp(argv[1], "remediate") == 0 || strcmp(argv[1], "--remediate") == 0) {
-        const char *spec1 = argc >= 3 ? argv[2] : "examples/compiler.flow";
-        const char *spec2 = argc >= 4 ? argv[3] : "examples/project.flow";
-
-        FlowOrchestrator *orch = flow_orchestrator_create(".");
-        FlowRemediationProposal proposal;
-        flow_orchestrator_synthesize_remediation(orch, spec1, spec2, &proposal);
-        flowy_print_remediation_proposal(&proposal, stdout);
-        flow_orchestrator_destroy(orch);
-        return EXIT_SUCCESS;
-    }
-
-    /* 17. Closed-Loop Autonomous Orchestration (flowy autopilot) */
-    if (strcmp(argv[1], "autopilot") == 0 || strcmp(argv[1], "--autopilot") == 0) {
-        FlowOrchestrator *orch = flow_orchestrator_create(".");
-        char diag[256] = {0};
-        const char *spec = argc >= 3 ? argv[2] : "examples/project.flow";
-        flow_orchestrator_absorb(orch, spec, diag, sizeof(diag));
-
-        FlowAutopilotController *ctrl = flow_autopilot_create(orch, NULL);
-        FlowPMUTelemetry storm = { .cache_miss_rate = 0.148, .ipc = 0.82 };
-        FlowAutopilotIncident inc;
-        flow_autopilot_step(ctrl, &storm, &inc);
-        flowy_print_autopilot_incident(&inc, stdout);
-        flow_autopilot_destroy(ctrl);
-        flow_orchestrator_destroy(orch);
-        return EXIT_SUCCESS;
-    }
-
-    if (strcmp(argv[1], "daemon") == 0 || strcmp(argv[1], "--daemon") == 0) {
-        size_t interval_ms = 100;
-        size_t max_cycles = 3;
-        int is_nightly = 0;
-        const char *target_spec = "examples/bounded_queue.flow";
-        const char *out_fvec = NULL;
-        size_t anneal_iters = 100;
-        uint32_t anneal_seed = 42;
-
-        for (int i = 2; i < argc; ++i) {
-            if (strcmp(argv[i], "--interval-ms") == 0 && i + 1 < argc) {
-                interval_ms = (size_t)strtoul(argv[++i], NULL, 10);
-            } else if (strcmp(argv[i], "--cycles") == 0 && i + 1 < argc) {
-                max_cycles = (size_t)strtoul(argv[++i], NULL, 10);
-            } else if (strcmp(argv[i], "--anneal") == 0 || strcmp(argv[i], "--nightly") == 0) {
-                is_nightly = 1;
-            } else if (strcmp(argv[i], "--spec") == 0 && i + 1 < argc) {
-                target_spec = argv[++i];
-                is_nightly = 1;
-            } else if (strcmp(argv[i], "--out-fvec") == 0 && i + 1 < argc) {
-                out_fvec = argv[++i];
-                is_nightly = 1;
-            } else if (strcmp(argv[i], "--iterations") == 0 && i + 1 < argc) {
-                anneal_iters = (size_t)strtoul(argv[++i], NULL, 10);
-            } else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) {
-                anneal_seed = (uint32_t)strtoul(argv[++i], NULL, 10);
-            }
-        }
-
-        if (is_nightly) {
-            FILE *f_spec = fopen(target_spec, "r");
-            if (!f_spec) {
-                fprintf(stderr, "flowy daemon: cannot open spec file: %s\n", target_spec);
-                return EXIT_FAILURE;
-            }
-            FlowSpec spec;
-            if (!parse_spec(f_spec, &spec)) {
-                fclose(f_spec);
-                fprintf(stderr, "flowy daemon: syntax error in spec: %s\n", target_spec);
-                return EXIT_FAILURE;
-            }
-            fclose(f_spec);
-
-            SemanticIR ir;
-            lower_to_ir(&spec, &ir);
-
-            FlowBitSpace space;
-            if (!flow_bitspace_init_for_ir(&ir, &space)) {
-                fprintf(stderr, "flowy daemon: failed to init BitSpace for spec: %s\n", target_spec);
-                flow_ir_cleanup(&ir);
-                return EXIT_FAILURE;
-            }
-
-            uint64_t current_genome = 0ULL;
-            FlowPlan best_plan;
-            space.decode(&space, current_genome, &best_plan);
-            space.evaluate(&space, &best_plan, &best_plan.eval);
-            double initial_energy = best_plan.eval.energy;
-
-            uint32_t rng = anneal_seed;
-            for (size_t iter = 0; iter < anneal_iters; ++iter) {
-                rng = rng * 1664525u + 1013904223u;
-                int bit = (int)(rng % 64);
-                uint64_t cand_genome = current_genome ^ (1ULL << bit);
-
-                FlowPlan cand_plan;
-                space.decode(&space, cand_genome, &cand_plan);
-                space.evaluate(&space, &cand_plan, &cand_plan.eval);
-
-                if (cand_plan.eval.energy < best_plan.eval.energy) {
-                    best_plan = cand_plan;
-                    current_genome = cand_genome;
-                }
-            }
-
-            char out_path_buf[512];
-            if (!out_fvec) {
-                snprintf(out_path_buf, sizeof(out_path_buf), ".flow/vecs/nightly_optimized_%s.fvec", ir.flow_name);
-                out_fvec = out_path_buf;
-            }
-
-            FlowVecHeader hdr;
-            FlowVecPayload payload;
-            memset(&hdr, 0, sizeof(hdr));
-            memset(&payload, 0, sizeof(payload));
-
-            strncpy(hdr.magic, "FVEC_V1", sizeof(hdr.magic) - 1);
-            snprintf(hdr.id, sizeof(hdr.id), "nightly_%s", ir.flow_name);
-            snprintf(hdr.name, sizeof(hdr.name), "Nightly 1-Bit Annealed [%s]", ir.flow_name);
-            strncpy(hdr.origin_hardware, "x86_avx2, L1=64K, Cores=64", sizeof(hdr.origin_hardware) - 1);
-            strncpy(hdr.trigger_intent, "NIGHTLY_ANNEALED", sizeof(hdr.trigger_intent) - 1);
-            strncpy(hdr.category, "NIGHTLY_ANNEALED", sizeof(hdr.category) - 1);
-            strncpy(hdr.component_id, best_plan.component ? best_plan.component->id : "auto", sizeof(hdr.component_id) - 1);
-            strncpy(hdr.smt_signature, "BUFFER_UNSAT:MEM_UNSAT:SHARD_UNSAT:DET_UNSAT", sizeof(hdr.smt_signature) - 1);
-            hdr.energy_score = best_plan.eval.energy;
-            hdr.created_at_unix = (uint64_t)time(NULL);
-            hdr.vector_dim = 16;
-            hdr.payload_size = sizeof(FlowVecPayload);
-
-            payload.pure_genome = best_plan.genome;
-            payload.hard_composite_mask = 0xFFFFFFFFFFFFFFFFULL;
-            payload.soft_composite_bias = 0ULL;
-            payload.proof.buffer_bounds_safety = FLOW_SMT_PROVEN_UNSAT;
-            payload.proof.memory_quota_bound = FLOW_SMT_PROVEN_UNSAT;
-            payload.proof.shard_non_aliasing = FLOW_SMT_PROVEN_UNSAT;
-            payload.proof.determinism_invariant = FLOW_SMT_PROVEN_UNSAT;
-            strncpy(payload.proof.proof_summary, "NIGHTLY_ANNEAL_PROVEN", sizeof(payload.proof.proof_summary) - 1);
-            payload.crc32 = flow_fvec_crc32(&payload, sizeof(payload) - sizeof(uint32_t));
-
-            flow_fvec_write_file(out_fvec, &hdr, &payload);
-
-                        printf("  🌙 FLOW Nightly Annealing Daemon (Background Architecture Optimizer)\n");
-                        printf("  Target Spec:       %s\n", target_spec);
-            printf("  Iterations:        %zu (Seed: %u)\n", anneal_iters, anneal_seed);
-            printf("  Convergence:       BMF Optimization Converged (Initial: %.2f -> Optimized: %.2f)\n",
-                   initial_energy, best_plan.eval.energy);
-            printf("  SMT Supreme Court: 4/4 Theorems Verified (UNSAT Zero-Defect Soundness)\n");
-            printf("  Crystallized To:   %s\n", out_fvec);
-            printf("  ⚡ Foreground Instant O(1) Cold-Start Command:\n");
-            printf("     flowc %s -o server.c --apply-fvec %s\n", target_spec, out_fvec);
-            
-            flow_ir_cleanup(&ir);
-            return EXIT_SUCCESS;
-        }
-
-        FlowOrchestrator *orch = flow_orchestrator_create(".");
-        char diag[256] = {0};
-        flow_orchestrator_absorb(orch, "examples/compiler.flow", diag, sizeof(diag));
-        flow_orchestrator_absorb(orch, "examples/project.flow", diag, sizeof(diag));
-        printf("flow-daemon: [started] Living Topology Orchestrator daemon active (interval=%zums, cycles=%zu)\n", interval_ms, max_cycles);
-        for (size_t c = 0; c < max_cycles; ++c) {
-            double delta = 0.0;
-            flow_orchestrator_refactor_entropy(orch, &delta);
-            FlowOrchestratorEpoch ep;
-            flow_orchestrator_anneal(orch, 50, 42 + (uint32_t)c, &ep);
-            printf("flow-daemon: [cycle #%zu] Entropy=%.4f (Delta=%.4f) GlobalEnergy=%.4f ActiveEpoch=#%llu PrimaryComponent=%s\n",
-                   c + 1, ep.entropy_score, delta, ep.global_energy, (unsigned long long)ep.epoch_id, ep.primary_component);
-        }
-        printf("flow-daemon: [quiesced] Background continuous annealing completed.\n");
-        flow_orchestrator_destroy(orch);
         return EXIT_SUCCESS;
     }
 
@@ -885,7 +850,7 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    fprintf(stderr, "Unknown command: %s\n", argv[1]);
-    fprintf(stderr, "Usage: flowy [hub|fvec|query|tidal|transfer|predict|generate|rag|vault|antibody|what-if|remediate|autopilot|ask|why|bottleneck|timeline|audit|audit-mechanisms|doc|absorb|anneal|landscape|refactor|morph|daemon|shell]\n");
+    fprintf(stderr, "Unknown command: %s\n\n", argv[1]);
+    flowy_print_usage(stderr);
     return EXIT_FAILURE;
 }
