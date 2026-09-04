@@ -84,10 +84,8 @@ void flowy_print_decision_timeline(const FlowDecisionLogger *logger, FILE *out) 
     if (out == NULL) return;
     const FlowDecisionLogger *l = (logger && logger->total_recorded > 0) ? logger : flow_decision_logger_default();
 
-    fprintf(out, "========================================================================================================\n");
-    fprintf(out, "                         FLOW REAL-TIME DECISION TIMELINE & CAUSAL LOG                                \n");
-    fprintf(out, "========================================================================================================\n");
-    fprintf(out, "%-10s | %-18s | %-18s | %-28s | %-8s\n",
+        fprintf(out, "                         FLOW REAL-TIME DECISION TIMELINE & CAUSAL LOG                                \n");
+        fprintf(out, "%-10s | %-18s | %-18s | %-28s | %-8s\n",
             "Time (ms)", "Trigger", "Observed / Limit", "Topology Morph", "QSBR (ns)");
     fprintf(out, "-----------+--------------------+--------------------+------------------------------+-----------\n");
 
@@ -103,8 +101,7 @@ void flowy_print_decision_timeline(const FlowDecisionLogger *logger, FILE *out) 
         fprintf(out, "%10.2f | %-18s | %-18s | %-28s | %8llu\n",
                 t_ms, ev->trigger_source, val_str, morph_str, (unsigned long long)ev->hot_swap_grace_ns);
     }
-    fprintf(out, "========================================================================================================\n");
-}
+    }
 
 void flowy_print_bottleneck_explanation(const FlowTopologyGraph *graph, FILE *out) {
     if (out == NULL) return;
@@ -119,17 +116,14 @@ int flowy_show_book_lang(const char *target, FlowLanguage lang, FILE *out) {
     const FlowBookChapterDoc *chapters = (lang == FLOW_LANG_EN) ? FLOW_BOOK_CHAPTERS_EN : FLOW_BOOK_CHAPTERS_ZH;
 
     if (target == NULL || strcmp(target, "all") == 0 || strcmp(target, "toc") == 0 || strcmp(target, "summary") == 0) {
-        fprintf(out, "================================================================================\n");
-        fprintf(out, "%s\n", tpl->book_toc_header);
-        fprintf(out, "================================================================================\n");
-        for (size_t i = 0; i < FLOW_BOOK_CHAPTER_COUNT; ++i) {
+                fprintf(out, "%s\n", tpl->book_toc_header);
+                for (size_t i = 0; i < FLOW_BOOK_CHAPTER_COUNT; ++i) {
             const FlowBookChapterDoc *ch = &chapters[i];
             fprintf(out, "[Chapter %02zu] %s\n", i + 1, ch->chapter_title);
             fprintf(out, "             %s: flow-book/src/%s\n", tpl->book_doc_path, ch->chapter_ref);
             fprintf(out, "             %s 「%s」\n\n", (lang == FLOW_LANG_EN ? "Philosophy:" : "哲學:"), ch->philosophy_why);
         }
-        fprintf(out, "================================================================================\n");
-        fprintf(out, "%s\n\n", tpl->book_toc_footer);
+                fprintf(out, "%s\n\n", tpl->book_toc_footer);
         return 1;
     }
 
@@ -149,8 +143,7 @@ int flowy_show_book_lang(const char *target, FlowLanguage lang, FILE *out) {
     }
 
     if (ch_found) {
-        fprintf(out, "================================================================================\n");
-        fprintf(out, "%s: %s\n", tpl->book_doc_header, ch_found->chapter_title);
+                fprintf(out, "%s: %s\n", tpl->book_doc_header, ch_found->chapter_title);
         fprintf(out, "%s: flow-book/src/%s\n", tpl->book_doc_path, ch_found->chapter_ref);
         fprintf(out, "================================================================================\n\n");
         fprintf(out, "%s\n   「%s」\n\n", tpl->book_doc_why, ch_found->philosophy_why);
@@ -174,58 +167,45 @@ int flowy_show_book(const char *target, FILE *out) {
 void flowy_print_counterfactual_report(const FlowCounterfactualReport *report, FILE *out) {
     if (report == NULL || out == NULL) return;
 
-    fprintf(out, "================================================================================\n");
-    fprintf(out, "        FLOW TOPOLOGY COUNTERFACTUAL WHAT-IF SIMULATION REPORT                  \n");
-    fprintf(out, "================================================================================\n");
-    fprintf(out, "Hypothetical Scenario:       %s\n", report->hypothetical_description);
+        fprintf(out, "        FLOW TOPOLOGY COUNTERFACTUAL WHAT-IF SIMULATION REPORT                  \n");
+        fprintf(out, "Hypothetical Scenario:       %s\n", report->hypothetical_description);
     fprintf(out, "Memory Constraint Shift:     %d MB -> %d MB\n", report->original_memory_mb, report->hypothetical_memory_mb);
     fprintf(out, "Component Layout:            %s -> %s\n", report->original_component, report->hypothetical_component);
     fprintf(out, "Pareto Latency Score:        %.2f -> %.2f\n", report->original_latency_score, report->hypothetical_latency_score);
     fprintf(out, "Pareto Energy:               %.2f -> %.2f\n", report->original_energy, report->hypothetical_energy);
     fprintf(out, "Throughput Impact:           %+.1f%%\n", report->throughput_delta_percent);
     fprintf(out, "QSBR Reclamation Multiplier: %.1fx (Reclamation pressure surge)\n", report->qsbr_reclaim_freq_multiplier);
-    fprintf(out, "--------------------------------------------------------------------------------\n");
-    fprintf(out, "STRUCTURAL TOPOLOGY COLLAPSE:\n");
+        fprintf(out, "STRUCTURAL TOPOLOGY COLLAPSE:\n");
     fprintf(out, "  * %s\n", report->structural_collapse);
-    fprintf(out, "--------------------------------------------------------------------------------\n");
-    fprintf(out, "DECISION RECOMMENDATION:\n");
+        fprintf(out, "DECISION RECOMMENDATION:\n");
     fprintf(out, "  * %s\n", report->recommendation);
-    fprintf(out, "================================================================================\n");
-}
+    }
 
 void flowy_print_remediation_proposal(const FlowRemediationProposal *proposal, FILE *out) {
     if (proposal == NULL || out == NULL) return;
 
-    fprintf(out, "================================================================================\n");
-    fprintf(out, "          FLOW TOPOLOGICAL SYNTHESIS & SMT AUTO-REMEDIATION PROPOSAL            \n");
-    fprintf(out, "================================================================================\n");
-    fprintf(out, "Conflict Summary:            %s\n", proposal->conflict_summary);
+        fprintf(out, "          FLOW TOPOLOGICAL SYNTHESIS & SMT AUTO-REMEDIATION PROPOSAL            \n");
+        fprintf(out, "Conflict Summary:            %s\n", proposal->conflict_summary);
     fprintf(out, "Min-Cut Bottleneck Variable: %s\n", proposal->min_cut_dimension);
     fprintf(out, "Current Infeasible Bound:    %.1f MB\n", proposal->current_bound);
     fprintf(out, "Required Remediation Bound:  %.1f MB (Minimum relaxation distance)\n", proposal->required_remediation_bound);
-    fprintf(out, "--------------------------------------------------------------------------------\n");
-    fprintf(out, "SYNTHESIZED .FLOW REMEDIATION PATCH:\n");
+        fprintf(out, "SYNTHESIZED .FLOW REMEDIATION PATCH:\n");
     fprintf(out, "%s", proposal->proposed_flow_patch);
-    fprintf(out, "================================================================================\n");
-}
+    }
 
 void flowy_print_autopilot_incident(const FlowAutopilotIncident *incident, FILE *out) {
     if (incident == NULL || out == NULL) return;
 
-    fprintf(out, "================================================================================\n");
-    fprintf(out, "          FLOW CLOSED-LOOP AUTONOMOUS AUTOPILOT INCIDENT REPORT                 \n");
-    fprintf(out, "================================================================================\n");
-    fprintf(out, "Incident ID:                 #%llu\n", (unsigned long long)incident->incident_id);
+        fprintf(out, "          FLOW CLOSED-LOOP AUTONOMOUS AUTOPILOT INCIDENT REPORT                 \n");
+        fprintf(out, "Incident ID:                 #%llu\n", (unsigned long long)incident->incident_id);
     fprintf(out, "Trigger Anomaly:             %s\n", incident->anomaly_cause);
     fprintf(out, "Topology Migration:          %s -> %s\n", incident->previous_topology, incident->new_topology);
     fprintf(out, "Autonomous Action:           %s\n", incident->autonomous_action);
     fprintf(out, "Hot-Swap Live Switch:        %llu ns (Zero-downtime QSBR pointer migration)\n", (unsigned long long)incident->hot_swap_switch_ns);
     fprintf(out, "SMT Mathematical Proofs:     %s (Zero-Defect Guaranteed)\n", incident->smt_proof.proof_summary);
-    fprintf(out, "--------------------------------------------------------------------------------\n");
-    fprintf(out, "HUMAN NARRATIVE LOG:\n");
+        fprintf(out, "HUMAN NARRATIVE LOG:\n");
     fprintf(out, "  \"%s\"\n", incident->human_narrative);
-    fprintf(out, "================================================================================\n");
-}
+    }
 
 /* ========================================================================= */
 /* Interactive REPL Prompt Loop                                              */
@@ -237,10 +217,8 @@ int flowy_interactive_loop(FlowOrchestrator *orch, FILE *in, FILE *out) {
     FlowTopologyGraph graph;
     flow_topology_build_codebase_graph(&graph);
 
-    fprintf(out, "================================================================================\n");
-    fprintf(out, "           FLOW INTROSPECTIVE CODEBASE KNOWLEDGE & ARCHITECTURE REASONER        \n");
-    fprintf(out, "================================================================================\n");
-    fprintf(out, "Ask any question about FLOW architecture, algorithms, QSBR, SMT, or BitSpace\n");
+        fprintf(out, "           FLOW INTROSPECTIVE CODEBASE KNOWLEDGE & ARCHITECTURE REASONER        \n");
+        fprintf(out, "Ask any question about FLOW architecture, algorithms, QSBR, SMT, or BitSpace\n");
     fprintf(out, "Commands: 'what-if', 'remediate', 'autopilot', 'why', 'bottleneck', 'timeline', 'list', 'exit'\n\n");
 
     char line_buf[512];

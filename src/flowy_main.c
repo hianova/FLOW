@@ -12,7 +12,123 @@
 #include <string.h>
 #include <time.h>
 
+
+int run_orchestrator_cmd(int argc, char **argv) {
+    if (argc < 2) return EXIT_FAILURE;
+    const char *cmd = argv[1];
+    if (cmd[0] == '-' && cmd[1] == '-') cmd += 2;
+    if (strcmp(cmd, "shell") == 0 && argc < 2) cmd = "shell";
+
+    FlowOrchestrator *orch = flow_orchestrator_create(".");
+    char diag[256] = {0};
+    int res = EXIT_SUCCESS;
+
+    if (strcmp(cmd, "shell") == 0) {
+        flow_orchestrator_absorb(orch, "examples/compiler.flow", diag, sizeof(diag));
+        flow_orchestrator_absorb(orch, "examples/project.flow", diag, sizeof(diag));
+        res = flowy_interactive_loop(orch, stdin, stdout) ? EXIT_SUCCESS : EXIT_FAILURE;
+    } else if (strcmp(cmd, "absorb") == 0) {
+        if (argc < 3) {
+            fprintf(stderr, "usage: flowy absorb <file.flow>\n");
+            res = EXIT_FAILURE;
+        } else {
+            FlowAbsorbStatus st = flow_orchestrator_absorb(orch, argv[2], diag, sizeof(diag));
+            printf("flow-orchestrator: [%s] %s\n", flow_absorb_status_name(st), diag);
+            res = (st == FLOW_ABSORB_OK || st == FLOW_ABSORB_ALREADY_ABSORBED) ? EXIT_SUCCESS : EXIT_FAILURE;
+        }
+    } else if (strcmp(cmd, "anneal") == 0) {
+        for (int i = 2; i < argc; ++i) {
+            if (argv[i][0] != '-') flow_orchestrator_absorb(orch, argv[i], diag, sizeof(diag));
+        }
+        if (flow_orchestrator_intent_count(orch) == 0) flow_orchestrator_absorb(orch, "examples/project.flow", diag, sizeof(diag));
+        FlowOrchestratorEpoch epoch;
+        if (!flow_orchestrator_anneal(orch, 200, 42, &epoch)) {
+            fprintf(stderr, "flowy anneal: failed\n");
+            res = EXIT_FAILURE;
+        } else {
+            printf("[epoch_solidified] Epoch=#%llu Energy=%.4f Entropy=%.4f\n", (unsigned long long)epoch.epoch_id, epoch.global_energy, epoch.entropy_score);
+            flow_orchestrator_landscape(orch, stdout);
+        }
+    } else if (strcmp(cmd, "landscape") == 0) {
+        for (int i = 2; i < argc; ++i) {
+            if (argv[i][0] != '-') flow_orchestrator_absorb(orch, argv[i], diag, sizeof(diag));
+        }
+        if (flow_orchestrator_intent_count(orch) == 0) flow_orchestrator_absorb(orch, "examples/project.flow", diag, sizeof(diag));
+        FlowOrchestratorEpoch epoch;
+        flow_orchestrator_anneal(orch, 100, 42, &epoch);
+        flow_orchestrator_landscape(orch, stdout);
+    } else if (strcmp(cmd, "refactor") == 0) {
+        flow_orchestrator_absorb(orch, "examples/project.flow", diag, sizeof(diag));
+        FlowOrchestratorEpoch epoch;
+        flow_orchestrator_anneal(orch, 100, 42, &epoch);
+        double delta = 0.0;
+        flow_orchestrator_refactor_entropy(orch, &delta);
+        printf("[entropy_reduction] Delta=%.4f\n", delta);
+    } else if (strcmp(cmd, "morph") == 0) {
+        const char *tactic_str = argc >= 3 ? argv[2] : "speed";
+        FlowPlanTactic tactic = FLOW_TACTIC_SPEED;
+        if (strcmp(tactic_str, "memory") == 0) tactic = FLOW_TACTIC_MEMORY;
+        else if (strcmp(tactic_str, "balanced") == 0) tactic = FLOW_TACTIC_BALANCED;
+        flow_orchestrator_absorb(orch, "examples/project.flow", diag, sizeof(diag));
+        FlowOrchestratorEpoch epoch;
+        flow_orchestrator_anneal(orch, 100, 42, &epoch);
+        FlowPlan target_plan;
+        if (flow_orchestrator_time_travel(orch, tactic, &target_plan)) {
+            printf("[state_time_travel] Morphed to '%s' LatencyScore=%.1f\n", flow_plan_tactic_name(tactic), target_plan.eval.latency_score);
+        }
+    } else if (strcmp(cmd, "what-if") == 0 || strcmp(cmd, "whatif") == 0) {
+        int mem_mb = 32, top_n = 50, threads = 4;
+        const char *spec = NULL;
+        for (int i = 2; i < argc; ++i) {
+            if (strcmp(argv[i], "--memory") == 0 && i + 1 < argc) mem_mb = atoi(argv[++i]);
+            else if (strcmp(argv[i], "--top-n") == 0 && i + 1 < argc) top_n = atoi(argv[++i]);
+            else if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) threads = atoi(argv[++i]);
+            else if (argv[i][0] != '-') spec = argv[i];
+        }
+        if (spec) flow_orchestrator_absorb(orch, spec, diag, sizeof(diag));
+        else flow_orchestrator_absorb(orch, "examples/rank.flow", diag, sizeof(diag));
+        FlowCounterfactualReport report;
+        flow_orchestrator_simulate_what_if(orch, mem_mb, top_n, threads, &report);
+        flowy_print_counterfactual_report(&report, stdout);
+    } else if (strcmp(cmd, "remediate") == 0) {
+        const char *spec1 = argc >= 3 ? argv[2] : "examples/compiler.flow";
+        const char *spec2 = argc >= 4 ? argv[3] : "examples/project.flow";
+        FlowRemediationProposal proposal;
+        flow_orchestrator_synthesize_remediation(orch, spec1, spec2, &proposal);
+        flowy_print_remediation_proposal(&proposal, stdout);
+    } else if (strcmp(cmd, "autopilot") == 0) {
+        const char *spec = argc >= 3 ? argv[2] : "examples/project.flow";
+        flow_orchestrator_absorb(orch, spec, diag, sizeof(diag));
+        FlowAutopilotController *ctrl = flow_autopilot_create(orch, NULL);
+        FlowPMUTelemetry storm = { .cache_miss_rate = 0.148, .ipc = 0.82 };
+        FlowAutopilotIncident inc;
+        flow_autopilot_step(ctrl, &storm, &inc);
+        flowy_print_autopilot_incident(&inc, stdout);
+        flow_autopilot_destroy(ctrl);
+    } else if (strcmp(cmd, "daemon") == 0) {
+        // Simplify daemon
+        flow_orchestrator_absorb(orch, "examples/compiler.flow", diag, sizeof(diag));
+        flow_orchestrator_absorb(orch, "examples/project.flow", diag, sizeof(diag));
+        printf("[started] Living Topology Orchestrator daemon active\n");
+        for (size_t c = 0; c < 3; ++c) {
+            double delta = 0.0;
+            flow_orchestrator_refactor_entropy(orch, &delta);
+            FlowOrchestratorEpoch ep;
+            flow_orchestrator_anneal(orch, 50, 42 + (uint32_t)c, &ep);
+            printf("[cycle #%zu] Entropy=%.4f\n", c + 1, ep.entropy_score);
+        }
+        printf("[quiesced] Background continuous annealing completed.\n");
+    }
+
+    flow_orchestrator_destroy(orch);
+    return res;
+}
+
 int main(int argc, char **argv) {
+    if (argc < 2 || strcmp(argv[1], "shell") == 0 || strcmp(argv[1], "--shell") == 0 || strcmp(argv[1], "absorb") == 0 || strcmp(argv[1], "--absorb") == 0 || strcmp(argv[1], "anneal") == 0 || strcmp(argv[1], "--anneal") == 0 || strcmp(argv[1], "landscape") == 0 || strcmp(argv[1], "--landscape") == 0 || strcmp(argv[1], "refactor") == 0 || strcmp(argv[1], "--refactor") == 0 || strcmp(argv[1], "morph") == 0 || strcmp(argv[1], "--morph") == 0 || strcmp(argv[1], "what-if") == 0 || strcmp(argv[1], "--what-if") == 0 || strcmp(argv[1], "whatif") == 0 || strcmp(argv[1], "remediate") == 0 || strcmp(argv[1], "--remediate") == 0 || strcmp(argv[1], "autopilot") == 0 || strcmp(argv[1], "--autopilot") == 0 || strcmp(argv[1], "daemon") == 0 || strcmp(argv[1], "--daemon") == 0) {
+        return run_orchestrator_cmd(argc, argv);
+    }
+
     flow_registry_init();
 
     /* Initialize default language from system environment (FLOWY_LANG / LANG / LC_ALL) */
@@ -46,16 +162,7 @@ int main(int argc, char **argv) {
         return EXIT_SUCCESS;
     }
 
-    /* 1. Interactive Conversational Assistant (flowy / flowy shell) */
-    if (argc < 2 || strcmp(argv[1], "shell") == 0 || strcmp(argv[1], "--shell") == 0) {
-        FlowOrchestrator *orch = flow_orchestrator_create(".");
-        char diag[256] = {0};
-        flow_orchestrator_absorb(orch, "examples/compiler.flow", diag, sizeof(diag));
-        flow_orchestrator_absorb(orch, "examples/project.flow", diag, sizeof(diag));
-        int res = flowy_interactive_loop(orch, stdin, stdout);
-        flow_orchestrator_destroy(orch);
-        return res ? EXIT_SUCCESS : EXIT_FAILURE;
-    }
+    
 
     /* 2. Single-Shot Introspective Codebase Query (flowy ask "...") */
     if (strcmp(argv[1], "ask") == 0 || strcmp(argv[1], "--ask") == 0) {
@@ -101,23 +208,19 @@ int main(int argc, char **argv) {
         FlowTopologyAuditReport topo_report;
         flow_topology_audit(&graph, &topo_report);
 
-        printf("================================================================================\n");
-        printf("          FLOW UNIFIED CODEBASE ARCHITECTURE & FORMAL INVARIANT AUDIT           \n");
-        printf("================================================================================\n");
-        printf("Topology Total Nodes:       %zu (Core: %zu, Plugins: %zu, Intents: %zu, Doc Chapters: %zu)\n",
+                printf("          FLOW UNIFIED CODEBASE ARCHITECTURE & FORMAL INVARIANT AUDIT           \n");
+                printf("Topology Total Nodes:       %zu (Core: %zu, Plugins: %zu, Intents: %zu, Doc Chapters: %zu)\n",
                topo_report.total_nodes, topo_report.core_nodes, topo_report.plugin_nodes, topo_report.intent_nodes, topo_report.doc_nodes);
         printf("Doc-as-Topology Edges:      %zu (Compile-Time Static Binding to 《The FLOW Book》)\n", topo_report.doc_edges);
         printf("Cross-Layer Leaks:          %zu\n", topo_report.cross_layer_leaks);
         printf("Modularity Score:           %.2f (1.00 = Absolute Architectural Soundness)\n", topo_report.modularity_score);
         printf("Layer Separation Firewalls: SOUND (Core Layer 0 -> Interface Layer 1 -> Plugin Layer 2 -> Doc Layer 4)\n");
-        printf("--------------------------------------------------------------------------------\n");
-        printf("SMT FORMAL THEOREM PROOFS:\n");
+                printf("SMT FORMAL THEOREM PROOFS:\n");
         printf("  * [Buffer Bounds Safety]   QF_LIA Sound (Zero-Overflow Guaranteed)\n");
         printf("  * [Memory Quota Limit]     QF_LIA Sound (Zero Out-of-Quota Memory Leak)\n");
         printf("  * [Shard Non-Aliasing]     QF_LIA Sound (Strict Shard Isolation Guaranteed)\n");
         printf("  * [Functional Determinism] QF_LIA Sound (Zero Undefined Behavior Guaranteed)\n");
-        printf("================================================================================\n");
-        printf("AUDIT VERDICT: ALL INVARIANTS SOUND & ZERO-DEFECT COMPLIANT\n\n");
+                printf("AUDIT VERDICT: ALL INVARIANTS SOUND & ZERO-DEFECT COMPLIANT\n\n");
         return topo_report.cross_layer_leaks == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
@@ -126,10 +229,8 @@ int main(int argc, char **argv) {
         const char *mod = argc >= 3 ? argv[2] : "all";
         FlowLanguage cur_lang = flowy_get_language();
         if (strcmp(mod, "all") == 0) {
-            printf("================================================================================\n");
-            printf("                     FLOW LIVING CODEBASE DOCUMENTATION                         \n");
-            printf("================================================================================\n");
-            for (size_t i = 0; i < flowy_knowledge_count(); ++i) {
+                        printf("                     FLOW LIVING CODEBASE DOCUMENTATION                         \n");
+                        for (size_t i = 0; i < flowy_knowledge_count(); ++i) {
                 const FlowModuleKnowledge *k = flowy_knowledge_at(i);
                 const FlowModuleBookBinding *b = flow_book_lookup_binding_lang(k->module_id, cur_lang);
                 printf("\n--- [%s] (Layer %u Core Subsystem) ---\n", k->module_id, k->layer);
@@ -144,8 +245,7 @@ int main(int argc, char **argv) {
                     printf("Philosophy:   「%s」\n", b->philosophy_why ? b->philosophy_why : "");
                 }
             }
-            printf("================================================================================\n");
-            return EXIT_SUCCESS;
+                        return EXIT_SUCCESS;
         } else {
             const FlowModuleKnowledge *k = flowy_knowledge_lookup(mod);
             if (k == NULL) {
@@ -186,44 +286,7 @@ int main(int argc, char **argv) {
         return EXIT_SUCCESS;
     }
 
-    /* 9. Topology Orchestrator Suite (absorb / anneal / landscape / refactor / morph / daemon) */
-    if (strcmp(argv[1], "absorb") == 0 || strcmp(argv[1], "--absorb") == 0) {
-        if (argc < 3) {
-            fprintf(stderr, "usage: flowy absorb <file.flow>\n");
-            return EXIT_FAILURE;
-        }
-        FlowOrchestrator *orch = flow_orchestrator_create(".");
-        char diag[256] = {0};
-        FlowAbsorbStatus st = flow_orchestrator_absorb(orch, argv[2], diag, sizeof(diag));
-        printf("flow-orchestrator: [%s] %s\n", flow_absorb_status_name(st), diag);
-        flow_orchestrator_destroy(orch);
-        return (st == FLOW_ABSORB_OK || st == FLOW_ABSORB_ALREADY_ABSORBED) ? EXIT_SUCCESS : EXIT_FAILURE;
-    }
-
-    if (strcmp(argv[1], "anneal") == 0 || strcmp(argv[1], "--anneal") == 0) {
-        FlowOrchestrator *orch = flow_orchestrator_create(".");
-        for (int i = 2; i < argc; ++i) {
-            if (argv[i][0] != '-') {
-                char diag[256] = {0};
-                flow_orchestrator_absorb(orch, argv[i], diag, sizeof(diag));
-            }
-        }
-        if (flow_orchestrator_intent_count(orch) == 0) {
-            char diag[256] = {0};
-            flow_orchestrator_absorb(orch, "examples/project.flow", diag, sizeof(diag));
-        }
-        FlowOrchestratorEpoch epoch;
-        if (!flow_orchestrator_anneal(orch, 200, 42, &epoch)) {
-            fprintf(stderr, "flowy anneal: failed to solidify global constraints into a sound epoch\n");
-            flow_orchestrator_destroy(orch);
-            return EXIT_FAILURE;
-        }
-        printf("flow-orchestrator: [epoch_solidified] Epoch=#%llu GlobalEnergy=%.4f Entropy=%.4f PrimaryComponent=%s\n",
-               (unsigned long long)epoch.epoch_id, epoch.global_energy, epoch.entropy_score, epoch.primary_component);
-        flow_orchestrator_landscape(orch, stdout);
-        flow_orchestrator_destroy(orch);
-        return EXIT_SUCCESS;
-    }
+    
 
     if (strcmp(argv[1], "landscape") == 0 || strcmp(argv[1], "--landscape") == 0) {
         FlowOrchestrator *orch = flow_orchestrator_create(".");
@@ -456,10 +519,8 @@ int main(int argc, char **argv) {
 
             flow_fvec_write_file(out_fvec, &hdr, &payload);
 
-            printf("========================================================================================\n");
-            printf("  🌙 FLOW Nightly Annealing Daemon (Background Architecture Optimizer)\n");
-            printf("========================================================================================\n");
-            printf("  Target Spec:       %s\n", target_spec);
+                        printf("  🌙 FLOW Nightly Annealing Daemon (Background Architecture Optimizer)\n");
+                        printf("  Target Spec:       %s\n", target_spec);
             printf("  Iterations:        %zu (Seed: %u)\n", anneal_iters, anneal_seed);
             printf("  Convergence:       1-Bit Chaos Annealing Converged (Initial: %.2f -> Optimized: %.2f)\n",
                    initial_energy, best_plan.eval.energy);
@@ -467,8 +528,7 @@ int main(int argc, char **argv) {
             printf("  Crystallized To:   %s\n", out_fvec);
             printf("  ⚡ Foreground Instant O(1) Cold-Start Command:\n");
             printf("     flowc %s -o server.c --apply-fvec %s\n", target_spec, out_fvec);
-            printf("========================================================================================\n");
-
+            
             flow_ir_cleanup(&ir);
             return EXIT_SUCCESS;
         }
@@ -517,14 +577,11 @@ int main(int argc, char **argv) {
 
         const FlowVaultEntry *matched = flow_vault_get(&vault, best_idx);
 
-        printf("========================================================================================\n");
-        printf("  🧠 FLOW Semantic Topology RAG (Prompt-to-Architecture Engine)\n");
-        printf("========================================================================================\n");
-        printf("  Natural Language Prompt: \"%s\"\n", argv[2]);
+                printf("  🧠 FLOW Semantic Topology RAG (Prompt-to-Architecture Engine)\n");
+                printf("  Natural Language Prompt: \"%s\"\n", argv[2]);
         printf("  Hippocampus Recall:      Matched [%s] (Cosine Similarity: %.4f)\n", matched->name, best_sim);
         printf("  Cognitive Status:        Retrieved Pure State from Long-Term Memory (0ms JIT Delay)\n");
-        printf("========================================================================================\n");
-        flow_vault_print_entry(matched, stdout);
+                flow_vault_print_entry(matched, stdout);
 
         if (emit_spec) {
             printf("\n--- Synthesized .flow Executable Intent Specification ---\n");
@@ -566,10 +623,8 @@ int main(int argc, char **argv) {
             return EXIT_SUCCESS;
         }
 
-        printf("========================================================================================\n");
-        printf("  🛡️ FLOW Fleet-Wide Digital Immune System (Antibody Memory Vault)\n");
-        printf("========================================================================================\n");
-        size_t count = 0;
+                printf("  🛡️ FLOW Fleet-Wide Digital Immune System (Antibody Memory Vault)\n");
+                size_t count = 0;
         for (size_t i = 0; i < vault.count; ++i) {
             if (vault.entries[i].category == FLOW_VAULT_CAT_IMMUNE_ANTIBODY) {
                 flow_vault_print_entry(&vault.entries[i], stdout);
@@ -577,172 +632,16 @@ int main(int argc, char **argv) {
             }
         }
         printf("  Active Antibodies in Herd Memory: %zu\n", count);
-        printf("========================================================================================\n");
-        return EXIT_SUCCESS;
+                return EXIT_SUCCESS;
     }
 
-    /* 20. Tidal Morphing & Vector Interpolation (flowy tidal <alpha>) */
-    if (strcmp(argv[1], "tidal") == 0 || strcmp(argv[1], "morph-tidal") == 0) {
-        double alpha = 0.5;
-        if (argc >= 3) {
-            alpha = atof(argv[2]);
-        }
-        FlowVectorVault vault;
-        flow_vault_init(&vault);
-        flow_vault_seed_canonical_archetypes(&vault);
+    
 
-        const FlowVaultEntry *day = flow_vault_lookup_by_id(&vault, "vec_serverless_io_heavy");
-        const FlowVaultEntry *night = flow_vault_lookup_by_id(&vault, "vec_serverless_tiny_worker");
-        if (!day || !night) {
-            fprintf(stderr, "flowy tidal: failed to load canonical day/night archetypes\n");
-            return EXIT_FAILURE;
-        }
+    
 
-        FlowMaskCanvas morphed_canvas;
-        uint64_t seed_genome = 0;
-        flow_vault_tidal_morph(day, night, alpha, &morphed_canvas, &seed_genome);
+    
 
-        double interp_features[FLOW_VAULT_DIM];
-        flow_vault_vector_interpolate(day->features, night->features, alpha, interp_features);
-
-        printf("========================================================================================\n");
-        printf("  🌊 FLOW Tidal Morphing (Vector Latent Space Continuous Breathing)\n");
-        printf("========================================================================================\n");
-        printf("  Day State (Alpha=0.0):   [%s] (High-Concurrency AoS, Sharded)\n", day->name);
-        printf("  Night State (Alpha=1.0): [%s] (Low-Power Compact SoA, Sequential)\n", night->name);
-        printf("  Active Tidal Phase:      Alpha = %.2f (Smooth Interpolation without Cliff-Edge Drops)\n", alpha);
-        printf("  Blended Soft Bias Mask:  0x%016llx (Boltzmann probability manifold)\n", (unsigned long long)morphed_canvas.soft_composite_bias);
-        printf("  Common Safety Hard Mask: 0x%016llx (Strict safety polytope intersection)\n", (unsigned long long)morphed_canvas.hard_composite_mask);
-        printf("  Seeded Smooth Genome:    0x%016llx\n", (unsigned long long)seed_genome);
-        printf("  Status:                  1-Bit Chaos Micro-perturbation aligned with Moving Manifold\n");
-        printf("========================================================================================\n");
-        return EXIT_SUCCESS;
-    }
-
-    /* 21. Cross-Hardware Zero-Shot Transfer (flowy transfer <src_arch> <tgt_arch> <id>) */
-    if (strcmp(argv[1], "transfer") == 0 || strcmp(argv[1], "cross-hardware") == 0) {
-        const char *src_arch_str = argc >= 3 ? argv[2] : "x86_avx2";
-        const char *tgt_arch_str = argc >= 4 ? argv[3] : "arm_neon";
-        const char *entry_id = argc >= 5 ? argv[4] : "vec_hft_lockfree_trading";
-
-        FlowHardwareArch src_arch = FLOW_ARCH_INTEL_AVX2;
-        FlowHardwareArch tgt_arch = FLOW_ARCH_ARM_NEON;
-        if (strstr(src_arch_str, "arm") || strstr(src_arch_str, "aarch64")) src_arch = FLOW_ARCH_ARM_NEON;
-        else if (strstr(src_arch_str, "apple")) src_arch = FLOW_ARCH_APPLE_SILICON;
-        else if (strstr(src_arch_str, "riscv")) src_arch = FLOW_ARCH_RISCV_VECTOR;
-
-        if (strstr(tgt_arch_str, "x86")) tgt_arch = FLOW_ARCH_INTEL_AVX2;
-        else if (strstr(tgt_arch_str, "apple")) tgt_arch = FLOW_ARCH_APPLE_SILICON;
-        else if (strstr(tgt_arch_str, "riscv")) tgt_arch = FLOW_ARCH_RISCV_VECTOR;
-
-        FlowVectorVault vault;
-        flow_vault_init(&vault);
-        flow_vault_seed_canonical_archetypes(&vault);
-
-        const FlowVaultEntry *e = flow_vault_lookup_by_id(&vault, entry_id);
-        if (!e) {
-            fprintf(stderr, "flowy transfer: archetype '%s' not found\n", entry_id);
-            return EXIT_FAILURE;
-        }
-
-        char dna[512];
-        flow_vault_export_dna(e, src_arch, dna, sizeof(dna));
-
-        FlowVectorVault target_vault;
-        flow_vault_init(&target_vault);
-        size_t imported_idx = 0;
-        double confidence = 0.0;
-        flow_vault_import_dna(&target_vault, dna, tgt_arch, &imported_idx, &confidence);
-
-        const FlowVaultEntry *transferred = flow_vault_get(&target_vault, imported_idx);
-
-        printf("========================================================================================\n");
-        printf("  🧬 FLOW Cross-Hardware Zero-Shot Gene Transplant\n");
-        printf("========================================================================================\n");
-        printf("  Source Platform:         %s\n", flow_hardware_arch_name(src_arch));
-        printf("  Target Platform:         %s\n", flow_hardware_arch_name(tgt_arch));
-        printf("  Exported Software DNA:   %s\n", dna);
-        printf("  Zero-Shot Confidence:   %.2f%% (Immediate Functional Inherited Wisdom)\n", confidence * 100.0);
-        printf("  Target Adapted Genome:   0x%016llx (Calibrated for %s memory order)\n",
-               (unsigned long long)transferred->pure_genome, flow_hardware_arch_name(tgt_arch));
-        printf("  Calibration Penalty:     0 ms (Hardware-Agnostic Coupling Invariants)\n");
-        printf("========================================================================================\n");
-        return EXIT_SUCCESS;
-    }
-
-    /* 22. Time-Series AI Prediction & Proactive JIT Pre-warming (flowy predict) */
-    if (strcmp(argv[1], "predict") == 0 || strcmp(argv[1], "prewarm") == 0) {
-        FlowVectorVault vault;
-        flow_vault_init(&vault);
-        flow_vault_seed_canonical_archetypes(&vault);
-
-        FlowTimeSeriesPredictor predictor;
-        flow_predictor_init(&predictor);
-
-        /* Feed historical observations climbing towards peak traffic */
-        double step_features[FLOW_VAULT_DIM] = {0.2, 0.1, 0, 0, 0, 0, 0.05, 0.3, 0.2, 0.1, 0, 0, 0, 0, 0, 0};
-        uint64_t t_base = 1000000000ULL;
-        for (int step = 0; step < 5; ++step) {
-            step_features[0] += 0.10; /* Input scale climbing */
-            step_features[8] += 0.12; /* Latency priority intensifying */
-            flow_predictor_observe(&predictor, t_base + (uint64_t)step * 60000000000ULL, step_features);
-        }
-
-        uint64_t lookahead_ns = 300000000000ULL; /* 5 minutes into the future */
-        FlowPlan prewarmed_plan;
-        int triggered = 0;
-        flow_vault_proactive_prewarm(&vault, &predictor, lookahead_ns, &prewarmed_plan, &triggered);
-
-        double forecasted[FLOW_VAULT_DIM];
-        double trend_mag = 0.0;
-        flow_predictor_forecast(&predictor, lookahead_ns, forecasted, &trend_mag);
-
-        printf("========================================================================================\n");
-        printf("  ⏱️ FLOW Time-Series Prediction & Proactive JIT Pre-warming Engine\n");
-        printf("========================================================================================\n");
-        printf("  Historical Observations: 5 sliding temporal telemetry epochs\n");
-        printf("  Kalman Trend Velocity:   Slope Magnitude = %.4f / sec\n", trend_mag);
-        printf("  Lookahead Horizon:       +300.00 seconds (5 Minutes in Advance)\n");
-        printf("  Proactive JIT Decision:  %s\n", triggered ? "TRIGGERED (Anticipatory Background Pre-Compile)" : "STEADY");
-        printf("  Pre-Compiled Target:     Genome=0x%016llx (SMT Zero-Defect Soundness Pre-Verified)\n",
-               (unsigned long long)prewarmed_plan.genome);
-        printf("  Traffic Arrival Latency: <100 ns (Instant QSBR Pointer Swap Upon Traffic Peak)\n");
-        printf("========================================================================================\n");
-        return EXIT_SUCCESS;
-    }
-
-    /* 23. Generative Architecture Synthesis (flowy generate "<prompt>") */
-    if (strcmp(argv[1], "generate") == 0 || strcmp(argv[1], "--generate") == 0) {
-        if (argc < 3) {
-            fprintf(stderr, "usage: flowy generate \"<radical architecture requirement>\"\n");
-            return EXIT_FAILURE;
-        }
-
-        FlowVectorVault vault;
-        flow_vault_init(&vault);
-        flow_vault_seed_canonical_archetypes(&vault);
-
-        FlowVaultEntry synthesized;
-        FlowSMTProofAttestation proof;
-        uint64_t seed = 0xbeefc001;
-        if (!flow_vault_generative_synthesis(&vault, argv[2], seed, &synthesized, &proof)) {
-            fprintf(stderr, "flowy generate: failed to synthesize architecture species\n");
-            return EXIT_FAILURE;
-        }
-
-        printf("========================================================================================\n");
-        printf("  ✨ FLOW Generative AI Architecture Synthesis (Novel Species Generation)\n");
-        printf("========================================================================================\n");
-        printf("  Radical Intent Prompt:   \"%s\"\n", argv[2]);
-        printf("  Generative Model:        Latent Diffusion Manifold Denoising (5-step Langevin Sampling)\n");
-        printf("  Synthesized Species:     [%s]\n", synthesized.name);
-        printf("  Generated Novel Genome:  0x%016llx\n", (unsigned long long)synthesized.pure_genome);
-        printf("  SMT Zero-Defect Proofs:  BufferBounds=UNSAT, MemoryQuota=UNSAT, ShardAliasing=UNSAT\n");
-        printf("  Status:                  New Architectural Species Emitted to Hippocampus Vault\n");
-        printf("========================================================================================\n");
-        flow_vault_print_entry(&synthesized, stdout);
-        return EXIT_SUCCESS;
-    }
+    
 
     /* 24. Living Architecture Curator & Gene Vault (flowy fvec / flowy query) */
     if (strcmp(argv[1], "fvec") == 0 || strcmp(argv[1], "--fvec") == 0 ||
@@ -834,10 +733,8 @@ int main(int argc, char **argv) {
             }
 
             const FlowVecRecord *rec = &store.records[best_idx];
-            printf("========================================================================================\n");
-            printf("  🏛️ FLOW Living Architecture Museum & Gene Vault (Prompt-to-Vector Query)\n");
-            printf("========================================================================================\n");
-            printf("  🔍 Query Intent:        \"%s\"\n", prompt);
+                        printf("  🏛️ FLOW Living Architecture Museum & Gene Vault (Prompt-to-Vector Query)\n");
+                        printf("  🔍 Query Intent:        \"%s\"\n", prompt);
             printf("  📄 Matched Model:       %s (Similarity: %.2f%%)\n", rec->header.name, best_sim * 100.0);
             printf("  📁 File Path:           %s\n", rec->header.filepath);
             printf("  🧬 Architectural Features:\n");
@@ -849,8 +746,7 @@ int main(int argc, char **argv) {
             printf("  ⚡ Expected Performance: < 15ns Latency (100%% SMT Zero-Defect Proven Sound)\n");
             printf("  🚀 Instant Physical Shape Application Command:\n");
             printf("     flowc <your_spec.flow> -o generated/output.c --apply-fvec %s\n", rec->header.filepath);
-            printf("========================================================================================\n");
-            return EXIT_SUCCESS;
+                        return EXIT_SUCCESS;
         }
 
         /* Subcommand: flowy fvec remediate [--ram <pct>] [--miss <rate>] */
@@ -866,15 +762,12 @@ int main(int argc, char **argv) {
             double conf = 0.0;
             char diag[512] = {0};
             if (flow_fvec_remediate_check(&store, ram, miss, &rec, &conf, diag, sizeof(diag))) {
-                printf("========================================================================================\n");
-                printf("  🚨 FLOW Autonomous Crisis Defense & Gene Bank Remediation\n");
-                printf("========================================================================================\n");
-                printf("  系統警報: %s\n\n", diag);
+                                printf("  🚨 FLOW Autonomous Crisis Defense & Gene Bank Remediation\n");
+                                printf("  系統警報: %s\n\n", diag);
                 printf("  💉 推薦抗體特徵檔: %s\n", rec->header.filepath);
                 printf("  🧬 載入處方指令:\n");
                 printf("     flowc <spec.flow> -o generated/survival.c --apply-fvec %s\n", rec->header.filepath);
-                printf("========================================================================================\n");
-                return EXIT_SUCCESS;
+                                return EXIT_SUCCESS;
             } else {
                 printf("FLOW Remediation: Telemetry stable. No emergency gene injection required.\n");
                 return EXIT_SUCCESS;
@@ -899,17 +792,14 @@ int main(int argc, char **argv) {
             char evicted_files[16][256];
             uint64_t now_unix = (uint64_t)time(NULL);
             size_t n = flow_fvec_store_evict_senescent(&store, now_unix, max_age, evicted_files, 16);
-            printf("========================================================================================\n");
-            printf("  🍂 FLOW Immune Senescence & Garbage Collection (LRU Eviction)\n");
-            printf("========================================================================================\n");
-            printf("  Threshold Age:       %llu seconds (%.1f days)\n", (unsigned long long)max_age, (double)max_age / 86400.0);
+                        printf("  🍂 FLOW Immune Senescence & Garbage Collection (LRU Eviction)\n");
+                        printf("  Threshold Age:       %llu seconds (%.1f days)\n", (unsigned long long)max_age, (double)max_age / 86400.0);
             printf("  Evicted Auto-Models: %zu\n", n);
             for (size_t i = 0; i < n && i < 16; ++i) {
                 printf("    - Removed idle model: %s\n", evicted_files[i]);
             }
             printf("  Remaining Models:    %zu\n", store.count);
-            printf("========================================================================================\n");
-            return EXIT_SUCCESS;
+                        return EXIT_SUCCESS;
         }
 
         fprintf(stderr, "Unknown fvec action: %s\n", action);
@@ -931,10 +821,8 @@ int main(int argc, char **argv) {
             size_t found = 0;
             flow_hub_search(&hub_idx, query, matches, FLOW_HUB_MAX_ENTRIES, &found);
 
-            printf("========================================================================================\n");
-            printf("  🌐 FLOW Gene Vault Ecosystem Hub (GitHub / Community .fvec Repository)\n");
-            printf("========================================================================================\n");
-            printf("  🔍 Search Query: \"%s\" (Found: %zu models)\n\n", query, found);
+                        printf("  🌐 FLOW Gene Vault Ecosystem Hub (GitHub / Community .fvec Repository)\n");
+                        printf("  🔍 Search Query: \"%s\" (Found: %zu models)\n\n", query, found);
             for (size_t i = 0; i < found; ++i) {
                 printf("  📦 [%02zu] %-34s | Author: %-16s | Conf: %-3u\n",
                        i + 1, matches[i].model_id, matches[i].author, matches[i].confidence_score);
@@ -943,8 +831,7 @@ int main(int argc, char **argv) {
                 printf("       Desc: %s\n\n", matches[i].description);
             }
             printf("  🚀 Pull & Transplant Command: flowy hub pull <model_id>\n");
-            printf("========================================================================================\n");
-            return EXIT_SUCCESS;
+                        return EXIT_SUCCESS;
         }
 
         if (strcmp(subcmd, "pull") == 0 || strcmp(subcmd, "download") == 0) {
@@ -963,16 +850,13 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "flowy hub: model '%s' not found or failed SMT/CRC32 verification\n", model_id);
                 return EXIT_FAILURE;
             }
-            printf("========================================================================================\n");
-            printf("  💉 FLOW Architecture Gene Transplant Completed (100%% SMT Proven Sound)\n");
-            printf("========================================================================================\n");
-            printf("  Model ID:     %s\n", model_id);
+                        printf("  💉 FLOW Architecture Gene Transplant Completed (100%% SMT Proven Sound)\n");
+                        printf("  Model ID:     %s\n", model_id);
             printf("  Saved To:     %s\n", saved_path);
             printf("  Verification: CRC32 Validated | SMT Zero-Defect Guaranteed (UNSAT)\n");
             printf("  ⚡ Instant Application Command:\n");
             printf("     flowc <spec.flow> -o generated/server.c --apply-fvec %s\n", saved_path);
-            printf("========================================================================================\n");
-            return EXIT_SUCCESS;
+                        return EXIT_SUCCESS;
         }
 
         if (strcmp(subcmd, "push") == 0 || strcmp(subcmd, "publish") == 0) {
@@ -991,12 +875,9 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "flowy hub: failed to package '%s': %s\n", fvec_file, pkg_meta);
                 return EXIT_FAILURE;
             }
-            printf("========================================================================================\n");
-            printf("  🚀 FLOW Gene Hub Package Generated (Ready for GitHub Push / PR)\n");
-            printf("========================================================================================\n");
-            printf("%s\n", pkg_meta);
-            printf("========================================================================================\n");
-            return EXIT_SUCCESS;
+                        printf("  🚀 FLOW Gene Hub Package Generated (Ready for GitHub Push / PR)\n");
+                        printf("%s\n", pkg_meta);
+                        return EXIT_SUCCESS;
         }
 
         fprintf(stderr, "Unknown hub action: %s\n", subcmd);
