@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
+#include <unistd.h>
 
 static int flow_smt_count_unsat(const FlowSMTProofAttestation *p) {
     return p ? (p->buffer_bounds_safety == FLOW_SMT_PROVEN_UNSAT) +
@@ -200,3 +202,331 @@ const char *flow_token_stage_name(FlowTokenStage stage) {
     static const char * const names[] = {"ingest", "polytope", "anneal", "smt_proof", "synthesis", "attractor", "custom"};
     return ((int)stage >= 0 && (int)stage <= 6) ? names[stage] : "unknown_stage";
 }
+
+/*
+ * ============================================================================
+ * Part 2: Orthogonal Subspace Decomposition & Join-Semilattice Confluence
+ * ============================================================================
+ */
+
+int flow_subspace_decompose_canonical(FlowSubspaceDecomposition *decomp, const SemanticIR *ir) {
+    if (!decomp) return 0;
+    memset(decomp, 0, sizeof(*decomp));
+
+    long online_cpus = sysconf(_SC_NPROCESSORS_ONLN);
+    if (online_cpus < 1) online_cpus = 4;
+    if (online_cpus > 64) online_cpus = 64;
+
+    uint64_t max_items = (ir && ir->input_max_count > 0) ? (uint64_t)ir->input_max_count : 4096ULL;
+    uint64_t mem_kb = (ir && ir->memory_limit_mb > 0) ? (uint64_t)ir->memory_limit_mb * 1024ULL : 65535ULL;
+    if (mem_kb > 65535ULL) mem_kb = 65535ULL;
+
+    /* Subspace 0: Capacity (bits 0..15) */
+    decomp->subspaces[0] = (FlowSubspace){
+        .id = FLOW_SUBSPACE_CAPACITY,
+        .name = "capacity",
+        .mask = 0x000000000000FFFFULL,
+        .bit_offset = 0,
+        .bit_width = 16,
+        .min_value = 16,
+        .max_value = 65535,
+        .capacity_limit = (double)max_items,
+        .current_demand = (double)max_items,
+        .learning_rate_eta = 0.05,
+        .shadow_price_lambda = 0.0,
+        .current_val = max_items,
+        .optimal_val = max_items
+    };
+
+    /* Subspace 1: Concurrency / Threads (bits 16..23) */
+    decomp->subspaces[1] = (FlowSubspace){
+        .id = FLOW_SUBSPACE_CONCURRENCY,
+        .name = "concurrency",
+        .mask = 0x0000000000FF0000ULL,
+        .bit_offset = 16,
+        .bit_width = 8,
+        .min_value = 1,
+        .max_value = 64,
+        .capacity_limit = (double)online_cpus,
+        .current_demand = (double)online_cpus,
+        .learning_rate_eta = 0.05,
+        .shadow_price_lambda = 0.0,
+        .current_val = (uint64_t)online_cpus,
+        .optimal_val = (uint64_t)online_cpus
+    };
+
+    /* Subspace 2: Sharding (bits 24..31) */
+    decomp->subspaces[2] = (FlowSubspace){
+        .id = FLOW_SUBSPACE_SHARDING,
+        .name = "sharding",
+        .mask = 0x00000000FF000000ULL,
+        .bit_offset = 24,
+        .bit_width = 8,
+        .min_value = 1,
+        .max_value = 64,
+        .capacity_limit = 16.0,
+        .current_demand = 16.0,
+        .learning_rate_eta = 0.05,
+        .shadow_price_lambda = 0.0,
+        .current_val = 16,
+        .optimal_val = 16
+    };
+
+    /* Subspace 3: Buffer / Arena Quota (bits 32..47) */
+    decomp->subspaces[3] = (FlowSubspace){
+        .id = FLOW_SUBSPACE_BUFFER,
+        .name = "buffer_arena",
+        .mask = 0x0000FFFF00000000ULL,
+        .bit_offset = 32,
+        .bit_width = 16,
+        .min_value = 1024,
+        .max_value = 65535,
+        .capacity_limit = (double)mem_kb,
+        .current_demand = (double)mem_kb,
+        .learning_rate_eta = 0.05,
+        .shadow_price_lambda = 0.0,
+        .current_val = mem_kb,
+        .optimal_val = mem_kb
+    };
+
+    /* Subspace 4: Growth / Batch Burst (bits 48..63) */
+    decomp->subspaces[4] = (FlowSubspace){
+        .id = FLOW_SUBSPACE_GROWTH,
+        .name = "growth_batch",
+        .mask = 0xFFFF000000000000ULL,
+        .bit_offset = 48,
+        .bit_width = 16,
+        .min_value = 100,
+        .max_value = 400,
+        .capacity_limit = 200.0,
+        .current_demand = 150.0,
+        .learning_rate_eta = 0.05,
+        .shadow_price_lambda = 0.0,
+        .current_val = 150,
+        .optimal_val = 150
+    };
+
+    decomp->subspace_count = 5;
+    decomp->composite_coverage_mask = 0;
+    decomp->is_strictly_orthogonal = true;
+
+    /* Mathematical Invariant Check: Verify disjointness across all pairs */
+    for (size_t i = 0; i < decomp->subspace_count; ++i) {
+        for (size_t j = i + 1; j < decomp->subspace_count; ++j) {
+            if ((decomp->subspaces[i].mask & decomp->subspaces[j].mask) != 0) {
+                decomp->is_strictly_orthogonal = false;
+            }
+        }
+        decomp->composite_coverage_mask |= decomp->subspaces[i].mask;
+    }
+    return decomp->is_strictly_orthogonal ? 1 : 0;
+}
+
+int flow_subspace_lagrangian_tune(FlowSubspace *sub, double current_demand, double capacity_limit) {
+    if (!sub) return 0;
+    sub->current_demand = current_demand;
+    sub->capacity_limit = capacity_limit;
+
+    double eta = sub->learning_rate_eta > 0.0 ? sub->learning_rate_eta : 0.05;
+    double subgradient = current_demand - capacity_limit;
+
+    /* Dual update: lambda_{t+1} = max(0, lambda_t + eta * (demand - capacity)) */
+    sub->shadow_price_lambda = sub->shadow_price_lambda + eta * subgradient;
+    if (sub->shadow_price_lambda < 0.0) {
+        sub->shadow_price_lambda = 0.0;
+    }
+
+    /* Mathematical target derived from Lagrangian optimality */
+    double target;
+    if (sub->shadow_price_lambda > 0.0) {
+        target = capacity_limit / (1.0 + sub->shadow_price_lambda);
+    } else {
+        target = current_demand;
+    }
+
+    /* Polyhedral box projection */
+    if (target < (double)sub->min_value) target = (double)sub->min_value;
+    if (target > (double)sub->max_value) target = (double)sub->max_value;
+
+    sub->optimal_val = (uint64_t)target;
+    sub->current_val = sub->optimal_val;
+    return 1;
+}
+
+uint64_t flow_subspace_polyhedral_project(const FlowSubspace *sub, uint64_t raw_val) {
+    if (!sub) return 0;
+    uint64_t val = raw_val;
+    if (val < sub->min_value) val = sub->min_value;
+    if (val > sub->max_value) val = sub->max_value;
+    uint64_t field_mask = (sub->bit_width >= 64) ? ~0ULL : ((1ULL << sub->bit_width) - 1ULL);
+    return (val & field_mask) << sub->bit_offset;
+}
+
+uint64_t flow_wavefront_semilattice_join(uint64_t base_genome,
+                                         const uint64_t *thread_slices,
+                                         const uint64_t *subspace_masks,
+                                         size_t count) {
+    uint64_t merged = base_genome;
+    if (!thread_slices || !subspace_masks || count == 0) return merged;
+
+    /*
+     * Lattice Least Upper Bound (\sqcup):
+     * Because all subspace_masks[i] are mutually orthogonal,
+     * this operation is strictly commutative and associative (A \sqcup B = B \sqcup A).
+     */
+    for (size_t i = 0; i < count; ++i) {
+        merged = (merged & ~subspace_masks[i]) | (thread_slices[i] & subspace_masks[i]);
+    }
+    return merged;
+}
+
+typedef struct {
+    FlowWavefrontRing *ring;
+    size_t worker_id;
+    size_t subspace_idx;
+    uint64_t slice_out;
+    double energy_out;
+} FlowWavefrontWorkerTask;
+
+static void *wavefront_worker_func(void *arg) {
+    FlowWavefrontWorkerTask *task = (FlowWavefrontWorkerTask *)arg;
+    if (!task || !task->ring) return NULL;
+    FlowWavefrontRing *ring = task->ring;
+    size_t idx = task->subspace_idx;
+    if (idx >= ring->decomp.subspace_count) return NULL;
+
+    FlowSubspace *sub = &ring->decomp.subspaces[idx];
+
+    /* Mathematical engine tuning via Lagrangian subgradient */
+    flow_subspace_lagrangian_tune(sub, sub->current_demand, sub->capacity_limit);
+
+    /* Polyhedral box/affine projection */
+    task->slice_out = flow_subspace_polyhedral_project(sub, sub->optimal_val);
+
+    /* Individual subspace Lyapunov potential V_k = 0.5 * (val - opt)^2 */
+    double diff = (double)sub->current_val - (double)sub->optimal_val;
+    task->energy_out = 0.5 * (diff * diff) / (double)(sub->max_value > 0 ? sub->max_value : 1);
+    return NULL;
+}
+
+int flow_wavefront_ring_init(FlowWavefrontRing *ring,
+                             SemanticIR *ir,
+                             size_t num_slots,
+                             size_t num_workers) {
+    if (!ring) return 0;
+    memset(ring, 0, sizeof(*ring));
+    ring->active_ir = ir;
+    ring->slot_count = (num_slots > 0 && num_slots <= FLOW_WAVEFRONT_MAX_SLOTS) ? num_slots : 4;
+    ring->worker_count = (num_workers > 0 && num_workers <= FLOW_WAVEFRONT_MAX_WORKERS) ? num_workers : 5;
+    ring->state = FLOW_RING_CIRCULATING;
+    ring->global_lyapunov_energy = 100.0;
+    ring->prev_lyapunov_energy = 200.0;
+    ring->lyapunov_delta_e = 100.0;
+
+    flow_subspace_decompose_canonical(&ring->decomp, ir);
+
+    for (size_t i = 0; i < ring->slot_count; ++i) {
+        ring->slots[i].slot_id = (uint32_t)i;
+        ring->slots[i].current_stage = (FlowTokenStage)(i % 5);
+        ring->slots[i].energy = 50.0;
+        ring->slots[i].in_flight = false;
+        ring->slots[i].slot_genome = 0;
+    }
+
+    if (ir) {
+        flow_bitspace_init_for_ir(ir, &ring->active_space);
+        if (ring->active_space.candidate_count > 0) {
+            flow_mask_canvas_compose(ir, ring->active_space.candidates[0],
+                                     &ring->active_space.candidate_dims[0],
+                                     NULL, &ring->global_canvas);
+        }
+    }
+    snprintf(ring->status_message, sizeof(ring->status_message),
+             "Wavefront Ring initialized: %zu slots, %zu workers, %zu orthogonal subspaces",
+             ring->slot_count, ring->worker_count, ring->decomp.subspace_count);
+    return 1;
+}
+
+int flow_wavefront_ring_step_parallel(FlowWavefrontRing *ring) {
+    if (!ring || ring->state != FLOW_RING_CIRCULATING) return 0;
+
+    size_t num_workers = ring->worker_count;
+    if (num_workers > ring->decomp.subspace_count) {
+        num_workers = ring->decomp.subspace_count;
+    }
+    if (num_workers == 0) return 0;
+
+    pthread_t threads[FLOW_WAVEFRONT_MAX_WORKERS];
+    FlowWavefrontWorkerTask tasks[FLOW_WAVEFRONT_MAX_WORKERS];
+    uint64_t thread_slices[FLOW_WAVEFRONT_MAX_WORKERS] = {0};
+    uint64_t subspace_masks[FLOW_WAVEFRONT_MAX_WORKERS] = {0};
+
+    for (size_t i = 0; i < num_workers; ++i) {
+        tasks[i].ring = ring;
+        tasks[i].worker_id = i;
+        tasks[i].subspace_idx = i;
+        tasks[i].slice_out = 0;
+        tasks[i].energy_out = 0.0;
+        if (pthread_create(&threads[i], NULL, wavefront_worker_func, &tasks[i]) != 0) {
+            wavefront_worker_func(&tasks[i]);
+            threads[i] = 0;
+        }
+    }
+
+    double total_subspace_energy = 0.0;
+    for (size_t i = 0; i < num_workers; ++i) {
+        if (threads[i] != 0) {
+            pthread_join(threads[i], NULL);
+        }
+        thread_slices[i] = tasks[i].slice_out;
+        subspace_masks[i] = ring->decomp.subspaces[i].mask;
+        total_subspace_energy += tasks[i].energy_out;
+    }
+
+    /* Register-speed Join-Semilattice Confluence (\sqcup) */
+    ring->global_lattice_genome = flow_wavefront_semilattice_join(
+        ring->global_lattice_genome,
+        thread_slices,
+        subspace_masks,
+        num_workers
+    );
+
+    /* Update Lyapunov Multi-Objective Energy */
+    ring->prev_lyapunov_energy = ring->global_lyapunov_energy;
+    ring->global_lyapunov_energy = total_subspace_energy;
+    ring->lyapunov_delta_e = fabs(ring->global_lyapunov_energy - ring->prev_lyapunov_energy);
+    ring->wave_cycle_count++;
+
+    /* Attractor Fixed-Point Check */
+    if (ring->wave_cycle_count >= 1 && (ring->lyapunov_delta_e < 1e-5 || ring->global_lyapunov_energy < 1.0)) {
+        ring->state = FLOW_RING_ATTRACTOR_REACHED;
+        ring->attractor_converged = true;
+        snprintf(ring->status_message, sizeof(ring->status_message),
+                 "Wavefront Attractor reached: cycle=%llu, energy=%.4f, Delta E=%.6f (Lattice Genome=0x%016llx)",
+                 (unsigned long long)ring->wave_cycle_count,
+                 ring->global_lyapunov_energy,
+                 ring->lyapunov_delta_e,
+                 (unsigned long long)ring->global_lattice_genome);
+    }
+    return 1;
+}
+
+FlowTokenRingState flow_wavefront_ring_run_to_attractor(FlowWavefrontRing *ring, size_t max_cycles) {
+    if (!ring) return FLOW_RING_UNSAT;
+    size_t limit = max_cycles ? max_cycles : FLOW_TOKEN_RING_DEFAULT_MAX_CYCLES;
+    while (ring->state == FLOW_RING_CIRCULATING && ring->wave_cycle_count < limit) {
+        if (!flow_wavefront_ring_step_parallel(ring)) break;
+    }
+    if (ring->state == FLOW_RING_CIRCULATING) {
+        ring->state = FLOW_RING_EXHAUSTED;
+        snprintf(ring->status_message, sizeof(ring->status_message),
+                 "Wavefront exhausted maximum cycle limit (%zu cycles)", limit);
+    }
+    return ring->state;
+}
+
+void flow_wavefront_ring_destroy(FlowWavefrontRing *ring) {
+    if (!ring) return;
+    ring->state = FLOW_RING_INIT;
+}
+

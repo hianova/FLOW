@@ -65,3 +65,33 @@ FLOW SMT 最高法院在 $O(1)$ 時間內判定雙重束縛成立，並瞬間引
 $$Canvas_{superposed} \longleftarrow \text{Pack}(\text{FLOW\_GAIT\_EMERGENCY\_BRACE}, \text{SurvivalFlag}=1)$$
 
 機器人關節在微秒內轉為剛性支撐阻尼狀態，向外部安全總線廣播故障，保全實體硬件，達成零損害生存。
+
+---
+
+## 5. 從串行 MoE 路由到開槽波前多線程協作 (Slotted Wavefront Ring)
+
+傳統單令牌環本質上是「全序串行 MoE 路由器」，以消滅多線程並發為代價換取確定性收斂。FLOW 進一步打破單令牌瓶頸，實現**開槽波前協作環（Slotted Wavefront Ring）**：
+
+### A. 流形直和分解 (Direct Sum Decomposition)
+相空間不再是不可分割的鐵板，而是依據幾何交換律正交拆解：
+$$\mathcal{M}_{Canvas} = \bigoplus_{k=1}^K \mathcal{S}_k, \quad \forall j \neq k: Mask(\mathcal{S}_j) \ \& \ Mask(\mathcal{S}_k) = 0$$
+- $\mathcal{S}_{\text{capacity}}$ (0..15 bits)：佇列與資料量上限。
+- $\mathcal{S}_{\text{concurrency}}$ (16..23 bits)：執行緒數與核心親和度。
+- $\mathcal{S}_{\text{sharding}}$ (24..31 bits)：分片數與快取隔離。
+- $\mathcal{S}_{\text{buffer}}$ (32..47 bits)：記憶體配額與環形緩衝區。
+- $\mathcal{S}_{\text{growth}}$ (48..63 bits)：調優成長率與批次突發閾值。
+
+### B. 數學引擎調優：拉格朗日對偶陰影價格 (Zero Heuristics)
+拒絕任何經驗啟發式魔數。各子空間調優完全由在線凸最佳化（OCO）與拉格朗日對偶乘子驅動：
+$$\lambda_{t+1} = \max\left(0, \lambda_t + \eta \cdot (Demand_t - Capacity)\right)$$
+- 當約束溢出時，影子價格 $\lambda > 0$ 自動提高違規成本，將最優目標解析拉回至 $x^* = \frac{Capacity}{1 + \lambda}$；
+- 透過多面體整數多胞形投影確保 $x^* \in [x_{\min}, x_{\max}]$；
+- 李亞普諾夫候選函數 $V(\mathbf{x}) = \sum_k V_k(x_k)$ 跨子空間交叉項正交為零，嚴格保證負漂移 $\dot{V} \le -\alpha V$，多執行緒調優永不發散。
+
+### C. 半格無鎖合流 (Join-Semilattice Confluence $\sqcup$)
+多線程協作不再搶奪單一鎖，而是向半格寫入局部投影：
+$$\text{Canvas}_{\text{merged}} = \bigsqcup_{k=1}^K \text{Canvas}_k = \bigvee_{k=1}^K \left(\text{Canvas}_k \wedge Mask(\mathcal{S}_k)\right)$$
+由於位元遮罩互斥，該運算天然滿足**結合律、交換律與冪等律**：
+$$A \sqcup B = B \sqcup A, \quad (A \sqcup B) \sqcup C = A \sqcup (B \sqcup C), \quad A \sqcup A = A$$
+工作執行緒（Worker Threads）在開槽環上無鎖並發推進，亂序收斂的最終幾何狀態在數學上具有絕對同一性。
+

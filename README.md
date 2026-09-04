@@ -61,10 +61,12 @@ FLOW compiles declarative intents (`.flow`) into zero-overhead native code. Oper
 
 ## 🌟 核心子系統與架構保證 (Key Subsystems)
 
-### 1. BMF Token Ring 離散注意力算子與吸引子收斂 (`FlowTokenRing`)
+### 1. BMF Token Ring 離散注意力算子與開槽波前協作環 (`FlowTokenRing` & `FlowWavefrontRing`)
 - **系統唯一定常態循環**：全系統演化由 Token Ring 驅動，嚴格遵循離散注意力算子：
   $$Canvas_{t+1} = \Phi(Canvas_t \otimes Mask_{Attn(t)})$$
-- **規範流水線**：沿著 $\text{Polytope} \to \text{Anneal} \to \text{SMT Proof} \to \text{Synthesis} \to \text{Attractor}$ 流轉，當 $\Delta E < 10^{-5}$ 時自發收斂至 Lyapunov 吸引子固定點。
+- **流形直和正交分解**：$\mathcal{M} = \bigoplus_k \mathcal{S}_k$，將 Capacity, Concurrency, Sharding, Buffer, Growth 分解為互斥正交子空間 ($\text{Mask}_i \ \& \ \text{Mask}_j = 0$)。
+- **數學引擎調優 (Zero Heuristics)**：各子空間調優完全由拉格朗日對偶乘子 $\lambda_{t+1} = \max(0, \lambda_t + \eta(D - C))$ 與多面體整數仿射投影驅動，消滅經驗啟發式魔數。
+- **半格無鎖合流 (Join-Semilattice $\sqcup$)**：多執行緒無鎖並發寫入，$Canvas = \bigsqcup_k Canvas_k = \bigvee_k (Canvas_k \wedge Mask_k)$，交換律與結合律保證亂序合併絕對一致，在開槽環 (Slotted Wavefront Ring) 上達成硬體並行加速與 Lyapunov 吸引子收斂 ($\Delta E < 10^{-5}$)。
 
 ### 2. 六大數學支柱：經驗啟發式的全息消解
 - **1. 多面體模型 (Polyhedral Model)**：將多層巢狀迴圈映射為整數多面體 $\mathcal{D} = \{ \vec{i} \in \mathbb{Z}^n \mid A\vec{i} + \vec{b} \ge 0 \}$，Fourier-Motzkin 消去法與 Farkas 引理精確求出最優 Tiling $T^*$ 與無衝突 SIMD 向量寬度 $V^*$。

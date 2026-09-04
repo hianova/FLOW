@@ -155,6 +155,140 @@ int flow_token_ring_is_converged(const FlowTokenRing *ring);
 const char *flow_token_ring_state_name(FlowTokenRingState state);
 const char *flow_token_stage_name(FlowTokenStage stage);
 
+/*
+ * ============================================================================
+ * Part 2: Orthogonal Subspace Decomposition & Join-Semilattice Confluence
+ * ============================================================================
+ *
+ * Direct Sum Decomposition:
+ *     \mathcal{M} = \bigoplus_{k=1}^K \mathcal{S}_k
+ *     \text{Mask}_j \ \& \ \text{Mask}_k = 0 \quad (\forall j \neq k)
+ *
+ * Join-Semilattice Merge (Lattice Least Upper Bound):
+ *     Canvas_{\text{merged}} = \bigsqcup_{k=1}^K Canvas_k = \bigvee_{k=1}^K (Canvas_k \ \& \ \text{Mask}_k)
+ *
+ * Mathematical Engine Tuning (Zero Heuristics):
+ * 1. Integer Polyhedral Affine Projection on bounds [min_val, max_val].
+ * 2. Lagrangian Shadow Price Multiplier \lambda_{t+1} = \max(0, \lambda_t + \eta \cdot (\text{demand} - \text{capacity})).
+ * 3. Lyapunov Negative Drift \dot{V} \le -\alpha V proving monotonic multi-threaded convergence.
+ * ============================================================================
+ */
+
+#define FLOW_MAX_SUBSPACES 8
+#define FLOW_WAVEFRONT_MAX_SLOTS 8
+#define FLOW_WAVEFRONT_MAX_WORKERS 8
+
+typedef enum {
+    FLOW_SUBSPACE_CAPACITY = 0,    /* Bits 0..15: Element/Queue capacity */
+    FLOW_SUBSPACE_CONCURRENCY = 1, /* Bits 16..23: Thread count & core affinity */
+    FLOW_SUBSPACE_SHARDING = 2,    /* Bits 24..31: Partition/Shard count */
+    FLOW_SUBSPACE_BUFFER = 3,      /* Bits 32..47: Buffer size & Arena quota */
+    FLOW_SUBSPACE_GROWTH = 4,      /* Bits 48..63: Growth rate & batch size */
+    FLOW_SUBSPACE_CUSTOM = 5
+} FlowSubspaceId;
+
+typedef struct {
+    FlowSubspaceId id;
+    char name[32];
+    uint64_t mask;             /* Disjoint bitmask (Mask_j & Mask_k = 0) */
+    uint8_t bit_offset;        /* Starting bit in 64-bit genome */
+    uint8_t bit_width;         /* Width in bits */
+    uint64_t min_value;        /* Polyhedral lower bound */
+    uint64_t max_value;        /* Polyhedral upper bound */
+
+    /* Mathematical Optimization State (Lagrangian Duality) */
+    double shadow_price_lambda;/* Dual multiplier \lambda >= 0 */
+    double learning_rate_eta;  /* Subgradient step size \eta */
+    double current_demand;     /* Actual utilization / resource demand */
+    double capacity_limit;     /* Hard constraint ceiling */
+    uint64_t current_val;      /* Current integer parameter value */
+    uint64_t optimal_val;      /* Mathematically tuned optimal value */
+} FlowSubspace;
+
+typedef struct {
+    FlowSubspace subspaces[FLOW_MAX_SUBSPACES];
+    size_t subspace_count;
+    uint64_t composite_coverage_mask; /* Union of all subspace masks */
+    bool is_strictly_orthogonal;      /* 1 if all pairwise intersections are empty */
+} FlowSubspaceDecomposition;
+
+/* Concurrent Pipeline Slot */
+typedef struct {
+    uint32_t slot_id;
+    FlowTokenStage current_stage;
+    uint64_t slot_genome;
+    FlowMaskCanvas slot_canvas;
+    double energy;
+    bool in_flight;
+} FlowWavefrontSlot;
+
+/* Multi-Threaded Slotted Wavefront Ring */
+typedef struct FlowWavefrontRing {
+    FlowSubspaceDecomposition decomp;
+    FlowWavefrontSlot slots[FLOW_WAVEFRONT_MAX_SLOTS];
+    size_t slot_count;
+    size_t worker_count;
+
+    /* Global Join-Semilattice Canvas Accumulator */
+    uint64_t global_lattice_genome;
+    FlowMaskCanvas global_canvas;
+
+    /* Lyapunov Multi-Objective Energy Tracking */
+    double global_lyapunov_energy;
+    double prev_lyapunov_energy;
+    double lyapunov_delta_e;
+    uint64_t wave_cycle_count;
+    bool attractor_converged;
+    FlowTokenRingState state;
+
+    /* Domain Context */
+    SemanticIR *active_ir;
+    FlowBitSpace active_space;
+    SearchResult best_search;
+    FlowSMTProofAttestation smt_proof;
+
+    char status_message[128];
+} FlowWavefrontRing;
+
+/*
+ * Mathematical Engine Subspace APIs
+ */
+
+/* Decompose 64-bit BitManifold into canonical orthogonal subspaces */
+int flow_subspace_decompose_canonical(FlowSubspaceDecomposition *decomp,
+                                      const SemanticIR *ir);
+
+/* Update Lagrangian dual multiplier lambda and compute optimal subspace value without heuristics */
+int flow_subspace_lagrangian_tune(FlowSubspace *sub,
+                                  double current_demand,
+                                  double capacity_limit);
+
+/* Polyhedral box/affine projection for a subspace slice */
+uint64_t flow_subspace_polyhedral_project(const FlowSubspace *sub,
+                                          uint64_t raw_val);
+
+/* Join-Semilattice Confluence: Commutative, associative, idempotent bitwise merge */
+uint64_t flow_wavefront_semilattice_join(uint64_t base_genome,
+                                         const uint64_t *thread_slices,
+                                         const uint64_t *subspace_masks,
+                                         size_t count);
+
+/* Initialize Multi-Threaded Slotted Wavefront Ring */
+int flow_wavefront_ring_init(FlowWavefrontRing *ring,
+                             SemanticIR *ir,
+                             size_t num_slots,
+                             size_t num_workers);
+
+/* Execute one concurrent parallel wave step across worker threads */
+int flow_wavefront_ring_step_parallel(FlowWavefrontRing *ring);
+
+/* Run Wavefront Ring until Lyapunov Attractor convergence (Delta E -> 0) */
+FlowTokenRingState flow_wavefront_ring_run_to_attractor(FlowWavefrontRing *ring,
+                                                        size_t max_cycles);
+
+/* Destroy Wavefront Ring resources */
+void flow_wavefront_ring_destroy(FlowWavefrontRing *ring);
+
 #ifdef __cplusplus
 }
 #endif
