@@ -119,7 +119,19 @@ TEST_BINARIES := \
 	$(BUILD_DIR)/test-fvec-swarm \
 	$(BUILD_DIR)/test-system
 
-$(BUILD_DIR)/test-%: tests/test_%.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
+$(BUILD_DIR)/test-brain: tests/test_brain.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
+
+$(BUILD_DIR)/test-body: tests/test_body.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
+
+$(BUILD_DIR)/test-concurrency: tests/test_concurrency.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
+
+$(BUILD_DIR)/test-fvec-swarm: tests/test_fvec_swarm.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
+
+$(BUILD_DIR)/test-system: tests/test_system.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
 $(BUILD_DIR)/generated-reload-test: tests/generated-reload-test.c $(FLOWC) $(LIBFLOW_A) | $(BUILD_DIR)
