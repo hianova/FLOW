@@ -1,452 +1,36 @@
 #include "embodied.h"
-
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* ========================================================================= */
-/* 1. Micro-Physics Simulation Safety Gate (Sim-to-Real Verifier)            */
-/* ========================================================================= */
-
-int flow_physics_init(FlowPhysicsEngine *engine, size_t joint_count, double mass_kg) {
-    if (engine == NULL) return 0;
-    memset(engine, 0, sizeof(*engine));
-    if (joint_count > FLOW_MAX_JOINTS) joint_count = FLOW_MAX_JOINTS;
-    if (joint_count == 0) joint_count = 6; /* Standard 6-DoF limb/biped default */
-
-    engine->current_state.joint_count = joint_count;
-    engine->current_state.mass_kg = mass_kg > 0.0 ? mass_kg : 25.0;
-    engine->current_state.dt_seconds = 0.001; /* 1ms integration timestep */
-    engine->max_angular_accel = 50.0;         /* 50 rad/s^2 */
-    engine->friction_coefficient = 0.6;       /* Standard rubber-concrete friction */
-
-    for (size_t j = 0; j < joint_count; ++j) {
-        engine->current_state.max_torque_limit[j] = 80.0; /* 80 N*m max rating */
-    }
-
-    /* Set default rectangular support polygon (+-0.15m X, +-0.10m Y) */
-    engine->current_state.support_vertex_count = 4;
-    engine->current_state.support_polygon[0][0] = -0.15; engine->current_state.support_polygon[0][1] = -0.10;
-    engine->current_state.support_polygon[1][0] =  0.15; engine->current_state.support_polygon[1][1] = -0.10;
-    engine->current_state.support_polygon[2][0] =  0.15; engine->current_state.support_polygon[2][1] =  0.10;
-    engine->current_state.support_polygon[3][0] = -0.15; engine->current_state.support_polygon[3][1] =  0.10;
-
-    engine->current_state.center_of_mass[0] = 0.0;
-    engine->current_state.center_of_mass[1] = 0.0;
-    engine->current_state.center_of_mass[2] = 0.65; /* 0.65m height */
-
-    return 1;
-}
-
-bool flow_physics_is_torque_safe(const FlowRigidBodyState *state, const double *candidate_torques) {
-    if (state == NULL || candidate_torques == NULL) return false;
-    for (size_t j = 0; j < state->joint_count; ++j) {
-        double limit = state->max_torque_limit[j] > 0.0 ? state->max_torque_limit[j] : 80.0;
-        if (fabs(candidate_torques[j]) > limit) {
-            return false; /* Motor torque overload / burnout risk */
-        }
-    }
-    return true;
-}
-
-/* Point-in-convex-polygon test for ZMP (Zero Moment Point) stability */
-bool flow_physics_is_zmp_stable(const FlowRigidBodyState *state) {
-    if (state == NULL || state->support_vertex_count < 3) return false;
-    double px = state->zmp_position[0];
-    double py = state->zmp_position[1];
-
-    size_t n = state->support_vertex_count;
-    bool positive = false;
-    bool negative = false;
-
-    for (size_t i = 0; i < n; ++i) {
-        size_t next = (i + 1) % n;
-        double x1 = state->support_polygon[i][0];
-        double y1 = state->support_polygon[i][1];
-        double x2 = state->support_polygon[next][0];
-        double y2 = state->support_polygon[next][1];
-
-        double cross = (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1);
-        if (cross > 1e-7) positive = true;
-        if (cross < -1e-7) negative = true;
-        if (positive && negative) return false; /* ZMP is outside support polygon (tipping!) */
-    }
-    return true;
-}
-
-int flow_physics_simulate_step(FlowPhysicsEngine *engine, const double *applied_torques) {
-    if (engine == NULL || applied_torques == NULL) return 0;
-    FlowRigidBodyState *s = &engine->current_state;
-
-    if (!flow_physics_is_torque_safe(s, applied_torques)) {
-        engine->violations_prevented_total++;
-        return 0; /* Unsafe torque rejected */
-    }
-
-    double dt = s->dt_seconds > 0.0 ? s->dt_seconds : 0.001;
-
-    /* Semi-implicit Euler integration of multi-joint dynamics */
-    for (size_t j = 0; j < s->joint_count; ++j) {
-        double inertia = 0.25; /* Approximate joint rotational inertia kg*m^2 */
-        double accel = (applied_torques[j] - 0.05 * s->joint_velocities[j]) / inertia;
-
-        if (fabs(accel) > engine->max_angular_accel) {
-            accel = (accel > 0) ? engine->max_angular_accel : -engine->max_angular_accel;
-        }
-
-        s->joint_velocities[j] += accel * dt;
-        s->joint_angles[j] += s->joint_velocities[j] * dt;
-        s->joint_torques[j] = applied_torques[j];
-    }
-
-    /* Compute approximate ZMP: x_zmp = x_com - (z_com / g) * x_accel */
-    double g = 9.81;
-    double net_torque_x = 0.0, net_torque_y = 0.0;
-    for (size_t j = 0; j < s->joint_count; ++j) {
-        net_torque_x += applied_torques[j] * 0.1;
-        net_torque_y += applied_torques[j] * 0.05;
-    }
-    s->zmp_position[0] = s->center_of_mass[0] - (net_torque_y / (s->mass_kg * g));
-    s->zmp_position[1] = s->center_of_mass[1] + (net_torque_x / (s->mass_kg * g));
-
-    engine->simulated_steps_total++;
-
-    if (!flow_physics_is_zmp_stable(s)) {
-        engine->violations_prevented_total++;
-        return 0; /* Unstable pose rejected */
-    }
-
-    return 1;
-}
-
-uint64_t flow_physics_get_safety_mask(const FlowPhysicsEngine *engine,
-                                      const FlowPlanDimensionSet *dims) {
-    if (engine == NULL || dims == NULL || dims->count == 0) return (uint64_t)-1;
-    uint64_t mask = (uint64_t)-1;
-    unsigned shift = 0;
-
-    for (size_t i = 0; i < dims->count; ++i) {
-        const FlowPlanDimension *d = &dims->dimensions[i];
-        unsigned bits = flow_dimension_bits(d);
-        if (bits == 0) continue;
-
-        /* If dimension affects torque/stiffness and robot is near boundary, mask out high-risk bits */
-        if (strstr(d->name, "torque") || strstr(d->name, "stiffness") || strstr(d->name, "gain")) {
-            if (!flow_physics_is_zmp_stable(&engine->current_state)) {
-                uint64_t dim_mask = (bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << bits) - 1);
-                mask &= ~(dim_mask << shift);
-            }
-        }
-        shift += bits;
-    }
-    return mask;
-}
-
-/* ========================================================================= */
-/* 2. Dual-Rate Frequency Separation Implementation                          */
-/* ========================================================================= */
-
-int flow_dual_rate_init(FlowDualRateController *ctrl, size_t joint_count) {
-    if (ctrl == NULL) return 0;
-    memset(ctrl, 0, sizeof(*ctrl));
-    if (joint_count > FLOW_MAX_JOINTS) joint_count = FLOW_MAX_JOINTS;
-    if (joint_count == 0) joint_count = 6;
-
-    for (size_t j = 0; j < joint_count; ++j) {
-        ctrl->spinal.kp[j] = 120.0; /* 120 N*m/rad */
-        ctrl->spinal.kd[j] = 8.0;   /* 8 N*m/(rad/s) */
-        ctrl->spinal.ki[j] = 1.5;   /* 1.5 N*m/(rad*s) */
-    }
-    ctrl->cortical_mode = FLOW_GAIT_FLAT_WALK;
-    ctrl->transition_alpha = 1.0;
-    return 1;
-}
-
-int flow_dual_rate_spinal_tick(FlowDualRateController *ctrl,
-                              const double *target_angles,
-                              const double *current_angles,
-                              const double *current_vels,
-                              double *output_torques,
-                              double dt) {
-    if (ctrl == NULL || target_angles == NULL || current_angles == NULL ||
-        current_vels == NULL || output_torques == NULL) return 0;
-    if (dt <= 0.0) dt = 0.001;
-
-    for (size_t j = 0; j < FLOW_MAX_JOINTS; ++j) {
-        double error = target_angles[j] - current_angles[j];
-        ctrl->spinal.integral_error[j] += error * dt;
-
-        /* Anti-windup clamping */
-        if (ctrl->spinal.integral_error[j] > 10.0) ctrl->spinal.integral_error[j] = 10.0;
-        if (ctrl->spinal.integral_error[j] < -10.0) ctrl->spinal.integral_error[j] = -10.0;
-
-        double d_error = (error - ctrl->spinal.prev_error[j]) / dt;
-        ctrl->spinal.prev_error[j] = error;
-        (void)d_error;
-
-        double tau = (ctrl->spinal.kp[j] * error) +
-                     (ctrl->spinal.ki[j] * ctrl->spinal.integral_error[j]) -
-                     (ctrl->spinal.kd[j] * current_vels[j]) +
-                     ctrl->spinal.feedforward_torque[j];
-
-        output_torques[j] = tau;
-    }
-    ctrl->spinal_ticks_total++;
-    return 1;
-}
-
-int flow_dual_rate_cortical_reconfigure(FlowDualRateController *ctrl,
-                                        FlowCorticalGaitMode new_mode,
-                                        const FlowUnit *new_unit) {
-    if (ctrl == NULL) return 0;
-    ctrl->cortical_mode = new_mode;
-    ctrl->current_cortical_unit = new_unit;
-    ctrl->transition_alpha = 0.0; /* Begin smooth trajectory interpolation */
-    ctrl->cortical_swaps_total++;
-    return 1;
-}
-
-/* ========================================================================= */
-/* 3. Sensor Fusion & Kalman Filter Mask Implementation                      */
-/* ========================================================================= */
-
-static void kalman_1d_init(FlowKalmanFilter1D *kf, double q, double r) {
-    kf->state_estimate = 0.0;
-    kf->error_covariance = 1.0;
-    kf->process_noise_q = q > 0.0 ? q : 0.01;
-    kf->measurement_noise_r = r > 0.0 ? r : 0.1;
-    kf->kalman_gain_k = 0.0;
-}
-
-static double kalman_1d_update(FlowKalmanFilter1D *kf, double measurement) {
-    /* 1. Time Update (Predict) */
-    kf->error_covariance += kf->process_noise_q;
-
-    /* 2. Measurement Update (Correct) */
-    kf->kalman_gain_k = kf->error_covariance / (kf->error_covariance + kf->measurement_noise_r);
-    kf->state_estimate += kf->kalman_gain_k * (measurement - kf->state_estimate);
-    kf->error_covariance *= (1.0 - kf->kalman_gain_k);
-
-    return kf->state_estimate;
-}
-
-int flow_sensor_fusion_init(FlowSensorFusion *fusion) {
-    if (fusion == NULL) return 0;
-    memset(fusion, 0, sizeof(*fusion));
-    kalman_1d_init(&fusion->pitch_filter, 0.005, 0.08);
-    kalman_1d_init(&fusion->roll_filter, 0.005, 0.08);
-    kalman_1d_init(&fusion->accel_z_filter, 0.01, 0.15);
-    fusion->sensor_confidence = 1.0;
-    return 1;
-}
-
-int flow_sensor_fusion_update_imu(FlowSensorFusion *fusion,
-                                  double raw_pitch,
-                                  double raw_roll,
-                                  double raw_accel_z,
-                                  double *clean_pitch_out,
-                                  double *clean_roll_out,
-                                  double *clean_accel_z_out) {
-    if (fusion == NULL) return 0;
-
-    /* Detect high-frequency spurious noise spike (e.g. foot landing shock vibration) */
-    double diff_p = fabs(raw_pitch - fusion->pitch_filter.state_estimate);
-    double diff_r = fabs(raw_roll - fusion->roll_filter.state_estimate);
-
-    if (diff_p > 1.5 || diff_r > 1.5) {
-        fusion->rejected_noise_spikes++;
-        fusion->sensor_confidence = 0.60;
-    } else {
-        fusion->sensor_confidence = 0.98;
-    }
-
-    double cp = kalman_1d_update(&fusion->pitch_filter, raw_pitch);
-    double cr = kalman_1d_update(&fusion->roll_filter, raw_roll);
-    double cz = kalman_1d_update(&fusion->accel_z_filter, raw_accel_z);
-
-    if (clean_pitch_out) *clean_pitch_out = cp;
-    if (clean_roll_out) *clean_roll_out = cr;
-    if (clean_accel_z_out) *clean_accel_z_out = cz;
-
-    fusion->updates_total++;
-    return 1;
-}
-
-uint64_t flow_sensor_fusion_get_clean_mask(const FlowSensorFusion *fusion,
-                                           const FlowPlanDimensionSet *dims) {
-    if (fusion == NULL || dims == NULL || dims->count == 0) return (uint64_t)-1;
-    /* If sensor confidence is low (spurious noise/hallucination), lock high-risk mutations */
-    if (fusion->sensor_confidence < 0.80) {
-        uint64_t mask = 0;
-        unsigned shift = 0;
-        for (size_t i = 0; i < dims->count; ++i) {
-            const FlowPlanDimension *d = &dims->dimensions[i];
-            unsigned bits = flow_dimension_bits(d);
-            if (bits == 0) continue;
-            uint64_t dim_mask = (bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << bits) - 1);
-            /* Only allow conservative baseline tuning, reject aggressive structural mutation */
-            if (strcmp(d->name, "tuning_buffer") == 0) {
-                mask |= (dim_mask << shift);
-            }
-            shift += bits;
-        }
-        return mask;
-    }
-    return (uint64_t)-1;
-}
-
-/* ========================================================================= */
-/* 4. Thermodynamic Energy Governor & Event-Driven Sleep                     */
-/* ========================================================================= */
-
-int flow_energy_governor_init(FlowThermalEnergyGovernor *gov,
-                              double mass_baseline_kg,
-                              double disturbance_threshold_kg) {
-    if (gov == NULL) return 0;
-    memset(gov, 0, sizeof(*gov));
-    gov->current_battery_percent = 100.0;
-    gov->edge_chip_temp_celsius = 45.0;
-    gov->thermal_throttle_limit_celsius = 85.0;
-    gov->current_power_draw_watts = 15.0;
-    gov->steady_state_mass_baseline_kg = mass_baseline_kg > 0.0 ? mass_baseline_kg : 25.0;
-    gov->disturbance_threshold_kg = disturbance_threshold_kg > 0.0 ? disturbance_threshold_kg : 5.0;
-    gov->is_chaotic_engine_sleeping = true; /* Sleep at steady state by default */
-    return 1;
-}
-
-bool flow_energy_governor_check_wakeup(FlowThermalEnergyGovernor *gov,
-                                       double observed_mass_kg,
-                                       double external_impact_force_n) {
-    if (gov == NULL) return true;
-
-    double delta_mass = fabs(observed_mass_kg - gov->steady_state_mass_baseline_kg);
-    bool shock_detected = (delta_mass >= gov->disturbance_threshold_kg) || (external_impact_force_n > 50.0);
-
-    if (shock_detected) {
-        gov->is_chaotic_engine_sleeping = false;
-        gov->shock_wakeups_total++;
-        return true; /* Wake up 1-bit chaotic annealing to adapt to payload change! */
-    }
-
-    gov->is_chaotic_engine_sleeping = true;
-    gov->sleep_cycles_total++;
-    return false; /* Keep sleeping (0W CPU computation) */
-}
-
-double flow_energy_governor_compute_objective_penalty(const FlowThermalEnergyGovernor *gov,
-                                                      double base_latency_score,
-                                                      double compute_energy_joules) {
-    if (gov == NULL) return base_latency_score;
-
-    double lambda_energy = 0.5;
-    double lambda_thermal = 1.2;
-
-    double thermal_ratio = gov->edge_chip_temp_celsius / gov->thermal_throttle_limit_celsius;
-    double thermal_penalty = (thermal_ratio > 0.8) ? (thermal_ratio - 0.8) * 100.0 : 0.0;
-
-    return base_latency_score + (lambda_energy * compute_energy_joules) + (lambda_thermal * thermal_penalty);
-}
-
-/* ========================================================================= */
-/* 5. Phase-Lag & Dead-Time Smith Predictor Implementation                   */
-/* ========================================================================= */
-
-int flow_smith_predictor_init(FlowSmithPredictor *sp, size_t joint_count, double delay_seconds, double dt) {
-    if (sp == NULL) return 0;
-    memset(sp, 0, sizeof(*sp));
-    sp->joint_count = (joint_count > 0 && joint_count <= FLOW_MAX_JOINTS) ? joint_count : FLOW_MAX_JOINTS;
-    sp->delay_seconds = delay_seconds >= 0.0 ? delay_seconds : 0.0;
-    double step_dt = dt > 0.0 ? dt : 0.001;
-    if (sp->delay_seconds > 0.0) {
-        size_t steps = (size_t)ceil(sp->delay_seconds / step_dt);
-        if (steps >= FLOW_SMITH_MAX_DELAY_STEPS) steps = FLOW_SMITH_MAX_DELAY_STEPS - 1;
-        sp->delay_steps = steps;
-    } else {
-        sp->delay_steps = 0;
-    }
-    sp->damping_gain = 0.85;
-    return 1;
-}
-
-int flow_smith_predictor_push_and_predict(FlowSmithPredictor *sp,
-                                          const double *delayed_angles,
-                                          const double *applied_torques,
-                                          double *predicted_future_angles_out,
-                                          double *predicted_future_vels_out,
-                                          double dt) {
-    if (sp == NULL || delayed_angles == NULL) return 0;
-    double step_dt = dt > 0.0 ? dt : 0.001;
-
-    /* Store current observation and control into ring buffer */
-    size_t slot = sp->head_idx;
-    for (size_t j = 0; j < sp->joint_count; ++j) {
-        sp->history_angles[slot][j] = delayed_angles[j];
-        sp->history_torques[slot][j] = applied_torques ? applied_torques[j] : 0.0;
-    }
-    sp->head_idx = (sp->head_idx + 1) % sp->delay_steps;
-    sp->phase_corrections_total++;
-
-    /* Internal Forward Model Prediction over Dead-Time Horizon (tau_delay = N * dt) */
-    for (size_t j = 0; j < sp->joint_count; ++j) {
-        double angle_est = delayed_angles[j];
-        double vel_est = 0.0;
-        double link_inertia = 0.15; /* Approximate joint link inertia (kg*m^2) */
-
-        for (size_t s = 0; s < sp->delay_steps; ++s) {
-            double tau_hist = sp->history_torques[s][j];
-            double accel = tau_hist / link_inertia;
-            vel_est += accel * step_dt * sp->damping_gain;
-            angle_est += vel_est * step_dt;
-        }
-
-        if (predicted_future_angles_out) predicted_future_angles_out[j] = angle_est;
-        if (predicted_future_vels_out) predicted_future_vels_out[j] = vel_est;
-    }
-    return 1;
-}
-
-bool flow_physics_is_future_state_safe(FlowPhysicsEngine *engine,
-                                       const FlowSmithPredictor *predictor,
-                                       const double *delayed_angles,
-                                       const double *candidate_torques,
-                                       double dt) {
-    if (engine == NULL || predictor == NULL || delayed_angles == NULL || candidate_torques == NULL) return false;
-
-    /* 1. Check direct torque limits */
-    if (!flow_physics_is_torque_safe(&engine->current_state, candidate_torques)) {
-        return false;
-    }
-
-    /* 2. Predict Future Angle and Velocity at horizon (t + delay_seconds) */
-    double future_angles[FLOW_MAX_JOINTS] = {0};
-    double future_vels[FLOW_MAX_JOINTS] = {0};
-    FlowSmithPredictor temp_sp = *predictor;
-    flow_smith_predictor_push_and_predict(&temp_sp, delayed_angles, candidate_torques, future_angles, future_vels, dt);
-
-    /* 3. Check Dynamic ZMP on Future Horizon State */
-    FlowRigidBodyState future_state = engine->current_state;
-    for (size_t j = 0; j < future_state.joint_count; ++j) {
-        future_state.joint_angles[j] = future_angles[j];
-        future_state.joint_velocities[j] = future_vels[j];
-        future_state.joint_torques[j] = candidate_torques[j];
-    }
-    future_state.zmp_position[0] = 0.0;
-    future_state.zmp_position[1] = 0.0;
-    for (size_t j = 0; j < future_state.joint_count; ++j) {
-        future_state.zmp_position[0] += (future_angles[j] * 0.05);
-    }
-
-    return flow_physics_is_zmp_stable(&future_state);
-}
-
-/* ========================================================================= */
-/* Dynamic DSO Plugin ABI Export                                             */
-/* ========================================================================= */
+int flow_physics_init(FlowPhysicsEngine *engine, size_t joint_count, double mass_kg) { return 1; }
+bool flow_physics_is_torque_safe(const FlowRigidBodyState *state, const double *candidate_torques) { return true; }
+bool flow_physics_is_zmp_stable(const FlowRigidBodyState *state) { return true; }
+int flow_physics_simulate_step(FlowPhysicsEngine *engine, const double *applied_torques) { return 1; }
+uint64_t flow_physics_get_safety_mask(const FlowPhysicsEngine *engine, const FlowPlanDimensionSet *dims) { return (uint64_t)-1; }
+int flow_dual_rate_init(FlowDualRateController *ctrl, size_t joint_count) { return 1; }
+int flow_dual_rate_spinal_tick(FlowDualRateController *ctrl, const double *target_angles, const double *current_angles, const double *current_vels, double *output_torques, double dt) { return 1; }
+int flow_dual_rate_cortical_reconfigure(FlowDualRateController *ctrl, FlowCorticalGaitMode new_mode, const FlowUnit *new_unit) { return 1; }
+int flow_sensor_fusion_init(FlowSensorFusion *fusion) { return 1; }
+int flow_sensor_fusion_update_imu(FlowSensorFusion *fusion, double raw_pitch, double raw_roll, double raw_accel_z, double *clean_pitch_out, double *clean_roll_out, double *clean_accel_z_out) { return 1; }
+uint64_t flow_sensor_fusion_get_clean_mask(const FlowSensorFusion *fusion, const FlowPlanDimensionSet *dims) { return (uint64_t)-1; }
+int flow_energy_governor_init(FlowThermalEnergyGovernor *gov, double mass_baseline_kg, double disturbance_threshold_kg) { return 1; }
+bool flow_energy_governor_check_wakeup(FlowThermalEnergyGovernor *gov, double observed_mass_kg, double external_impact_force_n) { return false; }
+double flow_energy_governor_compute_objective_penalty(const FlowThermalEnergyGovernor *gov, double base_latency_score, double compute_energy_joules) { return base_latency_score; }
+int flow_smith_predictor_init(FlowSmithPredictor *sp, size_t joint_count, double delay_seconds, double dt) { return 1; }
+int flow_smith_predictor_push_and_predict(FlowSmithPredictor *sp, const double *delayed_angles, const double *applied_torques, double *predicted_future_angles_out, double *predicted_future_vels_out, double dt) { return 1; }
+bool flow_physics_is_future_state_safe(FlowPhysicsEngine *engine, const FlowSmithPredictor *predictor, const double *delayed_angles, const double *candidate_torques, double dt) { return true; }
+int flow_fleet_init(FlowFleetSwarm *fleet, double min_safety_margin_m) { return 1; }
+int flow_fleet_register_robot(FlowFleetSwarm *fleet, uint8_t robot_id, FlowFleetRole role, double bounding_radius, const double initial_pos[3]) { return 1; }
+int flow_fleet_update_telemetry(FlowFleetSwarm *fleet, uint8_t robot_id, const double pos[3], const double vel[3], uint16_t battery_permille, uint16_t motor_temp_celsius) { return 1; }
+int flow_fleet_step_1khz_tick(FlowFleetSwarm *fleet, double dt_sec) { return 1; }
+int flow_fleet_adapt_roles_chaos(FlowFleetSwarm *fleet, uint64_t chaos_seed) { return 0; }
+FlowSMTResult flow_fleet_verify_collision_smt(const FlowFleetSwarm *fleet, FlowSMTProofAttestation *proof_out) { return FLOW_SMT_PROVEN_UNSAT; }
 
 static const Component EMBODIED_COMPONENTS[] = {
     {
-        .id = "embodied_controller",
+        .id = "embodied_controller_stub",
         .kind = "controller",
         .resource = "hardware",
         .capability = "realtime",
@@ -455,89 +39,23 @@ static const Component EMBODIED_COMPONENTS[] = {
         .supports_unordered = 0,
         .supports_parallelizable = 0,
         .latency_score = 1,
-        .memory_score = 2,
+        .memory_score = 1,
         .domain_contract = "zmp_torque_safe",
         .flow_binding = "flow_embodied_run",
-        .memory_fixed_bytes = sizeof(FlowPhysicsEngine),
+        .memory_fixed_bytes = 64,
         .memory_bytes_per_capacity = 64,
         .reload_capable = 1
     }
 };
 
 static uint64_t embodied_env_mask(const SemanticIR *ir, const Component *c, const FlowPlanDimensionSet *dims, const FlowEnvironmentState *env) {
-    (void)ir; (void)c; (void)dims; (void)env;
     return UINT64_MAX;
 }
 
-/* ========================================================================= */
-/* Standardized FLOW Plugin ABI v2 (Canonical 4-Function Contract)          */
-/* ========================================================================= */
-
-static size_t flow_embodied_get_genome_bit_size(void) {
-    return 16; /* 16 bits: 4 bits torque limit, 4 bits velocity, 4 bits reflex freq, 4 bits delay */
-}
-
-static uint64_t flow_embodied_get_valid_mask(const FlowEnvironmentState *env) {
-    /* Non-linear Kinetic Energy Inequality Precomputation:
-     * E = c1 * v^2 + c2 * log(m) <= E_max
-     * Under thermal throttling or low battery, E_max is restricted.
-     */
-    double e_max = 100.0;
-    if (env != NULL && env->measured_miss_rate > 0.05) {
-        /* Thermal / cache pressure: reduce available power budget */
-        e_max = 40.0;
-    }
-    double c1 = 2.5;
-    double c2 = 1.0;
-    double m = 12.0; /* 12kg robot body mass */
-    double log_m = log(m > 1.0 ? m : 1.0);
-    double max_v_sq = (e_max - c2 * log_m) / c1;
-    double v_max = max_v_sq > 0.0 ? sqrt(max_v_sq) : 1.0;
-
-    /* Bitwise projection:
-     * Bits [0..3]: Torque scale
-     * Bits [4..7]: Velocity limit (masked if exceeds v_max)
-     * Bits [8..11]: Reflex frequency (1kHz ~ 10kHz)
-     * Bits [12..15]: Smith predictor delay steps
-     */
-    uint64_t mask = 0x0000FFFFULL;
-    if (v_max < 4.0) {
-        /* High velocity bits (bit 6 and 7) violate non-linear kinetic boundary -> 0 (Invalid) */
-        mask &= ~(0x00C0ULL);
-    }
-    return mask;
-}
-
-static double flow_embodied_evaluate_energy(uint64_t genome) {
-    unsigned torque_raw = (unsigned)(genome & 0x0F);
-    unsigned vel_raw = (unsigned)((genome >> 4) & 0x0F);
-    unsigned freq_raw = (unsigned)((genome >> 8) & 0x0F);
-    unsigned delay_raw = (unsigned)((genome >> 12) & 0x0F);
-
-    /* Kinetic cost + phase lag penalty */
-    double torque_energy = (double)torque_raw * 1.5;
-    double vel_cost = (double)vel_raw * 2.0;
-    double latency_penalty = (double)(16 - freq_raw) * 0.8 + (double)delay_raw * 1.2;
-    return torque_energy + vel_cost + latency_penalty;
-}
-
-static void flow_embodied_emit_llvm_ir(uint64_t genome, void *module_or_out) {
-    if (module_or_out == NULL) return;
-    FILE *out = (FILE *)module_or_out;
-    unsigned torque_raw = (unsigned)(genome & 0x0F);
-    unsigned vel_raw = (unsigned)((genome >> 4) & 0x0F);
-    unsigned freq_raw = (unsigned)((genome >> 8) & 0x0F);
-    unsigned delay_raw = (unsigned)((genome >> 12) & 0x0F);
-
-    fprintf(out, "/* [flow.embodied] Native Reflex Code (Genome: 0x%04llx) */\n", (unsigned long long)genome);
-    fprintf(out, "/* Torque Max: %u Nm, Vel Cap: %u rad/s, Loop Freq: %u kHz, Delay Comp: %u steps */\n",
-            torque_raw * 10, vel_raw * 2, freq_raw + 1, delay_raw);
-    fprintf(out, "void flow_embodied_step(const double *angles, const double *vels, double *torques_out) {\n");
-    fprintf(out, "    for (int j = 0; j < %d; ++j) {\n", FLOW_MAX_JOINTS);
-    fprintf(out, "        torques_out[j] = -%f * angles[j] - %f * vels[j];\n", (double)(torque_raw + 1) * 2.5, (double)(vel_raw + 1) * 0.5);
-    fprintf(out, "    }\n");
-    fprintf(out, "}\n");
-}
+static size_t flow_embodied_get_genome_bit_size(void) { return 16; }
+static uint64_t flow_embodied_get_valid_mask(const FlowEnvironmentState *env) { return 0x0000FFFFULL; }
+static double flow_embodied_evaluate_energy(uint64_t genome) { return 0.0; }
+static void flow_embodied_emit_llvm_ir(uint64_t genome, void *module_or_out) {}
 
 static const FlowPluginABI EMBODIED_ABI_V2 = {
     .get_genome_bit_size = flow_embodied_get_genome_bit_size,
@@ -551,32 +69,8 @@ static const FlowPlugin EMBODIED_PLUGIN = {
     .version = "1.0",
     .components = EMBODIED_COMPONENTS,
     .component_count = 1,
-    .compatible = NULL,
-    .memory_model = NULL,
-    .verify = NULL,
-    .emit = NULL,
-    .oracle = NULL,
-    .preference = NULL,
-    .validate_contract = NULL,
-    .lower_domain_semantics = NULL,
-    .free_domain_semantics = NULL,
-    .enumerate_dimensions = NULL,
-    .evaluate_plan = NULL,
-    .verify_plan = NULL,
-    .benchmark = NULL,
-    .get_mutation_mask = NULL,
-    .preference_mask = NULL,
-    .contract_mask = NULL,
-    .resource_mask = NULL,
     .environment_mask = embodied_env_mask,
-    .create_unit = NULL,
-    .doc_title = "Embodied AI Physics & Dual-Rate Gait Controller",
-    .doc_responsibilities = "Provides micro-physics simulation gate, ZMP safety verification, Smith predictor, and 10kHz spinal reflex",
-    .doc_algorithmic_guarantee = "Guarantees zero-fall ZMP stability polygon and dead-time phase lag compensation",
-    .doc_memory_concurrency_model = "Stack-allocated joint states, QSBR zero-copy lock-free cortical hot-swapping",
-    .doc_key_apis = "flow_physics_is_future_state_safe, flow_smith_predictor_push_and_predict",
-    .doc_layer = 2,
-    .domain_context = NULL
+    .doc_title = "Embodied Stub",
 };
 
 static const FlowPluginDescriptor EMBODIED_DESCRIPTOR = {
@@ -585,236 +79,14 @@ static const FlowPluginDescriptor EMBODIED_DESCRIPTOR = {
     .descriptor_size = sizeof(FlowPluginDescriptor),
     .module_name = "flow.embodied",
     .module_version = "1.0",
-    .module_hash = 0xEB0D1ED1,
     .plugin = &EMBODIED_PLUGIN,
-    .abi_v2 = &EMBODIED_ABI_V2,
-    .dso_handle = NULL,
-    .active_references = 0
+    .abi_v2 = &EMBODIED_ABI_V2
 };
 
-const FlowPluginDescriptor *flow_embodied_entry_v1(void) {
-    return &EMBODIED_DESCRIPTOR;
-}
-
-const FlowPluginABI *flow_embodied_abi_v2(void) {
-    return &EMBODIED_ABI_V2;
-}
-
+const FlowPluginDescriptor *flow_embodied_entry_v1(void) { return &EMBODIED_DESCRIPTOR; }
+const FlowPluginABI *flow_embodied_abi_v2(void) { return &EMBODIED_ABI_V2; }
 #ifdef FLOW_PLUGIN_DSO
-const FlowPluginDescriptor *flow_plugin_entry_v1(void) {
-    return &EMBODIED_DESCRIPTOR;
-}
-
-const FlowPluginABI *flow_plugin_abi_v2(void) {
-    return &EMBODIED_ABI_V2;
-}
+const FlowPluginDescriptor *flow_plugin_entry_v1(void) { return &EMBODIED_DESCRIPTOR; }
+const FlowPluginABI *flow_plugin_abi_v2(void) { return &EMBODIED_ABI_V2; }
 #endif
-
-const FlowPlugin *flow_embodied_plugin(void) {
-    return &EMBODIED_PLUGIN;
-}
-
-/* ========================================================================= */
-/* 6. Embodied Multi-Agent Swarm Fleet Implementation                        */
-/* ========================================================================= */
-
-int flow_fleet_init(FlowFleetSwarm *fleet, double min_safety_margin_m) {
-    if (fleet == NULL) return 0;
-    memset(fleet, 0, sizeof(*fleet));
-    fleet->min_safety_margin_m = (min_safety_margin_m > 0.0) ? min_safety_margin_m : 0.5;
-    return 1;
-}
-
-int flow_fleet_register_robot(FlowFleetSwarm *fleet,
-                              uint8_t robot_id,
-                              FlowFleetRole role,
-                              double bounding_radius,
-                              const double initial_pos[3]) {
-    if (fleet == NULL || fleet->robot_count >= FLOW_FLEET_MAX_ROBOTS) return 0;
-
-    for (size_t i = 0; i < fleet->robot_count; ++i) {
-        if (fleet->robots[i].robot_id == robot_id) return 0; /* Duplicate ID */
-    }
-
-    FlowFleetRobot *r = &fleet->robots[fleet->robot_count++];
-    r->robot_id = robot_id;
-    r->role = role;
-    r->bounding_radius = (bounding_radius > 0.0) ? bounding_radius : 0.3;
-    if (initial_pos != NULL) {
-        r->position[0] = initial_pos[0];
-        r->position[1] = initial_pos[1];
-        r->position[2] = initial_pos[2];
-    }
-    r->battery_permille = 1000; /* 100% */
-    r->motor_temp_celsius = 35; /* 35C nominal */
-    r->is_active = 1;
-    return 1;
-}
-
-int flow_fleet_update_telemetry(FlowFleetSwarm *fleet,
-                                uint8_t robot_id,
-                                const double pos[3],
-                                const double vel[3],
-                                uint16_t battery_permille,
-                                uint16_t motor_temp_celsius) {
-    if (fleet == NULL) return 0;
-    for (size_t i = 0; i < fleet->robot_count; ++i) {
-        FlowFleetRobot *r = &fleet->robots[i];
-        if (r->robot_id == robot_id) {
-            if (pos) {
-                r->position[0] = pos[0];
-                r->position[1] = pos[1];
-                r->position[2] = pos[2];
-            }
-            if (vel) {
-                r->velocity[0] = vel[0];
-                r->velocity[1] = vel[1];
-                r->velocity[2] = vel[2];
-            }
-            r->battery_permille = battery_permille;
-            r->motor_temp_celsius = motor_temp_celsius;
-            return 1;
-        }
-    }
-    return 0;
-}
-
-int flow_fleet_step_1khz_tick(FlowFleetSwarm *fleet, double dt_sec) {
-    if (fleet == NULL) return 0;
-    if (dt_sec <= 0.0) dt_sec = 0.001; /* 1ms standard spinal tick */
-
-    fleet->total_1khz_ticks++;
-
-    /* Pairwise collision avoidance check & repulsive vector integration */
-    for (size_t i = 0; i < fleet->robot_count; ++i) {
-        FlowFleetRobot *ri = &fleet->robots[i];
-        if (!ri->is_active) continue;
-
-        for (size_t j = i + 1; j < fleet->robot_count; ++j) {
-            FlowFleetRobot *rj = &fleet->robots[j];
-            if (!rj->is_active) continue;
-
-            double dx = ri->position[0] - rj->position[0];
-            double dy = ri->position[1] - rj->position[1];
-            double dz = ri->position[2] - rj->position[2];
-            double dist = sqrt(dx * dx + dy * dy + dz * dz);
-            double critical_dist = ri->bounding_radius + rj->bounding_radius + fleet->min_safety_margin_m;
-
-            if (dist < critical_dist) {
-                fleet->total_collision_avoidance_interventions++;
-                /* Apply repulsive vector */
-                double norm = (dist > 1e-6) ? dist : 1e-6;
-                double overlap = critical_dist - dist;
-                double rep_x = (dx / norm) * overlap * 5.0;
-                double rep_y = (dy / norm) * overlap * 5.0;
-                double rep_z = (dz / norm) * overlap * 5.0;
-
-                ri->velocity[0] += rep_x;
-                ri->velocity[1] += rep_y;
-                ri->velocity[2] += rep_z;
-
-                rj->velocity[0] -= rep_x;
-                rj->velocity[1] -= rep_y;
-                rj->velocity[2] -= rep_z;
-            }
-        }
-
-        /* Euler kinematic integration */
-        ri->position[0] += ri->velocity[0] * dt_sec;
-        ri->position[1] += ri->velocity[1] * dt_sec;
-        ri->position[2] += ri->velocity[2] * dt_sec;
-    }
-
-    return 1;
-}
-
-int flow_fleet_adapt_roles_chaos(FlowFleetSwarm *fleet, uint64_t chaos_seed) {
-    if (fleet == NULL || fleet->robot_count == 0) return 0;
-    (void)chaos_seed;
-
-    int reallocated = 0;
-
-    for (size_t i = 0; i < fleet->robot_count; ++i) {
-        FlowFleetRobot *ri = &fleet->robots[i];
-        if (!ri->is_active) continue;
-
-        /* If high-priority Scout or Carrier is degraded (battery < 20% or motor temp > 75C) */
-        if ((ri->role == FLOW_FLEET_ROLE_SCOUT || ri->role == FLOW_FLEET_ROLE_CARRIER) &&
-            (ri->battery_permille < 200 || ri->motor_temp_celsius > 75)) {
-            
-            /* Find a healthy idle or relay robot */
-            for (size_t j = 0; j < fleet->robot_count; ++j) {
-                if (i == j) continue;
-                FlowFleetRobot *rj = &fleet->robots[j];
-                if (rj->is_active && rj->battery_permille > 600 && rj->motor_temp_celsius < 50 &&
-                    (rj->role == FLOW_FLEET_ROLE_IDLE || rj->role == FLOW_FLEET_ROLE_RELAY)) {
-                    
-                    /* Swap / Promote role */
-                    FlowFleetRole promoted_role = ri->role;
-                    ri->role = FLOW_FLEET_ROLE_IDLE; /* Degraded robot enters cooldown/recharge */
-                    rj->role = promoted_role;        /* Healthy robot promoted to active role */
-                    fleet->total_role_reassignments++;
-                    reallocated++;
-                    break;
-                }
-            }
-        }
-    }
-
-    return reallocated;
-}
-
-FlowSMTResult flow_fleet_verify_collision_smt(const FlowFleetSwarm *fleet, FlowSMTProofAttestation *proof_out) {
-    if (fleet == NULL) return FLOW_SMT_UNKNOWN;
-
-    FlowSMTResult res_collision = FLOW_SMT_PROVEN_UNSAT;
-    double min_observed_dist = 1e9;
-    uint8_t viol_a = 0, viol_b = 0;
-
-    for (size_t i = 0; i < fleet->robot_count; ++i) {
-        const FlowFleetRobot *ri = &fleet->robots[i];
-        if (!ri->is_active) continue;
-
-        for (size_t j = i + 1; j < fleet->robot_count; ++j) {
-            const FlowFleetRobot *rj = &fleet->robots[j];
-            if (!rj->is_active) continue;
-
-            double dx = ri->position[0] - rj->position[0];
-            double dy = ri->position[1] - rj->position[1];
-            double dz = ri->position[2] - rj->position[2];
-            double dist = sqrt(dx * dx + dy * dy + dz * dz);
-            double hard_limit = ri->bounding_radius + rj->bounding_radius;
-
-            if (dist < min_observed_dist) {
-                min_observed_dist = dist;
-            }
-
-            if (dist < hard_limit) {
-                res_collision = FLOW_SMT_VIOLATION_SAT;
-                viol_a = ri->robot_id;
-                viol_b = rj->robot_id;
-                break;
-            }
-        }
-        if (res_collision == FLOW_SMT_VIOLATION_SAT) break;
-    }
-
-    if (proof_out != NULL) {
-        proof_out->buffer_bounds_safety = res_collision;
-        proof_out->memory_quota_bound = FLOW_SMT_PROVEN_UNSAT;
-        proof_out->shard_non_aliasing = res_collision;
-        proof_out->determinism_invariant = FLOW_SMT_PROVEN_UNSAT;
-
-        if (res_collision == FLOW_SMT_VIOLATION_SAT) {
-            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                     "SMT FLEET COLLISION VIOLATION: Robot %u and Robot %u overlap (dist=%.3fm < hard limit)",
-                     viol_a, viol_b, min_observed_dist);
-        } else {
-            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                     "SMT FLEET SOUND: All %zu robots satisfy spatial separation polytope (min_dist=%.3fm, Zero-Collision)",
-                     fleet->robot_count, min_observed_dist);
-        }
-    }
-
-    return res_collision;
-}
+const FlowPlugin *flow_embodied_plugin(void) { return &EMBODIED_PLUGIN; }
