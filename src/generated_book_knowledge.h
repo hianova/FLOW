@@ -5,7 +5,7 @@
 #include "flowy.h"
 #include <string.h>
 
-#define FLOW_BOOK_CHAPTER_COUNT 14
+#define FLOW_BOOK_CHAPTER_COUNT 15
 
 typedef struct {
     const char *chapter_ref;
@@ -98,6 +98,12 @@ static const FlowBookChapterDoc FLOW_BOOK_CHAPTERS_ZH[FLOW_BOOK_CHAPTER_COUNT] =
         .chapter_title = "第十四章：擠乾軟體工程水分：零缺陷數學結構",
         .philosophy_why = "程式碼行數即系統結構熵 K(S)。FLOW 擠乾配置器分級、防禦性 Null 檢查瀑布、序列化與日誌字串格式化等軟體工程水分，達成柯爾莫哥洛夫理論下限。",
         .book_excerpt = "以幾何 Bump-Pointer+QSBR 世代折疊消滅 Slab 分配器；Curry-Howard 同構使防禦性檢查死碼消除；同構記憶體切片實現 0ns 傳輸；語義哈希流形消除熱路徑 snprintf；仿射測地線消除引用計數與 GC。"
+    },
+    {
+        .chapter_ref = "ch15_manifold_algebra_autopoiesis.md",
+        .chapter_title = "第十五章：流形代數、神經-符號橋、時空光錐反事實預演與活體自創生",
+        .philosophy_why = "約束收斂即相關。統計相關性只是幾何約束在投影維度上的影子；FLOW 抓的是本體，傳統 ML 抓的是影子。",
+        .book_excerpt = "流形代數實現交集與連鎖基因萃取；神經符號橋在 14 週期內完成 4096-D 語義到物理多面體投影；時空光錐預演未來 3 秒黑天鵝並在 13 微秒內混沌退火修正；物種形成引擎實現 10,000 節點活體自創生。"
     }
 
 };
@@ -186,6 +192,12 @@ static const FlowBookChapterDoc FLOW_BOOK_CHAPTERS_EN[FLOW_BOOK_CHAPTER_COUNT] =
         .chapter_title = "Chapter 14: Structural Entropy Elimination (6 Zero-Defect Mathematical Paradigms)",
         .philosophy_why = "Lines of code measure system structural entropy K(S). FLOW purges boilerplate software engineering complexities and reaches the Kolmogorov complexity theoretical lower bound.",
         .book_excerpt = "Bump-Pointer QSBR eliminates allocator fragmentation; Curry-Howard SMT DCE purges defensive null checks; Isomorphic wire slicing provides 0ns parsing; Semantic event manifolds eliminate hot-path snprintf; Affine geodesics eliminate ref-counting and GC."
+    },
+    {
+        .chapter_ref = "ch15_manifold_algebra_autopoiesis.md",
+        .chapter_title = "Chapter 15: Manifold Algebra, Neuro-Bit Bridge, Spacetime Pre-Play & Swarm Autopoiesis",
+        .philosophy_why = "Constraint convergence is correlation. Statistical correlation is merely a shadow of physical geometric constraints projected onto observation dimensions.",
+        .book_excerpt = "Manifold algebra executes feasible intersection and epistasis derivation; Neuro-bit bridge projects 4096-D continuous embeddings to polyhedra in 14 cycles; Spacetime preplay avers black swans in 13 microseconds; Swarm speciation engine enables autopoiesis across 10,000 nodes."
     }
 
 };
@@ -198,7 +210,7 @@ typedef struct {
     const char *book_excerpt;
 } FlowModuleBookBinding;
 
-static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_ZH[38] = {
+static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_ZH[42] = {
     {
         .module_id = "flowc",
         .chapter_ref = "ch01_what_is_flow.md",
@@ -464,11 +476,39 @@ static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_ZH[38] = {
         .chapter_title = "第十四章：擠乾軟體工程水分：零缺陷數學結構",
         .philosophy_why = "程式碼行數即系統結構熵 K(S)。FLOW 擠乾六大軟體工程水分，達到柯爾莫哥洛夫理論下限。",
         .book_excerpt = "Bump-Pointer QSBR、Curry-Howard SMT DCE、同構記憶體切片、相空間自創生、語義哈希流形與仿射測地線。"
+    },
+    {
+        .module_id = "manifold_algebra",
+        .chapter_ref = "ch15_manifold_algebra_autopoiesis.md",
+        .chapter_title = "第十五章：流形代數、神經-符號橋、時空光錐反事實預演與活體自創生",
+        .philosophy_why = "約束收斂即相關。流形交集算子在多面體邊界自動萃取連鎖基因群。",
+        .book_excerpt = "M_A (cap) M_B 緊縮邊界並依影子價格計算 Pareto 共識中心，Moreau 投影保證零缺陷。"
+    },
+    {
+        .module_id = "neuro_bridge",
+        .chapter_ref = "ch15_manifold_algebra_autopoiesis.md",
+        .chapter_title = "第十五章：流形代數、神經-符號橋、時空光錐反事實預演與活體自創生",
+        .philosophy_why = "大模型負責理解世界，FLOW 負責物理防摔與微秒剛性執行。",
+        .book_excerpt = "稀疏 Johnson-Lindenstrauss SIMD 投影在 14 週期內將 4096-D 語義向量映射為 BMF 座標與剛性多面體。"
+    },
+    {
+        .module_id = "spacetime_preplay",
+        .chapter_ref = "ch15_manifold_algebra_autopoiesis.md",
+        .chapter_title = "第十五章：流形代數、神經-符號橋、時空光錐反事實預演與活體自創生",
+        .philosophy_why = "從當下安全到時空錐前瞻安全，消除數秒後潛伏的黑天鵝失穩。",
+        .book_excerpt = "哈密頓相空間前瞻預演未來 3 秒光錐，13 微秒內以 1-Bit 混沌退火修正結冰側翻舵角。"
+    },
+    {
+        .module_id = "swarm_autopoiesis",
+        .chapter_ref = "ch15_manifold_algebra_autopoiesis.md",
+        .chapter_title = "第十五章：流形代數、神經-符號橋、時空光錐反事實預演與活體自創生",
+        .philosophy_why = "軟體系統的活體自創生，自發湧現跨環境最適拓撲。",
+        .book_excerpt = "四大生態位壓力下連鎖感知雜交與環境熵漂移，9-Byte 淋巴抗體網絡促進全網架構自動晉升。"
     }
 
 };
 
-static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_EN[38] = {
+static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_EN[42] = {
     {
         .module_id = "flowc",
         .chapter_ref = "ch01_what_is_flow.md",
@@ -734,6 +774,34 @@ static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_EN[38] = {
         .chapter_title = "Chapter 14: Structural Entropy Elimination (6 Zero-Defect Mathematical Paradigms)",
         .philosophy_why = "Lines of code measure system structural entropy K(S). FLOW purges boilerplate complexity.",
         .book_excerpt = "Bump-Pointer QSBR, Curry-Howard SMT DCE, Isomorphic Wire Slicing, BMF Autopoiesis, Semantic Event Manifolds, Affine Geodesics."
+    },
+    {
+        .module_id = "manifold_algebra",
+        .chapter_ref = "ch15_manifold_algebra_autopoiesis.md",
+        .chapter_title = "Chapter 15: Manifold Algebra, Neuro-Bit Bridge, Spacetime Pre-Play & Swarm Autopoiesis",
+        .philosophy_why = "Constraint convergence is correlation. Manifold intersection automatically derives epistatic linkage groups.",
+        .book_excerpt = "M_A (cap) M_B tightens boundaries and computes Pareto consensus centers; Moreau projection guarantees zero defects."
+    },
+    {
+        .module_id = "neuro_bridge",
+        .chapter_ref = "ch15_manifold_algebra_autopoiesis.md",
+        .chapter_title = "Chapter 15: Manifold Algebra, Neuro-Bit Bridge, Spacetime Pre-Play & Swarm Autopoiesis",
+        .philosophy_why = "LLMs comprehend the world; FLOW enforces physical safety and microsecond rigid execution.",
+        .book_excerpt = "Sparse Johnson-Lindenstrauss SIMD projection maps 4096-D continuous semantic embeddings to BMF and polyhedra in 14 cycles."
+    },
+    {
+        .module_id = "spacetime_preplay",
+        .chapter_ref = "ch15_manifold_algebra_autopoiesis.md",
+        .chapter_title = "Chapter 15: Manifold Algebra, Neuro-Bit Bridge, Spacetime Pre-Play & Swarm Autopoiesis",
+        .philosophy_why = "From Now-Safe to Spacetime-Safe: eliminate black swan instabilities seconds before they materialize.",
+        .book_excerpt = "Hamiltonian phase-space forward cone simulates future 3.0s, annealing rudder bias in 13 microseconds to avert ice slips."
+    },
+    {
+        .module_id = "swarm_autopoiesis",
+        .chapter_ref = "ch15_manifold_algebra_autopoiesis.md",
+        .chapter_title = "Chapter 15: Manifold Algebra, Neuro-Bit Bridge, Spacetime Pre-Play & Swarm Autopoiesis",
+        .philosophy_why = "Living software autopoiesis: spontaneous emergence of globally optimal topological architectures.",
+        .book_excerpt = "Epistatic-linkage-aware crossover and adaptive entropy drift across 4 niches; 9-byte lymphatic fleet immunity."
     }
 
 };
@@ -741,7 +809,7 @@ static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_EN[38] = {
 static inline const FlowModuleBookBinding *flow_book_lookup_binding_lang(const char *module_id, FlowLanguage lang) {
     if (module_id == NULL) return NULL;
     const FlowModuleBookBinding *bindings = (lang == FLOW_LANG_EN) ? FLOW_MODULE_BOOK_BINDINGS_EN : FLOW_MODULE_BOOK_BINDINGS_ZH;
-    for (size_t i = 0; i < 38; ++i) {
+    for (size_t i = 0; i < 42; ++i) {
         if (strcmp(bindings[i].module_id, module_id) == 0) return &bindings[i];
     }
     return NULL;

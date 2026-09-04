@@ -29,3 +29,6 @@
 - [12. BMF Token Ring 離散注意力算子與具身知覺超幾何疊加 (Coordinate Subspace Slicing & Double-Bind Emergency Brace)](ch12_token_ring_and_embodied_coordination.md)
 - [13. 六大數學支柱：經驗啟發式的全息消解 (Polyhedral Model, OCO Cache, Lyapunov Backpressure, Potential Games, Moreau Hysteresis, Simplicial Homology)](ch13_six_mathematical_pillars.md)
 - [14. 擠乾軟體工程水分：零缺陷數學結構 (Bump-Pointer QSBR, Curry-Howard SMT DCE, Isomorphic Wire Slicing, BMF Autopoiesis, Semantic Event Manifolds, Affine Geodesics)](ch14_structural_entropy_elimination.md)
+
+# 第七部：流形代數與活體自創生 (Manifold Algebra & Autopoiesis)
+- [15. 流形代數、神經-符號橋、時空光錐反事實預演與活體自創生 (Manifold Algebra, Neuro-Bit Bridge, Spacetime Pre-Play & Swarm Autopoiesis)](ch15_manifold_algebra_autopoiesis.md)

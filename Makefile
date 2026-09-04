@@ -187,7 +187,8 @@ TEST_BINARIES := \
 	$(BUILD_DIR)/entropy-collapse-test \
 	$(BUILD_DIR)/doc-as-intent-test \
 	$(BUILD_DIR)/hardware-blindspot-test \
-	$(BUILD_DIR)/bus-hybrid-poll-test
+	$(BUILD_DIR)/bus-hybrid-poll-test \
+	$(BUILD_DIR)/manifold-algebra-neuro-preplay-autopoiesis-test
 
 # Specific build prerequisites for targets with inter-module dependencies
 $(BUILD_DIR)/plugin-test: plugins
@@ -426,7 +427,7 @@ test: test-build
 	@$(MAKE) --no-print-directory test-run
 	@$(MAKE) --no-print-directory test-e2e
 	@echo "================================================================================"
-	@echo "          ALL 76 TEST SUITES & E2E VERIFICATIONS 100% SOUND & PASSED!           "
+	@echo "          ALL 77 TEST SUITES & E2E VERIFICATIONS 100% SOUND & PASSED!           "
 	@echo "================================================================================"
 
 clean:
