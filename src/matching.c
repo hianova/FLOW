@@ -188,50 +188,47 @@ FlowSMTResult flow_matching_verify_smt(const FlowLimitOrderBook *book,
     if (book == NULL) return FLOW_SMT_UNKNOWN;
 
     /* 1. Crossed Book Invariant (Bid < Ask) */
-    FlowSMTResult res_crossed = FLOW_SMT_PROVEN_UNSAT;
-    if (book->best_bid_price > 0 && book->best_ask_price > 0 &&
-        book->best_bid_price >= book->best_ask_price) {
-        res_crossed = FLOW_SMT_VIOLATION_SAT; /* Unmatched crossed price detected */
-    }
+    uint64_t crossed_val = (book->best_bid_price > 0 && book->best_ask_price > 0 &&
+                            book->best_bid_price >= book->best_ask_price) ? 1 : 0;
 
     /* 2. Non-Negative Inventory Invariant */
-    FlowSMTResult res_inventory = FLOW_SMT_PROVEN_UNSAT;
+    uint64_t max_fill_excess = 0;
     for (size_t i = 0; i < book->order_count; ++i) {
         const FlowOrder *o = &book->orders[i];
         if (o->filled_quantity > o->quantity) {
-            res_inventory = FLOW_SMT_VIOLATION_SAT;
+            max_fill_excess = o->filled_quantity - o->quantity;
             break;
         }
     }
 
-    /* 3. Deterministic Price-Time Priority */
-    FlowSMTResult res_det = FLOW_SMT_PROVEN_UNSAT;
-
-    if (proof_out != NULL) {
-        proof_out->buffer_bounds_safety = res_crossed;
-        proof_out->memory_quota_bound = res_inventory;
-        proof_out->shard_non_aliasing = res_det;
-        proof_out->determinism_invariant = res_det;
-
-        if (res_crossed == FLOW_SMT_VIOLATION_SAT) {
-            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                     "SMT FINANCIAL VIOLATION: Crossed book detected (Bid=%llu >= Ask=%llu)",
-                     (unsigned long long)book->best_bid_price, (unsigned long long)book->best_ask_price);
-        } else if (res_inventory == FLOW_SMT_VIOLATION_SAT) {
-            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                     "SMT FINANCIAL VIOLATION: Over-filled order detected (filled > requested)");
-        } else {
-            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                     "SMT FINANCIAL SOUND: Symbol=%u, Orders=%zu, Trades=%llu, TickToTrade=%lluns (Zero-Defect Soundness)",
-                     book->symbol_id, book->order_count, (unsigned long long)book->total_trades_executed,
-                     (unsigned long long)book->last_tick_to_trade_ns);
+    /* Unified SMT Box Constraint Invariants */
+    FlowBoxConstraint constraints[2] = {
+        {
+            .name = "crossed book indicator",
+            .candidate_value = crossed_val,
+            .min_bound = 0,
+            .max_bound = 0,
+            .theorem = FLOW_BOX_THEOREM_BUFFER_BOUNDS,
+            .violation_msg = "Crossed book detected (Bid >= Ask)"
+        },
+        {
+            .name = "fill excess",
+            .candidate_value = max_fill_excess,
+            .min_bound = 0,
+            .max_bound = 0,
+            .theorem = FLOW_BOX_THEOREM_MEMORY_QUOTA,
+            .violation_msg = "Over-filled order detected (filled > requested)"
         }
-    }
+    };
 
-    if (res_crossed == FLOW_SMT_VIOLATION_SAT || res_inventory == FLOW_SMT_VIOLATION_SAT) {
-        return FLOW_SMT_VIOLATION_SAT;
+    FlowSMTResult res = flow_smt_verify_box_invariants("financial_matching", constraints, 2, proof_out);
+    if (res == FLOW_SMT_PROVEN_UNSAT && proof_out != NULL) {
+        snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
+                 "SMT FINANCIAL SOUND: Symbol=%u, Orders=%zu, Trades=%llu, TickToTrade=%lluns (Zero-Defect Soundness)",
+                 book->symbol_id, book->order_count, (unsigned long long)book->total_trades_executed,
+                 (unsigned long long)book->last_tick_to_trade_ns);
     }
-    return FLOW_SMT_PROVEN_UNSAT;
+    return res;
 }
 
 /* ============================================================================

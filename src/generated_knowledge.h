@@ -10,15 +10,15 @@
 static const FlowModuleKnowledge CODEBASE_KNOWLEDGE[] = {
     {
         .module_id = "bitspace",
-        .title = "Orthogonal Polytope BitSpace & 3-Tier Mask Canvas",
+        .title = "BitManifold (BMF) / BitSpace & 3-Tier Mask Canvas",
         .header_file = "src/bitspace.h",
         .source_file = "src/bitspace.c",
         .layer = 0,
-        .responsibilities = "Manages orthogonal polytope hypercube projections Pi_P({0,1}^N), constant-time O(1) 1-bit chaotic annealing, and 3-Tier Dynamic Mask Canvas (Hard Safety, Telemetry Bias, Domain Preferences).",
+        .responsibilities = "Manages BitManifold (BMF) discrete manifolds, orthogonal polytope hypercube projections Pi_P({0,1}^N), constant-time O(1) 1-bit chaotic manifold transitions, 64-bit BitField Subspace Slicing (FLOW_GENOME_FIELD), and 3-Tier Dynamic Mask Canvas.",
         .algorithmic_guarantee = "O(1) 1-bit mutation (<2.5 ns/op) exploring Pareto frontiers on discrete manifolds; 1-cycle bitwise pruning eliminates 99.9% illegal states.",
         .memory_concurrency_model = "Native uint64_t register genome; zero heap allocation on search fast-path.",
-        .key_apis = "flow_polyhedron_project_mask, flow_mask_canvas_compose, flow_bitspace_search_configured",
-        .keywords = "bitspace genome 1bit 1-bit chaos mutation mask canvas polytope projection dimension pareto 混沌 幾何 遮罩 突變 退火 畫布"
+        .key_apis = "flow_manifold_project, flow_manifold_transition, flow_polyhedron_project_mask, flow_mask_canvas_compose",
+        .keywords = "bitmanifold bmf bitspace genome 1bit 1-bit chaos mutation mask canvas polytope projection flow_manifold_project flow_manifold_transition 混沌 流形 幾何 遮罩 突變 退火"
     },
     {
         .module_id = "reload",

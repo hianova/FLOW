@@ -1,4 +1,4 @@
-# 第四章：1-Bit 混沌退火 (暫存器位元翻轉、連鎖群與量子漂移)
+# 第四章：1-Bit 混沌退火與 BitManifold (BMF) (暫存器位元翻轉、連鎖群與量子漂移)
 
 > 「傳統演算法在組合爆炸的高維空間中寸步難行；FLOW 將硬體架構編碼進純暫存器的 64-bit 超立方體，以 12.96 奈秒的 1-Bit 混沌微步突變，突破上位效應壁壘，逼近全局帕累托前緣。」
 
@@ -120,4 +120,26 @@ $$\mathbf{M}_{\text{effective}} = \mathbf{M}_{\text{hard}} \;\land\; (\mathbf{M}
 * **SMT 記憶體配額與隔離定理證明 (`flow_cxl_verify_smt`)**：
   形式化證明跨 Session 記憶體完全隔離且單一 Session 消耗不超過配額上限，徹底杜絕內存越界與多租戶干擾。
 
+---
 
+## 4.7 同構模式大一統：BitManifold (BMF) 與四大量子原語
+
+隨著 FLOW 深入 Edge Gateway、具身多機協同、次微秒金融撮合與大模型 CXL 織網四大前沿領域，架構中浮現出最核心的四大同構模式。為了避免重複手寫與抽象洩漏，FLOW 透過純 C17 Header-only 零成本內聯將其封裝為四大權威原語：
+
+### 1. 64-bit 基因子空間切片與 BitManifold (BMF, `src/bitmanifold.h`)
+* **宣告式切片**：以 `FLOW_GENOME_PACK`、`FLOW_GENOME_GET` 與 `FLOW_GENOME_SET` 巨集取代手工位移計算，由編譯期坍縮為單週期暫存器遮罩運算。
+* **正規流形 API**：
+  * `flow_manifold_project()`：將隨機候選基因嚴格投影至 $\Pi_{\mathcal{P}}(\{0,1\}^{64})$ 合法離散多面體超立方體流形。
+  * `flow_manifold_transition()`：在遮罩約束下執行單週期 $O(1)$ 混沌波茲曼位元翻轉。
+
+### 2. SMT 幾何超長方體區間核驗 (Box-Constraint Polytope Verification, `src/smt.h`)
+* **統一驗證核心**：`flow_smt_verify_box_invariants()`。
+* **物理邊界結構體**：各驅動只需宣告 `FlowBoxConstraint` 陣列（名稱、候選值、上下界、定理類別與自訂違規描述），由統一 SMT Supreme Court 引擎產出形式化證明 `FlowSMTProofAttestation`，全面杜絕各子系統重複拼接 QF_LIA 邏輯。
+
+### 3. 9-Byte 活體費洛蒙零拷貝骨架 (`FlowWireFrame9`, `src/wire_frame.h`)
+* **剛好填入單個 UDP/暫存器**：統一封裝 1-Byte OpCode + 8-Byte 具名 Union Payload（淋巴抗體 `0xAA`、異質流體背壓 `0xBB`、機隊遙測 `0xCC`）。
+* **內聯快速 CRC16**：提供 `flow_wire_crc16()` 與零拷貝 `pack/unpack` 內聯函數，消除多份位元組打包與解包的潛在協議漂移。
+
+### 4. QSBR 世代生命週期與快取行隔離 (`FlowPluginRuntimeScope`, `src/reload.h`)
+* **64-Byte 快取行隔離**：`FlowPluginRuntimeScope` 封裝 `FLOW_CACHE_ALIGNED` 讀者結構與 false-sharing 防護緩衝區。
+* **RAII 風格生命週期**：提供 `flow_plugin_scope_enter`、`checkpoint`、`pause`、`resume`、`exit` 以及區塊型巨集 `FLOW_WITH_QSBR_SCOPE`，保證安全點宣布與離開時無條件註銷。

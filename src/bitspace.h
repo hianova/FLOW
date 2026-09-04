@@ -4,6 +4,7 @@
 #include "flow.h"
 #include "plugin.h"
 #include "adaptive.h"
+#include "bitmanifold.h"
 
 #include <stddef.h>
 #include <stdint.h>

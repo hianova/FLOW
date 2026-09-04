@@ -65,53 +65,37 @@ FlowSMTResult flow_primitive_verify_smt(const FlowPrimitiveDriver *driver,
         return FLOW_SMT_UNKNOWN;
     }
 
-    /* 1. Buffer Bounds Safety Theorem: queue depth must not exceed hardware ring limits */
-    FlowSMTResult res_buffer = FLOW_SMT_PROVEN_UNSAT;
-    if (candidate_queue_depth > bounds.max_queue_depth) {
-        res_buffer = FLOW_SMT_VIOLATION_SAT;
-    }
-
-    /* 2. Memory Quota Safety Theorem: allocated buffer must not exceed physical DMA limits */
-    FlowSMTResult res_memory = FLOW_SMT_PROVEN_UNSAT;
-    if (candidate_buffer_bytes > bounds.max_buffer_bytes) {
-        res_memory = FLOW_SMT_VIOLATION_SAT;
-    }
-
-    /* 3. Shard Non-Aliasing & Determinism */
-    FlowSMTResult res_shard = FLOW_SMT_PROVEN_UNSAT;
-    FlowSMTResult res_det = FLOW_SMT_PROVEN_UNSAT;
-
-    if (proof_out != NULL) {
-        proof_out->buffer_bounds_safety = res_buffer;
-        proof_out->memory_quota_bound = res_memory;
-        proof_out->shard_non_aliasing = res_shard;
-        proof_out->determinism_invariant = res_det;
-
-        if (res_buffer == FLOW_SMT_VIOLATION_SAT) {
-            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                     "SMT VIOLATION: candidate queue depth %llu exceeds hardware physical limit %llu",
-                     (unsigned long long)candidate_queue_depth,
-                     (unsigned long long)bounds.max_queue_depth);
-        } else if (res_memory == FLOW_SMT_VIOLATION_SAT) {
-            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                     "SMT VIOLATION: candidate buffer bytes %llu exceeds physical DMA limit %llu",
-                     (unsigned long long)candidate_buffer_bytes,
-                     (unsigned long long)bounds.max_buffer_bytes);
-        } else {
-            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                     "SMT PROVEN SOUND: queue_depth=%llu <= %llu, buffer=%llu <= %llu, zero_copy=%u",
-                     (unsigned long long)candidate_queue_depth,
-                     (unsigned long long)bounds.max_queue_depth,
-                     (unsigned long long)candidate_buffer_bytes,
-                     (unsigned long long)bounds.max_buffer_bytes,
-                     bounds.supports_zero_copy);
+    /* Unified SMT Hyper-box Constraint Verification (QF_LIA) */
+    FlowBoxConstraint constraints[2] = {
+        {
+            .name = "queue depth",
+            .candidate_value = candidate_queue_depth,
+            .min_bound = 1,
+            .max_bound = bounds.max_queue_depth,
+            .theorem = FLOW_BOX_THEOREM_BUFFER_BOUNDS,
+            .violation_msg = "exceeds hardware physical limit"
+        },
+        {
+            .name = "buffer bytes",
+            .candidate_value = candidate_buffer_bytes,
+            .min_bound = 0,
+            .max_bound = bounds.max_buffer_bytes,
+            .theorem = FLOW_BOX_THEOREM_MEMORY_QUOTA,
+            .violation_msg = "exceeds physical DMA limit"
         }
-    }
+    };
 
-    if (res_buffer == FLOW_SMT_VIOLATION_SAT || res_memory == FLOW_SMT_VIOLATION_SAT) {
-        return FLOW_SMT_VIOLATION_SAT;
+    FlowSMTResult res = flow_smt_verify_box_invariants(driver->driver_name, constraints, 2, proof_out);
+    if (res == FLOW_SMT_PROVEN_UNSAT && proof_out != NULL) {
+        snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
+                 "SMT PROVEN SOUND: queue_depth=%llu <= %llu, buffer=%llu <= %llu, zero_copy=%u",
+                 (unsigned long long)candidate_queue_depth,
+                 (unsigned long long)bounds.max_queue_depth,
+                 (unsigned long long)candidate_buffer_bytes,
+                 (unsigned long long)bounds.max_buffer_bytes,
+                 bounds.supports_zero_copy);
     }
-    return FLOW_SMT_PROVEN_UNSAT;
+    return res;
 }
 
 /* ============================================================================
@@ -460,27 +444,31 @@ const FlowPrimitiveDriver *flow_primitive_websocket_driver(void) {
  * Protocol 64-Bit Subspace Genome Encoding & Decoding
  * ============================================================================ */
 
+/* Protocol Genome Bitfield Subspace Layout (BitManifold BMF) */
+#define FLOW_PROTO_OFF_KIND     0
+#define FLOW_PROTO_LEN_KIND     3
+#define FLOW_PROTO_OFF_STREAMS  3
+#define FLOW_PROTO_LEN_STREAMS  9
+#define FLOW_PROTO_OFF_HEADER   12
+#define FLOW_PROTO_LEN_HEADER   7
+#define FLOW_PROTO_OFF_ZCOPY    19
+#define FLOW_PROTO_LEN_ZCOPY    1
+
 int flow_protocol_encode_genome(FlowProtocolKind kind,
                                 uint32_t streams,
                                 uint32_t header_table_bytes,
                                 int zero_copy,
                                 uint64_t *genome_out) {
     if (genome_out == NULL) return 0;
-    uint64_t g = 0;
 
-    /* Bits 0-2: Protocol Kind (3 bits, 0..7) */
-    g |= ((uint64_t)(kind & 0x7));
+    uint32_t st = (streams > 512) ? 512 : streams;
+    uint32_t ht = (header_table_bytes >> 6) & 0x7F;
 
-    /* Bits 3-11: Streams count (9 bits, 0..512) */
-    uint64_t st = (streams > 512) ? 512 : streams;
-    g |= (st << 3);
-
-    /* Bits 12-18: Header table size / 64 (7 bits, e.g. 4096 -> 64) */
-    uint64_t ht = (header_table_bytes >> 6) & 0x7F;
-    g |= (ht << 12);
-
-    /* Bit 19: Zero-copy active */
-    if (zero_copy) g |= (1ULL << 19);
+    /* Declarative BMF BitField Subspace Slicing */
+    uint64_t g = FLOW_GENOME_PACK((uint64_t)kind, FLOW_PROTO_OFF_KIND, FLOW_PROTO_LEN_KIND)
+               | FLOW_GENOME_PACK((uint64_t)st,   FLOW_PROTO_OFF_STREAMS, FLOW_PROTO_LEN_STREAMS)
+               | FLOW_GENOME_PACK((uint64_t)ht,   FLOW_PROTO_OFF_HEADER, FLOW_PROTO_LEN_HEADER)
+               | FLOW_GENOME_PACK(zero_copy ? 1ULL : 0ULL, FLOW_PROTO_OFF_ZCOPY, FLOW_PROTO_LEN_ZCOPY);
 
     *genome_out = g;
     return 1;
@@ -491,10 +479,19 @@ int flow_protocol_decode_genome(uint64_t genome,
                                 uint32_t *streams_out,
                                 uint32_t *header_table_bytes_out,
                                 int *zero_copy_out) {
-    if (kind_out) *kind_out = (FlowProtocolKind)(genome & 0x7);
-    if (streams_out) *streams_out = (uint32_t)((genome >> 3) & 0x1FF);
-    if (header_table_bytes_out) *header_table_bytes_out = (uint32_t)(((genome >> 12) & 0x7F) << 6);
-    if (zero_copy_out) *zero_copy_out = ((genome & (1ULL << 19)) != 0);
+    if (kind_out) {
+        *kind_out = (FlowProtocolKind)FLOW_GENOME_GET(genome, FLOW_PROTO_OFF_KIND, FLOW_PROTO_LEN_KIND);
+    }
+    if (streams_out) {
+        *streams_out = (uint32_t)FLOW_GENOME_GET(genome, FLOW_PROTO_OFF_STREAMS, FLOW_PROTO_LEN_STREAMS);
+    }
+    if (header_table_bytes_out) {
+        uint32_t ht = (uint32_t)FLOW_GENOME_GET(genome, FLOW_PROTO_OFF_HEADER, FLOW_PROTO_LEN_HEADER);
+        *header_table_bytes_out = ht << 6;
+    }
+    if (zero_copy_out) {
+        *zero_copy_out = (int)FLOW_GENOME_GET(genome, FLOW_PROTO_OFF_ZCOPY, FLOW_PROTO_LEN_ZCOPY);
+    }
     return 1;
 }
 
@@ -529,47 +526,34 @@ FlowSMTResult flow_primitive_verify_protocol_smt(const FlowPrimitiveDriver *driv
         return FLOW_SMT_UNKNOWN;
     }
 
-    /* 1. Stream Capacity Theorem (Anti-Stream Flood DoS) */
-    FlowSMTResult res_streams = FLOW_SMT_PROVEN_UNSAT;
-    if (candidate_streams > bounds.max_queue_depth) {
-        res_streams = FLOW_SMT_VIOLATION_SAT;
-    }
-
-    /* 2. Header Dynamic Table Theorem (Anti-HPACK Bomb) */
-    FlowSMTResult res_header = FLOW_SMT_PROVEN_UNSAT;
     const uint32_t max_allowed_header_table = 65536; /* 64 KB strict ceiling */
-    if (candidate_header_table_bytes > max_allowed_header_table) {
-        res_header = FLOW_SMT_VIOLATION_SAT;
-    }
 
-    /* 3. Stream Non-Aliasing & Protocol Determinism */
-    FlowSMTResult res_shard = FLOW_SMT_PROVEN_UNSAT;
-    FlowSMTResult res_det = FLOW_SMT_PROVEN_UNSAT;
-
-    if (proof_out != NULL) {
-        proof_out->buffer_bounds_safety = res_streams;
-        proof_out->memory_quota_bound = res_header;
-        proof_out->shard_non_aliasing = res_shard;
-        proof_out->determinism_invariant = res_det;
-
-        if (res_streams == FLOW_SMT_VIOLATION_SAT) {
-            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                     "SMT PROTOCOL VIOLATION: candidate streams %u exceeds protocol physical bound %llu",
-                     candidate_streams, (unsigned long long)bounds.max_queue_depth);
-        } else if (res_header == FLOW_SMT_VIOLATION_SAT) {
-            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                     "SMT PROTOCOL VIOLATION: candidate header table %uB exceeds safe ceiling %uB",
-                     candidate_header_table_bytes, max_allowed_header_table);
-        } else {
-            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                     "SMT PROTOCOL SOUND: protocol=%s, streams=%u <= %llu, header_table=%uB <= %uB",
-                     bounds.name, candidate_streams, (unsigned long long)bounds.max_queue_depth,
-                     candidate_header_table_bytes, max_allowed_header_table);
+    /* Unified SMT Hyper-box Constraint Verification (QF_LIA) */
+    FlowBoxConstraint constraints[2] = {
+        {
+            .name = "streams",
+            .candidate_value = candidate_streams,
+            .min_bound = 1,
+            .max_bound = bounds.max_queue_depth,
+            .theorem = FLOW_BOX_THEOREM_BUFFER_BOUNDS,
+            .violation_msg = "exceeds protocol physical bound"
+        },
+        {
+            .name = "header table",
+            .candidate_value = candidate_header_table_bytes,
+            .min_bound = 0,
+            .max_bound = max_allowed_header_table,
+            .theorem = FLOW_BOX_THEOREM_MEMORY_QUOTA,
+            .violation_msg = "exceeds safe ceiling"
         }
-    }
+    };
 
-    if (res_streams == FLOW_SMT_VIOLATION_SAT || res_header == FLOW_SMT_VIOLATION_SAT) {
-        return FLOW_SMT_VIOLATION_SAT;
+    FlowSMTResult res = flow_smt_verify_box_invariants(bounds.name, constraints, 2, proof_out);
+    if (res == FLOW_SMT_PROVEN_UNSAT && proof_out != NULL) {
+        snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
+                 "SMT PROTOCOL SOUND: protocol=%s, streams=%u <= %llu, header_table=%uB <= %uB",
+                 bounds.name, candidate_streams, (unsigned long long)bounds.max_queue_depth,
+                 candidate_header_table_bytes, max_allowed_header_table);
     }
-    return FLOW_SMT_PROVEN_UNSAT;
+    return res;
 }

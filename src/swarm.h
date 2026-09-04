@@ -3,6 +3,7 @@
 
 #include "bitspace.h"
 #include "smt.h"
+#include "wire_frame.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>

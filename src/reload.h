@@ -223,6 +223,62 @@ int flow_qsbr_unquarantine_reader(FlowReloadReader *reader);
 int flow_qsbr_is_reader_quarantined(const FlowReloadReader *reader);
 
 /* ========================================================================= */
+/* FlowPluginRuntimeScope: RAII-style Zero-Cost QSBR Lifecycle Scope         */
+/* ========================================================================= */
+
+typedef struct {
+    FlowReloadReader reader;           /* 64-byte cache-aligned with false-sharing isolation */
+    FlowReloadContext *context;        /* Host QSBR reload context */
+    uint64_t checkpoint_count;         /* Number of safe-points announced */
+    int is_registered;                 /* Registration state flag */
+} FLOW_CACHE_ALIGNED FlowPluginRuntimeScope;
+
+static inline int flow_plugin_scope_enter(FlowPluginRuntimeScope *scope, FlowReloadContext *context) {
+    if (scope == NULL || context == NULL) return 0;
+    scope->context = context;
+    scope->checkpoint_count = 0;
+    int rc = flow_reload_reader_register(context, &scope->reader);
+    scope->is_registered = (rc == FLOW_RELOAD_OK);
+    return scope->is_registered;
+}
+
+static inline void flow_plugin_scope_checkpoint(FlowPluginRuntimeScope *scope) {
+    if (scope != NULL && scope->is_registered) {
+        flow_qsbr_checkpoint(&scope->reader);
+        scope->checkpoint_count++;
+    }
+}
+
+static inline void flow_plugin_scope_pause(FlowPluginRuntimeScope *scope) {
+    if (scope != NULL && scope->is_registered) {
+        flow_qsbr_offline(&scope->reader);
+    }
+}
+
+static inline void flow_plugin_scope_resume(FlowPluginRuntimeScope *scope) {
+    if (scope != NULL && scope->is_registered) {
+        flow_qsbr_online(&scope->reader);
+    }
+}
+
+static inline void flow_plugin_scope_exit(FlowPluginRuntimeScope *scope) {
+    if (scope != NULL && scope->is_registered) {
+        flow_reload_reader_unregister(&scope->reader);
+        scope->is_registered = 0;
+    }
+}
+
+#define FLOW_WITH_QSBR_SCOPE(ctx, scope_ptr, ...) \
+    do { \
+        FlowPluginRuntimeScope _scope_inst; \
+        if (flow_plugin_scope_enter(&_scope_inst, (ctx))) { \
+            FlowPluginRuntimeScope *(scope_ptr) = &_scope_inst; \
+            do { __VA_ARGS__; } while (0); \
+            flow_plugin_scope_exit(&_scope_inst); \
+        } \
+    } while (0)
+
+/* ========================================================================= */
 /* Deterministic Audit Trail & Mutation Snapshots                            */
 /* ========================================================================= */
 

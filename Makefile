@@ -177,7 +177,8 @@ TEST_BINARIES := \
 	$(BUILD_DIR)/edge-gateway-test \
 	$(BUILD_DIR)/fleet-swarm-test \
 	$(BUILD_DIR)/financial-matching-test \
-	$(BUILD_DIR)/cxl-llm-fabric-test
+	$(BUILD_DIR)/cxl-llm-fabric-test \
+	$(BUILD_DIR)/isomorphic-primitives-test
 
 # Specific build prerequisites for targets with inter-module dependencies
 $(BUILD_DIR)/plugin-test: plugins
@@ -281,6 +282,7 @@ test-run: $(TEST_BINARIES) fvec-flowc-apply-test
 	@$(BUILD_DIR)/edge-gateway-test
 	@$(BUILD_DIR)/financial-matching-test
 	@$(BUILD_DIR)/cxl-llm-fabric-test
+	@$(BUILD_DIR)/isomorphic-primitives-test
 	@$(BUILD_DIR)/enterprise-production-test
 	@$(BUILD_DIR)/hardened-production-test
 	@$(BUILD_DIR)/decoupling-test
@@ -398,7 +400,7 @@ test: test-build
 	@$(MAKE) --no-print-directory test-run
 	@$(MAKE) --no-print-directory test-e2e
 	@echo "================================================================================"
-	@echo "          ALL 67 TEST SUITES & E2E VERIFICATIONS 100% SOUND & PASSED!           "
+	@echo "          ALL 68 TEST SUITES & E2E VERIFICATIONS 100% SOUND & PASSED!           "
 	@echo "================================================================================"
 
 clean:

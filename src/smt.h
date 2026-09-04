@@ -57,4 +57,29 @@ uint64_t flow_verifier_get_resource_mask(const SemanticIR *ir,
                                          const Component *comp,
                                          const FlowPlanDimensionSet *dims);
 
+/* ========================================================================= */
+/* SMT Hyper-box Constraint Polytope Verification (QF_LIA Invariants)        */
+/* ========================================================================= */
+
+typedef enum {
+    FLOW_BOX_THEOREM_BUFFER_BOUNDS = 0,
+    FLOW_BOX_THEOREM_MEMORY_QUOTA  = 1,
+    FLOW_BOX_THEOREM_SHARD_ISOLATION = 2,
+    FLOW_BOX_THEOREM_DETERMINISM   = 3
+} FlowBoxTheoremType;
+
+typedef struct {
+    const char *name;
+    uint64_t candidate_value;
+    uint64_t min_bound;
+    uint64_t max_bound;
+    FlowBoxTheoremType theorem;
+    const char *violation_msg; /* Optional custom violation description, e.g. "exceeds hardware physical limit" */
+} FlowBoxConstraint;
+
+FlowSMTResult flow_smt_verify_box_invariants(const char *subsystem_tag,
+                                             const FlowBoxConstraint *constraints,
+                                             size_t constraint_count,
+                                             FlowSMTProofAttestation *proof_out);
+
 #endif

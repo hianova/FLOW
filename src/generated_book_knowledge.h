@@ -35,7 +35,7 @@ static const FlowBookChapterDoc FLOW_BOOK_CHAPTERS_ZH[FLOW_BOOK_CHAPTER_COUNT] =
     },
     {
         .chapter_ref = "ch04_1bit_chaos_engine.md",
-        .chapter_title = "第四章：1-Bit 混沌退火 (暫存器位元翻轉、連鎖群與量子漂移)",
+        .chapter_title = "第四章：1-Bit 混沌退火與 BitManifold (BMF) (暫存器位元翻轉、連鎖群與量子漂移)",
         .philosophy_why = "在維度的詛咒與上位效應壁壘面前，傳統遺傳交叉必然撕裂拓樸；FLOW 以 12.96 奈秒純暫存器 1-Bit 混沌微步與 SMT 超級位元原子翻轉，突破局部鞍點。",
         .book_excerpt = "1-Bit 狀態脊椎將系統維度壓縮為 64-bit 離散基因組，透過三層動態遮罩畫布（SMT 硬安全閘門、遙測偏置、領域偏好）在 1 個時鐘週期內修剪 99.9% 非法狀態，並以 9-Byte UDP 費洛蒙實現群體尋優。"
     },
@@ -104,7 +104,7 @@ static const FlowBookChapterDoc FLOW_BOOK_CHAPTERS_EN[FLOW_BOOK_CHAPTER_COUNT] =
     },
     {
         .chapter_ref = "ch04_1bit_chaos_engine.md",
-        .chapter_title = "Chapter 4: 1-Bit Chaotic Annealing (Bit Flips, Linkage Groups & Quantum Drift)",
+        .chapter_title = "Chapter 4: 1-Bit Chaotic Annealing & BitManifold (BMF) (Bit Flips, Linkage Groups & Quantum Drift)",
         .philosophy_why = "In face of epistasis barriers, traditional GA crossover tears topology. FLOW employs 12.96ns 1-bit chaotic mutations with SMT super-bit atomic flips to tunnel through saddle points.",
         .book_excerpt = "The 1-Bit state spine encodes dimensions into 64-bit genomes, pruning 99.9% illegal states in a single clock cycle via 3-Tier Mask Canvases, sharing convergence via 9-byte UDP pheromones."
     },
@@ -199,28 +199,28 @@ static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_ZH[30] = {
     {
         .module_id = "bitspace",
         .chapter_ref = "ch04_1bit_chaos_engine.md",
-        .chapter_title = "第四章：1-Bit 混沌退火 (暫存器位元翻轉、連鎖群與量子漂移)",
+        .chapter_title = "第四章：1-Bit 混沌退火與 BitManifold (BMF) (暫存器位元翻轉、連鎖群與量子漂移)",
         .philosophy_why = "在維度的詛咒與上位效應壁壘面前，傳統遺傳交叉必然撕裂拓樸；FLOW 以 12.96 奈秒純暫存器 1-Bit 混沌微步與 SMT 超級位元原子翻轉，突破局部鞍點。",
         .book_excerpt = "1-Bit 狀態脊椎將系統維度壓縮為 64-bit 離散基因組，透過三層動態遮罩畫布（SMT 硬安全閘門、遙測偏置、領域偏好）在 1 個時鐘週期內修剪 99.9% 非法狀態，並以 9-Byte UDP 費洛蒙實現群體尋優。"
     },
     {
         .module_id = "search",
         .chapter_ref = "ch04_1bit_chaos_engine.md",
-        .chapter_title = "第四章：1-Bit 混沌退火 (暫存器位元翻轉、連鎖群與量子漂移)",
+        .chapter_title = "第四章：1-Bit 混沌退火與 BitManifold (BMF) (暫存器位元翻轉、連鎖群與量子漂移)",
         .philosophy_why = "在維度的詛咒與上位效應壁壘面前，傳統遺傳交叉必然撕裂拓樸；FLOW 以 12.96 奈秒純暫存器 1-Bit 混沌微步與 SMT 超級位元原子翻轉，突破局部鞍點。",
         .book_excerpt = "1-Bit 狀態脊椎將系統維度壓縮為 64-bit 離散基因組，透過三層動態遮罩畫布（SMT 硬安全閘門、遙測偏置、領域偏好）在 1 個時鐘週期內修剪 99.9% 非法狀態，並以 9-Byte UDP 費洛蒙實現群體尋優。"
     },
     {
         .module_id = "swarm",
         .chapter_ref = "ch04_1bit_chaos_engine.md",
-        .chapter_title = "第四章：1-Bit 混沌退火 (暫存器位元翻轉、連鎖群與量子漂移)",
+        .chapter_title = "第四章：1-Bit 混沌退火與 BitManifold (BMF) (暫存器位元翻轉、連鎖群與量子漂移)",
         .philosophy_why = "在維度的詛咒與上位效應壁壘面前，傳統遺傳交叉必然撕裂拓樸；FLOW 以 12.96 奈秒純暫存器 1-Bit 混沌微步與 SMT 超級位元原子翻轉，突破局部鞍點。",
         .book_excerpt = "1-Bit 狀態脊椎將系統維度壓縮為 64-bit 離散基因組，透過三層動態遮罩畫布（SMT 硬安全閘門、遙測偏置、領域偏好）在 1 個時鐘週期內修剪 99.9% 非法狀態，並以 9-Byte UDP 費洛蒙實現群體尋優。"
     },
     {
         .module_id = "genetic",
         .chapter_ref = "ch04_1bit_chaos_engine.md",
-        .chapter_title = "第四章：1-Bit 混沌退火 (暫存器位元翻轉、連鎖群與量子漂移)",
+        .chapter_title = "第四章：1-Bit 混沌退火與 BitManifold (BMF) (暫存器位元翻轉、連鎖群與量子漂移)",
         .philosophy_why = "在維度的詛咒與上位效應壁壘面前，傳統遺傳交叉必然撕裂拓樸；FLOW 以 12.96 奈秒純暫存器 1-Bit 混沌微步與 SMT 超級位元原子翻轉，突破局部鞍點。",
         .book_excerpt = "1-Bit 狀態脊椎將系統維度壓縮為 64-bit 離散基因組，透過三層動態遮罩畫布（SMT 硬安全閘門、遙測偏置、領域偏好）在 1 個時鐘週期內修剪 99.9% 非法狀態，並以 9-Byte UDP 費洛蒙實現群體尋優。"
     },
@@ -412,28 +412,28 @@ static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_EN[30] = {
     {
         .module_id = "bitspace",
         .chapter_ref = "ch04_1bit_chaos_engine.md",
-        .chapter_title = "Chapter 4: 1-Bit Chaotic Annealing (Bit Flips, Linkage Groups & Quantum Drift)",
+        .chapter_title = "Chapter 4: 1-Bit Chaotic Annealing & BitManifold (BMF) (Bit Flips, Linkage Groups & Quantum Drift)",
         .philosophy_why = "In face of epistasis barriers, traditional GA crossover tears topology. FLOW employs 12.96ns 1-bit chaotic mutations with SMT super-bit atomic flips to tunnel through saddle points.",
         .book_excerpt = "The 1-Bit state spine encodes dimensions into 64-bit genomes, pruning 99.9% illegal states in a single clock cycle via 3-Tier Mask Canvases, sharing convergence via 9-byte UDP pheromones."
     },
     {
         .module_id = "search",
         .chapter_ref = "ch04_1bit_chaos_engine.md",
-        .chapter_title = "Chapter 4: 1-Bit Chaotic Annealing (Bit Flips, Linkage Groups & Quantum Drift)",
+        .chapter_title = "Chapter 4: 1-Bit Chaotic Annealing & BitManifold (BMF) (Bit Flips, Linkage Groups & Quantum Drift)",
         .philosophy_why = "In face of epistasis barriers, traditional GA crossover tears topology. FLOW employs 12.96ns 1-bit chaotic mutations with SMT super-bit atomic flips to tunnel through saddle points.",
         .book_excerpt = "The 1-Bit state spine encodes dimensions into 64-bit genomes, pruning 99.9% illegal states in a single clock cycle via 3-Tier Mask Canvases, sharing convergence via 9-byte UDP pheromones."
     },
     {
         .module_id = "swarm",
         .chapter_ref = "ch04_1bit_chaos_engine.md",
-        .chapter_title = "Chapter 4: 1-Bit Chaotic Annealing (Bit Flips, Linkage Groups & Quantum Drift)",
+        .chapter_title = "Chapter 4: 1-Bit Chaotic Annealing & BitManifold (BMF) (Bit Flips, Linkage Groups & Quantum Drift)",
         .philosophy_why = "In face of epistasis barriers, traditional GA crossover tears topology. FLOW employs 12.96ns 1-bit chaotic mutations with SMT super-bit atomic flips to tunnel through saddle points.",
         .book_excerpt = "The 1-Bit state spine encodes dimensions into 64-bit genomes, pruning 99.9% illegal states in a single clock cycle via 3-Tier Mask Canvases, sharing convergence via 9-byte UDP pheromones."
     },
     {
         .module_id = "genetic",
         .chapter_ref = "ch04_1bit_chaos_engine.md",
-        .chapter_title = "Chapter 4: 1-Bit Chaotic Annealing (Bit Flips, Linkage Groups & Quantum Drift)",
+        .chapter_title = "Chapter 4: 1-Bit Chaotic Annealing & BitManifold (BMF) (Bit Flips, Linkage Groups & Quantum Drift)",
         .philosophy_why = "In face of epistasis barriers, traditional GA crossover tears topology. FLOW employs 12.96ns 1-bit chaotic mutations with SMT super-bit atomic flips to tunnel through saddle points.",
         .book_excerpt = "The 1-Bit state spine encodes dimensions into 64-bit genomes, pruning 99.9% illegal states in a single clock cycle via 3-Tier Mask Canvases, sharing convergence via 9-byte UDP pheromones."
     },

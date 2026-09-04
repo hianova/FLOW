@@ -367,27 +367,16 @@ const FlowPlugin *flow_swarm_plugin(void) {
 }
 
 /* ------------------------------------------------------------------------- */
+/* ------------------------------------------------------------------------- */
 /* Swarm Lymphatic Broadcasting (9-Byte Fleet-Wide Antibody Propagation)     */
 /* ------------------------------------------------------------------------- */
 
 int flow_swarm_lymphatic_encode(uint64_t content_hash, uint8_t out_packet[FLOW_SWARM_LYMPH_PKT_SIZE]) {
-    if (out_packet == NULL) return 0;
-    out_packet[0] = FLOW_SWARM_MSG_ANTIBODY;
-    for (int i = 0; i < 8; i++) {
-        out_packet[1 + i] = (uint8_t)((content_hash >> (56 - i * 8)) & 0xFF);
-    }
-    return 1;
+    return flow_wire_frame9_pack_antibody(content_hash, out_packet);
 }
 
 int flow_swarm_lymphatic_decode(const uint8_t in_packet[FLOW_SWARM_LYMPH_PKT_SIZE], uint64_t *out_content_hash) {
-    if (in_packet == NULL || out_content_hash == NULL) return 0;
-    if (in_packet[0] != FLOW_SWARM_MSG_ANTIBODY) return 0;
-    uint64_t h = 0;
-    for (int i = 0; i < 8; i++) {
-        h = (h << 8) | in_packet[1 + i];
-    }
-    *out_content_hash = h;
-    return 1;
+    return flow_wire_frame9_unpack_antibody(in_packet, out_content_hash);
 }
 
 int flow_swarm_lymphatic_assimilate(const char *local_vec_dir,
@@ -433,26 +422,22 @@ int flow_swarm_lymphatic_assimilate(const char *local_vec_dir,
 
 int flow_swarm_hetero_encode(const FlowHeteroPheromonePacket *pkt, uint8_t out[FLOW_SWARM_HETERO_PKT_SIZE]) {
     if (pkt == NULL || out == NULL) return 0;
-    out[0] = FLOW_SWARM_MSG_HETERO_PHEROMONE;
-    out[1] = (uint8_t)pkt->role;
-    out[2] = pkt->node_id;
-    out[3] = (uint8_t)((pkt->backpressure_permille >> 8) & 0xFF);
-    out[4] = (uint8_t)(pkt->backpressure_permille & 0xFF);
-    out[5] = (uint8_t)((pkt->latency_p99_us >> 8) & 0xFF);
-    out[6] = (uint8_t)(pkt->latency_p99_us & 0xFF);
-    out[7] = (uint8_t)((pkt->contract_crc16 >> 8) & 0xFF);
-    out[8] = (uint8_t)(pkt->contract_crc16 & 0xFF);
-    return 1;
+    return flow_wire_frame9_pack_hetero((uint8_t)pkt->role, pkt->node_id,
+                                        pkt->backpressure_permille,
+                                        pkt->latency_p99_us,
+                                        pkt->contract_crc16,
+                                        out);
 }
 
 int flow_swarm_hetero_decode(const uint8_t in[FLOW_SWARM_HETERO_PKT_SIZE], FlowHeteroPheromonePacket *pkt_out) {
     if (in == NULL || pkt_out == NULL) return 0;
-    if (in[0] != FLOW_SWARM_MSG_HETERO_PHEROMONE) return 0;
-    pkt_out->role = (FlowSwarmRole)in[1];
-    pkt_out->node_id = in[2];
-    pkt_out->backpressure_permille = ((uint16_t)in[3] << 8) | in[4];
-    pkt_out->latency_p99_us = ((uint16_t)in[5] << 8) | in[6];
-    pkt_out->contract_crc16 = ((uint16_t)in[7] << 8) | in[8];
+    uint8_t role_val = 0;
+    int ok = flow_wire_frame9_unpack_hetero(in, &role_val, &pkt_out->node_id,
+                                            &pkt_out->backpressure_permille,
+                                            &pkt_out->latency_p99_us,
+                                            &pkt_out->contract_crc16);
+    if (!ok) return 0;
+    pkt_out->role = (FlowSwarmRole)role_val;
     return 1;
 }
 
@@ -583,50 +568,41 @@ FlowSMTResult flow_hetero_mesh_verify_smt(const FlowHeteroMesh *mesh,
         bottleneck_capacity = compute_capacity + storage_capacity;
     }
 
-    /* 1. Flow Conservation Theorem: Bottleneck Tier Capacity >= Ingress Max QPS */
-    FlowSMTResult res_capacity = FLOW_SMT_PROVEN_UNSAT;
-    if (bottleneck_capacity < ingress_max_qps) {
-        res_capacity = FLOW_SMT_VIOLATION_SAT;
-    }
-
-    /* 2. Bottleneck Saturation Invariant: no single node is 100% saturated without redundancy */
-    FlowSMTResult res_saturation = FLOW_SMT_PROVEN_UNSAT;
+    /* 1. Flow Conservation Theorem & Saturation via Unified SMT Box Invariants */
+    uint64_t max_backpressure = 0;
     if (downstream_nodes <= 1 && mesh->node_count > 1) {
         for (size_t i = 0; i < mesh->node_count; ++i) {
-            if (mesh->nodes[i].current_backpressure >= 950) {
-                res_saturation = FLOW_SMT_VIOLATION_SAT;
-                break;
+            if (mesh->nodes[i].current_backpressure > max_backpressure) {
+                max_backpressure = mesh->nodes[i].current_backpressure;
             }
         }
     }
 
-    /* 3. Role Non-Aliasing & Determinism */
-    FlowSMTResult res_shard = FLOW_SMT_PROVEN_UNSAT;
-    FlowSMTResult res_det = FLOW_SMT_PROVEN_UNSAT;
-
-    if (proof_out != NULL) {
-        proof_out->buffer_bounds_safety = res_capacity;
-        proof_out->memory_quota_bound = res_saturation;
-        proof_out->shard_non_aliasing = res_shard;
-        proof_out->determinism_invariant = res_det;
-
-        if (res_capacity == FLOW_SMT_VIOLATION_SAT) {
-            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                     "SMT MESH VIOLATION: ingress QPS %u exceeds pipeline bottleneck tier capacity %llu",
-                     ingress_max_qps, (unsigned long long)bottleneck_capacity);
-        } else if (res_saturation == FLOW_SMT_VIOLATION_SAT) {
-            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                     "SMT MESH VIOLATION: single-point-of-failure downstream node at 95%%+ saturation");
-        } else {
-            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                     "SMT MESH SOUND: ingress_qps=%u <= bottleneck_cap=%llu across %zu nodes (Zero-Defect)",
-                     ingress_max_qps, (unsigned long long)bottleneck_capacity, downstream_nodes);
+    FlowBoxConstraint constraints[2] = {
+        {
+            .name = "ingress QPS",
+            .candidate_value = ingress_max_qps,
+            .min_bound = 0,
+            .max_bound = bottleneck_capacity,
+            .theorem = FLOW_BOX_THEOREM_BUFFER_BOUNDS,
+            .violation_msg = "exceeds pipeline bottleneck tier capacity"
+        },
+        {
+            .name = "downstream saturation",
+            .candidate_value = max_backpressure,
+            .min_bound = 0,
+            .max_bound = 949,
+            .theorem = FLOW_BOX_THEOREM_MEMORY_QUOTA,
+            .violation_msg = "single-point-of-failure downstream node at 95%+ saturation"
         }
-    }
+    };
 
-    if (res_capacity == FLOW_SMT_VIOLATION_SAT || res_saturation == FLOW_SMT_VIOLATION_SAT) {
-        return FLOW_SMT_VIOLATION_SAT;
+    FlowSMTResult res = flow_smt_verify_box_invariants("hetero_mesh", constraints, 2, proof_out);
+    if (res == FLOW_SMT_PROVEN_UNSAT && proof_out != NULL) {
+        snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
+                 "SMT MESH SOUND: ingress_qps=%u <= bottleneck_cap=%llu across %zu nodes (Zero-Defect)",
+                 ingress_max_qps, (unsigned long long)bottleneck_capacity, downstream_nodes);
     }
-    return FLOW_SMT_PROVEN_UNSAT;
+    return res;
 }
 

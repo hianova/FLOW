@@ -2,6 +2,7 @@
 #define FLOW_PRIMITIVE_H
 
 #include "smt.h"
+#include "bitmanifold.h"
 
 #include <stddef.h>
 #include <stdint.h>
