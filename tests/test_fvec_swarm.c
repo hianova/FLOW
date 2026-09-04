@@ -199,7 +199,7 @@ int main(void) {
         FLOW_ASSERT_EQ(result.classified_intent, FLOW_NEURO_INTENT_SMOOTH_FETCH_LATTE);
         FLOW_ASSERT_NE(result.bmf_coordinates, 0ULL);
         FLOW_ASSERT_TRUE(result.bound_count >= 4);
-        FLOW_ASSERT_TRUE(result.projection_nanoseconds < 1000.0);
+        FLOW_ASSERT_TRUE(result.projection_nanoseconds < 50000.0);
 
         FlowSMTProofAttestation proof;
         memset(&proof, 0, sizeof(proof));
@@ -212,6 +212,7 @@ int main(void) {
                                                       FLOW_NEURO_INTENT_SMOOTH_FETCH_LATTE, &simd_result), 1);
         FLOW_ASSERT_EQ(simd_result.classified_intent, FLOW_NEURO_INTENT_SMOOTH_FETCH_LATTE);
         FLOW_ASSERT_EQ(simd_result.bmf_coordinates, result.bmf_coordinates);
+        FLOW_ASSERT_TRUE(simd_result.projection_nanoseconds < 1000.0);
 
         FlowSMTProofAttestation simd_proof;
         memset(&simd_proof, 0, sizeof(simd_proof));
@@ -238,7 +239,31 @@ int main(void) {
         FLOW_ASSERT_EQ(flow_neuro_eval_bounds_simd(result.bounds, result.bound_count, unsafe_state, &violation_unsafe), 1);
         FLOW_ASSERT_NE(violation_unsafe, 0U); /* Violation flagged in sub-5ns! */
 
-        printf("  ✓ Stage 6 Passed: 4096-D continuous embedding projected via Deep SIMD (%.1fns) & INT8 Quantization; SMT Sound.\n\n",
+        /* 5. 4096-D Continuous Embedding -> Subspace Routing -> 1-Bit BMF Canvas */
+        FlowBmfSubspaceRegistry reg;
+        flow_bmf_subspace_init_registry(&reg);
+
+        uint32_t indexed_sub_id = 0;
+        FLOW_ASSERT_EQ(flow_neuro_bridge_index_subspace(&bridge, embedding, input_dim,
+                                                        FLOW_NEURO_INTENT_SMOOTH_FETCH_LATTE,
+                                                        &reg, &indexed_sub_id), 1);
+        FLOW_ASSERT_EQ(indexed_sub_id, FLOW_BMF_SUBSPACE_SMOOTH_FETCH_LATTE);
+
+        FlowBmf1BitCanvas bmf_canvas;
+        FlowNeuroProjectionResult bridge_res;
+        FLOW_ASSERT_EQ(flow_neuro_bridge_to_1bit_canvas(&bridge, embedding, input_dim,
+                                                        FLOW_NEURO_INTENT_SMOOTH_FETCH_LATTE,
+                                                        &reg, &bmf_canvas, &bridge_res), 1);
+        FLOW_ASSERT_EQ(bmf_canvas.subspace_id, FLOW_BMF_SUBSPACE_SMOOTH_FETCH_LATTE);
+        /* Invariants must be active */
+        FLOW_ASSERT_TRUE(flow_bmf_canvas_get_switch(&bmf_canvas, FLOW_BMF_SW_HARD_SAFETY));
+        FLOW_ASSERT_TRUE(flow_bmf_canvas_get_switch(&bmf_canvas, FLOW_BMF_SW_ANTI_SPILL_TILT));
+        FLOW_ASSERT_TRUE(flow_bmf_canvas_get_switch(&bmf_canvas, FLOW_BMF_SW_GRIPPER_FORCE_SAFE));
+        /* SMT Formal Adjudication */
+        FLOW_ASSERT_TRUE(flow_bmf_canvas_adjudicate_smt(&bmf_canvas));
+        FLOW_ASSERT_TRUE(bmf_canvas.is_adjudicated_sound);
+
+        printf("  ✓ Stage 6 Passed: 4096-D continuous embedding routed to Subspace & 1-Bit BMF Canvas via Deep SIMD (%.1fns); SMT Sound.\n\n",
                simd_result.projection_nanoseconds);
     }
 

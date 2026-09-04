@@ -11,6 +11,7 @@
 #include "oco_cache.h"
 #include "manifold_algebra.h"
 #include "entropy_collapse.h"
+#include "token_ring.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -345,6 +346,86 @@ int main(void) {
         FLOW_ASSERT_SMT_SOUND(m_proof);
 
         printf("  ✓ Stage 6 Passed: Manifold algebra intersection, epistasis and boundary projection SMT sound.\n\n");
+    }
+
+    /* ========================================================================= */
+    /* STAGE 7: 1-Bit BMF Canvas: Subspace Routing, 1-Bit Switchboard & SMT      */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(7, "1-Bit BMF Canvas: Subspace Routing, 1-Bit Switchboard & SMT Adjudication");
+    {
+        /* 1. Subspace Registry & Lookup */
+        FlowBmfSubspaceRegistry reg;
+        flow_bmf_subspace_init_registry(&reg);
+        FLOW_ASSERT_TRUE(reg.is_initialized);
+        FLOW_ASSERT_TRUE(reg.subspace_count >= 5);
+
+        const FlowBmfSubspace *latte_sub = flow_bmf_subspace_lookup(&reg, FLOW_BMF_SUBSPACE_SMOOTH_FETCH_LATTE);
+        FLOW_ASSERT_TRUE(latte_sub != NULL);
+        FLOW_ASSERT_EQ(latte_sub->subspace_id, FLOW_BMF_SUBSPACE_SMOOTH_FETCH_LATTE);
+        FLOW_ASSERT_TRUE((latte_sub->invariant_mask & FLOW_BMF_SW_ANTI_SPILL_TILT) != 0);
+        FLOW_ASSERT_TRUE((latte_sub->invariant_mask & FLOW_BMF_SW_GRIPPER_FORCE_SAFE) != 0);
+
+        /* 2. Subspace Indexing from 16-D Features */
+        double latte_features[FLOW_BMF_SUBSPACE_FEATURE_DIM] = {0.84, 0.60, 0.22, 0.0};
+        uint32_t indexed_sub = flow_bmf_subspace_index_from_features(&reg, latte_features, FLOW_BMF_SUBSPACE_FEATURE_DIM);
+        FLOW_ASSERT_EQ(indexed_sub, FLOW_BMF_SUBSPACE_SMOOTH_FETCH_LATTE);
+
+        /* 3. 1-Bit BMF Canvas Initialization from Subspace */
+        FlowBmf1BitCanvas canvas;
+        flow_bmf_canvas_init_from_subspace(&canvas, latte_sub);
+        FLOW_ASSERT_EQ(canvas.subspace_id, FLOW_BMF_SUBSPACE_SMOOTH_FETCH_LATTE);
+        FLOW_ASSERT_TRUE(flow_bmf_canvas_get_switch(&canvas, FLOW_BMF_SW_HARD_SAFETY));
+        FLOW_ASSERT_TRUE(flow_bmf_canvas_get_switch(&canvas, FLOW_BMF_SW_ANTI_SPILL_TILT));
+        FLOW_ASSERT_TRUE(flow_bmf_canvas_get_switch(&canvas, FLOW_BMF_SW_GRIPPER_FORCE_SAFE));
+
+        /* 4. Invariant Protection: Attempting to clear an invariant switch is safely rejected */
+        flow_bmf_canvas_set_switch(&canvas, FLOW_BMF_SW_ANTI_SPILL_TILT, 0);
+        FLOW_ASSERT_TRUE(flow_bmf_canvas_get_switch(&canvas, FLOW_BMF_SW_ANTI_SPILL_TILT)); /* Must remain 1 */
+
+        /* 5. Malleable switch toggling */
+        flow_bmf_canvas_set_switch(&canvas, FLOW_BMF_SW_SIMD_VECTORIZED, 1);
+        FLOW_ASSERT_TRUE(flow_bmf_canvas_get_switch(&canvas, FLOW_BMF_SW_SIMD_VECTORIZED));
+        flow_bmf_canvas_set_switch(&canvas, FLOW_BMF_SW_SIMD_VECTORIZED, 0);
+        FLOW_ASSERT_FALSE(flow_bmf_canvas_get_switch(&canvas, FLOW_BMF_SW_SIMD_VECTORIZED));
+
+        /* 6. SMT Physical Formal Adjudication */
+        FLOW_ASSERT_TRUE(flow_bmf_canvas_adjudicate_smt(&canvas));
+        FLOW_ASSERT_TRUE(canvas.is_adjudicated_sound);
+
+        /* Artificial violation detection in SMT */
+        canvas.switchboard_bits &= ~FLOW_BMF_SW_HARD_SAFETY;
+        FLOW_ASSERT_FALSE(flow_bmf_canvas_adjudicate_smt(&canvas));
+        FLOW_ASSERT_FALSE(canvas.is_adjudicated_sound);
+        /* Restore safety */
+        canvas.switchboard_bits |= FLOW_BMF_SW_HARD_SAFETY;
+        FLOW_ASSERT_TRUE(flow_bmf_canvas_adjudicate_smt(&canvas));
+
+        /* 7. Single-cycle 1-Bit Chaotic Mutation Transition */
+        uint64_t rng = 0xdeadbeef12345678ULL;
+        uint32_t flipped_bit = 0;
+        uint64_t prev_bits = canvas.switchboard_bits;
+        uint64_t new_bits = flow_bmf_canvas_flip_1bit(&canvas, &rng, &flipped_bit);
+        FLOW_ASSERT_NE(new_bits, prev_bits);
+        /* Invariants must remain unviolated after flip */
+        FLOW_ASSERT_TRUE(flow_bmf_canvas_verify_invariants(&canvas));
+
+        /* 8. Token Ring Attention Projection on 1-Bit Canvas */
+        uint64_t attention_mask = ~(FLOW_BMF_SW_SIMD_VECTORIZED);
+        uint64_t proj = flow_token_ring_bmf_attention_project(&canvas, attention_mask, 0);
+        FLOW_ASSERT_TRUE(proj != 0);
+        FLOW_ASSERT_TRUE(flow_bmf_canvas_verify_invariants(&canvas));
+
+        /* 9. Isomorphic Conversion with FlowMaskCanvas */
+        FlowMaskCanvas mask_conv;
+        flow_bmf_canvas_to_mask_canvas(&canvas, &mask_conv);
+        FLOW_ASSERT_EQ(mask_conv.hard_composite_mask, canvas.switchboard_bits);
+
+        FlowBmf1BitCanvas restored_canvas;
+        flow_bmf_canvas_from_mask_canvas(&mask_conv, FLOW_BMF_SUBSPACE_SMOOTH_FETCH_LATTE, &restored_canvas);
+        FLOW_ASSERT_EQ(restored_canvas.subspace_id, FLOW_BMF_SUBSPACE_SMOOTH_FETCH_LATTE);
+        FLOW_ASSERT_EQ(restored_canvas.switchboard_bits, canvas.switchboard_bits);
+
+        printf("  ✓ Stage 7 Passed: 1-Bit BMF Canvas Subspace routing, 1-bit switchboard & SMT formal adjudication verified.\n\n");
     }
 
     FLOW_TEST_SUITE_END();

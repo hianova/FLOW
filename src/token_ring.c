@@ -25,6 +25,23 @@ uint64_t flow_token_ring_attention_project(FlowMaskCanvas *canvas, uint64_t atte
     return canvas->hard_composite_mask ? flow_manifold_project(current_genome, canvas->hard_composite_mask, canvas->soft_composite_bias) : 0;
 }
 
+uint64_t flow_token_ring_bmf_attention_project(FlowBmf1BitCanvas *canvas, uint64_t attention_mask, uint64_t dynamic_bias) {
+    if (!canvas) return 0;
+    if (attention_mask != 0) {
+        canvas->malleable_mask &= attention_mask;
+    }
+    if (dynamic_bias != 0) {
+        canvas->dynamic_bias = dynamic_bias;
+    }
+    canvas->switchboard_bits = (canvas->switchboard_bits & (canvas->invariant_mask | canvas->malleable_mask)) | canvas->invariant_mask;
+    if (canvas->dynamic_bias != 0) {
+        uint64_t malleable_free = canvas->malleable_mask & ~canvas->invariant_mask;
+        canvas->switchboard_bits |= (canvas->dynamic_bias & malleable_free);
+    }
+    canvas->is_adjudicated_sound = flow_bmf_canvas_verify_invariants(canvas);
+    return canvas->switchboard_bits;
+}
+
 static int stage_polytope_handler(FlowTokenRing *ring, FlowToken *token, FlowMaskCanvas *canvas) {
     if (!ring || !token || !canvas || !ring->active_ir) return 0;
     if (ring->active_space.candidate_count == 0 &&
@@ -128,6 +145,7 @@ int flow_token_ring_init(FlowTokenRing *ring, SemanticIR *ir) {
     } else {
         ring->active_canvas = (FlowMaskCanvas){.hard_safety_mask = ~0ULL, .hard_composite_mask = ~0ULL};
     }
+    flow_bmf_canvas_from_mask_canvas(&ring->active_canvas, FLOW_BMF_SUBSPACE_GENERIC, &ring->bmf_1bit_canvas);
     snprintf(ring->status_message, sizeof(ring->status_message), "Token Ring initialized");
     return 1;
 }

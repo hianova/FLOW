@@ -62,6 +62,8 @@ typedef struct {
     char intent_description[128];
     FlowNeuroPhysicalBound bounds[FLOW_NEURO_MAX_CONSTRAINTS];
     size_t bound_count;
+    uint32_t indexed_subspace_id;                /* Subspace / Chart ID indexed from 4096-D embedding */
+    uint64_t bmf_1bit_switches;                  /* 1-bit rigid switchboard state in active subspace */
     uint64_t projection_cycles;                  /* RDTSC / CNTVCT_EL0 elapsed cycles */
     double projection_nanoseconds;               /* Elapsed time in nanoseconds (< 100 ns target) */
 } FlowNeuroProjectionResult;
@@ -140,9 +142,28 @@ FlowSMTResult flow_neuro_bridge_verify_smt(const FlowNeuroProjectionResult *resu
  * classification and error epsilon <= max_allowed_error relative to FP32 reference.
  */
 FlowSMTResult flow_neuro_verify_simd_soundness_smt(const FlowNeuroProjectionResult *baseline_res,
-                                                  const FlowNeuroProjectionResult *simd_res,
-                                                  double max_allowed_error,
-                                                  FlowSMTProofAttestation *proof_out);
+                                                   const FlowNeuroProjectionResult *simd_res,
+                                                   double max_allowed_error,
+                                                   FlowSMTProofAttestation *proof_out);
+
+/*
+ * Subspace Indexing & 1-Bit BMF Canvas Projection
+ * 4096-D Continuous Embedding -> Subspace Selection -> 1-Bit Rigid Canvas
+ */
+int flow_neuro_bridge_index_subspace(const FlowNeuroBridge *bridge,
+                                     const float *input_embedding,
+                                     size_t embedding_len,
+                                     FlowNeuroIntentType intent_hint,
+                                     const FlowBmfSubspaceRegistry *reg,
+                                     uint32_t *subspace_id_out);
+
+int flow_neuro_bridge_to_1bit_canvas(FlowNeuroBridge *bridge,
+                                     const float *input_embedding,
+                                     size_t embedding_len,
+                                     FlowNeuroIntentType intent_hint,
+                                     const FlowBmfSubspaceRegistry *reg,
+                                     FlowBmf1BitCanvas *canvas_out,
+                                     FlowNeuroProjectionResult *result_out);
 
 #ifdef __cplusplus
 }

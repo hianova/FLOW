@@ -83,6 +83,7 @@ typedef struct FlowTokenRing {
 
     /* Circulating Constraint Canvas & Manifold Genome */
     FlowMaskCanvas active_canvas;
+    FlowBmf1BitCanvas bmf_1bit_canvas;
     uint64_t active_genome;
 
     /* Lyapunov Energy Tracking */
@@ -139,6 +140,10 @@ uint64_t flow_token_ring_attention_project(FlowMaskCanvas *canvas,
                                            uint64_t attention_mask,
                                            uint64_t dynamic_bias,
                                            uint64_t current_genome);
+
+uint64_t flow_token_ring_bmf_attention_project(FlowBmf1BitCanvas *canvas,
+                                               uint64_t attention_mask,
+                                               uint64_t dynamic_bias);
 
 /*
  * State Machine Execution

@@ -27,6 +27,52 @@ typedef struct {
     uint64_t soft_composite_bias;    /* Superposition: Probability-Biasing Manifold */
 } FlowMaskCanvas;
 
+/*
+ * ============================================================================
+ * Subspace-Indexed 1-Bit Rigid Switchboard BMF System (FlowBmfSubspace)
+ * ============================================================================
+ */
+
+typedef enum {
+    FLOW_BMF_SUBSPACE_GENERIC = 0,
+    FLOW_BMF_SUBSPACE_SMOOTH_FETCH_LATTE = 1,   /* "拿桌上快灑出來的拿鐵": Anti-spill tilt clamp, gentle gripper */
+    FLOW_BMF_SUBSPACE_AGILE_SPRINT = 2,         /* "敏捷衝刺避障": Friction stick lock, ZMP balance, dynamic torque */
+    FLOW_BMF_SUBSPACE_COLLABORATIVE_HOLD = 3,   /* "雙臂協同平穩搬運": Distance sync lock, rigid coop */
+    FLOW_BMF_SUBSPACE_EMERGENCY_PROTECT = 4,    /* "防跌倒緊急制動": Emergency CAN halt, critical touchdown damping */
+    FLOW_BMF_SUBSPACE_HFT_LATENCY = 5,          /* "HFT 超低延遲": SIMD 512, NUMA first touch, zero-copy wire */
+    FLOW_BMF_SUBSPACE_QUIESCENT_IOT = 6,        /* "IoT 靜止休眠": Low thermal, minimal switches */
+    FLOW_BMF_SUBSPACE_MAX = 16
+} FlowBmfSubspaceId;
+
+#define FLOW_BMF_SUBSPACE_FEATURE_DIM 16
+
+typedef struct {
+    uint32_t subspace_id;
+    char name[48];
+    char description[96];
+    double centroid[FLOW_BMF_SUBSPACE_FEATURE_DIM]; /* 16-D feature centroid from 4096-D embedding */
+    uint64_t invariant_mask;                         /* 1-bit switches that must be 1 (hard physical constraints) */
+    uint64_t malleable_mask;                         /* 1-bit switches that can mutate / anneal */
+    uint64_t default_switches;                       /* Default active 1-bit switch configuration */
+} FlowBmfSubspace;
+
+typedef struct {
+    FlowBmfSubspace subspaces[FLOW_BMF_SUBSPACE_MAX];
+    size_t subspace_count;
+    int is_initialized;
+} FlowBmfSubspaceRegistry;
+
+/* BMF Subspace & 1-Bit Canvas Management */
+void flow_bmf_subspace_init_registry(FlowBmfSubspaceRegistry *reg);
+const FlowBmfSubspace *flow_bmf_subspace_lookup(const FlowBmfSubspaceRegistry *reg, uint32_t subspace_id);
+uint32_t flow_bmf_subspace_index_from_features(const FlowBmfSubspaceRegistry *reg, const double *features, size_t dim);
+void flow_bmf_canvas_init_from_subspace(FlowBmf1BitCanvas *canvas, const FlowBmfSubspace *subspace);
+int flow_bmf_canvas_adjudicate_smt(FlowBmf1BitCanvas *canvas);
+
+/* Isomorphic conversion between legacy FlowMaskCanvas and FlowBmf1BitCanvas */
+void flow_bmf_canvas_to_mask_canvas(const FlowBmf1BitCanvas *canvas, FlowMaskCanvas *mask_canvas_out);
+void flow_bmf_canvas_from_mask_canvas(const FlowMaskCanvas *mask_canvas, uint32_t subspace_id, FlowBmf1BitCanvas *canvas_out);
+
 /* ========================================================================= */
 /* Mathematical Polyhedral Constraint & Hypercube Projection Engine         */
 /* Linear Inequality System: \mathcal{P} = { x \in R^D | A x <= b }          */

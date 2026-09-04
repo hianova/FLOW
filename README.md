@@ -160,6 +160,14 @@ FLOW compiles declarative intents (`.flow`) into zero-overhead native code. Oper
   - **Moreau 觸地著陸緩衝**：45kg 雙足機器人自 0.5m 自由落體觸地，15ms 阻抗過渡抑制瞬態衝擊，恢復係數 $e \le 0.05$，SMT 證明峰值力 $F \le 10\text{kN}$，齒輪結構零剪切崩裂。
   - **雙機剛性協同約束**：雙機器人共同搬運 1.5m 碳纖維剛性樑，50N 突發擾動下同步誤差 $\le 0.8\text{mm} \le 5.0\text{mm}$，SMT 形式化證明物料內部應力不超過材料屈服強度 $F_{\text{yield}}$，零斷裂。
 
+### 13. 1-Bit BMF Canvas 與子空間索引架構 (`FlowBmf1BitCanvas` / `FlowBmfSubspace`)
+- **1. 4096-D 連續語義子空間索引 (`flow_neuro_bridge_index_subspace`)**：
+  大模型提供的 4096 維高維語義向量不堆疊連續變數，而是透過 Neuro-Bridge 在次微秒內索引出對應的 **Subspace (流形子空間/幾何圖卡)**，包含 Smooth Fetch Latte、Agile Sprint、Collaborative Hold、Emergency Protect、HFT Latency、Quiescent IoT 等。
+- **2. 1-Bit 純粹剛性開關板 (`FlowBmf1BitCanvas` / `FlowBmfCanvas`, `src/bitmanifold.h`)**：
+  在選定子空間內，FLOW 核心退回至最純粹的 1-Bit 剛性開關矩陣（Bits 0..15 硬性不變量約束開關，Bits 16..31 硬體基質開關，Bits 32..63 遙測退火位元）。防灑傾角鉗位、夾爪安全力矩、庫侖摩擦鎖等不變量受硬性保護，任何試圖關閉的變異均被原地拒絕。
+- **3. SMT 次微秒形式裁決與單週期混沌退火 (`flow_bmf_canvas_adjudicate_smt`, `flow_bmf_canvas_flip_1bit`)**：
+  SMT 裁決引擎在次微秒級判定子空間不變量閉包（UNSAT）；單週期 1-bit 混沌變異嚴格在可塑位元內執行，與 Token Ring Attention Operator 無縫融合 ($Canvas_{t+1} = \Phi(Canvas_t \otimes Mask_{Attn})$)。
+
 ---
 
 ## 🚀 範例：意圖規格 `project.flow`
@@ -247,7 +255,7 @@ flowy shell
 # 編譯純粹四大主軸核心庫、flowc、flowy 與動態外掛
 make all
 
-# 執行全套 5 大領域測試套件（1,104 項形式化斷言全部通過，100% Sound & Verified）
+# 執行全套 5 大領域測試套件（1,140 項形式化斷言全部通過，100% Sound & Verified）
 make test
 
 # 執行端到端編譯器與跨語言代碼生成煙霧測試
