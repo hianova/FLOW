@@ -106,12 +106,14 @@ typedef enum {
     FLOW_PROTO_NONE = 0,
     FLOW_PROTO_HTTP1 = 1,
     FLOW_PROTO_HTTP2 = 2,
-    FLOW_PROTO_QUIC_HTTP3 = 3
+    FLOW_PROTO_QUIC_HTTP3 = 3,
+    FLOW_PROTO_GRPC = 4,
+    FLOW_PROTO_WEBSOCKET = 5
 } FlowProtocolKind;
 
 typedef struct {
     FlowProtocolKind kind;
-    uint32_t max_concurrent_streams;   /* HTTP/1=1, HTTP/2=128, HTTP/3=512 */
+    uint32_t max_concurrent_streams;   /* HTTP/1=1, HTTP/2=128, HTTP/3=512, gRPC=256, WS=1024 */
     uint32_t max_header_table_bytes;   /* HPACK/QPACK dynamic table limit */
     uint32_t max_frame_payload_bytes;  /* Max binary/stream frame payload size */
     uint32_t idle_timeout_ms;          /* Keep-alive timeout */
@@ -123,6 +125,8 @@ typedef struct {
 const FlowPrimitiveDriver *flow_primitive_http1_driver(void);
 const FlowPrimitiveDriver *flow_primitive_http2_driver(void);
 const FlowPrimitiveDriver *flow_primitive_quic_driver(void);
+const FlowPrimitiveDriver *flow_primitive_grpc_driver(void);
+const FlowPrimitiveDriver *flow_primitive_websocket_driver(void);
 
 /* Protocol 64-Bit Subspace Genome Encoding & Decoding */
 int flow_protocol_encode_genome(FlowProtocolKind kind,

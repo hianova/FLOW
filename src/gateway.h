@@ -38,8 +38,21 @@ typedef enum {
     FLOW_GATEWAY_MODE_HTTP1_STATIC = 0,    /* Mode 1: Low concurrency HTTP/1.1 Keep-Alive */
     FLOW_GATEWAY_MODE_HTTP2_BURST = 1,     /* Mode 2: 100k QPS burst -> HTTP/2 binary multiplexing */
     FLOW_GATEWAY_MODE_QUIC_LOSSY = 2,      /* Mode 3: Lossy/mobile network -> HTTP/3 QUIC UDP datagram */
-    FLOW_GATEWAY_MODE_DDOS_HARDENED = 3    /* Mode 4: Slowloris DDoS attack -> SMT timeout polytope tightening */
+    FLOW_GATEWAY_MODE_DDOS_HARDENED = 3,   /* Mode 4: Slowloris DDoS attack -> SMT timeout polytope tightening */
+    FLOW_GATEWAY_MODE_GRPC_RPC = 4,        /* Mode 5: gRPC high-velocity microservice RPC */
+    FLOW_GATEWAY_MODE_WEBSOCKET_PUSH = 5   /* Mode 6: WebSocket persistent bidirectional push */
 } FlowGatewayMode;
+
+#define FLOW_EDGE_CACHE_CAPACITY 64
+
+typedef struct {
+    uint64_t key_hash;
+    uint8_t data[256];
+    size_t data_len;
+    uint64_t expire_ns;
+    uint64_t access_count;
+    int is_valid;
+} FlowEdgeCacheEntry;
 
 typedef struct {
     uint32_t active_connections;          /* Current concurrent TCP/UDP sessions */
@@ -65,6 +78,8 @@ typedef struct {
     uint64_t total_morph_events;
     uint64_t total_ddos_connections_pruned;
     uint64_t total_zero_copy_frames;
+    uint64_t total_cache_hits;
+    uint64_t total_waf_blocked;
     uint32_t current_active_connections;
     uint64_t p99_latency_ns;
     FlowGatewayMode current_mode;
@@ -91,10 +106,15 @@ typedef struct FlowGateway {
     _Atomic uint64_t total_morph_events;
     _Atomic uint64_t total_ddos_connections_pruned;
     _Atomic uint64_t total_zero_copy_frames;
+    _Atomic uint64_t total_cache_hits;
+    _Atomic uint64_t total_waf_blocked;
     _Atomic uint32_t current_connections;
     _Atomic uint64_t p99_latency_ns;
     
     uint64_t last_morph_timestamp_ns;
+
+    /* In-line Zero-Heap Edge Cache */
+    FlowEdgeCacheEntry cache[FLOW_EDGE_CACHE_CAPACITY];
 } FlowGateway;
 
 /* Gateway Lifecycle */
@@ -127,6 +147,16 @@ void flow_gateway_get_stats(const FlowGateway *gw, FlowGatewayStats *stats_out);
 
 /* Human-readable Mode Name */
 const char *flow_gateway_mode_name(FlowGatewayMode mode);
+
+/* In-line Edge Cache Operations */
+int flow_gateway_cache_lookup(FlowGateway *gw, uint64_t key_hash, void *buf_out, size_t *len_out);
+int flow_gateway_cache_put(FlowGateway *gw, uint64_t key_hash, const void *data, size_t len, uint64_t ttl_ns);
+
+/* SMT Polytope WAF Formal Inspection (SQLi, Path Traversal, XSS in 1 Cycle) */
+FlowSMTResult flow_gateway_evaluate_waf_smt(FlowGateway *gw,
+                                            const void *payload,
+                                            size_t len,
+                                            FlowSMTProofAttestation *proof_out);
 
 #ifdef __cplusplus
 }

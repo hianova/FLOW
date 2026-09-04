@@ -22,7 +22,7 @@ INCLUDEDIR ?= $(PREFIX)/include/flow
 
 PLUGINS_SO := $(BUILD_DIR)/libflow_embodied.so $(BUILD_DIR)/libflow_smt.so $(BUILD_DIR)/libflow_security.so $(BUILD_DIR)/libflow_swarm.so
 
-.PHONY: all clean test demos demo benchmark chaos-benchmark gateway-benchmark autopoiesis-check acceptance install uninstall fuzz test-build test-run test-e2e sync-book level5-contest audit-mechanisms fvec-flowc-apply-test reload-stress-nightly plugins flowy libflow
+.PHONY: all clean test demos demo benchmark chaos-benchmark gateway-benchmark frontier-benchmark autopoiesis-check acceptance install uninstall fuzz test-build test-run test-e2e sync-book level5-contest audit-mechanisms fvec-flowc-apply-test reload-stress-nightly plugins flowy libflow
 
 all: src/generated_book_knowledge.h $(LIBFLOW_A) $(FLOWC) $(FLOWY) plugins
 
@@ -103,6 +103,10 @@ gateway-benchmark: tests/gateway-autonomous-benchmark.c $(LIBFLOW_A) | $(BUILD_D
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $(BUILD_DIR)/gateway-autonomous-benchmark $(LDLIBS)
 	$(BUILD_DIR)/gateway-autonomous-benchmark
 
+frontier-benchmark: tests/frontier-4pillars-benchmark.c $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $(BUILD_DIR)/frontier-4pillars-benchmark $(LDLIBS)
+	$(BUILD_DIR)/frontier-4pillars-benchmark
+
 # ==============================================================================
 # Two-Stage Native Makefile Test Pipeline (Native Hermetic Barrier)
 # ==============================================================================
@@ -169,7 +173,11 @@ TEST_BINARIES := \
 	$(BUILD_DIR)/fvec-hub-test \
 	$(BUILD_DIR)/hetero-swarm-mesh-test \
 	$(BUILD_DIR)/snapshot-replay-test \
-	$(BUILD_DIR)/gateway-autonomous-test
+	$(BUILD_DIR)/gateway-autonomous-test \
+	$(BUILD_DIR)/edge-gateway-test \
+	$(BUILD_DIR)/fleet-swarm-test \
+	$(BUILD_DIR)/financial-matching-test \
+	$(BUILD_DIR)/cxl-llm-fabric-test
 
 # Specific build prerequisites for targets with inter-module dependencies
 $(BUILD_DIR)/plugin-test: plugins
@@ -264,11 +272,15 @@ test-run: $(TEST_BINARIES) fvec-flowc-apply-test
 	@$(BUILD_DIR)/ebpf-pmu-test
 	@echo "=== [Phase 3/5] Running Hardware Primitive Drivers & Embodied Gates ==="
 	@$(BUILD_DIR)/embodied-physics-test
+	@$(BUILD_DIR)/fleet-swarm-test
 	@$(BUILD_DIR)/plugin-test
 	@$(BUILD_DIR)/plugin-abi-v2-test
 	@$(BUILD_DIR)/primitive-driver-test
 	@$(BUILD_DIR)/protocol-primitive-test
 	@$(BUILD_DIR)/gateway-autonomous-test
+	@$(BUILD_DIR)/edge-gateway-test
+	@$(BUILD_DIR)/financial-matching-test
+	@$(BUILD_DIR)/cxl-llm-fabric-test
 	@$(BUILD_DIR)/enterprise-production-test
 	@$(BUILD_DIR)/hardened-production-test
 	@$(BUILD_DIR)/decoupling-test
@@ -386,7 +398,7 @@ test: test-build
 	@$(MAKE) --no-print-directory test-run
 	@$(MAKE) --no-print-directory test-e2e
 	@echo "================================================================================"
-	@echo "          ALL 63 TEST SUITES & E2E VERIFICATIONS 100% SOUND & PASSED!           "
+	@echo "          ALL 67 TEST SUITES & E2E VERIFICATIONS 100% SOUND & PASSED!           "
 	@echo "================================================================================"
 
 clean:

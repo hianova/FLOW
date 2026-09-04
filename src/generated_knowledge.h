@@ -211,6 +211,30 @@ static const FlowModuleKnowledge CODEBASE_KNOWLEDGE[] = {
         .memory_concurrency_model = "Lock-free atomic state transition with QSBR quiescent state checkpoints; zero heap allocation on request fast-path.",
         .key_apis = "flow_gateway_init, flow_gateway_adapt_entropy, flow_gateway_dispatch_request, flow_gateway_thwart_ddos, flow_gateway_verify_smt",
         .keywords = "gateway autonomous self-healing http1 http2 http3 quic ddos slowloris timeout polytope morphing 網關 自治 自愈 變形 防禦 零丟包"
+    },
+    {
+        .module_id = "matching",
+        .title = "Sub-Microsecond Financial Matching Engine & Price-Time Priority LOB",
+        .header_file = "src/matching.h",
+        .source_file = "src/matching.c",
+        .layer = 0,
+        .responsibilities = "High-frequency limit order book (LOB) executing FIFO price-time priority matching with pure fixed-point integer pricing (1e8 multiplier), zero heap allocations, non-arbitrage enforcement, and SMT conservation proofs.",
+        .algorithmic_guarantee = "Tick-to-trade latency < 500ns (<50ns hot cache); SMT QF_LIA formal proofs for order book volume balance and non-arbitrage.",
+        .memory_concurrency_model = "Contiguous ring-buffered pre-allocated slots; cache-line friendly layout; lock-free single-writer state.",
+        .key_apis = "flow_matching_engine_init, flow_matching_submit_order, flow_matching_verify_smt, flow_primitive_matching_driver",
+        .keywords = "matching orderbook lob hft price-time fifo fixed-point non-arbitrage financial 金融 撮合 訂單簿 限價單 微秒 無套利"
+    },
+    {
+        .module_id = "cxl_fabric",
+        .title = "Distributed LLM KV-Cache & 3-Tier CXL Memory Fabric",
+        .header_file = "src/cxl_fabric.h",
+        .source_file = "src/cxl_fabric.c",
+        .layer = 0,
+        .responsibilities = "Manages 3-tier disaggregated memory topology (Tier 0 HBM, Tier 1 DDR5, Tier 2 CXL 3.0 Pool) for LLM distributed inference. Implements 1-bit chaotic KV-cache eviction via attention entropy, zero-stall QSBR page migration, and SMT quota enforcement.",
+        .algorithmic_guarantee = "HBM read < 10ns, DDR5 < 60ns, CXL pool < 200ns; QSBR page demotion without stalling active token generation; zero cross-session memory leaks verified by SMT.",
+        .memory_concurrency_model = "Tier-tagged page directories with lock-free pointer migration under QSBR quiescent epochs.",
+        .key_apis = "flow_cxl_fabric_init, flow_cxl_allocate_session, flow_cxl_read_page, flow_cxl_evict_chaos, flow_cxl_verify_smt, flow_primitive_cxl_driver",
+        .keywords = "cxl hbm ddr5 kv-cache llm attention entropy eviction memory tiering qsbr 大模型 記憶體 記憶體池 階層 遷移 熵減"
     }
 };
 

@@ -95,3 +95,29 @@ $$\mathbf{M}_{\text{effective}} = \mathbf{M}_{\text{hard}} \;\land\; (\mathbf{M}
 3. **SMT 全域流守恆證明 (Flow Conservation Theorem)**：
    SMT 最高法院形式化證明：管線最慢瓶頸層的總處理容量 $\ge$ 入口最大並發流量，保證分散式微服務鏈路的零崩潰數學確定性。
 
+---
+
+## 4.6 前沿支柱實證：具身多機智能機隊與大模型 CXL 記憶體織網
+
+### 1. 具身多機智能機隊協同 (`src/embodied.c`)
+在機器人與無人機群的多機協同中，傳統中心化排程存在單點失效與網路延遲瓶頸。FLOW 引入：
+* **1kHz 脊髓反射群體步態 (1kHz Swarm Spinal Loop)**：各 Agent 本地獨立運行 1kHz 脊髓反射，感測與避障即時計算在毫秒內閉環。
+* **SMT 碰撞防護多面體證明 (`flow_fleet_verify_collision_smt`)**：
+  形式化證明任意兩台 Agent 之間的歐幾里得距離平方不小於安全半徑平方（$\|\mathbf{p}_i - \mathbf{p}_j\|^2 \ge R_{\text{safe}}^2$），嚴禁軌跡相交。
+* **1-Bit 混沌動態角色重分配 (`flow_fleet_adapt_roles_chaos`)**：
+  群體角色（Scout, Worker, Carrier, Relay）編碼於 64-bit 狀態向量，透過 1-bit 混沌翻轉即時動態再分配，適應電量損耗與通訊拓樸變化。
+
+### 2. 大模型分散式推論與 3-Tier CXL 記憶體織網 (`src/cxl_fabric.c`)
+面對千億參數 LLM 的超長 Context Window 與 KV-Cache 暴漲難題，FLOW 打造了 3 階層記憶體織網：
+* **3-Tier 分級儲存架構**：
+  * **Tier 0 (HBM / 本地 GPU 顯存)**：極致延遲 $< 10\text{ns}$，承載當前解碼步的高注意力關注度 Tokens。
+  * **Tier 1 (DDR5 / 主機內存)**：延遲 $< 60\text{ns}$，承載近期上下文與高頻快取。
+  * **Tier 2 (CXL 3.0 遠端記憶體池)**：延遲 $< 200\text{ns}$，承載海量歷史 KV-Cache。
+* **1-Bit 混沌注意力熵值淘汰 (Chaotic KV-Cache Eviction)**：
+  依據 Attention Entropy 動態評估 token 重要性。1-bit 混沌引擎在線翻轉位元，將低熵淘汰或降階至 CXL 記憶體池。
+* **QSBR 零停頓熱遷移 (Zero-Stall Page Migration)**：
+  結合 FLOW 的 QSBR 世代機制，在背景線程無鎖置換頁表指針，推論解碼線程完全不被阻塞（Zero-Stall）。
+* **SMT 記憶體配額與隔離定理證明 (`flow_cxl_verify_smt`)**：
+  形式化證明跨 Session 記憶體完全隔離且單一 Session 消耗不超過配額上限，徹底杜絕內存越界與多租戶干擾。
+
+

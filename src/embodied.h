@@ -4,6 +4,7 @@
 #include "flow.h"
 #include "bitspace.h"
 #include "reload.h"
+#include "smt.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -174,5 +175,62 @@ bool flow_physics_is_future_state_safe(FlowPhysicsEngine *engine,
                                        const double *delayed_angles,
                                        const double *candidate_torques,
                                        double dt);
+
+/* ========================================================================= */
+/* 6. Embodied Multi-Agent Swarm Fleet (1kHz Reflex & SMT Collision Polytope)*/
+/* ========================================================================= */
+
+#define FLOW_FLEET_MAX_ROBOTS 16
+
+typedef enum {
+    FLOW_FLEET_ROLE_IDLE = 0,
+    FLOW_FLEET_ROLE_SCOUT = 1,       /* High sensor bandwidth, agile exploration */
+    FLOW_FLEET_ROLE_CARRIER = 2,     /* Heavy payload transport, high torque */
+    FLOW_FLEET_ROLE_RELAY = 3,       /* Mesh communication anchor */
+    FLOW_FLEET_ROLE_ACTUATOR = 4     /* Precise manipulation / docking */
+} FlowFleetRole;
+
+typedef struct {
+    uint8_t robot_id;
+    FlowFleetRole role;
+    double position[3];              /* [x, y, z] in meters */
+    double velocity[3];              /* [vx, vy, vz] in m/s */
+    double bounding_radius;          /* Collision bounding sphere radius in meters */
+    uint16_t battery_permille;       /* 0..1000 (e.g. 850 = 85.0%) */
+    uint16_t motor_temp_celsius;     /* Motor winding temperature */
+    int is_active;
+} FlowFleetRobot;
+
+typedef struct {
+    FlowFleetRobot robots[FLOW_FLEET_MAX_ROBOTS];
+    size_t robot_count;
+    double min_safety_margin_m;      /* Minimum inter-robot clearance in meters (e.g. 0.5m) */
+    uint64_t total_1khz_ticks;
+    uint64_t total_collision_avoidance_interventions;
+    uint64_t total_role_reassignments;
+} FlowFleetSwarm;
+
+int flow_fleet_init(FlowFleetSwarm *fleet, double min_safety_margin_m);
+int flow_fleet_register_robot(FlowFleetSwarm *fleet,
+                              uint8_t robot_id,
+                              FlowFleetRole role,
+                              double bounding_radius,
+                              const double initial_pos[3]);
+
+int flow_fleet_update_telemetry(FlowFleetSwarm *fleet,
+                                uint8_t robot_id,
+                                const double pos[3],
+                                const double vel[3],
+                                uint16_t battery_permille,
+                                uint16_t motor_temp_celsius);
+
+/* 1kHz Spinal Fleet Step: Computes pairwise velocities and applies repulsive vectors if within safety margin */
+int flow_fleet_step_1khz_tick(FlowFleetSwarm *fleet, double dt_sec);
+
+/* 1-Bit Chaotic Dynamic Role Reassignment: Automatically shifts role when battery < 20% or motor temp > 80C */
+int flow_fleet_adapt_roles_chaos(FlowFleetSwarm *fleet, uint64_t chaos_seed);
+
+/* SMT Formal Spatial Separation & Collision-Avoidance Polytope Theorem */
+FlowSMTResult flow_fleet_verify_collision_smt(const FlowFleetSwarm *fleet, FlowSMTProofAttestation *proof_out);
 
 #endif

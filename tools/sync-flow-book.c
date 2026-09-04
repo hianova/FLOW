@@ -156,7 +156,9 @@ static const ModuleMap MODULE_BINDINGS[] = {
     { "flowy_cli", "ch10_deterministic_flowy_reasoner.md" },
     { "audit", "ch10_deterministic_flowy_reasoner.md" },
     { "benchmark", "ch11_level5_crucible_and_benchmarks.md" },
-    { "gateway", "ch11_level5_crucible_and_benchmarks.md" }
+    { "gateway", "ch11_level5_crucible_and_benchmarks.md" },
+    { "matching", "ch08_hardware_primitive_drivers.md" },
+    { "cxl_fabric", "ch08_hardware_primitive_drivers.md" }
 };
 
 static const size_t MODULE_COUNT = sizeof(MODULE_BINDINGS) / sizeof(MODULE_BINDINGS[0]);

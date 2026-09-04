@@ -160,7 +160,7 @@ typedef struct {
     const char *book_excerpt;
 } FlowModuleBookBinding;
 
-static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_ZH[28] = {
+static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_ZH[30] = {
     {
         .module_id = "flowc",
         .chapter_ref = "ch01_what_is_flow.md",
@@ -356,10 +356,24 @@ static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_ZH[28] = {
         .chapter_title = "第十一章：Level 5 絕對死局壓測與效能基準 (並發風暴與 OOM 雙重束縛下的生存實錄)",
         .philosophy_why = "在科林丸號（Kobayashi Maru）測試中，學員面臨註定毀滅的死局。FLOW 打造了 Level 5 絕對死局壓測：當記憶體暴跌 99%、連線暴增 10,000 倍時，系統在死局中自我蛻變求生。",
         .book_excerpt = "Level-5 熔爐壓測驗證了系統在雙重束縛下的 5 階段自癒過程，維持 0 封包丟失與 0 崩潰；QSBR 讀取吞吐達到 390M ops/s，通用鎖定檔套用耗時縮短至 37 微秒。"
+    },
+    {
+        .module_id = "matching",
+        .chapter_ref = "ch08_hardware_primitive_drivers.md",
+        .chapter_title = "第八章：硬體原語驅動 (奧坎剃刀下的 3-Function 極簡 ABI 與具身物理閘門)",
+        .philosophy_why = "Plugin 不該是沉重的編譯器外掛，而只是大腦接在物理世界的視神經與肌肉。奧坎剃刀切除了一切非必要的 24 個回呼實體，只留下極簡的 3 個硬體原語驅動介面。",
+        .book_excerpt = "極簡驅動 ABI 只需宣告硬體原語、呈報 SMT 物理邊界與執行調度。具身模組具備 1kHz 脊髓反射與 1Hz 皮層重構雙速率分離，ZMP 零力矩點物理閘門確保機器人永不倒地。"
+    },
+    {
+        .module_id = "cxl_fabric",
+        .chapter_ref = "ch08_hardware_primitive_drivers.md",
+        .chapter_title = "第八章：硬體原語驅動 (奧坎剃刀下的 3-Function 極簡 ABI 與具身物理閘門)",
+        .philosophy_why = "Plugin 不該是沉重的編譯器外掛，而只是大腦接在物理世界的視神經與肌肉。奧坎剃刀切除了一切非必要的 24 個回呼實體，只留下極簡的 3 個硬體原語驅動介面。",
+        .book_excerpt = "極簡驅動 ABI 只需宣告硬體原語、呈報 SMT 物理邊界與執行調度。具身模組具備 1kHz 脊髓反射與 1Hz 皮層重構雙速率分離，ZMP 零力矩點物理閘門確保機器人永不倒地。"
     }
 };
 
-static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_EN[28] = {
+static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_EN[30] = {
     {
         .module_id = "flowc",
         .chapter_ref = "ch01_what_is_flow.md",
@@ -555,13 +569,27 @@ static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_EN[28] = {
         .chapter_title = "Chapter 11: Level 5 Crucible & Benchmarks (Kobayashi Maru & Production Replay)",
         .philosophy_why = "In Kobayashi Maru double-bind crises where memory drops 99% amid 10,000x traffic surges, FLOW demonstrates Level-5 resilience via SMT veto, JIT shelter, and QSBR zero-downtime morphing.",
         .book_excerpt = "The Level-5 crucible validates 5-stage autonomous self-healing with 0 dropped requests and 0 panics. QSBR achieves >390M ops/s read throughput and 37us instant cold-start application."
+    },
+    {
+        .module_id = "matching",
+        .chapter_ref = "ch08_hardware_primitive_drivers.md",
+        .chapter_title = "Chapter 8: Hardware Primitive Drivers (3-Function Minimalist ABI & Embodied Gates)",
+        .philosophy_why = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks.",
+        .book_excerpt = "Minimalist driver ABI declares primitives, reports SMT bounds, and executes syscalls. Embodied intelligence features dual-rate 1kHz/1Hz reflexes, with ZMP stability gates preventing robot tip-overs."
+    },
+    {
+        .module_id = "cxl_fabric",
+        .chapter_ref = "ch08_hardware_primitive_drivers.md",
+        .chapter_title = "Chapter 8: Hardware Primitive Drivers (3-Function Minimalist ABI & Embodied Gates)",
+        .philosophy_why = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks.",
+        .book_excerpt = "Minimalist driver ABI declares primitives, reports SMT bounds, and executes syscalls. Embodied intelligence features dual-rate 1kHz/1Hz reflexes, with ZMP stability gates preventing robot tip-overs."
     }
 };
 
 static inline const FlowModuleBookBinding *flow_book_lookup_binding_lang(const char *module_id, FlowLanguage lang) {
     if (module_id == NULL) return NULL;
     const FlowModuleBookBinding *bindings = (lang == FLOW_LANG_EN) ? FLOW_MODULE_BOOK_BINDINGS_EN : FLOW_MODULE_BOOK_BINDINGS_ZH;
-    for (size_t i = 0; i < 28; ++i) {
+    for (size_t i = 0; i < 30; ++i) {
         if (strcmp(bindings[i].module_id, module_id) == 0) return &bindings[i];
     }
     return NULL;

@@ -56,6 +56,8 @@ void flow_topology_build_codebase_graph(FlowTopologyGraph *graph) {
     uint32_t n_embodied     = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "embodied", "core", 1, 0);
     uint32_t n_audit        = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "audit", "core", 1, 0);
     uint32_t n_flowy_fvec   = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "flowy_fvec", "core", 1, 0);
+    uint32_t n_matching     = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "matching", "core", 1, 0);
+    uint32_t n_cxl_fabric   = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "cxl_fabric", "core", 1, 0);
 
     /* Layer 1: ABI, Registry & Presentation Interface Boundary */
     uint32_t n_registry     = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "registry", "interface", 1, 1);
@@ -101,6 +103,9 @@ void flow_topology_build_codebase_graph(FlowTopologyGraph *graph) {
     flow_topology_add_edge(graph, n_embodied, n_security, FLOW_EDGE_CALLS, 1.0, "sim_to_real_gate");
     flow_topology_add_edge(graph, n_audit, n_reload, FLOW_EDGE_CALLS, 1.0, "audit_qsbr_events");
     flow_topology_add_edge(graph, n_flowy_fvec, n_smt, FLOW_EDGE_CALLS, 1.0, "affinity_gate_verification");
+    flow_topology_add_edge(graph, n_matching, n_smt, FLOW_EDGE_CALLS, 1.0, "verify_orderbook_conservation");
+    flow_topology_add_edge(graph, n_cxl_fabric, n_smt, FLOW_EDGE_CALLS, 1.0, "verify_cxl_memory_safety");
+    flow_topology_add_edge(graph, n_cxl_fabric, n_reload, FLOW_EDGE_CALLS, 1.0, "qsbr_page_migration");
 
     /* Boundary Firewalls (Layer 0 -> Layer 1) */
     flow_topology_add_edge(graph, n_backend, n_abi, FLOW_EDGE_USES, 1.0, "emit_abi_adapters");
@@ -136,6 +141,8 @@ void flow_topology_build_codebase_graph(FlowTopologyGraph *graph) {
     flow_topology_add_edge(graph, n_orchestrator, n_doc_ch10, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
     flow_topology_add_edge(graph, n_comp_sharded, n_doc_ch11, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
     flow_topology_add_edge(graph, n_gateway, n_doc_ch11, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_matching, n_doc_ch08, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_cxl_fabric, n_doc_ch08, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
     (void)n_doc_ch03;
 }
 
