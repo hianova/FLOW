@@ -3,23 +3,20 @@
 #include "matching.h"
 #include "cxl_fabric.h"
 #include "smt.h"
+#include "flow_benchmark_harness.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <math.h>
-
-static uint64_t frontier_time_ns(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
-}
 
 int main(void) {
     printf("====================================================================================================\n");
     printf("  ⚡ FLOW Four Frontier Pillars Comprehensive Performance Benchmark & Crucible\n");
     printf("====================================================================================================\n\n");
+
+    FlowBenchmarkResult results[6];
+    size_t res_count = 0;
 
     /* ================================================================================================== */
     /* BENCHMARK 1: Self-Evolving Edge API Gateway (SMT WAF & Zero-Heap Cache)                           */
@@ -36,18 +33,13 @@ int main(void) {
     size_t payload_len = strlen(test_payload);
     FlowSMTProofAttestation proof;
 
-    uint64_t waf_t0 = frontier_time_ns();
-    const size_t N_WAF_OPS = 1000000;
-    for (size_t i = 0; i < N_WAF_OPS; ++i) {
+    FLOW_BENCHMARK_RUN("SMT WAF Polytope", 1000000, {
         flow_gateway_evaluate_waf_smt(&gw, test_payload, payload_len, &proof);
-    }
-    uint64_t waf_t1 = frontier_time_ns();
-    double waf_elapsed_ms = (double)(waf_t1 - waf_t0) / 1000000.0;
-    double waf_qps = ((double)N_WAF_OPS / waf_elapsed_ms) * 1000.0;
-    double waf_ns_per_op = (double)(waf_t1 - waf_t0) / (double)N_WAF_OPS;
+    }, &results[res_count++]);
+    double waf_ns_per_op = results[res_count - 1].ns_per_op;
 
     printf("  [SMT WAF Polytope] Time: %7.2f ms | Throughput: %10.0f checks/s | Latency: %5.2f ns/check\n",
-           waf_elapsed_ms, waf_qps, waf_ns_per_op);
+           results[res_count - 1].elapsed_ms, results[res_count - 1].qps, waf_ns_per_op);
 
     /* 1b. In-Line Edge Cache Hit Benchmark */
     uint64_t key_hash = 0xDEADBEEF1234LL;
@@ -57,19 +49,14 @@ int main(void) {
     char read_buf[128];
     size_t read_len = sizeof(read_buf);
 
-    uint64_t cache_t0 = frontier_time_ns();
-    const size_t N_CACHE_OPS = 1000000;
-    for (size_t i = 0; i < N_CACHE_OPS; ++i) {
+    FLOW_BENCHMARK_RUN("Zero-Heap Cache Hit", 1000000, {
         read_len = sizeof(read_buf);
         flow_gateway_cache_lookup(&gw, key_hash, read_buf, &read_len);
-    }
-    uint64_t cache_t1 = frontier_time_ns();
-    double cache_elapsed_ms = (double)(cache_t1 - cache_t0) / 1000000.0;
-    double cache_qps = ((double)N_CACHE_OPS / cache_elapsed_ms) * 1000.0;
-    double cache_ns_per_op = (double)(cache_t1 - cache_t0) / (double)N_CACHE_OPS;
+    }, &results[res_count++]);
+    double cache_ns_per_op = results[res_count - 1].ns_per_op;
 
     printf("  [Zero-Heap Cache ] Time: %7.2f ms | Throughput: %10.0f hits/s   | Latency: %5.2f ns/hit\n\n",
-           cache_elapsed_ms, cache_qps, cache_ns_per_op);
+           results[res_count - 1].elapsed_ms, results[res_count - 1].qps, cache_ns_per_op);
 
     flow_gateway_destroy(&gw);
 
@@ -90,22 +77,18 @@ int main(void) {
         flow_fleet_register_robot(&fleet, r, (r % 2 == 0) ? FLOW_FLEET_ROLE_SCOUT : FLOW_FLEET_ROLE_CARRIER, 0.4, pos);
     }
 
-    uint64_t fleet_t0 = frontier_time_ns();
-    const size_t N_FLEET_TICKS = 10000;
-    for (size_t t = 0; t < N_FLEET_TICKS; ++t) {
+    FLOW_BENCHMARK_RUN("Fleet 1kHz Loop", 10000, {
         flow_fleet_step_1khz_tick(&fleet, 0.001);
-    }
-    uint64_t fleet_t1 = frontier_time_ns();
-    double fleet_elapsed_ms = (double)(fleet_t1 - fleet_t0) / 1000000.0;
-    double us_per_tick = (fleet_elapsed_ms * 1000.0) / (double)N_FLEET_TICKS;
-    double cpu_budget_percent = (us_per_tick / 1000.0) * 100.0; /* 1000us = 1ms full budget */
+    }, &results[res_count++]);
+    double us_per_tick = (results[res_count - 1].elapsed_ms * 1000.0) / 10000.0;
+    double cpu_budget_percent = (us_per_tick / 1000.0) * 100.0;
 
     printf("  [Fleet 1kHz Loop ] 10,000 Ticks: %7.2f ms | Loop Time: %5.2f us/tick (CPU Load: %4.2f%% of 1ms budget)\n",
-           fleet_elapsed_ms, us_per_tick, cpu_budget_percent);
+           results[res_count - 1].elapsed_ms, us_per_tick, cpu_budget_percent);
 
-    uint64_t smt_t0 = frontier_time_ns();
+    uint64_t smt_t0 = flow_benchmark_now_ns();
     flow_fleet_verify_collision_smt(&fleet, &proof);
-    uint64_t smt_t1 = frontier_time_ns();
+    uint64_t smt_t1 = flow_benchmark_now_ns();
     printf("  [SMT Polytope    ] Spatial Separation Proof Verified UNSAT in %llu ns (< 2.5us threshold)\n\n",
            (unsigned long long)(smt_t1 - smt_t0));
 
@@ -136,27 +119,24 @@ int main(void) {
     }
 
     /* Submit 100,000 crossing Taker orders and measure Tick-to-Trade execution latency */
-    const size_t N_MATCH_ORDERS = 100000;
-    uint64_t match_t0 = frontier_time_ns();
-    for (size_t i = 0; i < N_MATCH_ORDERS; ++i) {
-        FlowOrder taker = {
-            .order_id = 10000 + i,
-            .symbol_id = 1,
-            .side = (i % 2 == 0) ? FLOW_ORDER_BUY : FLOW_ORDER_SELL,
-            .type = FLOW_ORDER_LIMIT,
-            .price = (i % 2 == 0) ? 50100 : 49900, /* Crosses top of the book */
-            .quantity = 1,
-            .filled_quantity = 0
-        };
+    uint64_t order_seq = 10000;
+    FLOW_BENCHMARK_RUN("LOB Match Engine", 100000, {
+        FlowOrder taker;
+        taker.order_id = order_seq++;
+        taker.symbol_id = 1;
+        taker.side = (order_seq % 2 == 0) ? FLOW_ORDER_BUY : FLOW_ORDER_SELL;
+        taker.type = FLOW_ORDER_LIMIT;
+        taker.price = (taker.side == FLOW_ORDER_BUY) ? 50100 : 49900;
+        taker.quantity = 1;
+        taker.filled_quantity = 0;
+        taker.is_active = 1;
+        taker.timestamp_ns = 0;
         flow_orderbook_submit(&book, &taker, match_trades, 8, &trade_c);
-    }
-    uint64_t match_t1 = frontier_time_ns();
-    double match_elapsed_ms = (double)(match_t1 - match_t0) / 1000000.0;
-    double match_tps = ((double)N_MATCH_ORDERS / match_elapsed_ms) * 1000.0;
-    double tick_to_trade_ns = (double)(match_t1 - match_t0) / (double)N_MATCH_ORDERS;
+    }, &results[res_count++]);
+    double tick_to_trade_ns = results[res_count - 1].ns_per_op;
 
     printf("  [LOB Match Engine] Time: %7.2f ms | Throughput: %10.0f orders/s | Tick-to-Trade: %5.1f ns\n",
-           match_elapsed_ms, match_tps, tick_to_trade_ns);
+           results[res_count - 1].elapsed_ms, results[res_count - 1].qps, tick_to_trade_ns);
     printf("  >>> Ultra-Low Latency: Sub-Microsecond Tick-to-Trade confirmed (< 500ns HFT Target)\n\n");
 
     /* ================================================================================================== */
@@ -187,27 +167,23 @@ int main(void) {
     uint64_t dummy_lat;
 
     /* Benchmark Tier 0 HBM Access */
-    uint64_t hbm_t0 = frontier_time_ns();
-    for (int i = 0; i < 100000; ++i) {
+    FLOW_BENCHMARK_RUN("Tier 0 HBM Cache", 100000, {
         flow_cxl_access_kv_page(&cxl, p_hbm, kv_buf, &dummy_lat);
-    }
-    uint64_t hbm_t1 = frontier_time_ns();
-    double hbm_ns_per_op = (double)(hbm_t1 - hbm_t0) / 100000.0;
+    }, &results[res_count++]);
+    double hbm_ns_per_op = results[res_count - 1].ns_per_op;
 
     /* Benchmark Tier 1 DDR5 Access */
-    uint64_t ddr_t0 = frontier_time_ns();
-    for (int i = 0; i < 100000; ++i) {
+    FLOW_BENCHMARK_RUN("Tier 1 DDR5 RAM", 100000, {
         flow_cxl_access_kv_page(&cxl, p_ddr5, kv_buf, &dummy_lat);
-    }
-    uint64_t ddr_t1 = frontier_time_ns();
-    double ddr_ns_per_op = (double)(ddr_t1 - ddr_t0) / 100000.0;
+    }, &results[res_count++]);
+    double ddr_ns_per_op = results[res_count - 1].ns_per_op;
 
     /* Benchmark Tier 2 CXL 3.0 Pool Access */
-    uint64_t cxl_t0 = frontier_time_ns();
+    uint64_t cxl_t0 = flow_benchmark_now_ns();
     for (int i = 0; i < 100000; ++i) {
         flow_cxl_access_kv_page(&cxl, p_cxl, kv_buf, &dummy_lat);
     }
-    uint64_t cxl_t1 = frontier_time_ns();
+    uint64_t cxl_t1 = flow_benchmark_now_ns();
     double cxl_ns_per_op = (double)(cxl_t1 - cxl_t0) / 100000.0;
 
     printf("  [Tier 0 HBM Cache] Access Latency: %5.2f ns/page\n", hbm_ns_per_op);
@@ -215,13 +191,19 @@ int main(void) {
     printf("  [Tier 2 CXL Pool ] Access Latency: %5.2f ns/page\n", cxl_ns_per_op);
 
     /* Benchmark QSBR Zero-Downtime Migration */
-    uint64_t mig_t0 = frontier_time_ns();
+    uint64_t mig_t0 = flow_benchmark_now_ns();
     flow_cxl_migrate_page(&cxl, p_hbm, FLOW_CXL_TIER_REMOTE_CXL);
-    uint64_t mig_t1 = frontier_time_ns();
+    uint64_t mig_t1 = flow_benchmark_now_ns();
     printf("  [QSBR Migration  ] Tier 0 -> Tier 2 Migration Latency: %llu ns (Zero Generation Stalls)\n\n",
            (unsigned long long)(mig_t1 - mig_t0));
 
     flow_cxl_destroy(&cxl);
+
+    /* ================================================================================================== */
+    /* STANDARDIZED BENCHMARK HARNESS SCORECARD                                                          */
+    /* ================================================================================================== */
+    printf("  >>> FLOW BENCHMARK HARNESS STATISTICAL SCORECARD:\n");
+    flow_benchmark_print_scorecard(results, res_count);
 
     /* ================================================================================================== */
     /* BENCHMARK SCORECARD SUMMARY                                                                        */

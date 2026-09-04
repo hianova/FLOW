@@ -103,4 +103,26 @@ FLOW 針對四大前沿工業場景建構了高壓熔爐基準測試（`make fro
 ### 形式化數學確定性：
 四大支柱全數通過 SMT 最高法院的形式化證明（`flow_matching_verify_smt`, `flow_cxl_verify_smt`, `flow_fleet_verify_collision_smt`, `flow_gateway_verify_smt`），將安全、守恆、無套利、無碰撞與無洩漏作為數學定理在編譯與運行期嚴格閉環。
 
+---
+
+## 11.6 五大純 C17 開發者與測試基礎設施套件 (Developer & Testing Infrastructure Kits)
+
+為了加速 FLOW 未來新功能原型的演進與形式化驗證，FLOW 將底層測試與評測的重複模式沉澱為 5 個無依賴、純 C17 的 Header-Only 工具套件：
+
+1. **基準測試統計量測骨架 (`src/flow_benchmark_harness.h`)**：
+   * 透過 `FLOW_BENCHMARK_RUN(name, iterations, code_block, result_ptr)` 自動完成 CPU 暖機、總耗時量測、P50/P90/P99 延遲分佈採樣與 QPS 計算。
+   * 內建標準化 Scorecard 輸出器（`flow_benchmark_print_scorecard`），免去手寫測時與格式化輸出。
+2. **SMT 定理斷言與統一測試腳手架 (`src/flow_test_kit.h`)**：
+   * 提供測試生命週期管理（`FLOW_TEST_SUITE_BEGIN`, `FLOW_TEST_SUITE_END`, `FLOW_STAGE_BEGIN`）。
+   * 一行式 SMT 定理斷言：`FLOW_ASSERT_SMT_SOUND` 與 `FLOW_ASSERT_SMT_VIOLATION`，直接核驗 QF_LIA 四大不變量與違例反例。
+   * 超立方體驗證一覽：`FLOW_ASSERT_SMT_BOX_SOUND`。
+3. **Minimal ABI 模擬驅動宣告器 (`src/flow_mock_driver.h`)**：
+   * 宣告式巨集 `FLOW_DECLARE_MOCK_DRIVER(driver_name, ...)`，編譯期自動展開為純粹的 3-Function Minimal Driver ABI（`register`, `get_bounds`, `execute`），新硬體與協定原型立即可測，無需手工搬弄底層 Syscall。
+4. **領域能耗函數與 BitManifold 轉移夾具 (`flow_bmf_fixture.h`)**：
+   * 對齊 BitManifold (BMF)，封裝閉環退火與能耗評估模組。
+   * 開發者只需提供 3 行領域能耗函數 `FlowBMFEnergyFn`，底層自動完成 1-bit 混沌翻轉、玻爾茲曼探索與多面體硬修剪。
+5. **零堆平鋪環狀記憶體槽位原語 (`flow_fixed_ring.h`)**：
+   * 巨集 `FLOW_FIXED_RING_DEFINE(RingType, ElementType, Capacity)`，以編譯期 2 的冪次方靜態斷言（`_Static_assert`）與 `& (Capacity - 1)` 位元遮罩實作無分支環狀緩衝。
+   * 64 位元組快取行對齊與偽共享隔離防護，嚴格貫徹生產路徑零 Heap 分配鐵律。
+
 

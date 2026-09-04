@@ -1,5 +1,6 @@
 #include "primitive.h"
 #include "smt.h"
+#include "flow_mock_driver.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -40,6 +41,13 @@ static const FlowPrimitiveDriver s_custom_xdp_driver = {
     .get_hardware_bounds = custom_xdp_get_bounds,
     .execute_primitive = custom_xdp_execute
 };
+
+FLOW_DECLARE_MOCK_DRIVER(mock_nvme_driver,
+                         .queue_depth = 2048,
+                         .buffer_bytes = 64 * 1024 * 1024,
+                         .zero_copy = 1,
+                         .is_kernel_bypass = 1,
+                         .simulated_latency_cycles = 30);
 
 int main(void) {
     printf("========================================================================================\n");
@@ -138,6 +146,26 @@ int main(void) {
     CHECK(xdp_res.latency_cycles == 15);
     printf("  ✓ Custom eBPF XDP Driver verified: 3 functions, 0 AST callbacks, latency=%llu cycles!\n\n",
            (unsigned long long)xdp_res.latency_cycles);
+
+    /* ---------------------------------------------------------------------------------- */
+    /* STAGE 5: Declarative Mock Driver (1-Line Driver Prototyping)                      */
+    /* ---------------------------------------------------------------------------------- */
+    printf("--- [Stage 5: Declarative Mock Driver (flow_mock_driver.h)] ---\n");
+    CHECK(flow_primitive_register(&registry, &mock_nvme_driver));
+    CHECK(flow_primitive_count(&registry) == 4);
+
+    const FlowPrimitiveDriver *nvme_drv = flow_primitive_lookup(&registry, "mock_nvme_driver");
+    CHECK(nvme_drv != NULL);
+
+    FlowSMTResult nvme_smt = flow_primitive_verify_smt(nvme_drv, 2048, 64 * 1024 * 1024, &proof);
+    CHECK(nvme_smt == FLOW_SMT_PROVEN_UNSAT);
+
+    FlowPrimitiveResult nvme_res;
+    memset(&nvme_res, 0, sizeof(nvme_res));
+    CHECK(nvme_drv->execute_primitive(&ctx, &nvme_res) == 0);
+    CHECK(nvme_res.latency_cycles == 30);
+    printf("  ✓ Declarative Mock Driver verified: 1-line definition, 0 boilerplate, latency=%llu cycles!\n\n",
+           (unsigned long long)nvme_res.latency_cycles);
 
     printf("========================================================================================\n");
     printf("PRIMITIVE_DRIVER_TEST=passed 3_function_abi=verified smt_polytope_guard=sound zero_copy=sound\n");
