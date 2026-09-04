@@ -1,4 +1,6 @@
 #include "cxl_fabric.h"
+#include "flow_smt_dsl.h"
+#include "flow_str.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -261,7 +263,7 @@ static int cxl_driver_register(void) {
 
 static int cxl_driver_get_bounds(FlowHardwareBounds *bounds_out) {
     if (bounds_out == NULL) return 0;
-    strncpy(bounds_out->name, "cxl_memory_pool", sizeof(bounds_out->name) - 1);
+    flow_str_copy(bounds_out->name, sizeof(bounds_out->name), "cxl_memory_pool");
     bounds_out->max_queue_depth = FLOW_CXL_MAX_PAGES;
     bounds_out->max_buffer_bytes = 64ULL * 1024ULL * 1024ULL;
     bounds_out->supports_zero_copy = 1;

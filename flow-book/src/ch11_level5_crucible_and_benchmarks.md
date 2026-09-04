@@ -146,5 +146,25 @@ FLOW 針對四大前沿工業場景建構了高壓熔爐基準測試（`make fro
 5. **第 70 號測試套件全面驗證 (`tests/dev-velocity-kit-test.c`)**：
    * 66 項嚴格斷言全數覆蓋四大套件：向量越界守護、安全字串防溢位、哈希高雪崩無碰撞、SMT DSL 違例抓取、BitManifold 欄位獨立互不干擾讀寫，達成 100% 覆蓋與零記憶體洩漏。
 
+---
+
+## 11.8 全方位四層整潔架構 (Clean Four-Layer Architecture & Decoupling)
+
+為了使 FLOW 在高度複雜的多領域（微秒金融、大模型推論、具身機隊、邊緣網關）下保持極致精準、高可讀性與零技術債，FLOW 確立了 **「應用層、測試層、跑分層、插件層」** 四層完全封裝解耦規範：
+
+1. **插件層 (Plugin Layer, `src/flow_plugin_kit.h`)**：
+   * 以宣告式巨集 `FLOW_PLUGIN_ABI_DECLARE` 和 `FLOW_PLUGIN_DESCRIPTOR_DECLARE` 取代數十行 C 結構體手工配置。
+   * 提供預設合約核驗與記憶體估算 Hook，插件僅需關注自身領域的核心 1-bit 能耗函數與幾何多面體修剪。
+2. **應用層 (Application Layer, `src/gateway.c`, `src/matching.c`, `src/cxl_fabric.c`, `src/embodied.c`)**：
+   * 形式化核驗全面統一採用 `flow_smt_dsl.h`，以流暢 DSL 構建 QF_LIA 超立方體約束，杜絕陣列手算越界。
+   * 安全關鍵路徑以 `flow_str.h` 防禦緩衝區溢位，生產全鏈條嚴守零 Heap 分配與無鎖 QSBR 熱更新。
+3. **跑分層 (Benchmark Layer, `src/flow_benchmark_harness.h`)**：
+   * 基準測試全面採用 `FLOW_BENCHMARK_RUN` 自動化執行 CPU 暖機、高解析納秒量測與 P50/P90/P99 分佈採樣。
+   * 統一呼叫 `flow_benchmark_print_scorecard` 輸出標準 ASCII/Markdown 性能記分板，消滅重複的計時樣板碼。
+4. **測試層 (Testing Layer, `src/flow_test_kit.h`)**：
+   * 旗艦測試套件全數現代化為 `FLOW_TEST_SUITE_BEGIN`、`FLOW_STAGE_BEGIN`、`FLOW_ASSERT_*` 與 `FLOW_ASSERT_SMT_SOUND`。
+   * 統一生命週期管控，提供清晰結構化階段日誌與自動化失敗追蹤，維護 70 套測試 100% 零缺陷通過。
+
+
 
 

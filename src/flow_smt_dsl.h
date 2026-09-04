@@ -66,6 +66,9 @@ static inline FlowSMTResult flow_smt_box_builder_verify(const FlowSMTBoxBuilder 
 #define FLOW_SMT_BOX_ADD_RULE(builder, name_str, cand, min_b, max_b, th, msg_str) \
     flow_smt_box_builder_add(&(builder), (name_str), (uint64_t)(cand), (uint64_t)(min_b), (uint64_t)(max_b), (th), (msg_str))
 
+#define FLOW_SMT_BOX_ADD(builder, name_str, cand, min_b, max_b) \
+    FLOW_SMT_BOX_ADD_RULE(builder, (name_str), (cand), (min_b), (max_b), FLOW_BOX_THEOREM_BUFFER_BOUNDS, "out of bounds")
+
 #define FLOW_SMT_BOX_VERIFY(builder, tag_str, proof_ptr) \
     flow_smt_box_builder_verify(&(builder), (tag_str), (proof_ptr))
 

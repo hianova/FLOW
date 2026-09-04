@@ -1,4 +1,6 @@
 #include "primitive.h"
+#include "flow_smt_dsl.h"
+#include "flow_str.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -65,27 +67,14 @@ FlowSMTResult flow_primitive_verify_smt(const FlowPrimitiveDriver *driver,
         return FLOW_SMT_UNKNOWN;
     }
 
-    /* Unified SMT Hyper-box Constraint Verification (QF_LIA) */
-    FlowBoxConstraint constraints[2] = {
-        {
-            .name = "queue depth",
-            .candidate_value = candidate_queue_depth,
-            .min_bound = 1,
-            .max_bound = bounds.max_queue_depth,
-            .theorem = FLOW_BOX_THEOREM_BUFFER_BOUNDS,
-            .violation_msg = "exceeds hardware physical limit"
-        },
-        {
-            .name = "buffer bytes",
-            .candidate_value = candidate_buffer_bytes,
-            .min_bound = 0,
-            .max_bound = bounds.max_buffer_bytes,
-            .theorem = FLOW_BOX_THEOREM_MEMORY_QUOTA,
-            .violation_msg = "exceeds physical DMA limit"
-        }
-    };
+    /* Unified SMT Hyper-box Constraint Verification (QF_LIA) using flow_smt_dsl */
+    FLOW_SMT_BOX_BUILDER_DECL(builder);
+    FLOW_SMT_BOX_ADD_RULE(builder, "queue depth", candidate_queue_depth, 1, bounds.max_queue_depth,
+                          FLOW_BOX_THEOREM_BUFFER_BOUNDS, "exceeds hardware physical limit");
+    FLOW_SMT_BOX_ADD_RULE(builder, "buffer bytes", candidate_buffer_bytes, 0, bounds.max_buffer_bytes,
+                          FLOW_BOX_THEOREM_MEMORY_QUOTA, "exceeds physical DMA limit");
 
-    FlowSMTResult res = flow_smt_verify_box_invariants(driver->driver_name, constraints, 2, proof_out);
+    FlowSMTResult res = FLOW_SMT_BOX_VERIFY(builder, driver->driver_name, proof_out);
     if (res == FLOW_SMT_PROVEN_UNSAT && proof_out != NULL) {
         snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
                  "SMT PROVEN SOUND: queue_depth=%llu <= %llu, buffer=%llu <= %llu, zero_copy=%u",
@@ -528,27 +517,14 @@ FlowSMTResult flow_primitive_verify_protocol_smt(const FlowPrimitiveDriver *driv
 
     const uint32_t max_allowed_header_table = 65536; /* 64 KB strict ceiling */
 
-    /* Unified SMT Hyper-box Constraint Verification (QF_LIA) */
-    FlowBoxConstraint constraints[2] = {
-        {
-            .name = "streams",
-            .candidate_value = candidate_streams,
-            .min_bound = 1,
-            .max_bound = bounds.max_queue_depth,
-            .theorem = FLOW_BOX_THEOREM_BUFFER_BOUNDS,
-            .violation_msg = "exceeds protocol physical bound"
-        },
-        {
-            .name = "header table",
-            .candidate_value = candidate_header_table_bytes,
-            .min_bound = 0,
-            .max_bound = max_allowed_header_table,
-            .theorem = FLOW_BOX_THEOREM_MEMORY_QUOTA,
-            .violation_msg = "exceeds safe ceiling"
-        }
-    };
+    /* Unified SMT Hyper-box Constraint Verification (QF_LIA) using flow_smt_dsl */
+    FLOW_SMT_BOX_BUILDER_DECL(builder);
+    FLOW_SMT_BOX_ADD_RULE(builder, "streams", candidate_streams, 1, bounds.max_queue_depth,
+                          FLOW_BOX_THEOREM_BUFFER_BOUNDS, "exceeds protocol physical bound");
+    FLOW_SMT_BOX_ADD_RULE(builder, "header table", candidate_header_table_bytes, 0, max_allowed_header_table,
+                          FLOW_BOX_THEOREM_MEMORY_QUOTA, "exceeds safe ceiling");
 
-    FlowSMTResult res = flow_smt_verify_box_invariants(bounds.name, constraints, 2, proof_out);
+    FlowSMTResult res = FLOW_SMT_BOX_VERIFY(builder, bounds.name, proof_out);
     if (res == FLOW_SMT_PROVEN_UNSAT && proof_out != NULL) {
         snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
                  "SMT PROTOCOL SOUND: protocol=%s, streams=%u <= %llu, header_table=%uB <= %uB",

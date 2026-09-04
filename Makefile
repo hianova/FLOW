@@ -96,7 +96,7 @@ benchmark: demos
 	./tools/benchmark-suite.sh 1000
 
 chaos-benchmark: tests/chaos-fp-vs-int-benchmark.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $< -o $(BUILD_DIR)/chaos-fp-vs-int-benchmark -lm
+	$(CC) $(CFLAGS) -Isrc $< -o $(BUILD_DIR)/chaos-fp-vs-int-benchmark -lm
 	$(BUILD_DIR)/chaos-fp-vs-int-benchmark
 
 gateway-benchmark: tests/gateway-autonomous-benchmark.c $(LIBFLOW_A) | $(BUILD_DIR)

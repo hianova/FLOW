@@ -1,4 +1,6 @@
 #include "matching.h"
+#include "flow_smt_dsl.h"
+#include "flow_str.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -201,27 +203,14 @@ FlowSMTResult flow_matching_verify_smt(const FlowLimitOrderBook *book,
         }
     }
 
-    /* Unified SMT Box Constraint Invariants */
-    FlowBoxConstraint constraints[2] = {
-        {
-            .name = "crossed book indicator",
-            .candidate_value = crossed_val,
-            .min_bound = 0,
-            .max_bound = 0,
-            .theorem = FLOW_BOX_THEOREM_BUFFER_BOUNDS,
-            .violation_msg = "Crossed book detected (Bid >= Ask)"
-        },
-        {
-            .name = "fill excess",
-            .candidate_value = max_fill_excess,
-            .min_bound = 0,
-            .max_bound = 0,
-            .theorem = FLOW_BOX_THEOREM_MEMORY_QUOTA,
-            .violation_msg = "Over-filled order detected (filled > requested)"
-        }
-    };
+    /* Unified SMT Box Constraint Invariants using flow_smt_dsl */
+    FLOW_SMT_BOX_BUILDER_DECL(builder);
+    FLOW_SMT_BOX_ADD_RULE(builder, "crossed book indicator", crossed_val, 0, 0,
+                          FLOW_BOX_THEOREM_BUFFER_BOUNDS, "Crossed book detected (Bid >= Ask)");
+    FLOW_SMT_BOX_ADD_RULE(builder, "fill excess", max_fill_excess, 0, 0,
+                          FLOW_BOX_THEOREM_MEMORY_QUOTA, "Over-filled order detected (filled > requested)");
 
-    FlowSMTResult res = flow_smt_verify_box_invariants("financial_matching", constraints, 2, proof_out);
+    FlowSMTResult res = FLOW_SMT_BOX_VERIFY(builder, "financial_matching", proof_out);
     if (res == FLOW_SMT_PROVEN_UNSAT && proof_out != NULL) {
         snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
                  "SMT FINANCIAL SOUND: Symbol=%u, Orders=%zu, Trades=%llu, TickToTrade=%lluns (Zero-Defect Soundness)",
@@ -241,7 +230,7 @@ static int matching_register(void) {
 
 static int matching_get_bounds(FlowHardwareBounds *bounds_out) {
     if (bounds_out == NULL) return 0;
-    strncpy(bounds_out->name, "order_book_matcher", sizeof(bounds_out->name) - 1);
+    flow_str_copy(bounds_out->name, sizeof(bounds_out->name), "order_book_matcher");
     bounds_out->max_queue_depth = FLOW_MATCHING_MAX_ORDERS;
     bounds_out->max_buffer_bytes = 16ULL * 1024ULL * 1024ULL;
     bounds_out->supports_zero_copy = 1;

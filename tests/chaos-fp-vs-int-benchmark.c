@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include "flow_benchmark_harness.h"
 
 static uint64_t bench_time_ns(void) {
     struct timespec ts;
@@ -189,7 +190,13 @@ int main(void) {
     printf("10 Million Iterations Benchmark (sink=%llu):\n", (unsigned long long)sink);
     printf("  Method A (Double + libm exp):    %6.2f ms | %5.2f ns/op | %6.2f Mops/s\n", t_a, (t_a*1e6)/N, (N/t_a)/1e3);
     printf("  Method B (Hybrid + Integer LUT): %6.2f ms | %5.2f ns/op | %6.2f Mops/s\n", t_b, (t_b*1e6)/N, (N/t_b)/1e3);
-    printf("  Method C (Pure Integer Q16):     %6.2f ms | %5.2f ns/op | %6.2f Mops/s\n", t_c, (t_c*1e6)/N, (N/t_c)/1e3);
+    printf("  Method C (Pure Integer Q16):     %6.2f ms | %5.2f ns/op | %6.2f Mops/s\n\n", t_c, (t_c*1e6)/N, (N/t_c)/1e3);
+
+    FlowBenchmarkResult results[3];
+    flow_benchmark_compute_stats(&results[0], "Double+libm (f64)", N, (uint64_t)(t_a * 1e6), NULL, 0);
+    flow_benchmark_compute_stats(&results[1], "Hybrid+LUT (f64/LUT)", N, (uint64_t)(t_b * 1e6), NULL, 0);
+    flow_benchmark_compute_stats(&results[2], "Pure Integer (Q16.16)", N, (uint64_t)(t_c * 1e6), NULL, 0);
+    flow_benchmark_print_scorecard(results, 3);
 
     return 0;
 }

@@ -1,4 +1,6 @@
 #include "gateway.h"
+#include "flow_str.h"
+#include "flow_smt_dsl.h"
 
 #include <assert.h>
 #include <stdlib.h>
@@ -294,18 +296,12 @@ FlowSMTResult flow_gateway_verify_smt(const FlowGateway *gw,
         res_mesh = flow_hetero_mesh_verify_smt(&gw->mesh, req_qps, proof_out);
     }
 
-    /* 3. Timeout Polytope Hard Invariant Theorem */
-    FlowSMTResult res_timeout = FLOW_SMT_PROVEN_UNSAT;
+    /* 3. Timeout Polytope Hard Invariant Theorem using flow_smt_dsl */
     uint32_t active_timeout = atomic_load(&gw->active_timeout_ms);
-    if (atomic_load(&gw->is_hardened)) {
-        if (active_timeout > gw->config.hardened_timeout_ms) {
-            res_timeout = FLOW_SMT_VIOLATION_SAT; /* Violation: Under attack but timeout not tightened */
-        }
-    } else {
-        if (active_timeout > gw->config.normal_timeout_ms) {
-            res_timeout = FLOW_SMT_VIOLATION_SAT;
-        }
-    }
+    uint32_t max_timeout = atomic_load(&gw->is_hardened) ? gw->config.hardened_timeout_ms : gw->config.normal_timeout_ms;
+    FLOW_SMT_BOX_BUILDER_DECL(timeout_builder);
+    FLOW_SMT_BOX_ADD(timeout_builder, "gateway timeout", active_timeout, 0, max_timeout);
+    FlowSMTResult res_timeout = FLOW_SMT_BOX_VERIFY(timeout_builder, "gateway_timeout", NULL);
 
     FlowSMTResult overall = (res_proto == FLOW_SMT_PROVEN_UNSAT &&
                              res_mesh == FLOW_SMT_PROVEN_UNSAT &&
@@ -421,15 +417,18 @@ FlowSMTResult flow_gateway_evaluate_waf_smt(FlowGateway *gw,
     int is_malicious = 0;
     const char *reason = "Safe";
 
-    /* Fast 1-cycle string search for OWASP Top exploit patterns */
-    if (strstr(str, "' OR '") || strstr(str, "' OR 1=1") || strstr(str, "UNION SELECT") ||
-        strstr(str, "DROP TABLE") || strstr(str, "1=1--")) {
+    /* Fast 1-cycle string search for OWASP Top exploit patterns using flow_str_contains */
+    if (flow_str_contains(str, "' OR '") || flow_str_contains(str, "' OR 1=1") ||
+        flow_str_contains(str, "UNION SELECT") || flow_str_contains(str, "DROP TABLE") ||
+        flow_str_contains(str, "1=1--")) {
         is_malicious = 1;
         reason = "SQL Injection exploit detected";
-    } else if (strstr(str, "../..") || strstr(str, "/etc/passwd") || strstr(str, "..\\..")) {
+    } else if (flow_str_contains(str, "../..") || flow_str_contains(str, "/etc/passwd") ||
+               flow_str_contains(str, "..\\..")) {
         is_malicious = 1;
         reason = "Path Traversal directory climb detected";
-    } else if (strstr(str, "<script") || strstr(str, "javascript:") || strstr(str, "onerror=")) {
+    } else if (flow_str_contains(str, "<script") || flow_str_contains(str, "javascript:") ||
+               flow_str_contains(str, "onerror=")) {
         is_malicious = 1;
         reason = "Cross-Site Scripting (XSS) payload detected";
     }
