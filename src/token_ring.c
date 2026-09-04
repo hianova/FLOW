@@ -1,5 +1,8 @@
 #include "token_ring.h"
 #include "backend.h"
+#include "numa_affinity.h"
+#include "hardware_telemetry.h"
+#include "simd_manifold.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -366,14 +369,26 @@ uint64_t flow_wavefront_semilattice_join(uint64_t base_genome,
                                          const uint64_t *thread_slices,
                                          const uint64_t *subspace_masks,
                                          size_t count) {
-    uint64_t merged = base_genome;
-    if (!thread_slices || !subspace_masks || count == 0) return merged;
+    if (!thread_slices || !subspace_masks || count == 0) return base_genome;
 
     /*
-     * Lattice Least Upper Bound (\sqcup):
-     * Because all subspace_masks[i] are mutually orthogonal,
-     * this operation is strictly commutative and associative (A \sqcup B = B \sqcup A).
+     * Hardware Pillar 2: 512-Bit SIMD Vectorized Confluence
+     * If count <= 8 (the 8 orthogonal subspaces of the 512-bit vector register),
+     * execute parallel bitwise intersection and horizontal reduction in vector registers.
      */
+    if (count <= 8) {
+        FlowVector512 s = {0}, m = {0};
+        for (size_t i = 0; i < count; ++i) {
+            s.u64[i] = thread_slices[i];
+            m.u64[i] = subspace_masks[i];
+        }
+        FlowVector512 filtered = flow_v512_and(s, m);
+        uint64_t total_slices = flow_v512_horizontal_or(filtered);
+        uint64_t total_mask = flow_v512_horizontal_or(m);
+        return (base_genome & ~total_mask) | total_slices;
+    }
+
+    uint64_t merged = base_genome;
     for (size_t i = 0; i < count; ++i) {
         merged = (merged & ~subspace_masks[i]) | (thread_slices[i] & subspace_masks[i]);
     }
@@ -391,6 +406,10 @@ typedef struct {
 static void *wavefront_worker_func(void *arg) {
     FlowWavefrontWorkerTask *task = (FlowWavefrontWorkerTask *)arg;
     if (!task || !task->ring) return NULL;
+
+    /* Hardware Pillar 1: Core pinning & QoS steer to performance cores */
+    flow_numa_pin_thread((uint32_t)task->worker_id);
+
     FlowWavefrontRing *ring = task->ring;
     size_t idx = task->subspace_idx;
     if (idx >= ring->decomp.subspace_count) return NULL;
@@ -456,6 +475,10 @@ int flow_wavefront_ring_step_parallel(FlowWavefrontRing *ring) {
     }
     if (num_workers == 0) return 0;
 
+    /* Hardware Pillar 3: Physical Hardware Telemetry Probe Start */
+    FlowPhysicalProbe probe;
+    flow_hardware_probe_start(&probe);
+
     pthread_t threads[FLOW_WAVEFRONT_MAX_WORKERS];
     FlowWavefrontWorkerTask tasks[FLOW_WAVEFRONT_MAX_WORKERS];
     uint64_t thread_slices[FLOW_WAVEFRONT_MAX_WORKERS] = {0};
@@ -483,7 +506,13 @@ int flow_wavefront_ring_step_parallel(FlowWavefrontRing *ring) {
         total_subspace_energy += tasks[i].energy_out;
     }
 
-    /* Register-speed Join-Semilattice Confluence (\sqcup) */
+    /* Hardware Pillar 3: Physical Hardware Telemetry Probe Stop */
+    flow_hardware_probe_stop(&probe);
+    ring->last_probe = probe;
+    ring->total_cycles += probe.elapsed_cycles;
+    ring->total_energy_uj += probe.dissipated_energy_uj;
+
+    /* Register-speed Join-Semilattice Confluence (\sqcup) via 512-bit SIMD */
     ring->global_lattice_genome = flow_wavefront_semilattice_join(
         ring->global_lattice_genome,
         thread_slices,
@@ -502,10 +531,12 @@ int flow_wavefront_ring_step_parallel(FlowWavefrontRing *ring) {
         ring->state = FLOW_RING_ATTRACTOR_REACHED;
         ring->attractor_converged = true;
         snprintf(ring->status_message, sizeof(ring->status_message),
-                 "Wavefront Attractor reached: cycle=%llu, energy=%.4f, Delta E=%.6f (Lattice Genome=0x%016llx)",
+                 "Wavefront Attractor reached: cycle=%llu, energy=%.4f, Delta E=%.6f, cycles=%llu, uJ=%.1f (Lattice Genome=0x%016llx)",
                  (unsigned long long)ring->wave_cycle_count,
                  ring->global_lyapunov_energy,
                  ring->lyapunov_delta_e,
+                 (unsigned long long)ring->total_cycles,
+                 ring->total_energy_uj,
                  (unsigned long long)ring->global_lattice_genome);
     }
     return 1;

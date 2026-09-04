@@ -21,13 +21,16 @@ FLOW compiles declarative intents (`.flow`) into zero-overhead native code. Oper
 │      • bitspace.c   : 多面體硬限制、連鎖群與 1-Bit 編碼空間              │
 │      • parser.c     : 語法分析與語意降維 (包含 lower_to_ir)              │
 │                                                                        │
-│   🦾【物理肉體 (The Body)】                                           │
-│      • embodied.c   : 64-Bit 具身子空間切片與多感官遮罩超幾何疊加      │
-│      • jit.c        : 即時組合語言與 C 源碼發射器                        │
-│      • reload.c     : 零原子鎖 QSBR 熱替換與世代追蹤 (>390M ops/s)       │
-│      • primitive.c  : 極簡 3-Function 實體硬體驅動 (io_uring/RDMA/eBPF)  │
-│      • adaptive.c   : 硬體 PMU 遙測與控制器                              │
-│      • backend.c    : 多後端發射 (LLVM/MLIR/C/Rust/Python)               │
+│   🦾【物理肉體 (The Body & Hardware Pillars)】                        │
+│      • numa_affinity.c : NUMA 拓樸感知、線程親和綁核與 First-Touch 本機 Arena│
+│      • simd_manifold.c : 512-Bit SIMD 向量流形 (AVX-512/Neon 8x64b 單週期) │
+│      • hardware_telemetry.c : 裸機 0ns RDTSC/CNTVCT 週期與 uJ 熱力學閉環   │
+│      • embodied.c      : 64-Bit 具身子空間切片與多感官遮罩超幾何疊加       │
+│      • jit.c           : 即時組合語言與 C 源碼發射器                         │
+│      • reload.c        : 零原子鎖 QSBR 熱替換與世代追蹤 (>390M ops/s)        │
+│      • primitive.c     : 極簡 3-Function 實體硬體驅動 (io_uring/RDMA/eBPF)   │
+│      • adaptive.c      : 硬體 PMU 遙測與控制器                               │
+│      • backend.c       : 多後端發射 (LLVM/MLIR/C/Rust/Python)                │
 │                                                                        │
 │   📐【六大數學支柱 (Six Mathematical Pillars)】                         │
 │      • polyhedral.c : Presburger 仿射多面體模型 (消滅迴圈展開猜測)       │
@@ -106,6 +109,14 @@ FLOW compiles declarative intents (`.flow`) into zero-overhead native code. Oper
 
 ### 8. 確定性因果推論大腦 (`Flowy`)
 - **0% 幻覺** 的代碼庫圖譜檢索、即時決策因果解釋（`flowy why`）、神經遙測熱點分析（`flowy bottleneck`）與 14 章中英雙語《The FLOW Book》知識圖譜。
+
+### 9. 攻克三大底層硬體盲區 (Three Critical Computer Hardware Blindspots Conquered)
+- **1. NUMA 拓樸感知、線程綁核與本機 Arena (`src/numa_affinity.h`, `src/numa_affinity.c`)**：
+  徹底消除跨 Socket 互聯懲罰（QPI/UPI/Infinity Fabric）與快取行顛簸。自動探索實體核心、超線程、效能核（P-cores）與能效核（E-cores）。Linux 呼叫 `pthread_setaffinity_np`，macOS Apple Silicon 透過 `pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0)` 強制鎖定高效能核心；提供頁對齊第一觸摸（First-Touch Faulting）本機記憶體分配。
+- **2. 512-Bit SIMD 向量流形 (`src/simd_manifold.h`, `src/simd_manifold.c`)**：
+  原生 `__attribute__((vector_size(64)))` 對接 AVX-512 與 ARM Neon。在單一向量指令週期內平行完成 8 組 64-bit 正交子空間的離散注意力投影 (`flow_v512_project`)、半格交匯 (`flow_v512_semilattice_join`)、全域族群計數 (`flow_v512_popcount`) 與水平位元規約。
+- **3. 裸機物理硬體遙測與熱力學閉環 (`src/hardware_telemetry.h`, `src/hardware_telemetry.c`)**：
+  以內聯組合語言讀取裸機 CPU 週期計數器（ARM64 `mrs cntvct_el0` 零開銷、x86-64 `__rdtsc()`），透過 Intel/AMD RAPL 暫存器或校準物理模型取得微焦耳（$\mu\text{J}$）能量耗散。實體李雅普諾夫候選泛函 $V_{\text{phys}}(x) = w_{\text{cyc}} \cdot \frac{\Delta \text{Cycles}}{10^4} + w_{\text{ene}} \cdot \frac{\Delta \mu\text{J}}{10^3} + V_{\text{constraint}}(x)$，使軟體演進受制於真實矽晶片物理熱力學閉環。
 
 ---
 

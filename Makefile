@@ -185,7 +185,8 @@ TEST_BINARIES := \
 	$(BUILD_DIR)/embodied-coordination-test \
 	$(BUILD_DIR)/six-pillars-math-test \
 	$(BUILD_DIR)/entropy-collapse-test \
-	$(BUILD_DIR)/doc-as-intent-test
+	$(BUILD_DIR)/doc-as-intent-test \
+	$(BUILD_DIR)/hardware-blindspot-test
 
 # Specific build prerequisites for targets with inter-module dependencies
 $(BUILD_DIR)/plugin-test: plugins
@@ -300,6 +301,7 @@ test-run: $(TEST_BINARIES) fvec-flowc-apply-test
 	@$(BUILD_DIR)/enterprise-production-test
 	@$(BUILD_DIR)/hardened-production-test
 	@$(BUILD_DIR)/decoupling-test
+	@$(BUILD_DIR)/hardware-blindspot-test
 	@echo "=== [Phase 4/5] Running Architecture Memory (.fvec) & Herd Immunity ==="
 	@$(BUILD_DIR)/vault-test
 	@$(BUILD_DIR)/serverless-coldstart-test
@@ -422,7 +424,7 @@ test: test-build
 	@$(MAKE) --no-print-directory test-run
 	@$(MAKE) --no-print-directory test-e2e
 	@echo "================================================================================"
-	@echo "          ALL 74 TEST SUITES & E2E VERIFICATIONS 100% SOUND & PASSED!           "
+	@echo "          ALL 75 TEST SUITES & E2E VERIFICATIONS 100% SOUND & PASSED!           "
 	@echo "================================================================================"
 
 clean:

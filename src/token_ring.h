@@ -6,6 +6,7 @@
 #include "bitmanifold.h"
 #include "search.h"
 #include "smt.h"
+#include "hardware_telemetry.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -246,6 +247,11 @@ typedef struct FlowWavefrontRing {
     FlowBitSpace active_space;
     SearchResult best_search;
     FlowSMTProofAttestation smt_proof;
+
+    /* Hardware Telemetry & Thermodynamic Monitoring */
+    FlowPhysicalProbe last_probe;
+    uint64_t total_cycles;
+    double total_energy_uj;
 
     char status_message[128];
 } FlowWavefrontRing;
