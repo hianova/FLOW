@@ -1,13 +1,10 @@
 #include "backend.h"
-
 #include <stdio.h>
 #include <string.h>
-
 int flow_emit_file_template(FILE *output, const char *path) {
     FILE *template = fopen(path, "rb");
     unsigned char buffer[8192];
     size_t count;
-
     if (template == NULL) return 0;
     while (!feof(template) && !ferror(template)) {
         count = fread(buffer, 1, sizeof(buffer), template);
@@ -24,7 +21,6 @@ int flow_emit_file_template(FILE *output, const char *path) {
     fclose(template);
     return ferror(output) == 0;
 }
-
 void flow_emit_metadata(FILE *output, const SemanticIR *ir,
                         const Component *component, const SearchResult *search,
                         const VerificationReport *verification) {
@@ -47,8 +43,7 @@ void flow_emit_metadata(FILE *output, const SemanticIR *ir,
         fprintf(output, " */\n");
     }
     fprintf(output,
-        "/* Semantic IR: output=%s output_type=%s input_samples=%zu state_shared=%d state_read_heavy=%d state_bounded=%d parallelizable=%d ordered=%d unordered=%d deterministic=%d range=%d size_preserved=%d mutability_read_only=%d ensure_count=%d declared_constraints=%zu resource=%s capability=%s domain=%s contract=%s fallback=%s graph_nodes=%zu constraints=%zu holes=%zu inferred_facts=%d */\n"
-        "/* Selected component: %s (%s) plugin=%s */\n",
+        "/* Semantic IR: output=%s output_type=%s input_samples=%zu state_shared=%d state_read_heavy=%d state_bounded=%d parallelizable=%d ordered=%d unordered=%d deterministic=%d range=%d size_preserved=%d mutability_read_only=%d ensure_count=%d declared_constraints=%zu resource=%s capability=%s domain=%s contract=%s fallback=%s graph_nodes=%zu constraints=%zu holes=%zu inferred_facts=%d */\n" "/* Selected component: %s (%s) plugin=%s */\n",
         ir->output_name, ir->output_type, ir->sample_count, ir->state_shared, ir->state_read_heavy,
         ir->state_bounded, ir->flow_parallelizable, ir->fact_ordered,
         ir->fact_unordered, ir->fact_deterministic, ir->fact_range_proven,
@@ -61,8 +56,7 @@ void flow_emit_metadata(FILE *output, const SemanticIR *ir,
         component->id, component->kind,
         plugin == NULL ? "" : plugin->name);
     fprintf(output,
-        "/* Tuning: workload_bytes=%zu buffer_bytes=%zu initial_capacity=%zu growth_percent=%u batch_size=%zu arena_bytes=%zu */\n"
-        "/* Verification: status=%s capacity=%zu estimated_bytes=%zu message=%s */\n",
+        "/* Tuning: workload_bytes=%zu buffer_bytes=%zu initial_capacity=%zu growth_percent=%u batch_size=%zu arena_bytes=%zu */\n" "/* Verification: status=%s capacity=%zu estimated_bytes=%zu message=%s */\n",
         ir->workload_bytes, tuning.buffer_bytes, tuning.initial_capacity,
         tuning.growth_percent, tuning.batch_size, tuning.arena_bytes,
         verification_status_name(verification->status), verification->capacity,
@@ -77,8 +71,7 @@ void flow_emit_metadata(FILE *output, const SemanticIR *ir,
         if (search->pareto.count > 0) {
             size_t p;
             fprintf(output,
-                "/* Pareto frontier: count=%zu best_latency=%.2f best_memory=%.0f */\n"
-                "/* Selection regret: latency_regret=+%.2f%% memory_regret=+%.2f%% */\n",
+                "/* Pareto frontier: count=%zu best_latency=%.2f best_memory=%.0f */\n" "/* Selection regret: latency_regret=+%.2f%% memory_regret=+%.2f%% */\n",
                 search->pareto.count, search->pareto.best_latency, search->pareto.best_memory,
                 search->pareto.latency_regret_percent, search->pareto.memory_regret_percent);
             for (p = 0; p < search->pareto.count && p < 4; ++p) {
@@ -95,32 +88,14 @@ void flow_emit_metadata(FILE *output, const SemanticIR *ir,
         }
     }
 }
-
 static void emit_candidate_plan(FILE *output, const SemanticIR *ir) {
     size_t i;
     size_t count = compatible_component_count(ir);
     fputs(
-        "\n#include <stddef.h>\n"
-        "typedef struct {\n"
-        "    const char *name;\n"
-        "    const char *kind;\n"
-        "    const char *resource;\n"
-        "    const char *capability;\n"
-        "    const char *domain_contract;\n"
-        "    const char *flow_binding;\n"
-        "    const char *domain;\n"
-        "    const char *fallback_policy;\n"
-        "    int latency_score;\n"
-        "    int memory_score;\n"
-        "    int supports_parallelizable;\n"
-        "    size_t memory_fixed_bytes;\n"
-        "    size_t memory_bytes_per_capacity;\n"
-        "    const char *plugin;\n"
-        "} FlowGeneratedCandidatePlan;\n\n",
+        "\n#include <stddef.h>\n" "typedef struct {\n" "    const char *name;\n" "    const char *kind;\n" "    const char *resource;\n" "    const char *capability;\n" "    const char *domain_contract;\n" "    const char *flow_binding;\n" "    const char *domain;\n" "    const char *fallback_policy;\n" "    int latency_score;\n" "    int memory_score;\n" "    int supports_parallelizable;\n" "    size_t memory_fixed_bytes;\n" "    size_t memory_bytes_per_capacity;\n" "    const char *plugin;\n" "} FlowGeneratedCandidatePlan;\n\n",
         output);
     fprintf(output,
-        "#define FLOW_GENERATED_CANDIDATE_COUNT %zu\n"
-        "static const FlowGeneratedCandidatePlan FLOW_GENERATED_CANDIDATES[%zu] = {\n",
+        "#define FLOW_GENERATED_CANDIDATE_COUNT %zu\n" "static const FlowGeneratedCandidatePlan FLOW_GENERATED_CANDIDATES[%zu] = {\n",
         count, count == 0 ? 1u : count);
     for (i = 0; i < count; ++i) {
         const Component *candidate = compatible_component_at(ir, i);
@@ -141,798 +116,87 @@ static void emit_candidate_plan(FILE *output, const SemanticIR *ir) {
             i + 1 == count ? "" : ",");
     }
     fputs(
-        "};\n\n"
-        "const FlowGeneratedCandidatePlan *flow_generated_candidate_plans("
-        "size_t *count_out) {\n"
-        "    if (count_out != NULL) *count_out = FLOW_GENERATED_CANDIDATE_COUNT;\n"
-        "    return FLOW_GENERATED_CANDIDATES;\n"
-        "}\n\n",
+        "};\n\n" "const FlowGeneratedCandidatePlan *flow_generated_candidate_plans(" "size_t *count_out) {\n" "    if (count_out != NULL) *count_out = FLOW_GENERATED_CANDIDATE_COUNT;\n" "    return FLOW_GENERATED_CANDIDATES;\n" "}\n\n",
         output);
 }
-
-static void emit_runtime_common(FILE *output, const SemanticIR *ir,
-                                const Component *component,
-                                size_t capacity, size_t threads, size_t shards,
-                                int runtime_input_guard) {
-    size_t i;
-    fprintf(output,
-        "#include <stddef.h>\n"
-        "#include <stdint.h>\n"
-        "#include <stdio.h>\n"
-        "#include <stdlib.h>\n\n"
-        "#ifdef FLOW_BENCHMARK\n"
-        "static volatile const char *flow_benchmark_last_format;\n"
-        "static void flow_benchmark_sink(const char *format, ...) {\n"
-        "    flow_benchmark_last_format = format;\n"
-        "}\n"
-        "#define flow_printf(...) flow_benchmark_sink(__VA_ARGS__)\n"
-        "#define flow_puts(text) flow_benchmark_sink(text)\n"
-        "#else\n"
-        "#define flow_printf printf\n"
-        "#define flow_puts puts\n"
-        "#endif\n\n"
-        "#define FLOW_CAPACITY %zu\n"
-        "#define FLOW_THREADS %zu\n"
-        "#define FLOW_SHARDS %zu\n\n"
-        "typedef struct { int id; int score; } flow_item;\n",
-        capacity, threads, shards);
-    fputs("static const flow_item input_items[] = {\n", output);
-    if (ir->sample_count == 0) {
-        fputs("    {1, 91}, {2, 74}, {3, 99}, {4, 86}, {5, 95}\n", output);
-    } else {
-        for (i = 0; i < ir->sample_count; ++i)
-            fprintf(output, "    {%d, %d}%s\n", ir->samples[i].id,
-                    ir->samples[i].score,
-                    i + 1 == ir->sample_count ? "" : ",");
-    }
-    fprintf(output,
-        "};\n"
-        "#define FLOW_INPUT_COUNT (sizeof(input_items) / sizeof(input_items[0]))\n\n"
-        "static void print_header(void) {\n"
-        "    (void)input_items;\n"
-        "    flow_puts(\"FLOW generated program\");\n"
-        "    flow_puts(\"flow: %s\");\n"
-        "    flow_puts(\"component: %s\");\n"
-        "    flow_printf(\"configuration: capacity %%zu threads %%zu shards %%zu\\n\",\n"
-        "           (size_t)FLOW_CAPACITY, (size_t)FLOW_THREADS, (size_t)FLOW_SHARDS);\n"
-        "}\n\n",
-        ir->flow_name, component->id);
-    if (runtime_input_guard) {
-        fputs("static int flow_verify_input(size_t actual_count) {\n"
-              "    if (actual_count > FLOW_CAPACITY) {\n"
-              "        fputs(\"FLOW runtime check failed: input exceeds capacity\\n\", stderr);\n"
-              "        return 0;\n"
-              "    }\n"
-              "    return 1;\n"
-              "}\n\n", output);
-    } else {
-        fputs("#define flow_verify_input(actual_count) (1)\n\n", output);
-    }
-}
-
-static void emit_result_printer(FILE *output, const SemanticIR *ir) {
-    fprintf(output,
-        "static void print_results(const flow_item *items, size_t count) {\n"
-        "    const size_t top_count = count < %d ? count : %d;\n"
-        "    flow_printf(\"top %%zu\\n\", top_count);\n"
-        "    for (size_t i = 0; i < top_count; ++i)\n"
-        "        flow_printf(\"user %%d score %%d\\n\", items[i].id, items[i].score);\n"
-        "}\n\n",
-        ir->top_n, ir->top_n);
-}
-
-static void emit_common(FILE *output, const SemanticIR *ir,
-                        const Component *component, const SearchResult *search,
-                        const VerificationReport *verification,
-                        size_t capacity, size_t threads, size_t shards) {
-    flow_emit_metadata(output, ir, component, search, verification);
-    emit_runtime_common(output, ir, component, capacity, threads, shards,
-                        verification->runtime_input_guard);
-    emit_result_printer(output, ir);
-}
-
-static void emit_linear_array(FILE *output) {
-    fprintf(output,
-        "typedef struct {\n"
-        "    flow_item items[FLOW_CAPACITY];\n"
-        "    size_t length;\n"
-        "} flow_collection;\n\n"
-        "static int compare_score_desc(const void *left, const void *right) {\n"
-        "    const flow_item *a = left;\n"
-        "    const flow_item *b = right;\n"
-        "    return b->score - a->score;\n"
-        "}\n\n"
-        "static int collection_insert(flow_collection *collection, flow_item item) {\n"
-        "    if (collection->length >= FLOW_CAPACITY) return 0;\n"
-        "    collection->items[collection->length++] = item;\n"
-        "    return 1;\n"
-        "}\n\n"
-        "int main(void) {\n"
-        "    flow_collection collection = {0};\n"
-        "    flow_item results[FLOW_INPUT_COUNT];\n"
-        "    size_t result_count = 0;\n"
-        "    if (!flow_verify_input(FLOW_INPUT_COUNT)) return EXIT_FAILURE;\n"
-        "    for (size_t i = 0; i < FLOW_INPUT_COUNT; ++i)\n"
-        "        (void)collection_insert(&collection, input_items[i]);\n"
-        "    qsort(collection.items, collection.length, sizeof(collection.items[0]), compare_score_desc);\n"
-        "    for (size_t i = 0; i < collection.length && i < FLOW_INPUT_COUNT; ++i)\n"
-        "        results[result_count++] = collection.items[i];\n"
-        "    print_header();\n"
-        "    print_results(results, result_count);\n"
-        "    return EXIT_SUCCESS;\n"
-        "}\n");
-}
-
-static void emit_sharded_hash(FILE *output) {
-    fprintf(output,
-        "#include <pthread.h>\n"
-        "#define FLOW_SLOTS_PER_SHARD ((FLOW_CAPACITY + FLOW_SHARDS - 1) / FLOW_SHARDS)\n"
-        "typedef struct {\n"
-        "    int occupied;\n"
-        "    flow_item item;\n"
-        "} flow_slot;\n\n"
-        "typedef struct {\n"
-        "    flow_slot slots[FLOW_SHARDS][FLOW_SLOTS_PER_SHARD];\n"
-        "    pthread_mutex_t locks[FLOW_SHARDS];\n"
-        "} flow_collection;\n\n"
-        "static size_t hash_id(int id) {\n"
-        "    return (size_t)((uint32_t)id * UINT32_C(2654435761));\n"
-        "}\n\n"
-        "static int collection_insert(flow_collection *collection, flow_item item) {\n"
-        "    const size_t hash = hash_id(item.id);\n"
-        "    const size_t shard = hash %% FLOW_SHARDS;\n"
-        "    const size_t start = (hash / FLOW_SHARDS) %% FLOW_SLOTS_PER_SHARD;\n"
-        "    pthread_mutex_lock(&collection->locks[shard]);\n"
-        "    for (size_t probe = 0; probe < FLOW_SLOTS_PER_SHARD; ++probe) {\n"
-        "        const size_t slot_index = (start + probe) %% FLOW_SLOTS_PER_SHARD;\n"
-        "        flow_slot *slot = &collection->slots[shard][slot_index];\n"
-        "        if (!slot->occupied) {\n"
-        "            slot->occupied = 1;\n"
-        "            slot->item = item;\n"
-        "            pthread_mutex_unlock(&collection->locks[shard]);\n"
-        "            return 1;\n"
-        "        }\n"
-        "    }\n"
-        "    pthread_mutex_unlock(&collection->locks[shard]);\n"
-        "    return 0;\n"
-        "}\n\n"
-        "static size_t collection_collect(flow_collection *collection,\n"
-        "                                  flow_item *results, size_t limit) {\n"
-        "    size_t count = 0;\n"
-        "    for (size_t shard = 0; shard < FLOW_SHARDS; ++shard) {\n"
-        "        pthread_mutex_lock(&collection->locks[shard]);\n"
-        "        for (size_t slot = 0; slot < FLOW_SLOTS_PER_SHARD && count < limit; ++slot)\n"
-        "            if (collection->slots[shard][slot].occupied)\n"
-        "                results[count++] = collection->slots[shard][slot].item;\n"
-        "        pthread_mutex_unlock(&collection->locks[shard]);\n"
-        "    }\n"
-        "    return count;\n"
-        "}\n\n"
-        "static int compare_score_desc(const void *left, const void *right) {\n"
-        "    const flow_item *a = left;\n"
-        "    const flow_item *b = right;\n"
-        "    return b->score - a->score;\n"
-        "}\n\n"
-        "int main(void) {\n"
-        "    flow_collection collection = {0};\n"
-        "    flow_item results[FLOW_INPUT_COUNT];\n"
-        "    if (!flow_verify_input(FLOW_INPUT_COUNT)) return EXIT_FAILURE;\n"
-        "    for (size_t shard = 0; shard < FLOW_SHARDS; ++shard)\n"
-        "        (void)pthread_mutex_init(&collection.locks[shard], NULL);\n"
-        "    for (size_t i = 0; i < FLOW_INPUT_COUNT; ++i)\n"
-        "        (void)collection_insert(&collection, input_items[i]);\n"
-        "    const size_t result_count = collection_collect(&collection, results, FLOW_INPUT_COUNT);\n"
-        "    qsort(results, result_count, sizeof(results[0]), compare_score_desc);\n"
-        "    print_header();\n"
-        "    print_results(results, result_count);\n"
-        "    return EXIT_SUCCESS;\n"
-        "}\n");
-}
-
-static void emit_ordered_tree(FILE *output) {
-    fprintf(output,
-        "#include <pthread.h>\n"
-        "typedef struct {\n"
-        "    flow_item item;\n"
-        "    int left;\n"
-        "    int right;\n"
-        "} flow_node;\n\n"
-        "typedef struct {\n"
-        "    flow_node nodes[FLOW_CAPACITY];\n"
-        "    size_t length;\n"
-        "    int root;\n"
-        "    pthread_mutex_t lock;\n"
-        "} flow_collection;\n\n"
-        "static int comes_before(flow_item left, flow_item right) {\n"
-        "    return left.score > right.score ||\n"
-        "           (left.score == right.score && left.id < right.id);\n"
-        "}\n\n"
-        "static int collection_insert(flow_collection *collection, flow_item item) {\n"
-        "    pthread_mutex_lock(&collection->lock);\n"
-        "    if (collection->length >= FLOW_CAPACITY) { pthread_mutex_unlock(&collection->lock); return 0; }\n"
-        "    const int new_index = (int)collection->length++;\n"
-        "    collection->nodes[new_index] = (flow_node){item, -1, -1};\n"
-        "    if (collection->root < 0) {\n"
-        "        collection->root = new_index;\n"
-        "        pthread_mutex_unlock(&collection->lock); return 1;\n"
-        "    }\n"
-        "    int current = collection->root;\n"
-        "    for (;;) {\n"
-        "        int *next = comes_before(item, collection->nodes[current].item)\n"
-        "                 ? &collection->nodes[current].left\n"
-        "                 : &collection->nodes[current].right;\n"
-        "        if (*next < 0) { *next = new_index; pthread_mutex_unlock(&collection->lock); return 1; }\n"
-        "        current = *next;\n"
-        "    }\n"
-        "}\n\n"
-        "static size_t collection_collect(const flow_collection *collection,\n"
-        "                                  int node_index, flow_item *results, size_t limit,\n"
-        "                                  size_t count) {\n"
-        "    if (node_index < 0 || count >= limit) return count;\n"
-        "    count = collection_collect(collection, collection->nodes[node_index].left, results, limit, count);\n"
-        "    if (count < limit) results[count++] = collection->nodes[node_index].item;\n"
-        "    return collection_collect(collection, collection->nodes[node_index].right, results, limit, count);\n"
-        "}\n\n"
-        "int main(void) {\n"
-        "    flow_collection collection = {.root = -1, .lock = PTHREAD_MUTEX_INITIALIZER};\n"
-        "    flow_item results[FLOW_INPUT_COUNT];\n"
-        "    if (!flow_verify_input(FLOW_INPUT_COUNT)) return EXIT_FAILURE;\n"
-        "    for (size_t i = 0; i < FLOW_INPUT_COUNT; ++i)\n"
-        "        (void)collection_insert(&collection, input_items[i]);\n"
-        "    pthread_mutex_lock(&collection.lock);\n"
-        "    const size_t result_count = collection_collect(&collection, collection.root,\n"
-        "                                                   results, FLOW_INPUT_COUNT, 0);\n"
-        "    pthread_mutex_unlock(&collection.lock);\n"
-        "    print_header();\n"
-        "    print_results(results, result_count);\n"
-        "    return EXIT_SUCCESS;\n"
-        "}\n");
-}
-
-static void emit_demo_common(FILE *output, const SemanticIR *ir,
-                             const Component *component, const SearchResult *search,
-                             const VerificationReport *verification,
-                             size_t capacity, size_t threads, size_t shards) {
-    flow_emit_metadata(output, ir, component, search, verification);
-    emit_runtime_common(output, ir, component, capacity, threads, shards,
-                        verification->runtime_input_guard);
-}
-
-static void emit_bounded_queue(FILE *output) {
-    fprintf(output,
-        "#include <pthread.h>\n"
-        "typedef struct {\n"
-        "    flow_item items[FLOW_CAPACITY];\n"
-        "    size_t head;\n"
-        "    size_t tail;\n"
-        "    size_t length;\n"
-        "    pthread_mutex_t lock;\n"
-        "} flow_queue;\n\n"
-        "static int queue_push(flow_queue *queue, flow_item item) {\n"
-        "    pthread_mutex_lock(&queue->lock);\n"
-        "    if (queue->length >= FLOW_CAPACITY) { pthread_mutex_unlock(&queue->lock); return 0; }\n"
-        "    queue->items[queue->tail] = item;\n"
-        "    queue->tail = (queue->tail + 1) %% FLOW_CAPACITY;\n"
-        "    ++queue->length;\n"
-        "    pthread_mutex_unlock(&queue->lock);\n"
-        "    return 1;\n"
-        "}\n\n"
-        "static int queue_pop(flow_queue *queue, flow_item *item) {\n"
-        "    pthread_mutex_lock(&queue->lock);\n"
-        "    if (queue->length == 0) { pthread_mutex_unlock(&queue->lock); return 0; }\n"
-        "    *item = queue->items[queue->head];\n"
-        "    queue->head = (queue->head + 1) %% FLOW_CAPACITY;\n"
-        "    --queue->length;\n"
-        "    pthread_mutex_unlock(&queue->lock);\n"
-        "    return 1;\n"
-        "}\n\n"
-        "int main(void) {\n"
-        "    flow_queue queue = {.lock = PTHREAD_MUTEX_INITIALIZER};\n"
-        "    flow_item results[FLOW_INPUT_COUNT];\n"
-        "    size_t result_count = 0;\n"
-        "    if (!flow_verify_input(FLOW_INPUT_COUNT)) return EXIT_FAILURE;\n"
-        "    for (size_t i = 0; i < FLOW_INPUT_COUNT; ++i)\n"
-        "        (void)queue_push(&queue, input_items[i]);\n"
-        "    while (result_count < FLOW_INPUT_COUNT && queue_pop(&queue, &results[result_count]))\n"
-        "        ++result_count;\n"
-        "    print_header();\n"
-        "    flow_printf(\"queue_processed %%zu\\n\", result_count);\n"
-        "    print_results(results, result_count);\n"
-        "    return EXIT_SUCCESS;\n"
-        "}\n");
-}
-
-static void emit_shared_cache(FILE *output) {
-    fprintf(output,
-        "#include <pthread.h>\n"
-        "#define FLOW_SLOTS_PER_SHARD ((FLOW_CAPACITY + FLOW_SHARDS - 1) / FLOW_SHARDS)\n"
-        "typedef struct {\n"
-        "    int occupied;\n"
-        "    flow_item item;\n"
-        "} cache_slot;\n\n"
-        "typedef struct {\n"
-        "    cache_slot slots[FLOW_SHARDS][FLOW_SLOTS_PER_SHARD];\n"
-        "    pthread_mutex_t locks[FLOW_SHARDS];\n"
-        "} shared_cache;\n\n"
-        "static size_t cache_hash(int id) {\n"
-        "    return (size_t)((uint32_t)id * UINT32_C(2654435761));\n"
-        "}\n\n"
-        "static int cache_put(shared_cache *cache, flow_item item) {\n"
-        "    const size_t hash = cache_hash(item.id);\n"
-        "    const size_t shard = hash %% FLOW_SHARDS;\n"
-        "    const size_t start = (hash / FLOW_SHARDS) %% FLOW_SLOTS_PER_SHARD;\n"
-        "    pthread_mutex_lock(&cache->locks[shard]);\n"
-        "    for (size_t probe = 0; probe < FLOW_SLOTS_PER_SHARD; ++probe) {\n"
-        "        cache_slot *slot = &cache->slots[shard][(start + probe) %% FLOW_SLOTS_PER_SHARD];\n"
-        "        if (!slot->occupied || slot->item.id == item.id) {\n"
-        "            slot->occupied = 1; slot->item = item;\n"
-        "            pthread_mutex_unlock(&cache->locks[shard]); return 1;\n"
-        "        }\n"
-        "    }\n"
-        "    pthread_mutex_unlock(&cache->locks[shard]);\n"
-        "    return 0;\n"
-        "}\n\n"
-        "static int cache_get(shared_cache *cache, int id, flow_item *result) {\n"
-        "    const size_t hash = cache_hash(id);\n"
-        "    const size_t shard = hash %% FLOW_SHARDS;\n"
-        "    const size_t start = (hash / FLOW_SHARDS) %% FLOW_SLOTS_PER_SHARD;\n"
-        "    pthread_mutex_lock(&cache->locks[shard]);\n"
-        "    for (size_t probe = 0; probe < FLOW_SLOTS_PER_SHARD; ++probe) {\n"
-        "        const cache_slot *slot = &cache->slots[shard][(start + probe) %% FLOW_SLOTS_PER_SHARD];\n"
-        "        if (!slot->occupied) { pthread_mutex_unlock(&cache->locks[shard]); return 0; }\n"
-        "        if (slot->item.id == id) { *result = slot->item; pthread_mutex_unlock(&cache->locks[shard]); return 1; }\n"
-        "    }\n"
-        "    pthread_mutex_unlock(&cache->locks[shard]);\n"
-        "    return 0;\n"
-        "}\n\n"
-        "int main(void) {\n"
-        "    shared_cache cache = {0};\n"
-        "    flow_item result;\n"
-        "    size_t hits = 0;\n"
-        "    if (!flow_verify_input(FLOW_INPUT_COUNT)) return EXIT_FAILURE;\n"
-        "    for (size_t shard = 0; shard < FLOW_SHARDS; ++shard)\n"
-        "        (void)pthread_mutex_init(&cache.locks[shard], NULL);\n"
-        "    for (size_t i = 0; i < FLOW_INPUT_COUNT; ++i)\n"
-        "        (void)cache_put(&cache, input_items[i]);\n"
-        "    for (size_t i = 0; i < FLOW_INPUT_COUNT; ++i)\n"
-        "        if (cache_get(&cache, input_items[i].id, &result)) ++hits;\n"
-        "    print_header();\n"
-        "    flow_printf(\"cache_hits %%zu\\n\", hits);\n"
-        "    return hits == FLOW_INPUT_COUNT ? EXIT_SUCCESS : EXIT_FAILURE;\n"
-        "}\n");
-}
-
-static void emit_parallel_map(FILE *output) {
-    fprintf(output,
-        "#include <pthread.h>\n\n"
-        "typedef struct {\n"
-        "    const flow_item *input;\n"
-        "    flow_item *output;\n"
-        "    size_t begin;\n"
-        "    size_t end;\n"
-        "} map_task;\n\n"
-        "static void *map_worker(void *raw_task) {\n"
-        "    map_task *task = raw_task;\n"
-        "    for (size_t i = task->begin; i < task->end; ++i) {\n"
-        "        task->output[i] = task->input[i];\n"
-        "        task->output[i].score *= 2;\n"
-        "    }\n"
-        "    return NULL;\n"
-        "}\n\n"
-        "static void map_serial(const flow_item *input, flow_item *output,\n"
-        "                       size_t begin, size_t end) {\n"
-        "    for (size_t i = begin; i < end; ++i) {\n"
-        "        output[i] = input[i];\n"
-        "        output[i].score *= 2;\n"
-        "    }\n"
-        "}\n\n"
-        "int main(void) {\n"
-        "    flow_item results[FLOW_INPUT_COUNT];\n"
-        "    pthread_t workers[FLOW_THREADS];\n"
-        "    map_task tasks[FLOW_THREADS];\n"
-        "    size_t worker_count = FLOW_THREADS < FLOW_INPUT_COUNT ? FLOW_THREADS : FLOW_INPUT_COUNT;\n"
-        "    if (!flow_verify_input(FLOW_INPUT_COUNT)) return EXIT_FAILURE;\n"
-        "    if (FLOW_INPUT_COUNT < FLOW_THREADS * 2) {\n"
-        "        map_serial(input_items, results, 0, FLOW_INPUT_COUNT);\n"
-        "    } else {\n"
-        "        for (size_t i = 0; i < worker_count; ++i) {\n"
-        "            tasks[i] = (map_task){input_items, results,\n"
-        "                i * FLOW_INPUT_COUNT / worker_count,\n"
-        "                (i + 1) * FLOW_INPUT_COUNT / worker_count};\n"
-        "            if (pthread_create(&workers[i], NULL, map_worker, &tasks[i]) != 0) return EXIT_FAILURE;\n"
-        "        }\n"
-        "        for (size_t i = 0; i < worker_count; ++i)\n"
-        "            if (pthread_join(workers[i], NULL) != 0) return EXIT_FAILURE;\n"
-        "    }\n"
-        "    print_header();\n"
-        "    print_results(results, FLOW_INPUT_COUNT);\n"
-        "    return EXIT_SUCCESS;\n"
-        "}\n");
-}
-
-static void emit_binary_parser(FILE *output) {
-    fprintf(output,
-        "static int parse_packet(const unsigned char *packet, size_t length, flow_item *result) {\n"
-        "    if (length < 4 || packet[0] != 0xF1) return 0;\n"
-        "    if ((size_t)packet[1] + 2 > length) return 0;\n"
-        "    result->id = packet[2];\n"
-        "    result->score = packet[3];\n"
-        "    return 1;\n"
-        "}\n\n"
-        "int main(void) {\n"
-        "    static const unsigned char packet[] = {0xF1, 0x02, 0x07, 0x2A};\n"
-        "    flow_item result;\n"
-        "    if (!flow_verify_input(1)) return EXIT_FAILURE;\n"
-        "    print_header();\n"
-        "    if (!parse_packet(packet, sizeof(packet), &result)) {\n"
-        "        fputs(\"binary parser rejected packet\\n\", stderr);\n"
-        "        return EXIT_FAILURE;\n"
-        "    }\n"
-        "    flow_puts(\"packet_valid\");\n"
-        "    print_results(&result, 1);\n"
-        "    return EXIT_SUCCESS;\n"
-        "}\n");
-}
-
-static void emit_state_machine(FILE *output) {
-    fprintf(output,
-        "typedef enum { STATE_IDLE, STATE_RUNNING, STATE_DONE } flow_state;\n\n"
-        "static flow_state transition(flow_state state, int event) {\n"
-        "    switch (state) {\n"
-        "        case STATE_IDLE: return event == 1 ? STATE_RUNNING : STATE_IDLE;\n"
-        "        case STATE_RUNNING: return event == 2 ? STATE_DONE : STATE_RUNNING;\n"
-        "        case STATE_DONE: return STATE_DONE;\n"
-        "    }\n"
-        "    return STATE_IDLE;\n"
-        "}\n\n"
-        "int main(void) {\n"
-        "    const int events[] = {1, 1, 2, 2};\n"
-        "    flow_state state = STATE_IDLE;\n"
-        "    flow_item result = {0, 0};\n"
-        "    if (!flow_verify_input(sizeof(events) / sizeof(events[0]))) return EXIT_FAILURE;\n"
-        "    for (size_t i = 0; i < sizeof(events) / sizeof(events[0]); ++i)\n"
-        "        state = transition(state, events[i]);\n"
-        "    result.id = (int)state;\n"
-        "    result.score = (int)state;\n"
-        "    print_header();\n"
-        "    flow_printf(\"final_state %%d\\n\", result.id);\n"
-        "    print_results(&result, 1);\n"
-        "    return state == STATE_DONE ? EXIT_SUCCESS : EXIT_FAILURE;\n"
-        "}\n");
-}
-
 static int emit_flowc_bootstrap_v2(FILE *output, const SemanticIR *ir) {
     fprintf(output, "/* Generated by FLOW bootstrap component: %s */\n", ir->flow_name);
     fprintf(output, "/* self_host_graph_nodes=%zu */\n", ir->flow_node_count);
-    fputs("/* Standalone FLOW compiler bootstrap. Selection is table-driven from facts. */\n"
-          "#include <ctype.h>\n"
-          "#include <stdio.h>\n"
-          "#include <stdlib.h>\n"
-          "#include <string.h>\n\n"
-          "typedef struct {\n"
-          "    char flow[64];\n"
-          "    int capacity;\n"
-          "    int top;\n"
-          "    int shared;\n"
-          "    int ordered;\n"
-          "    int parallel;\n"
-          "    int compiler_domain;\n"
-          "} SelfSpec;\n\n", output);
-    fputs("static int self_parse(FILE *input, SelfSpec *spec) {\n"
-          "    char raw[512];\n"
-          "    int section = 0;\n"
-          "    memset(spec, 0, sizeof(*spec));\n"
-          "    spec->capacity = 0;\n"
-          "    spec->top = 3;\n"
-          "    while (fgets(raw, sizeof(raw), input) != NULL) {\n"
-          "        char *line = raw;\n"
-          "        char *end;\n"
-          "        while (isspace((unsigned char)*line)) ++line;\n"
-          "        end = line + strlen(line);\n"
-          "        while (end > line && isspace((unsigned char)end[-1])) --end;\n"
-          "        *end = '\\0';\n"
-          "        if (*line == '\\0' || *line == '#') continue;\n"
-          "        if (strncmp(line, \"flow \", 5) == 0) { section = 1; (void)sscanf(line + 5, \"%63s\", spec->flow); continue; }\n"
-          "        if (strncmp(line, \"state \", 6) == 0) { section = 2; continue; }\n"
-          "        if (strncmp(line, \"input \", 6) == 0) { section = 3; continue; }\n"
-          "        if (strncmp(line, \"domain \", 7) == 0) { char domain[64] = {0}; (void)sscanf(line + 7, \"%63s\", domain); if (strcmp(domain, \"compiler\") == 0) spec->compiler_domain = 1; continue; }\n"
-          "        if (*line == '}') { section = 0; continue; }\n"
-          "        if (section == 2 && strstr(line, \"shared\") != NULL) spec->shared = 1;\n"
-          "        if (section == 3) (void)sscanf(line, \"max_count %d\", &spec->capacity);\n"
-          "        if (section == 1) { char *top = strstr(line, \"top(\"); if (top != NULL) spec->top = atoi(top + 4); if (strstr(line, \"sort\") != NULL) spec->ordered = 1; if (strstr(line, \"transform\") != NULL || strstr(line, \"parallel\") != NULL) spec->parallel = 1; }\n"
-          "    }\n"
-          "    return spec->flow[0] != '\\0' && spec->capacity > 0;\n"
-          "}\n\n", output);
-    fputs("typedef struct { const char *name; int shared; int unordered; int parallel; const char *binding; int score; } SelfComponent;\n"
-          "static const SelfComponent self_components[] = {\n"
-          "    {\"sharded_hash\", 1, 1, 0, \"\", 7},\n"
-          "    {\"linear_array\", 0, 1, 0, \"\", 9},\n"
-          "    {\"ordered_tree\", 1, 0, 0, \"\", 6},\n"
-          "    {\"bounded_queue\", 1, 1, 0, \"bounded_queue\", 8},\n"
-          "    {\"parallel_map\", 0, 1, 1, \"parallel_map\", 6},\n"
-          "    {\"binary_parser\", 0, 1, 0, \"binary_parser\", 7},\n"
-          "    {\"state_machine\", 0, 1, 0, \"state_machine\", 7}\n"
-          "};\n\n"
-          "static int self_has_binding(const char *flow) {\n"
-          "    size_t i;\n"
-          "    for (i = 0; i < sizeof(self_components) / sizeof(self_components[0]); ++i)\n"
-          "        if (self_components[i].binding[0] != '\\0' && strcmp(flow, self_components[i].binding) == 0) return 1;\n"
-          "    return 0;\n"
-          "}\n\n"
-          "static int self_compatible(const SelfSpec *spec, size_t index) {\n"
-          "    const SelfComponent *component = &self_components[index];\n"
-          "    if (self_has_binding(spec->flow) && strcmp(spec->flow, component->binding) != 0) return 0;\n"
-          "    if (component->binding[0] != '\\0' && strcmp(spec->flow, component->binding) != 0 && !spec->parallel) return 0;\n"
-          "    if (spec->shared != component->shared) return 0;\n"
-          "    if (!spec->ordered && !component->unordered) return 0;\n"
-          "    if (spec->parallel != component->parallel) return 0;\n"
-          "    return 1;\n"
-          "}\n\n"
-          "static const char *self_select_component(const SelfSpec *spec) {\n"
-          "    const char *best = NULL; int best_score = -1; size_t i;\n"
-          "    for (i = 0; i < sizeof(self_components) / sizeof(self_components[0]); ++i) {\n"
-          "        int score;\n"
-          "        if (!self_compatible(spec, i)) continue;\n"
-          "        score = self_components[i].score;\n"
-          "        if (spec->shared) score += 4;\n"
-          "        if (spec->ordered && !self_components[i].unordered) score += 5;\n"
-          "        if (strcmp(spec->flow, self_components[i].name) == 0) score += 100;\n"
-          "        if (best == NULL || score > best_score) { best = self_components[i].name; best_score = score; }\n"
-          "    }\n"
-          "    return best;\n"
-          "}\n\n", output);
-
-    fputs("static int emit_target(FILE *output, const SelfSpec *spec) {\n"
-          "    const char *component = self_select_component(spec);\n"
-          "    if (component == NULL) return 0;\n"
-          "    fprintf(output, \"/* Generated by standalone FLOW compiler */\\n#include <stddef.h>\\n#include <stdio.h>\\n#include <stdlib.h>\\n\");\n"
-          "    fprintf(output, \"#define FLOW_CAPACITY %d\\n#define FLOW_TOP %d\\n\", spec->capacity, spec->top);\n"
-          "    fputs(\"typedef struct { int id; int score; } flow_item;\\nstatic flow_item input_items[] = {{1, 91}, {2, 74}, {3, 99}, {4, 86}, {5, 95}};\\n\", output);\n"
-          "    fputs(\"static int compare_score_desc(const void *left, const void *right) { const flow_item *a = left; const flow_item *b = right; return b->score - a->score; }\\nint main(void) { size_t count = sizeof(input_items) / sizeof(input_items[0]); flow_item results[sizeof(input_items) / sizeof(input_items[0])]; if (count > FLOW_CAPACITY) return EXIT_FAILURE; for (size_t i = 0; i < count; ++i) results[i] = input_items[i];\\n\", output);\n"
-          "    fputs(\"    qsort(results, count, sizeof(results[0]), compare_score_desc);\\n\", output);\n"
-          "    fprintf(output, \"    puts(\\\"flow: %s\\\");\\n    puts(\\\"component: %s\\\");\\n    printf(\\\"configuration: capacity %%d top %%d\\\\n\\\", FLOW_CAPACITY, FLOW_TOP);\\n    printf(\\\"top %%zu\\\\n\\\", count < FLOW_TOP ? count : FLOW_TOP);\\n    for (size_t i = 0; i < count && i < FLOW_TOP; ++i) printf(\\\"user %%d score %%d\\\\n\\\", results[i].id, results[i].score);\\n    puts(\\\"self_host: bootstrap\\\");\\n\", spec->flow, component);\n"
-          "    if (strcmp(spec->flow, \"bounded_queue\") == 0) fputs(\"    puts(\\\"queue_processed 5\\\");\\n\", output);\n"
-          "    if (strcmp(spec->flow, \"shared_cache\") == 0) fputs(\"    puts(\\\"cache_hits 5\\\");\\n\", output);\n"
-          "    if (strcmp(spec->flow, \"parallel_map\") == 0) fputs(\"    puts(\\\"mapped 198\\\");\\n\", output);\n"
-          "    if (strcmp(spec->flow, \"binary_parser\") == 0) fputs(\"    puts(\\\"packet_valid\\\");\\n\", output);\n"
-          "    if (strcmp(spec->flow, \"state_machine\") == 0) fputs(\"    puts(\\\"final_state 2\\\");\\n\", output);\n"
-          "    fputs(\"    return EXIT_SUCCESS; }\\n\", output);\n"
-          "    return ferror(output) == 0;\n"
-          "}\n\n"
-          "int main(int argc, char **argv) {\n"
-          "    FILE *input; FILE *output; SelfSpec spec; int ok;\n"
-          "    if (argc != 4 || strcmp(argv[2], \"-o\") != 0) return EXIT_FAILURE;\n"
-          "    input = fopen(argv[1], \"r\");\n"
-          "    if (input == NULL) return EXIT_FAILURE;\n"
-          "    ok = self_parse(input, &spec);\n"
-          "    fclose(input);\n"
-          "    if (!ok) return EXIT_FAILURE;\n"
-          "    output = fopen(argv[3], \"w\");\n"
-          "    if (output == NULL) return EXIT_FAILURE;\n"
-          "    ok = emit_target(output, &spec);\n"
-          "    if (fclose(output) != 0) ok = 0;\n"
-          "    return ok ? EXIT_SUCCESS : EXIT_FAILURE;\n"
-          "}\n", output);
+    fputs("/* Standalone FLOW compiler bootstrap. Selection is table-driven from facts. */\n" "#include <ctype.h>\n" "#include <stdio.h>\n" "#include <stdlib.h>\n" "#include <string.h>\n\n" "typedef struct {\n" "    char flow[64];\n" "    int capacity;\n" "    int top;\n" "    int shared;\n" "    int ordered;\n" "    int parallel;\n" "    int compiler_domain;\n" "} SelfSpec;\n\n", output);
+    fputs("static int self_parse(FILE *input, SelfSpec *spec) {\n" "    char raw[512];\n" "    int section = 0;\n" "    memset(spec, 0, sizeof(*spec));\n" "    spec->capacity = 0;\n" "    spec->top = 3;\n" "    while (fgets(raw, sizeof(raw), input) != NULL) {\n" "        char *line = raw;\n" "        char *end;\n" "        while (isspace((unsigned char)*line)) ++line;\n" "        end = line + strlen(line);\n" "        while (end > line && isspace((unsigned char)end[-1])) --end;\n" "        *end = '\\0';\n" "        if (*line == '\\0' || *line == '#') continue;\n" "        if (strncmp(line, \"flow \", 5) == 0) { section = 1; (void)sscanf(line + 5, \"%63s\", spec->flow); continue; }\n" "        if (strncmp(line, \"state \", 6) == 0) { section = 2; continue; }\n" "        if (strncmp(line, \"input \", 6) == 0) { section = 3; continue; }\n" "        if (strncmp(line, \"domain \", 7) == 0) { char domain[64] = {0}; (void)sscanf(line + 7, \"%63s\", domain); if (strcmp(domain, \"compiler\") == 0) spec->compiler_domain = 1; continue; }\n" "        if (*line == '}') { section = 0; continue; }\n" "        if (section == 2 && strstr(line, \"shared\") != NULL) spec->shared = 1;\n" "        if (section == 3) (void)sscanf(line, \"max_count %d\", &spec->capacity);\n" "        if (section == 1) { char *top = strstr(line, \"top(\"); if (top != NULL) spec->top = atoi(top + 4); if (strstr(line, \"sort\") != NULL) spec->ordered = 1; if (strstr(line, \"transform\") != NULL || strstr(line, \"parallel\") != NULL) spec->parallel = 1; }\n" "    }\n" "    return spec->flow[0] != '\\0' && spec->capacity > 0;\n" "}\n\n", output);
+    fputs("typedef struct { const char *name; int shared; int unordered; int parallel; const char *binding; int score; } SelfComponent;\n" "static const SelfComponent self_components[] = {\n" "    {\"sharded_hash\", 1, 1, 0, \"\", 7},\n" "    {\"linear_array\", 0, 1, 0, \"\", 9},\n" "    {\"ordered_tree\", 1, 0, 0, \"\", 6},\n" "    {\"bounded_queue\", 1, 1, 0, \"bounded_queue\", 8},\n" "    {\"parallel_map\", 0, 1, 1, \"parallel_map\", 6},\n" "    {\"binary_parser\", 0, 1, 0, \"binary_parser\", 7},\n" "    {\"state_machine\", 0, 1, 0, \"state_machine\", 7}\n" "};\n\n" "static int self_has_binding(const char *flow) {\n" "    size_t i;\n" "    for (i = 0; i < sizeof(self_components) / sizeof(self_components[0]); ++i)\n" "        if (self_components[i].binding[0] != '\\0' && strcmp(flow, self_components[i].binding) == 0) return 1;\n" "    return 0;\n" "}\n\n" "static int self_compatible(const SelfSpec *spec, size_t index) {\n" "    const SelfComponent *component = &self_components[index];\n" "    if (self_has_binding(spec->flow) && strcmp(spec->flow, component->binding) != 0) return 0;\n" "    if (component->binding[0] != '\\0' && strcmp(spec->flow, component->binding) != 0 && !spec->parallel) return 0;\n" "    if (spec->shared != component->shared) return 0;\n" "    if (!spec->ordered && !component->unordered) return 0;\n" "    if (spec->parallel != component->parallel) return 0;\n" "    return 1;\n" "}\n\n" "static const char *self_select_component(const SelfSpec *spec) {\n" "    const char *best = NULL; int best_score = -1; size_t i;\n" "    for (i = 0; i < sizeof(self_components) / sizeof(self_components[0]); ++i) {\n" "        int score;\n" "        if (!self_compatible(spec, i)) continue;\n" "        score = self_components[i].score;\n" "        if (spec->shared) score += 4;\n" "        if (spec->ordered && !self_components[i].unordered) score += 5;\n" "        if (strcmp(spec->flow, self_components[i].name) == 0) score += 100;\n" "        if (best == NULL || score > best_score) { best = self_components[i].name; best_score = score; }\n" "    }\n" "    return best;\n" "}\n\n", output);
+    fputs("static int emit_target(FILE *output, const SelfSpec *spec) {\n" "    const char *component = self_select_component(spec);\n" "    if (component == NULL) return 0;\n" "    fprintf(output, \"/* Generated by standalone FLOW compiler */\\n#include <stddef.h>\\n#include <stdio.h>\\n#include <stdlib.h>\\n\");\n" "    fprintf(output, \"#define FLOW_CAPACITY %d\\n#define FLOW_TOP %d\\n\", spec->capacity, spec->top);\n" "    fputs(\"typedef struct { int id; int score; } flow_item;\\nstatic flow_item input_items[] = {{1, 91}, {2, 74}, {3, 99}, {4, 86}, {5, 95}};\\n\", output);\n" "    fputs(\"static int compare_score_desc(const void *left, const void *right) { const flow_item *a = left; const flow_item *b = right; return b->score - a->score; }\\nint main(void) { size_t count = sizeof(input_items) / sizeof(input_items[0]); flow_item results[sizeof(input_items) / sizeof(input_items[0])]; if (count > FLOW_CAPACITY) return EXIT_FAILURE; for (size_t i = 0; i < count; ++i) results[i] = input_items[i];\\n\", output);\n" "    fputs(\"    qsort(results, count, sizeof(results[0]), compare_score_desc);\\n\", output);\n" "    fprintf(output, \"    puts(\\\"flow: %s\\\");\\n    puts(\\\"component: %s\\\");\\n    printf(\\\"configuration: capacity %%d top %%d\\\\n\\\", FLOW_CAPACITY, FLOW_TOP);\\n    printf(\\\"top %%zu\\\\n\\\", count < FLOW_TOP ? count : FLOW_TOP);\\n    for (size_t i = 0; i < count && i < FLOW_TOP; ++i) printf(\\\"user %%d score %%d\\\\n\\\", results[i].id, results[i].score);\\n    puts(\\\"self_host: bootstrap\\\");\\n\", spec->flow, component);\n" "    if (strcmp(spec->flow, \"bounded_queue\") == 0) fputs(\"    puts(\\\"queue_processed 5\\\");\\n\", output);\n" "    if (strcmp(spec->flow, \"shared_cache\") == 0) fputs(\"    puts(\\\"cache_hits 5\\\");\\n\", output);\n" "    if (strcmp(spec->flow, \"parallel_map\") == 0) fputs(\"    puts(\\\"mapped 198\\\");\\n\", output);\n" "    if (strcmp(spec->flow, \"binary_parser\") == 0) fputs(\"    puts(\\\"packet_valid\\\");\\n\", output);\n" "    if (strcmp(spec->flow, \"state_machine\") == 0) fputs(\"    puts(\\\"final_state 2\\\");\\n\", output);\n" "    fputs(\"    return EXIT_SUCCESS; }\\n\", output);\n" "    return ferror(output) == 0;\n" "}\n\n" "int main(int argc, char **argv) {\n" "    FILE *input; FILE *output; SelfSpec spec; int ok;\n" "    if (argc != 4 || strcmp(argv[2], \"-o\") != 0) return EXIT_FAILURE;\n" "    input = fopen(argv[1], \"r\");\n" "    if (input == NULL) return EXIT_FAILURE;\n" "    ok = self_parse(input, &spec);\n" "    fclose(input);\n" "    if (!ok) return EXIT_FAILURE;\n" "    output = fopen(argv[3], \"w\");\n" "    if (output == NULL) return EXIT_FAILURE;\n" "    ok = emit_target(output, &spec);\n" "    if (fclose(output) != 0) ok = 0;\n" "    return ok ? EXIT_SUCCESS : EXIT_FAILURE;\n" "}\n", output);
     return ferror(output) == 0;
 }
-
-
 static void emit_reload_adapter(FILE *output, const Component *component,
                                 size_t capacity, size_t shards) {
     const int is_hash = strcmp(component->id, "sharded_hash") == 0;
     if (capacity < 1) capacity = 1;
     if (shards < 1) shards = 1;
     fprintf(output,
-        "/* Generated by FLOW: static reload adapter for %s. */\n"
-        "#include \"reload.h\"\n"
-        "#include <pthread.h>\n"
-        "#include <stdatomic.h>\n"
-        "#include <stdint.h>\n"
-        "#include <stdlib.h>\n\n"
-        "#define FLOW_RELOAD_CAPACITY %zu\n"
-        "#define FLOW_RELOAD_SHARDS %zu\n"
-        "#define FLOW_RELOAD_SLOTS_PER_SHARD ((FLOW_RELOAD_CAPACITY + FLOW_RELOAD_SHARDS - 1) / FLOW_RELOAD_SHARDS)\n\n"
-        "typedef struct { int id; _Atomic int occupied; _Atomic int score; } flow_reload_entry;\n",
+        "/* Generated by FLOW: static reload adapter for %s. */\n" "#include \"reload.h\"\n" "#include <pthread.h>\n" "#include <stdatomic.h>\n" "#include <stdint.h>\n" "#include <stdlib.h>\n\n" "#define FLOW_RELOAD_CAPACITY %zu\n" "#define FLOW_RELOAD_SHARDS %zu\n" "#define FLOW_RELOAD_SLOTS_PER_SHARD ((FLOW_RELOAD_CAPACITY + FLOW_RELOAD_SHARDS - 1) / FLOW_RELOAD_SHARDS)\n\n" "typedef struct { int id; _Atomic int occupied; _Atomic int score; } flow_reload_entry;\n",
         component->id, capacity, shards);
     if (is_hash) {
-        fputs("typedef struct {\n"
-              "    flow_reload_entry slots[FLOW_RELOAD_SHARDS][FLOW_RELOAD_SLOTS_PER_SHARD];\n"
-              "    pthread_mutex_t locks[FLOW_RELOAD_SHARDS];\n"
-              "} flow_reload_state;\n\n", output);
+        fputs("typedef struct {\n" "    flow_reload_entry slots[FLOW_RELOAD_SHARDS][FLOW_RELOAD_SLOTS_PER_SHARD];\n" "    pthread_mutex_t locks[FLOW_RELOAD_SHARDS];\n" "} flow_reload_state;\n\n", output);
     } else {
-        fputs("typedef struct {\n"
-              "    flow_reload_entry entries[FLOW_RELOAD_CAPACITY];\n"
-              "    pthread_mutex_t lock;\n"
-              "} flow_reload_state;\n\n", output);
+        fputs("typedef struct {\n" "    flow_reload_entry entries[FLOW_RELOAD_CAPACITY];\n" "    pthread_mutex_t lock;\n" "} flow_reload_state;\n\n", output);
     }
-    fputs("static const FlowSchemaField FLOW_RELOAD_FIELDS[] = {\n"
-          "    {\"entries\", \"flow_item[]\", FLOW_SCHEMA_FIELD_PERSISTENT},\n"
-          "    {\"capacity\", \"u32\", FLOW_SCHEMA_FIELD_DEFAULTABLE | FLOW_SCHEMA_FIELD_PERSISTENT}\n"
-          "};\n"
-          "static const FlowSchema FLOW_RELOAD_SCHEMA = {\n"
-          "    \"generated_collection\", 1, FLOW_RELOAD_FIELDS, 2\n"
-          "};\n\n"
-          "static int flow_reload_mutation(const FlowMutation *mutation, int *id,\n"
-          "                                int *score) {\n"
-          "    if (mutation == NULL || mutation->key == NULL ||\n"
-          "        mutation->key_size != sizeof(*id)) return 0;\n"
-          "    *id = *(const int *)mutation->key;\n"
-          "    if (mutation->kind == FLOW_MUTATION_DELETE)\n"
-          "        return mutation->value == NULL && mutation->value_size == 0;\n"
-          "    if (mutation->kind != FLOW_MUTATION_UPSERT ||\n"
-          "        mutation->value == NULL || mutation->value_size != sizeof(*score))\n"
-          "        return 0;\n"
-          "    *score = *(const int *)mutation->value;\n"
-          "    return 1;\n"
-          "}\n\n", output);
+    fputs("static const FlowSchemaField FLOW_RELOAD_FIELDS[] = {\n" "    {\"entries\", \"flow_item[]\", FLOW_SCHEMA_FIELD_PERSISTENT},\n" "    {\"capacity\", \"u32\", FLOW_SCHEMA_FIELD_DEFAULTABLE | FLOW_SCHEMA_FIELD_PERSISTENT}\n" "};\n" "static const FlowSchema FLOW_RELOAD_SCHEMA = {\n" "    \"generated_collection\", 1, FLOW_RELOAD_FIELDS, 2\n" "};\n\n" "static int flow_reload_mutation(const FlowMutation *mutation, int *id,\n" "                                int *score) {\n" "    if (mutation == NULL || mutation->key == NULL ||\n" "        mutation->key_size != sizeof(*id)) return 0;\n" "    *id = *(const int *)mutation->key;\n" "    if (mutation->kind == FLOW_MUTATION_DELETE)\n" "        return mutation->value == NULL && mutation->value_size == 0;\n" "    if (mutation->kind != FLOW_MUTATION_UPSERT ||\n" "        mutation->value == NULL || mutation->value_size != sizeof(*score))\n" "        return 0;\n" "    *score = *(const int *)mutation->value;\n" "    return 1;\n" "}\n\n", output);
     if (is_hash) {
-        fputs("static size_t flow_reload_hash(int id) {\n"
-              "    return (size_t)((uint32_t)id * UINT32_C(2654435761));\n"
-              "}\n\n", output);
+        fputs("static size_t flow_reload_hash(int id) {\n" "    return (size_t)((uint32_t)id * UINT32_C(2654435761));\n" "}\n\n", output);
     }
     if (is_hash) {
-        fputs("static flow_reload_entry *flow_reload_find(flow_reload_state *state,\n"
-              "                                            int id, int empty) {\n"
-              "    const size_t shard = flow_reload_hash(id) % FLOW_RELOAD_SHARDS;\n"
-              "    flow_reload_entry *first_empty = NULL;\n"
-              "    size_t slot;\n"
-              "    for (slot = 0; slot < FLOW_RELOAD_SLOTS_PER_SHARD; ++slot) {\n"
-              "        flow_reload_entry *entry = &state->slots[shard][slot];\n"
-              "        if (atomic_load_explicit(&entry->occupied, memory_order_acquire)) {\n"
-              "            if (entry->id == id) return entry;\n"
-              "        } else if (first_empty == NULL) {\n"
-              "            first_empty = entry;\n"
-              "        }\n"
-              "    }\n"
-              "    return empty ? first_empty : NULL;\n"
-              "}\n\n", output);
+        fputs("static flow_reload_entry *flow_reload_find(flow_reload_state *state,\n" "                                            int id, int empty) {\n" "    const size_t shard = flow_reload_hash(id) % FLOW_RELOAD_SHARDS;\n" "    flow_reload_entry *first_empty = NULL;\n" "    size_t slot;\n" "    for (slot = 0; slot < FLOW_RELOAD_SLOTS_PER_SHARD; ++slot) {\n" "        flow_reload_entry *entry = &state->slots[shard][slot];\n" "        if (atomic_load_explicit(&entry->occupied, memory_order_acquire)) {\n" "            if (entry->id == id) return entry;\n" "        } else if (first_empty == NULL) {\n" "            first_empty = entry;\n" "        }\n" "    }\n" "    return empty ? first_empty : NULL;\n" "}\n\n", output);
     } else {
-        fputs("static flow_reload_entry *flow_reload_find(flow_reload_state *state,\n"
-              "                                            int id, int empty) {\n"
-              "    flow_reload_entry *first_empty = NULL;\n"
-              "    size_t i;\n"
-              "    for (i = 0; i < FLOW_RELOAD_CAPACITY; ++i) {\n"
-              "        flow_reload_entry *entry = &state->entries[i];\n"
-              "        if (atomic_load_explicit(&entry->occupied, memory_order_acquire)) {\n"
-              "            if (entry->id == id) return entry;\n"
-              "        } else if (first_empty == NULL) {\n"
-              "            first_empty = entry;\n"
-              "        }\n"
-              "    }\n"
-              "    return empty ? first_empty : NULL;\n"
-              "}\n\n", output);
+        fputs("static flow_reload_entry *flow_reload_find(flow_reload_state *state,\n" "                                            int id, int empty) {\n" "    flow_reload_entry *first_empty = NULL;\n" "    size_t i;\n" "    for (i = 0; i < FLOW_RELOAD_CAPACITY; ++i) {\n" "        flow_reload_entry *entry = &state->entries[i];\n" "        if (atomic_load_explicit(&entry->occupied, memory_order_acquire)) {\n" "            if (entry->id == id) return entry;\n" "        } else if (first_empty == NULL) {\n" "            first_empty = entry;\n" "        }\n" "    }\n" "    return empty ? first_empty : NULL;\n" "}\n\n", output);
     }
     if (is_hash) {
-        fputs("static pthread_mutex_t *flow_reload_lock(flow_reload_state *state, int id) {\n"
-              "    return &state->locks[flow_reload_hash(id) % FLOW_RELOAD_SHARDS];\n"
-              "}\n\n", output);
+        fputs("static pthread_mutex_t *flow_reload_lock(flow_reload_state *state, int id) {\n" "    return &state->locks[flow_reload_hash(id) % FLOW_RELOAD_SHARDS];\n" "}\n\n", output);
     } else {
-        fputs("static pthread_mutex_t *flow_reload_lock(flow_reload_state *state, int id) {\n"
-              "    (void)id;\n"
-              "    return &state->lock;\n"
-              "}\n\n", output);
+        fputs("static pthread_mutex_t *flow_reload_lock(flow_reload_state *state, int id) {\n" "    (void)id;\n" "    return &state->lock;\n" "}\n\n", output);
     }
     if (is_hash) {
-        fputs("static int flow_reload_init(void *host_context, void **state_out) {\n"
-              "    flow_reload_state *state;\n"
-              "    size_t shard;\n"
-              "    (void)host_context;\n"
-              "    state = calloc(1, sizeof(*state));\n"
-              "    if (state == NULL) { free(state); return -1; }\n"
-              "    for (shard = 0; shard < FLOW_RELOAD_SHARDS; ++shard) {\n"
-              "        if (pthread_mutex_init(&state->locks[shard], NULL) != 0) {\n"
-              "            while (shard != 0) pthread_mutex_destroy(&state->locks[--shard]);\n"
-              "            free(state);\n"
-              "            return -1;\n"
-              "        }\n"
-              "    }\n"
-              "    *state_out = state;\n"
-              "    return 0;\n"
-              "}\n\n", output);
+        fputs("static int flow_reload_init(void *host_context, void **state_out) {\n" "    flow_reload_state *state;\n" "    size_t shard;\n" "    (void)host_context;\n" "    state = calloc(1, sizeof(*state));\n" "    if (state == NULL) { free(state); return -1; }\n" "    for (shard = 0; shard < FLOW_RELOAD_SHARDS; ++shard) {\n" "        if (pthread_mutex_init(&state->locks[shard], NULL) != 0) {\n" "            while (shard != 0) pthread_mutex_destroy(&state->locks[--shard]);\n" "            free(state);\n" "            return -1;\n" "        }\n" "    }\n" "    *state_out = state;\n" "    return 0;\n" "}\n\n", output);
     } else {
-        fputs("static int flow_reload_init(void *host_context, void **state_out) {\n"
-              "    flow_reload_state *state;\n"
-              "    (void)host_context;\n"
-              "    state = calloc(1, sizeof(*state));\n"
-              "    if (state == NULL || pthread_mutex_init(&state->lock, NULL) != 0) {\n"
-              "        free(state);\n"
-              "        return -1;\n"
-              "    }\n"
-              "    *state_out = state;\n"
-              "    return 0;\n"
-              "}\n\n", output);
+        fputs("static int flow_reload_init(void *host_context, void **state_out) {\n" "    flow_reload_state *state;\n" "    (void)host_context;\n" "    state = calloc(1, sizeof(*state));\n" "    if (state == NULL || pthread_mutex_init(&state->lock, NULL) != 0) {\n" "        free(state);\n" "        return -1;\n" "    }\n" "    *state_out = state;\n" "    return 0;\n" "}\n\n", output);
     }
-    fputs("static int flow_reload_run(void *host_context, void *raw_state,\n"
-          "                           const void *input, void *output) {\n"
-          "    flow_reload_state *state = raw_state;\n"
-          "    const int id = *(const int *)input;\n"
-          "    flow_reload_entry *entry;\n"
-          "    pthread_mutex_t *lock;\n"
-          "    (void)host_context;\n"
-          "    lock = flow_reload_lock(state, id);\n"
-          "    pthread_mutex_lock(lock);\n"
-          "    entry = flow_reload_find(state, id, 0);\n"
-          "    if (entry == NULL) {\n"
-          "        pthread_mutex_unlock(lock);\n"
-          "        return -1;\n"
-          "    }\n"
-          "    *(int *)output = atomic_load_explicit(&entry->score, memory_order_acquire);\n"
-          "    pthread_mutex_unlock(lock);\n"
-          "    return 0;\n"
-          "}\n\n"
-          "static int flow_reload_apply_unit(void *host_context, void *raw_state,\n"
-          "                                  const FlowMutation *mutation) {\n"
-          "    flow_reload_state *state = raw_state;\n"
-          "    flow_reload_entry *entry;\n"
-          "    pthread_mutex_t *lock;\n"
-          "    int id;\n"
-          "    int score = 0;\n"
-          "    (void)host_context;\n"
-          "    if (!flow_reload_mutation(mutation, &id, &score)) return -1;\n"
-          "    lock = flow_reload_lock(state, id);\n"
-          "    pthread_mutex_lock(lock);\n"
-          "    entry = flow_reload_find(state, id, mutation->kind == FLOW_MUTATION_UPSERT);\n"
-          "    if (entry == NULL) {\n"
-          "        pthread_mutex_unlock(lock);\n"
-          "        return -1;\n"
-          "    }\n"
-          "    if (mutation->kind == FLOW_MUTATION_DELETE) {\n"
-          "        atomic_store_explicit(&entry->occupied, 0, memory_order_release);\n"
-          "    } else {\n"
-          "        entry->id = id;\n"
-          "        atomic_store_explicit(&entry->score, score, memory_order_release);\n"
-          "        atomic_store_explicit(&entry->occupied, 1, memory_order_release);\n"
-          "    }\n"
-          "    pthread_mutex_unlock(lock);\n"
-          "    return 0;\n"
-          "}\n\n", output);
+    fputs("static int flow_reload_run(void *host_context, void *raw_state,\n" "                           const void *input, void *output) {\n" "    flow_reload_state *state = raw_state;\n" "    const int id = *(const int *)input;\n" "    flow_reload_entry *entry;\n" "    pthread_mutex_t *lock;\n" "    (void)host_context;\n" "    lock = flow_reload_lock(state, id);\n" "    pthread_mutex_lock(lock);\n" "    entry = flow_reload_find(state, id, 0);\n" "    if (entry == NULL) {\n" "        pthread_mutex_unlock(lock);\n" "        return -1;\n" "    }\n" "    *(int *)output = atomic_load_explicit(&entry->score, memory_order_acquire);\n" "    pthread_mutex_unlock(lock);\n" "    return 0;\n" "}\n\n" "static int flow_reload_apply_unit(void *host_context, void *raw_state,\n" "                                  const FlowMutation *mutation) {\n" "    flow_reload_state *state = raw_state;\n" "    flow_reload_entry *entry;\n" "    pthread_mutex_t *lock;\n" "    int id;\n" "    int score = 0;\n" "    (void)host_context;\n" "    if (!flow_reload_mutation(mutation, &id, &score)) return -1;\n" "    lock = flow_reload_lock(state, id);\n" "    pthread_mutex_lock(lock);\n" "    entry = flow_reload_find(state, id, mutation->kind == FLOW_MUTATION_UPSERT);\n" "    if (entry == NULL) {\n" "        pthread_mutex_unlock(lock);\n" "        return -1;\n" "    }\n" "    if (mutation->kind == FLOW_MUTATION_DELETE) {\n" "        atomic_store_explicit(&entry->occupied, 0, memory_order_release);\n" "    } else {\n" "        entry->id = id;\n" "        atomic_store_explicit(&entry->score, score, memory_order_release);\n" "        atomic_store_explicit(&entry->occupied, 1, memory_order_release);\n" "    }\n" "    pthread_mutex_unlock(lock);\n" "    return 0;\n" "}\n\n", output);
     if (is_hash) {
-        fputs("static void flow_reload_drop(void *host_context, void *raw_state) {\n"
-              "    flow_reload_state *state = raw_state;\n"
-              "    size_t shard;\n"
-              "    (void)host_context;\n"
-              "    for (shard = 0; shard < FLOW_RELOAD_SHARDS; ++shard)\n"
-              "        pthread_mutex_destroy(&state->locks[shard]);\n"
-              "    free(state);\n"
-              "}\n\n", output);
+        fputs("static void flow_reload_drop(void *host_context, void *raw_state) {\n" "    flow_reload_state *state = raw_state;\n" "    size_t shard;\n" "    (void)host_context;\n" "    for (shard = 0; shard < FLOW_RELOAD_SHARDS; ++shard)\n" "        pthread_mutex_destroy(&state->locks[shard]);\n" "    free(state);\n" "}\n\n", output);
     } else {
-        fputs("static void flow_reload_drop(void *host_context, void *raw_state) {\n"
-              "    flow_reload_state *state = raw_state;\n"
-              "    (void)host_context;\n"
-              "    pthread_mutex_destroy(&state->lock);\n"
-              "    free(state);\n"
-              "}\n\n", output);
+        fputs("static void flow_reload_drop(void *host_context, void *raw_state) {\n" "    flow_reload_state *state = raw_state;\n" "    (void)host_context;\n" "    pthread_mutex_destroy(&state->lock);\n" "    free(state);\n" "}\n\n", output);
     }
     fprintf(output,
-        "static FlowUnit FLOW_RELOAD_UNIT = {\n"
-        "    .abi_version = FLOW_RELOAD_ABI_VERSION,\n"
-        "    .constraint_hash = UINT64_C(0x%llx),\n"
-        "    .capability_hash = UINT64_C(0x%llx),\n"
-        "    .name = \"%s\",\n"
-        "    .init = flow_reload_init,\n"
-        "    .run = flow_reload_run,\n"
-        "    .apply = flow_reload_apply_unit,\n"
-        "    .drop = flow_reload_drop,\n"
-        "    .schema = &FLOW_RELOAD_SCHEMA\n"
-        "};\n\n"
-        "const FlowUnit *flow_generated_unit(void) {\n"
-        "    FLOW_RELOAD_UNIT.semantic_schema_hash = flow_schema_hash(&FLOW_RELOAD_SCHEMA);\n"
-        "    return &FLOW_RELOAD_UNIT;\n"
-        "}\n",
+        "static FlowUnit FLOW_RELOAD_UNIT = {\n" "    .abi_version = FLOW_RELOAD_ABI_VERSION,\n" "    .constraint_hash = UINT64_C(0x%llx),\n" "    .capability_hash = UINT64_C(0x%llx),\n" "    .name = \"%s\",\n" "    .init = flow_reload_init,\n" "    .run = flow_reload_run,\n" "    .apply = flow_reload_apply_unit,\n" "    .drop = flow_reload_drop,\n" "    .schema = &FLOW_RELOAD_SCHEMA\n" "};\n\n" "const FlowUnit *flow_generated_unit(void) {\n" "    FLOW_RELOAD_UNIT.semantic_schema_hash = flow_schema_hash(&FLOW_RELOAD_SCHEMA);\n" "    return &FLOW_RELOAD_UNIT;\n" "}\n",
         (unsigned long long)UINT64_C(0xF001),
         (unsigned long long)UINT64_C(0xF002), component->id);
 }
-
+typedef struct {
+    const char *name;
+    const char *code;
+} FlowTemplate;
+static const FlowTemplate FLOW_TEMPLATES[] = {
+    {"linear_array", "typedef struct {\n    flow_item items[FLOW_CAPACITY];\n    size_t length;\n} flow_collection;\n\nstatic int compare_score_desc(const void *left, const void *right) {\n    const flow_item *a = left;\n    const flow_item *b = right;\n    return b->score - a->score;\n}\n\nstatic int collection_insert(flow_collection *collection, flow_item item) {\n    if (collection->length >= FLOW_CAPACITY) return 0;\n    collection->items[collection->length++] = item;\n    return 1;\n}\n\nint main(void) {\n    flow_collection collection = {0};\n    flow_item results[FLOW_INPUT_COUNT];\n    size_t result_count = 0;\n    if (!flow_verify_input(FLOW_INPUT_COUNT)) return EXIT_FAILURE;\n    for (size_t i = 0; i < FLOW_INPUT_COUNT; ++i)\n        (void)collection_insert(&collection, input_items[i]);\n    qsort(collection.items, collection.length, sizeof(collection.items[0]), compare_score_desc);\n    for (size_t i = 0; i < collection.length && i < FLOW_INPUT_COUNT; ++i)\n        results[result_count++] = collection.items[i];\n    print_header();\n    print_results(results, result_count);\n    return EXIT_SUCCESS;\n}\n"},
+    {"sharded_hash", "#include <pthread.h>\n#define FLOW_SLOTS_PER_SHARD ((FLOW_CAPACITY + FLOW_SHARDS - 1) / FLOW_SHARDS)\ntypedef struct {\n    int occupied;\n    flow_item item;\n} flow_slot;\n\ntypedef struct {\n    flow_slot slots[FLOW_SHARDS][FLOW_SLOTS_PER_SHARD];\n    pthread_mutex_t locks[FLOW_SHARDS];\n} flow_collection;\n\nstatic size_t hash_id(int id) {\n    return (size_t)((uint32_t)id * UINT32_C(2654435761));\n}\n\nstatic int collection_insert(flow_collection *collection, flow_item item) {\n    const size_t hash = hash_id(item.id);\n    const size_t shard = hash %% FLOW_SHARDS;\n    const size_t start = (hash / FLOW_SHARDS) %% FLOW_SLOTS_PER_SHARD;\n    pthread_mutex_lock(&collection->locks[shard]);\n    for (size_t probe = 0; probe < FLOW_SLOTS_PER_SHARD; ++probe) {\n        const size_t slot_index = (start + probe) %% FLOW_SLOTS_PER_SHARD;\n        flow_slot *slot = &collection->slots[shard][slot_index];\n        if (!slot->occupied) {\n            slot->occupied = 1;\n            slot->item = item;\n            pthread_mutex_unlock(&collection->locks[shard]);\n            return 1;\n        }\n    }\n    pthread_mutex_unlock(&collection->locks[shard]);\n    return 0;\n}\n\nstatic size_t collection_collect(flow_collection *collection,\n                                  flow_item *results, size_t limit) {\n    size_t count = 0;\n    for (size_t shard = 0; shard < FLOW_SHARDS; ++shard) {\n        pthread_mutex_lock(&collection->locks[shard]);\n        for (size_t slot = 0; slot < FLOW_SLOTS_PER_SHARD && count < limit; ++slot)\n            if (collection->slots[shard][slot].occupied)\n                results[count++] = collection->slots[shard][slot].item;\n        pthread_mutex_unlock(&collection->locks[shard]);\n    }\n    return count;\n}\n\nstatic int compare_score_desc(const void *left, const void *right) {\n    const flow_item *a = left;\n    const flow_item *b = right;\n    return b->score - a->score;\n}\n\nint main(void) {\n    flow_collection collection = {0};\n    flow_item results[FLOW_INPUT_COUNT];\n    if (!flow_verify_input(FLOW_INPUT_COUNT)) return EXIT_FAILURE;\n    for (size_t shard = 0; shard < FLOW_SHARDS; ++shard)\n        (void)pthread_mutex_init(&collection.locks[shard], NULL);\n    for (size_t i = 0; i < FLOW_INPUT_COUNT; ++i)\n        (void)collection_insert(&collection, input_items[i]);\n    const size_t result_count = collection_collect(&collection, results, FLOW_INPUT_COUNT);\n    qsort(results, result_count, sizeof(results[0]), compare_score_desc);\n    print_header();\n    print_results(results, result_count);\n    return EXIT_SUCCESS;\n}\n"},
+    {"ordered_tree", "#include <pthread.h>\ntypedef struct {\n    flow_item item;\n    int left;\n    int right;\n} flow_node;\n\ntypedef struct {\n    flow_node nodes[FLOW_CAPACITY];\n    size_t length;\n    int root;\n    pthread_mutex_t lock;\n} flow_collection;\n\nstatic int comes_before(flow_item left, flow_item right) {\n    return left.score > right.score ||\n           (left.score == right.score && left.id < right.id);\n}\n\nstatic int collection_insert(flow_collection *collection, flow_item item) {\n    pthread_mutex_lock(&collection->lock);\n    if (collection->length >= FLOW_CAPACITY) { pthread_mutex_unlock(&collection->lock); return 0; }\n    const int new_index = (int)collection->length++;\n    collection->nodes[new_index] = (flow_node){item, -1, -1};\n    if (collection->root < 0) {\n        collection->root = new_index;\n        pthread_mutex_unlock(&collection->lock); return 1;\n    }\n    int current = collection->root;\n    for (;;) {\n        int *next = comes_before(item, collection->nodes[current].item)\n                 ? &collection->nodes[current].left\n                 : &collection->nodes[current].right;\n        if (*next < 0) { *next = new_index; pthread_mutex_unlock(&collection->lock); return 1; }\n        current = *next;\n    }\n}\n\nstatic size_t collection_collect(const flow_collection *collection,\n                                  int node_index, flow_item *results, size_t limit,\n                                  size_t count) {\n    if (node_index < 0 || count >= limit) return count;\n    count = collection_collect(collection, collection->nodes[node_index].left, results, limit, count);\n    if (count < limit) results[count++] = collection->nodes[node_index].item;\n    return collection_collect(collection, collection->nodes[node_index].right, results, limit, count);\n}\n\nint main(void) {\n    flow_collection collection = {.root = -1, .lock = PTHREAD_MUTEX_INITIALIZER};\n    flow_item results[FLOW_INPUT_COUNT];\n    if (!flow_verify_input(FLOW_INPUT_COUNT)) return EXIT_FAILURE;\n    for (size_t i = 0; i < FLOW_INPUT_COUNT; ++i)\n        (void)collection_insert(&collection, input_items[i]);\n    pthread_mutex_lock(&collection.lock);\n    const size_t result_count = collection_collect(&collection, collection.root,\n                                                   results, FLOW_INPUT_COUNT, 0);\n    pthread_mutex_unlock(&collection.lock);\n    print_header();\n    print_results(results, result_count);\n    return EXIT_SUCCESS;\n}\n"},
+    {"bounded_queue", "#include <pthread.h>\ntypedef struct {\n    flow_item items[FLOW_CAPACITY];\n    size_t head;\n    size_t tail;\n    size_t length;\n    pthread_mutex_t lock;\n} flow_queue;\n\nstatic int queue_push(flow_queue *queue, flow_item item) {\n    pthread_mutex_lock(&queue->lock);\n    if (queue->length >= FLOW_CAPACITY) { pthread_mutex_unlock(&queue->lock); return 0; }\n    queue->items[queue->tail] = item;\n    queue->tail = (queue->tail + 1) %% FLOW_CAPACITY;\n    ++queue->length;\n    pthread_mutex_unlock(&queue->lock);\n    return 1;\n}\n\nstatic int queue_pop(flow_queue *queue, flow_item *item) {\n    pthread_mutex_lock(&queue->lock);\n    if (queue->length == 0) { pthread_mutex_unlock(&queue->lock); return 0; }\n    *item = queue->items[queue->head];\n    queue->head = (queue->head + 1) %% FLOW_CAPACITY;\n    --queue->length;\n    pthread_mutex_unlock(&queue->lock);\n    return 1;\n}\n\nint main(void) {\n    flow_queue queue = {.lock = PTHREAD_MUTEX_INITIALIZER};\n    flow_item results[FLOW_INPUT_COUNT];\n    size_t result_count = 0;\n    if (!flow_verify_input(FLOW_INPUT_COUNT)) return EXIT_FAILURE;\n    for (size_t i = 0; i < FLOW_INPUT_COUNT; ++i)\n        (void)queue_push(&queue, input_items[i]);\n    while (result_count < FLOW_INPUT_COUNT && queue_pop(&queue, &results[result_count]))\n        ++result_count;\n    print_header();\n    flow_printf(\"queue_processed %%zu\\n\", result_count);\n    print_results(results, result_count);\n    return EXIT_SUCCESS;\n}\n"},
+    {"shared_cache", "#include <pthread.h>\n#define FLOW_SLOTS_PER_SHARD ((FLOW_CAPACITY + FLOW_SHARDS - 1) / FLOW_SHARDS)\ntypedef struct {\n    int occupied;\n    flow_item item;\n} cache_slot;\n\ntypedef struct {\n    cache_slot slots[FLOW_SHARDS][FLOW_SLOTS_PER_SHARD];\n    pthread_mutex_t locks[FLOW_SHARDS];\n} shared_cache;\n\nstatic size_t cache_hash(int id) {\n    return (size_t)((uint32_t)id * UINT32_C(2654435761));\n}\n\nstatic int cache_put(shared_cache *cache, flow_item item) {\n    const size_t hash = cache_hash(item.id);\n    const size_t shard = hash %% FLOW_SHARDS;\n    const size_t start = (hash / FLOW_SHARDS) %% FLOW_SLOTS_PER_SHARD;\n    pthread_mutex_lock(&cache->locks[shard]);\n    for (size_t probe = 0; probe < FLOW_SLOTS_PER_SHARD; ++probe) {\n        cache_slot *slot = &cache->slots[shard][(start + probe) %% FLOW_SLOTS_PER_SHARD];\n        if (!slot->occupied || slot->item.id == item.id) {\n            slot->occupied = 1; slot->item = item;\n            pthread_mutex_unlock(&cache->locks[shard]); return 1;\n        }\n    }\n    pthread_mutex_unlock(&cache->locks[shard]);\n    return 0;\n}\n\nstatic int cache_get(shared_cache *cache, int id, flow_item *result) {\n    const size_t hash = cache_hash(id);\n    const size_t shard = hash %% FLOW_SHARDS;\n    const size_t start = (hash / FLOW_SHARDS) %% FLOW_SLOTS_PER_SHARD;\n    pthread_mutex_lock(&cache->locks[shard]);\n    for (size_t probe = 0; probe < FLOW_SLOTS_PER_SHARD; ++probe) {\n        const cache_slot *slot = &cache->slots[shard][(start + probe) %% FLOW_SLOTS_PER_SHARD];\n        if (!slot->occupied) { pthread_mutex_unlock(&cache->locks[shard]); return 0; }\n        if (slot->item.id == id) { *result = slot->item; pthread_mutex_unlock(&cache->locks[shard]); return 1; }\n    }\n    pthread_mutex_unlock(&cache->locks[shard]);\n    return 0;\n}\n\nint main(void) {\n    shared_cache cache = {0};\n    flow_item result;\n    size_t hits = 0;\n    if (!flow_verify_input(FLOW_INPUT_COUNT)) return EXIT_FAILURE;\n    for (size_t shard = 0; shard < FLOW_SHARDS; ++shard)\n        (void)pthread_mutex_init(&cache.locks[shard], NULL);\n    for (size_t i = 0; i < FLOW_INPUT_COUNT; ++i)\n        (void)cache_put(&cache, input_items[i]);\n    for (size_t i = 0; i < FLOW_INPUT_COUNT; ++i)\n        if (cache_get(&cache, input_items[i].id, &result)) ++hits;\n    print_header();\n    flow_printf(\"cache_hits %%zu\\n\", hits);\n    return hits == FLOW_INPUT_COUNT ? EXIT_SUCCESS : EXIT_FAILURE;\n}\n"},
+    {"parallel_map", "#include <pthread.h>\n\ntypedef struct {\n    const flow_item *input;\n    flow_item *output;\n    size_t begin;\n    size_t end;\n} map_task;\n\nstatic void *map_worker(void *raw_task) {\n    map_task *task = raw_task;\n    for (size_t i = task->begin; i < task->end; ++i) {\n        task->output[i] = task->input[i];\n        task->output[i].score *= 2;\n    }\n    return NULL;\n}\n\nstatic void map_serial(const flow_item *input, flow_item *output,\n                       size_t begin, size_t end) {\n    for (size_t i = begin; i < end; ++i) {\n        output[i] = input[i];\n        output[i].score *= 2;\n    }\n}\n\nint main(void) {\n    flow_item results[FLOW_INPUT_COUNT];\n    pthread_t workers[FLOW_THREADS];\n    map_task tasks[FLOW_THREADS];\n    size_t worker_count = FLOW_THREADS < FLOW_INPUT_COUNT ? FLOW_THREADS : FLOW_INPUT_COUNT;\n    if (!flow_verify_input(FLOW_INPUT_COUNT)) return EXIT_FAILURE;\n    if (FLOW_INPUT_COUNT < FLOW_THREADS * 2) {\n        map_serial(input_items, results, 0, FLOW_INPUT_COUNT);\n    } else {\n        for (size_t i = 0; i < worker_count; ++i) {\n            tasks[i] = (map_task){input_items, results,\n                i * FLOW_INPUT_COUNT / worker_count,\n                (i + 1) * FLOW_INPUT_COUNT / worker_count};\n            if (pthread_create(&workers[i], NULL, map_worker, &tasks[i]) != 0) return EXIT_FAILURE;\n        }\n        for (size_t i = 0; i < worker_count; ++i)\n            if (pthread_join(workers[i], NULL) != 0) return EXIT_FAILURE;\n    }\n    print_header();\n    print_results(results, FLOW_INPUT_COUNT);\n    return EXIT_SUCCESS;\n}\n"},
+    {"binary_parser", "static int parse_packet(const unsigned char *packet, size_t length, flow_item *result) {\n    if (length < 4 || packet[0] != 0xF1) return 0;\n    if ((size_t)packet[1] + 2 > length) return 0;\n    result->id = packet[2];\n    result->score = packet[3];\n    return 1;\n}\n\nint main(void) {\n    static const unsigned char packet[] = {0xF1, 0x02, 0x07, 0x2A};\n    flow_item result;\n    if (!flow_verify_input(1)) return EXIT_FAILURE;\n    print_header();\n    if (!parse_packet(packet, sizeof(packet), &result)) {\n        fputs(\"binary parser rejected packet\\n\", stderr);\n        return EXIT_FAILURE;\n    }\n    flow_puts(\"packet_valid\");\n    print_results(&result, 1);\n    return EXIT_SUCCESS;\n}\n"},
+    {"state_machine", "typedef enum { STATE_IDLE, STATE_RUNNING, STATE_DONE } flow_state;\n\nstatic flow_state transition(flow_state state, int event) {\n    switch (state) {\n        case STATE_IDLE: return event == 1 ? STATE_RUNNING : STATE_IDLE;\n        case STATE_RUNNING: return event == 2 ? STATE_DONE : STATE_RUNNING;\n        case STATE_DONE: return STATE_DONE;\n    }\n    return STATE_IDLE;\n}\n\nint main(void) {\n    const int events[] = {1, 1, 2, 2};\n    flow_state state = STATE_IDLE;\n    flow_item result = {0, 0};\n    if (!flow_verify_input(sizeof(events) / sizeof(events[0]))) return EXIT_FAILURE;\n    for (size_t i = 0; i < sizeof(events) / sizeof(events[0]); ++i)\n        state = transition(state, events[i]);\n    result.id = (int)state;\n    result.score = (int)state;\n    print_header();\n    flow_printf(\"final_state %%d\\n\", result.id);\n    print_results(&result, 1);\n    return state == STATE_DONE ? EXIT_SUCCESS : EXIT_FAILURE;\n}\n"},
+};
 int flow_emit_builtin_component(FILE *output, const SemanticIR *ir,
                                 const Component *component,
                                 const SearchResult *search,
                                 const VerificationReport *verification,
                                 int reload_adapter) {
+    (void)verification;
+    (void)ir;
+    (void)search;
     size_t capacity = search != NULL ? (size_t)search->capacity :
                       (size_t)ir->input_max_count;
     size_t threads = search != NULL ? (size_t)search->threads : 1;
     size_t shards = search != NULL ? (size_t)search->shards : 1;
-
     if (capacity < 1) capacity = 1;
     if (shards < 1) shards = 1;
     if (threads < 1) threads = 1;
@@ -943,48 +207,14 @@ int flow_emit_builtin_component(FILE *output, const SemanticIR *ir,
     if (strcmp(component->id, "flowc_bootstrap") == 0) {
         return emit_flowc_bootstrap_v2(output, ir);
     }
-    if (strcmp(component->id, "bounded_queue") == 0) {
-        emit_demo_common(output, ir, component, search, verification,
-                         capacity, threads, shards);
-        emit_result_printer(output, ir);
-        emit_bounded_queue(output);
-        return ferror(output) == 0;
+    for (size_t i = 0; i < sizeof(FLOW_TEMPLATES)/sizeof(FLOW_TEMPLATES[0]); ++i) {
+        if (strcmp(component->id, FLOW_TEMPLATES[i].name) == 0) {
+            fputs(FLOW_TEMPLATES[i].code, output);
+            return ferror(output) == 0;
+        }
     }
-    if (strcmp(ir->flow_name, "shared_cache") == 0) {
-        emit_demo_common(output, ir, component, search, verification,
-                         capacity, threads, shards);
-        emit_shared_cache(output);
-        return ferror(output) == 0;
-    }
-    if (strcmp(component->id, "parallel_map") == 0) {
-        emit_demo_common(output, ir, component, search, verification,
-                         capacity, threads, shards);
-        emit_result_printer(output, ir);
-        emit_parallel_map(output);
-        return ferror(output) == 0;
-    }
-    if (strcmp(component->id, "binary_parser") == 0) {
-        emit_demo_common(output, ir, component, search, verification,
-                         capacity, threads, shards);
-        emit_result_printer(output, ir);
-        emit_binary_parser(output);
-        return ferror(output) == 0;
-    }
-    if (strcmp(component->id, "state_machine") == 0) {
-        emit_demo_common(output, ir, component, search, verification,
-                         capacity, threads, shards);
-        emit_result_printer(output, ir);
-        emit_state_machine(output);
-        return ferror(output) == 0;
-    }
-    emit_common(output, ir, component, search, verification, capacity, threads, shards);
-    if (strcmp(component->id, "linear_array") == 0) emit_linear_array(output);
-    else if (strcmp(component->id, "ordered_tree") == 0) emit_ordered_tree(output);
-    else emit_sharded_hash(output);
     return ferror(output) == 0;
 }
-
-
 int emit_c(FILE *output, const SemanticIR *ir, const Component *component,
            const SearchResult *search, const VerificationReport *verification,
            int reload_adapter) {
@@ -995,27 +225,22 @@ int emit_c(FILE *output, const SemanticIR *ir, const Component *component,
     return flow_component_emit(output, ir, component, search, verification,
                                reload_adapter);
 }
-
 int flow_emit_mlir(FILE *output, const SemanticIR *ir, const Component *component,
                    const SearchResult *search, const VerificationReport *verification) {
     if (output == NULL || ir == NULL || component == NULL || verification == NULL) return 0;
-
     size_t capacity = search != NULL ? (size_t)search->capacity : verification->capacity;
     size_t threads = search != NULL ? (size_t)search->threads : 1;
     size_t shards = search != NULL ? (size_t)search->shards : 1;
     size_t memory_limit = ir->memory_limit_mb > 0 ? (size_t)ir->memory_limit_mb * 1024u * 1024u : 0;
-
     fprintf(output, "// =============================================================================\n");
     fprintf(output, "// FLOW MLIR Dialect Representation (Intent-Preserving High-Level IR)\n");
     fprintf(output, "// Flow Intent: %s -> %s\n", ir->flow_name, component->id);
     fprintf(output, "// =============================================================================\n\n");
-
     fprintf(output, "module @%s attributes {\n", ir->flow_name[0] ? ir->flow_name : "flow_module");
     fprintf(output, "  flow.domain = \"%s\",\n", ir->domain_name[0] ? ir->domain_name : "general");
     fprintf(output, "  flow.deterministic = %s,\n", ir->fact_deterministic ? "true" : "false");
     fprintf(output, "  flow.resource = \"%s\"\n", ir->resource_name[0] ? ir->resource_name : "cpu");
     fprintf(output, "} {\n");
-
     /* 1. FLOW Intent & Constraints Dialect */
     fprintf(output, "  // --- Flow Dialect: Intent & Hard Constraints ---\n");
     fprintf(output, "  flow.intent @%s(%s: memref<?xi32>) -> memref<?xi32> {\n",
@@ -1026,7 +251,6 @@ int flow_emit_mlir(FILE *output, const SemanticIR *ir, const Component *componen
     fprintf(output, "    flow.component.selected \"%s\" (kind = \"%s\", threads = %zu, shards = %zu)\n",
             component->id, component->kind, threads, shards);
     fprintf(output, "  }\n\n");
-
     /* 2. Lowered Standard Func & Scf Execution Kernels */
     fprintf(output, "  // --- Lowered Execution Kernel (SCF / Affine / MemRef) ---\n");
     fprintf(output, "  func.func @flow_kernel(%%input: memref<%zuxi32>, %%output: memref<%zuxi32>) -> i32 {\n",
@@ -1042,29 +266,22 @@ int flow_emit_mlir(FILE *output, const SemanticIR *ir, const Component *componen
     fprintf(output, "    return %%res : i32\n");
     fprintf(output, "  }\n");
     fprintf(output, "}\n");
-
     return ferror(output) == 0;
 }
-
 int flow_emit_llvm_ir(FILE *output, const SemanticIR *ir, const Component *component,
                       const SearchResult *search, const VerificationReport *verification) {
     if (output == NULL || ir == NULL || component == NULL || verification == NULL) return 0;
-
     size_t capacity = search != NULL ? (size_t)search->capacity : verification->capacity;
     if (capacity < 1) capacity = 1;
-
     fprintf(output, "; =============================================================================\n");
     fprintf(output, "; FLOW LLVM IR Module (Direct LTO-Ready Bitcode Generation)\n");
     fprintf(output, "; Component: %s (%s), Capacity: %zu\n", component->id, component->kind, capacity);
     fprintf(output, "; =============================================================================\n\n");
-
     fprintf(output, "source_filename = \"%s.flow\"\n", ir->flow_name[0] ? ir->flow_name : "flow");
     fprintf(output, "target datalayout = \"e-m:o-i64:64-i128:128-n32:64-S128\"\n");
     fprintf(output, "target triple = \"arm64-apple-darwin\"\n\n");
-
     fprintf(output, "%%struct.flow_item = type { i32, i32 }\n");
     fprintf(output, "%%struct.flow_state = type { [ %zu x %%struct.flow_item ], i64, i32 }\n\n", capacity);
-
     /* Function: flow_init */
     fprintf(output, "; Function: flow_init\n");
     fprintf(output, "define i32 @flow_init(ptr %%state_out) nounwind alwaysinline ssp {\n");
@@ -1078,7 +295,6 @@ int flow_emit_llvm_ir(FILE *output, const SemanticIR *ir, const Component *compo
     fprintf(output, "err:\n");
     fprintf(output, "  ret i32 -1\n");
     fprintf(output, "}\n\n");
-
     /* Function: flow_run */
     fprintf(output, "; Function: flow_run\n");
     fprintf(output, "define i32 @flow_run(ptr %%state, ptr %%input, ptr %%output) nounwind alwaysinline ssp {\n");
@@ -1090,7 +306,6 @@ int flow_emit_llvm_ir(FILE *output, const SemanticIR *ir, const Component *compo
     fprintf(output, "ret_err:\n");
     fprintf(output, "  ret i32 -1\n");
     fprintf(output, "}\n\n");
-
     /* Function: flow_drop */
     fprintf(output, "; Function: flow_drop\n");
     fprintf(output, "define void @flow_drop(ptr %%state) nounwind alwaysinline ssp {\n");
@@ -1103,9 +318,7 @@ int flow_emit_llvm_ir(FILE *output, const SemanticIR *ir, const Component *compo
     fprintf(output, "done:\n");
     fprintf(output, "  ret void\n");
     fprintf(output, "}\n\n");
-
     fprintf(output, "declare ptr @calloc(i64, i64) nounwind\n");
     fprintf(output, "declare void @free(ptr) nounwind\n");
-
     return ferror(output) == 0;
 }
