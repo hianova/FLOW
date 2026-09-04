@@ -1,3 +1,4 @@
+#include "flow_test_kit.h"
 #include "flow.h"
 #include "registry.h"
 #include "topology.h"
@@ -26,8 +27,8 @@ int main(void) {
     CHECK(report.modularity_score == 1.0);
 
     /* 2. Test Intent & Dataflow Graph Construction */
-    const char *spec_src =
-        "input task_stream {\n"
+    FLOW_TEST_CASE("tests/topology-test.c",
+"input task_stream {\n"
         "    max_count 8192\n"
         "}\n"
         "flow data_pipe {\n"
@@ -37,18 +38,9 @@ int main(void) {
         "require {\n"
         "    deterministic\n"
         "    memory < 64mb\n"
-        "}\n";
-
-    FILE *mem = fmemopen((void *)spec_src, strlen(spec_src), "r");
-    CHECK(mem != NULL);
-    FlowSpec spec;
-    CHECK(parse_spec(mem, &spec));
-    fclose(mem);
-
-    SemanticIR ir;
-    lower_to_ir(&spec, &ir);
-
-    const Component *comp = select_component(&ir);
+        "}\n",
+{
+const Component *comp = select_component(&ir);
     CHECK(comp != NULL);
 
     FlowTopologyGraph intent_graph;
@@ -75,9 +67,12 @@ int main(void) {
     fclose(dot_out);
     CHECK(strstr(dot_buf, "digraph FlowTopology") != NULL);
 
-    flow_ir_cleanup(&ir);
+    
+
 
     printf("TOPOLOGY_TEST=passed codebase_nodes=%zu modularity=%.2f leaks=0 affinity=%.2f\n",
            report.total_nodes, report.modularity_score, affinity);
     return 0;
+
+});
 }

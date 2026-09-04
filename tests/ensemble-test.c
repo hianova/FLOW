@@ -1,3 +1,4 @@
+#include "flow_test_kit.h"
 #include "bitspace.h"
 #include "flow.h"
 #include "registry.h"
@@ -14,8 +15,8 @@ int main(void) {
     flow_registry_init();
 
     /* 1. Parse rank specification */
-    const char *spec_src =
-        "input score_stream {\n"
+    FLOW_TEST_CASE("tests/ensemble-test.c",
+"input score_stream {\n"
         "    max_count 10000\n"
         "}\n"
         "flow rank {\n"
@@ -28,18 +29,9 @@ int main(void) {
         "}\n"
         "prefer {\n"
         "    throughput\n"
-        "}\n";
-
-    FILE *mem = fmemopen((void *)spec_src, strlen(spec_src), "r");
-    CHECK(mem != NULL);
-    FlowSpec spec;
-    CHECK(parse_spec(mem, &spec));
-    fclose(mem);
-
-    SemanticIR ir;
-    lower_to_ir(&spec, &ir);
-
-    /* 2. Run multi-objective Pareto BitSpace search */
+        "}\n",
+{
+/* 2. Run multi-objective Pareto BitSpace search */
     FlowBitSpace space;
     CHECK(flow_bitspace_init_for_ir(&ir, &space));
 
@@ -65,9 +57,12 @@ int main(void) {
           ensemble.tactics[FLOW_TACTIC_MEMORY].eval.capacity <=
           ensemble.tactics[FLOW_TACTIC_SPEED].eval.capacity);
 
-    flow_ir_cleanup(&ir);
+    
+
 
     printf("ENSEMBLE_TEST=passed pareto_count=%zu tactics=3 bundle_verification=sound\n",
            bit_res.pareto_count);
     return 0;
+
+});
 }
