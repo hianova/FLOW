@@ -163,6 +163,7 @@ TEST_BINARIES := \
 	$(BUILD_DIR)/primitive-driver-test \
 	$(BUILD_DIR)/protocol-primitive-test \
 	$(BUILD_DIR)/fvec-hub-test \
+	$(BUILD_DIR)/hetero-swarm-mesh-test \
 	$(BUILD_DIR)/snapshot-replay-test
 
 # Specific build prerequisites for targets with inter-module dependencies
@@ -278,6 +279,7 @@ test-run: $(TEST_BINARIES) fvec-flowc-apply-test
 	@$(BUILD_DIR)/fvec-curator-test
 	@$(BUILD_DIR)/immune-promotion-test
 	@$(BUILD_DIR)/fvec-hub-test
+	@$(BUILD_DIR)/hetero-swarm-mesh-test
 	@$(BUILD_DIR)/snapshot-replay-test
 	@echo "=== [Phase 5/5] Running Autopilot, Introspection & Hardware Stress Crucible ==="
 	@$(BUILD_DIR)/flowy-test
@@ -378,7 +380,7 @@ test: test-build
 	@$(MAKE) --no-print-directory test-run
 	@$(MAKE) --no-print-directory test-e2e
 	@echo "================================================================================"
-	@echo "          ALL 61 TEST SUITES & E2E VERIFICATIONS 100% SOUND & PASSED!           "
+	@echo "          ALL 62 TEST SUITES & E2E VERIFICATIONS 100% SOUND & PASSED!           "
 	@echo "================================================================================"
 
 clean:

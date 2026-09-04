@@ -70,3 +70,28 @@ $$\mathbf{M}_{\text{effective}} = \mathbf{M}_{\text{hard}} \;\land\; (\mathbf{M}
 *   **Bytes 1~8**: 64-bit 收斂基因組與能量標記。
 
 群體節點彼此交換「拓樸費洛蒙」，讓整個分散式機隊宛如單一龐大的退火有機體，達成全域超速收斂。
+
+---
+
+## 4.5 異質費洛蒙協定與分散式服務織網 (Heterogeneous Pheromone Mesh)
+
+當集群中同時存在不同職責的節點時（例如 Ingress 網關、平行計算工作節點、分片資料庫索引），同質 Swarm 會面臨結構性失效。FLOW 引入了 **9-Byte 異質流體背壓費洛蒙（`0xBB`）**：
+
+```text
+┌────────────────────────────────────────────────────────────────────────┐
+│             9-Byte 異質流體背壓費洛蒙封包 (Hetero Pheromone Packet)    │
+├─────────┬─────────┬─────────┬──────────────┬──────────────┬────────────┤
+│ OpCode  │ Role ID │ Node ID │ Backpressure │ Latency P99  │ Contract   │
+│ (0xBB)  │ (1 Byte)│ (1 Byte)│ (2 Bytes)    │ (2 Bytes us) │ CRC16 (2B) │
+└─────────┴─────────┴─────────┴──────────────┴──────────────┴────────────┘
+```
+
+1. **流體力學能量導流 (Fluid Energy Routing)**：
+   上游入口網關透過監聽 9-Byte 廣播，計算下游節點的能量代價：
+   $$\text{Energy Cost} = \text{Latency}_{\text{P99}} \times \left(1.0 + \frac{\text{Backpressure Permille}}{200.0}\right)$$
+   在 5 奈秒內自發將流量導向最低負載與最低延遲節點，**徹底消滅了沉重的 Envoy / Istio Sidecar 代理**。
+2. **1-Bit 混沌在線節流自愈 (Subspace Auto-Throttling)**：
+   當下游集群總背壓逼近臨界警戒線時，入口網關的 1-Bit 混沌退火在線翻轉位元，自發收緊並發連線池，防止全集群級聯雪崩。
+3. **SMT 全域流守恆證明 (Flow Conservation Theorem)**：
+   SMT 最高法院形式化證明：管線最慢瓶頸層的總處理容量 $\ge$ 入口最大並發流量，保證分散式微服務鏈路的零崩潰數學確定性。
+
