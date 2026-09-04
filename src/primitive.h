@@ -98,6 +98,51 @@ FlowSMTResult flow_primitive_verify_smt(const FlowPrimitiveDriver *driver,
 const FlowPrimitiveDriver *flow_primitive_io_uring_driver(void);
 const FlowPrimitiveDriver *flow_primitive_rdma_driver(void);
 
+/* ============================================================================
+ * Protocol-as-Primitive: HTTP/1.1, HTTP/2, and HTTP/3 QUIC Drivers
+ * ============================================================================ */
+
+typedef enum {
+    FLOW_PROTO_NONE = 0,
+    FLOW_PROTO_HTTP1 = 1,
+    FLOW_PROTO_HTTP2 = 2,
+    FLOW_PROTO_QUIC_HTTP3 = 3
+} FlowProtocolKind;
+
+typedef struct {
+    FlowProtocolKind kind;
+    uint32_t max_concurrent_streams;   /* HTTP/1=1, HTTP/2=128, HTTP/3=512 */
+    uint32_t max_header_table_bytes;   /* HPACK/QPACK dynamic table limit */
+    uint32_t max_frame_payload_bytes;  /* Max binary/stream frame payload size */
+    uint32_t idle_timeout_ms;          /* Keep-alive timeout */
+    uint32_t supports_multiplexing;    /* 1 if multi-stream interleaving supported */
+    uint32_t supports_datagram;        /* 1 if UDP/QUIC datagram supported */
+} FlowProtocolBounds;
+
+/* Built-in Protocol Drivers */
+const FlowPrimitiveDriver *flow_primitive_http1_driver(void);
+const FlowPrimitiveDriver *flow_primitive_http2_driver(void);
+const FlowPrimitiveDriver *flow_primitive_quic_driver(void);
+
+/* Protocol 64-Bit Subspace Genome Encoding & Decoding */
+int flow_protocol_encode_genome(FlowProtocolKind kind,
+                                uint32_t streams,
+                                uint32_t header_table_bytes,
+                                int zero_copy,
+                                uint64_t *genome_out);
+
+int flow_protocol_decode_genome(uint64_t genome,
+                                FlowProtocolKind *kind_out,
+                                uint32_t *streams_out,
+                                uint32_t *header_table_bytes_out,
+                                int *zero_copy_out);
+
+/* SMT Formal Protocol Bounds Verification */
+FlowSMTResult flow_primitive_verify_protocol_smt(const FlowPrimitiveDriver *driver,
+                                                uint32_t candidate_streams,
+                                                uint32_t candidate_header_table_bytes,
+                                                FlowSMTProofAttestation *proof_out);
+
 #ifdef __cplusplus
 }
 #endif

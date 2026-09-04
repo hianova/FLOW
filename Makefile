@@ -161,6 +161,7 @@ TEST_BINARIES := \
 	$(BUILD_DIR)/fvec-curator-test \
 	$(BUILD_DIR)/immune-promotion-test \
 	$(BUILD_DIR)/primitive-driver-test \
+	$(BUILD_DIR)/protocol-primitive-test \
 	$(BUILD_DIR)/fvec-hub-test \
 	$(BUILD_DIR)/snapshot-replay-test
 
@@ -260,6 +261,7 @@ test-run: $(TEST_BINARIES) fvec-flowc-apply-test
 	@$(BUILD_DIR)/plugin-test
 	@$(BUILD_DIR)/plugin-abi-v2-test
 	@$(BUILD_DIR)/primitive-driver-test
+	@$(BUILD_DIR)/protocol-primitive-test
 	@$(BUILD_DIR)/enterprise-production-test
 	@$(BUILD_DIR)/hardened-production-test
 	@$(BUILD_DIR)/decoupling-test
@@ -376,7 +378,7 @@ test: test-build
 	@$(MAKE) --no-print-directory test-run
 	@$(MAKE) --no-print-directory test-e2e
 	@echo "================================================================================"
-	@echo "          ALL 60 TEST SUITES & E2E VERIFICATIONS 100% SOUND & PASSED!           "
+	@echo "          ALL 61 TEST SUITES & E2E VERIFICATIONS 100% SOUND & PASSED!           "
 	@echo "================================================================================"
 
 clean:
