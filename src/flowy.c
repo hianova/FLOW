@@ -42,8 +42,8 @@ static void init_knowledge_book_bindings(void) {
             if (b) {
                 k->book_chapter_ref = b->chapter_ref;
                 k->book_chapter_title = b->chapter_title;
-                k->design_philosophy_why = "";
-                k->book_excerpt = "";
+                k->design_philosophy_why = b->philosophy_why;
+                k->book_excerpt = b->book_excerpt;
             }
         }
     }
@@ -142,7 +142,7 @@ void flowy_explain_decision_lang(const FlowDecisionEvent *event, FlowLanguage la
              b ? b->chapter_title : "The FLOW Book",
              b ? b->chapter_ref : "introduction.md",
              (lang == FLOW_LANG_EN ? "Design Philosophy" : "設計哲學"),
-             b ? "" : "Autopoietic topology runtime adaptation.");
+             (b && b->philosophy_why) ? b->philosophy_why : "Autopoietic topology runtime adaptation.");
 }
 
 void flowy_explain_decision(const FlowDecisionEvent *event, char *buf_out, size_t max_len) {
@@ -181,69 +181,50 @@ int flowy_explain_bottleneck_lang(const FlowTopologyGraph *graph, FlowLanguage l
     const FlowModuleKnowledge *k = flowy_knowledge_lookup(peak->name);
     const FlowyLocaleTemplate *tpl = &LOCALE_TEMPLATES[lang == FLOW_LANG_EN ? FLOW_LANG_EN : FLOW_LANG_ZH];
 
-    if (lang == FLOW_LANG_EN) {
-        snprintf(buf_out, max_len,
-                 "%s\n"
-                 "Active Peak Hotspot:  %s (Layer %u Core Module)\n"
-                 "Hotspot Intensity:    %.1f%%\n"
-                 "Observed Metric:      %s: %.2f %s (Baseline: <= %.2f %s)\n"
-                 "Subconscious Symptom: %s\n\n"
-                 "%s\n"
-                 "   %s (%s)\n"
-                 "   %s\n\n"
-                 "%s\n"
-                 "   Performance hotspot currently isolated in '%s' module. Rapid generational\n"
-                 "   turnover created temporary QSBR epoch queue congestion (%s reached %.1f%s).\n"
-                 "   1-Bit chaotic engine masked new mutation allocations to prioritize reader threads\n"
-                 "   passing quiescent grace periods.\n\n"
-                 "%s\n"
-                 "   1-Bit chaotic engine applied temporary mutation mask (0x0000ffff) to pause\n"
-                 "   non-critical state turnover until watermark drops below 20%%.\n",
-                 tpl->bottleneck_header,
-                 peak->name, peak->layer,
-                 peak->hotspot_score,
-                 peak->hotspot_metric, peak->hotspot_raw_val, peak->hotspot_unit,
-                 peak->hotspot_threshold_val, peak->hotspot_unit,
-                 peak->dynamic_symptom,
-                 tpl->bottleneck_sec1_title,
-                 k ? k->title : "Core Module", k ? k->header_file : "src/reload.h",
-                 k ? k->responsibilities : "RCU reclamation",
-                 tpl->bottleneck_sec2_title,
-                 peak->name,
-                 peak->hotspot_metric, peak->hotspot_raw_val, peak->hotspot_unit,
-                 tpl->bottleneck_sec3_title);
-    } else {
-        snprintf(buf_out, max_len,
-                 "%s\n"
-                 "Active Peak Hotspot:  %s (Layer %u Core Module)\n"
-                 "Hotspot Intensity:    %.1f%%\n"
-                 "Observed Metric:      %s: %.2f %s (Baseline: <= %.2f %s)\n"
-                 "Subconscious Symptom: %s\n\n"
-                 "%s\n"
-                 "   %s (%s)\n"
-                 "   %s\n\n"
-                 "%s\n"
-                 "   目前的效能熱點集中在 %s 模組。由於短時間內產生大量舊世代記憶體，導致 QSBR\n"
-                 "   回收佇列暫時擁塞（%s 達到 %.1f%s）。\n"
-                 "   1-bit 混沌引擎目前已經自動將新突變的分配遮蔽 (Masked)，優先讓讀取執行緒\n"
-                 "   度過寬限期 (Grace Period) 以清空回收水位。\n\n"
-                 "%s\n"
-                 "   1-Bit 混沌引擎已自動套用暫態突變遮罩 (0x0000ffff) 暫停非關鍵世代切換，\n"
-                 "   直至回收水位降至 20%% 以下。\n",
-                 tpl->bottleneck_header,
-                 peak->name, peak->layer,
-                 peak->hotspot_score,
-                 peak->hotspot_metric, peak->hotspot_raw_val, peak->hotspot_unit,
-                 peak->hotspot_threshold_val, peak->hotspot_unit,
-                 peak->dynamic_symptom,
-                 tpl->bottleneck_sec1_title,
-                 k ? k->title : "Core Module", k ? k->header_file : "src/reload.h",
-                 k ? k->responsibilities : "RCU reclamation",
-                 tpl->bottleneck_sec2_title,
-                 peak->name,
-                 peak->hotspot_metric, peak->hotspot_raw_val, peak->hotspot_unit,
-                 tpl->bottleneck_sec3_title);
-    }
+    static const char *s_narratives[2] = {
+        "   Performance hotspot currently isolated in '%s' module. Rapid generational\n"
+        "   turnover created temporary QSBR epoch queue congestion (%s reached %.1f%s).\n"
+        "   1-Bit chaotic engine masked new mutation allocations to prioritize reader threads\n"
+        "   passing quiescent grace periods.\n\n"
+        "%s\n"
+        "   1-Bit chaotic engine applied temporary mutation mask (0x0000ffff) to pause\n"
+        "   non-critical state turnover until watermark drops below 20%%.\n",
+        "   目前的效能熱點集中在 %s 模組。由於短時間內產生大量舊世代記憶體，導致 QSBR\n"
+        "   回收佇列暫時擁塞（%s 達到 %.1f%s）。\n"
+        "   1-bit 混沌引擎目前已經自動將新突變的分配遮蔽 (Masked)，優先讓讀取執行緒\n"
+        "   度過寬限期 (Grace Period) 以清空回收水位。\n\n"
+        "%s\n"
+        "   1-Bit 混沌引擎已自動套用暫態突變遮罩 (0x0000ffff) 暫停非關鍵世代切換，\n"
+        "   直至回收水位降至 20%% 以下。\n"
+    };
+
+    char narrative[1024];
+    snprintf(narrative, sizeof(narrative), s_narratives[lang == FLOW_LANG_EN ? 0 : 1],
+             peak->name, peak->hotspot_metric, peak->hotspot_raw_val, peak->hotspot_unit,
+             tpl->bottleneck_sec3_title);
+
+    snprintf(buf_out, max_len,
+             "%s\n"
+             "Active Peak Hotspot:  %s (Layer %u Core Module)\n"
+             "Hotspot Intensity:    %.1f%%\n"
+             "Observed Metric:      %s: %.2f %s (Baseline: <= %.2f %s)\n"
+             "Subconscious Symptom: %s\n\n"
+             "%s\n"
+             "   %s (%s)\n"
+             "   %s\n\n"
+             "%s\n"
+             "%s",
+             tpl->bottleneck_header,
+             peak->name, peak->layer,
+             peak->hotspot_score,
+             peak->hotspot_metric, peak->hotspot_raw_val, peak->hotspot_unit,
+             peak->hotspot_threshold_val, peak->hotspot_unit,
+             peak->dynamic_symptom,
+             tpl->bottleneck_sec1_title,
+             k ? k->title : "Core Module", k ? k->header_file : "src/reload.h",
+             k ? k->responsibilities : "RCU reclamation",
+             tpl->bottleneck_sec2_title,
+             narrative);
     return 1;
 }
 
@@ -362,13 +343,13 @@ int flowy_query_codebase_lang(const FlowTopologyGraph *graph,
     const FlowyLocaleTemplate *tpl = &LOCALE_TEMPLATES[lang == FLOW_LANG_EN ? FLOW_LANG_EN : FLOW_LANG_ZH];
     const FlowModuleBookBinding *binding = flow_book_lookup_binding_lang(best_m->module_id, lang);
 
-    const char *phil_why = (binding && "") ? "" :
+    const char *phil_why = (binding && binding->philosophy_why) ? binding->philosophy_why :
                            (best_m->design_philosophy_why ? best_m->design_philosophy_why : "Autopoietic living system guarantees.");
     const char *book_chap = (binding && binding->chapter_title) ? binding->chapter_title :
                             (best_m->book_chapter_title ? best_m->book_chapter_title : "The FLOW Book");
     const char *book_ref = (binding && binding->chapter_ref) ? binding->chapter_ref :
                            (best_m->book_chapter_ref ? best_m->book_chapter_ref : "introduction.md");
-    const char *book_exc = (binding && "") ? "" :
+    const char *book_exc = (binding && binding->book_excerpt) ? binding->book_excerpt :
                            (best_m->book_excerpt ? best_m->book_excerpt : "Refer to 《The FLOW Book》 for comprehensive architectural details.");
 
     snprintf(answer_out->explanation, sizeof(answer_out->explanation),

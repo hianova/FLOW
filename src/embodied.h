@@ -5,6 +5,7 @@
 #include "bitspace.h"
 #include "reload.h"
 #include "smt.h"
+#include "bitmanifold.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -232,5 +233,67 @@ int flow_fleet_adapt_roles_bmf(FlowFleetSwarm *fleet, uint64_t bmf_seed);
 
 /* SMT Formal Spatial Separation & Collision-Avoidance Polytope Theorem */
 FlowSMTResult flow_fleet_verify_collision_smt(const FlowFleetSwarm *fleet, FlowSMTProofAttestation *proof_out);
+
+/* ========================================================================= */
+/* 7. Embodied 64-Bit Coordinate Subspace Slicing & Mask Superposition (BMF) */
+/* ========================================================================= */
+
+#define FLOW_EMBODIED_OFF_GAIT       0
+#define FLOW_EMBODIED_LEN_GAIT       4
+#define FLOW_EMBODIED_OFF_TORQUE     4
+#define FLOW_EMBODIED_LEN_TORQUE     8
+#define FLOW_EMBODIED_OFF_SENSOR    12
+#define FLOW_EMBODIED_LEN_SENSOR     6
+#define FLOW_EMBODIED_OFF_THERMAL   18
+#define FLOW_EMBODIED_LEN_THERMAL    6
+#define FLOW_EMBODIED_OFF_SMITH     24
+#define FLOW_EMBODIED_LEN_SMITH      8
+#define FLOW_EMBODIED_OFF_FLEET     32
+#define FLOW_EMBODIED_LEN_FLEET     16
+#define FLOW_EMBODIED_OFF_SURVIVAL  48
+#define FLOW_EMBODIED_LEN_SURVIVAL  16
+
+typedef struct {
+    FlowCorticalGaitMode gait_mode;
+    uint8_t torque_gain_scale;       /* 0..255 -> 0%..100% */
+    uint8_t sensor_confidence;       /* 0..63 */
+    uint8_t thermal_throttle_level;  /* 0..63 */
+    uint8_t smith_delay_steps;       /* 0..32 */
+    uint16_t fleet_clearance_mm;     /* e.g. 500 = 0.5m */
+    uint16_t survival_flags;         /* Bit 0: Double-bind detected; Bit 1: Static brace active */
+} FlowEmbodiedCoordinate;
+
+/* 64-Bit Subspace Genome Encoding & Decoding */
+int flow_embodied_encode_genome(const FlowEmbodiedCoordinate *coord, uint64_t *genome_out);
+int flow_embodied_decode_genome(uint64_t genome, FlowEmbodiedCoordinate *coord_out);
+
+/* Multi-Sensory Mask Canvas Hypergeometric Superposition */
+typedef struct {
+    uint64_t zmp_mask;
+    uint64_t kalman_mask;
+    uint64_t thermal_mask;
+    uint64_t fleet_mask;
+    uint64_t superposed_mask;
+    uint64_t dynamic_bias;
+    int is_double_bind;              /* 1 if superposed_mask == 0 (all control options blocked) */
+} FlowEmbodiedCanvas;
+
+int flow_embodied_superpose_safety_canvas(const FlowPhysicsEngine *phys,
+                                         const FlowSensorFusion *fusion,
+                                         const FlowThermalEnergyGovernor *gov,
+                                         const FlowFleetSwarm *fleet,
+                                         FlowEmbodiedCanvas *canvas_out);
+
+/* Token Ring Discrete Attention Integration (Lyapunov Attractor Convergence) */
+int flow_embodied_step_token_ring(FlowEmbodiedCanvas *canvas,
+                                  uint64_t *current_genome_inout,
+                                  uint64_t *rng_state_inout,
+                                  uint32_t *mutated_bit_out);
+
+/* Formal SMT Multi-Sensory Safety Polytope Verification */
+FlowSMTResult flow_embodied_verify_smt(const FlowRigidBodyState *state,
+                                      const FlowThermalEnergyGovernor *gov,
+                                      const FlowFleetSwarm *fleet,
+                                      FlowSMTProofAttestation *proof_out);
 
 #endif

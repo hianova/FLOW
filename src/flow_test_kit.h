@@ -220,30 +220,5 @@ typedef struct {
 }
 #endif
 
-
-#define FLOW_TEST_CASE(name, spec_literal, checks_block) \
-    do { \
-        _flow_test_state.total_tests++; \
-        const char *_spec_src = (spec_literal); \
-        FILE *_mem = fmemopen((void *)_spec_src, strlen(_spec_src), "r"); \
-        if (!_mem) { \
-            _flow_test_state.failed_tests++; \
-            fprintf(stderr, "❌ [%s] fmemopen failed\n", name); \
-            break; \
-        } \
-        FlowSpec spec; \
-        if (!parse_spec(_mem, &spec)) { \
-            _flow_test_state.failed_tests++; \
-            fprintf(stderr, "❌ [%s] parse_spec failed\n", name); \
-            fclose(_mem); \
-            break; \
-        } \
-        fclose(_mem); \
-        SemanticIR ir; \
-        lower_to_ir(&spec, &ir); \
-        checks_block \
-        flow_ir_cleanup(&ir); \
-        _flow_test_state.passed_tests++; \
-    } while (0)
-
 #endif /* FLOW_TEST_KIT_H */
+

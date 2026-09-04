@@ -180,7 +180,11 @@ TEST_BINARIES := \
 	$(BUILD_DIR)/cxl-llm-fabric-test \
 	$(BUILD_DIR)/isomorphic-primitives-test \
 	$(BUILD_DIR)/dev-infrastructure-kit-test \
-	$(BUILD_DIR)/dev-velocity-kit-test
+	$(BUILD_DIR)/dev-velocity-kit-test \
+	$(BUILD_DIR)/token-ring-test \
+	$(BUILD_DIR)/embodied-coordination-test \
+	$(BUILD_DIR)/six-pillars-math-test \
+	$(BUILD_DIR)/entropy-collapse-test
 
 # Specific build prerequisites for targets with inter-module dependencies
 $(BUILD_DIR)/plugin-test: plugins
@@ -243,6 +247,9 @@ test-run: $(TEST_BINARIES) fvec-flowc-apply-test
 	@$(BUILD_DIR)/bitspace-test
 	@$(BUILD_DIR)/smt-test
 	@$(BUILD_DIR)/polytope-projection-test
+	@$(BUILD_DIR)/token-ring-test
+	@$(BUILD_DIR)/six-pillars-math-test
+	@$(BUILD_DIR)/entropy-collapse-test
 	@$(BUILD_DIR)/topology-test
 	@$(BUILD_DIR)/abi-test
 	@$(BUILD_DIR)/project-test
@@ -275,6 +282,7 @@ test-run: $(TEST_BINARIES) fvec-flowc-apply-test
 	@$(BUILD_DIR)/ebpf-pmu-test
 	@echo "=== [Phase 3/5] Running Hardware Primitive Drivers & Embodied Gates ==="
 	@$(BUILD_DIR)/embodied-physics-test
+	@$(BUILD_DIR)/embodied-coordination-test
 	@$(BUILD_DIR)/fleet-swarm-test
 	@$(BUILD_DIR)/plugin-test
 	@$(BUILD_DIR)/plugin-abi-v2-test
@@ -404,7 +412,7 @@ test: test-build
 	@$(MAKE) --no-print-directory test-run
 	@$(MAKE) --no-print-directory test-e2e
 	@echo "================================================================================"
-	@echo "          ALL 70 TEST SUITES & E2E VERIFICATIONS 100% SOUND & PASSED!           "
+	@echo "          ALL 73 TEST SUITES & E2E VERIFICATIONS 100% SOUND & PASSED!           "
 	@echo "================================================================================"
 
 clean:

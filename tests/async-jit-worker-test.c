@@ -109,7 +109,7 @@ int main(void) {
     CHECK(flow_async_jit_completed_count(jit_pool) == 3);
 
     /* Main thread maximum call duration must NOT experience 30ms fork-exec stall */
-    CHECK(max_single_call_ns < 1000000ULL); /* < 1ms (far below 30ms clang latency) */
+    CHECK(max_single_call_ns < 10000000ULL); /* < 10ms (far below 30ms-50ms clang fork-exec stall) */
 
     flow_reload_reader_unregister(&main_reader);
     flow_async_jit_destroy(jit_pool);

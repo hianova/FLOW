@@ -24,3 +24,8 @@
 
 # 第五部：極限實戰 (The Crucible)
 - [11. Level 5 絕對死局壓測與效能基準 (並發風暴與 OOM 雙重束縛下的生存實錄)](ch11_level5_crucible_and_benchmarks.md)
+
+# 第六部：數學大一統與結構熵消解 (Mathematical Convergence & Entropy Elimination)
+- [12. BMF Token Ring 離散注意力算子與具身知覺超幾何疊加 (Coordinate Subspace Slicing & Double-Bind Emergency Brace)](ch12_token_ring_and_embodied_coordination.md)
+- [13. 六大數學支柱：經驗啟發式的全息消解 (Polyhedral Model, OCO Cache, Lyapunov Backpressure, Potential Games, Moreau Hysteresis, Simplicial Homology)](ch13_six_mathematical_pillars.md)
+- [14. 擠乾軟體工程水分：零缺陷數學結構 (Bump-Pointer QSBR, Curry-Howard SMT DCE, Isomorphic Wire Slicing, BMF Autopoiesis, Semantic Event Manifolds, Affine Geodesics)](ch14_structural_entropy_elimination.md)

@@ -7,6 +7,7 @@
 #include "search.h"
 #include "smt.h"
 #include "topology.h"
+#include "token_ring.h"
 
 #include <stdio.h>
 #include <stdint.h>
@@ -42,6 +43,9 @@ typedef struct {
     SearchResult search_result;
     FlowSMTProofAttestation smt_proof;
     size_t active_intent_count;
+    uint64_t attractor_cycles;
+    double lyapunov_delta_e;
+    int attractor_converged;
 } FlowOrchestratorEpoch;
 
 typedef struct FlowOrchestrator FlowOrchestrator;

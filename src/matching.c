@@ -68,38 +68,24 @@ int flow_orderbook_submit(FlowLimitOrderBook *book,
         uint64_t best_price = (order->side == FLOW_ORDER_BUY) ? UINT64_MAX : 0;
         uint64_t earliest_ts = UINT64_MAX;
 
-        /* Find top of the book maker */
+        /* Find top of the book maker: unified directional price-time comparator */
+        int is_buy = (order->side == FLOW_ORDER_BUY);
         for (size_t i = 0; i < book->order_count; ++i) {
             FlowOrder *maker = &book->orders[i];
-            if (!maker->is_active || maker->filled_quantity >= maker->quantity) continue;
+            if (!maker->is_active || maker->filled_quantity >= maker->quantity || maker->side == order->side) continue;
 
-            if (order->side == FLOW_ORDER_BUY && maker->side == FLOW_ORDER_SELL) {
-                /* Crossed: ask <= bid (or market order) */
-                if (order->type == FLOW_ORDER_MARKET || maker->price <= taker_price) {
-                    if (maker->price < best_price ||
-                        (maker->price == best_price && maker->timestamp_ns < earliest_ts)) {
-                        best_price = maker->price;
-                        earliest_ts = maker->timestamp_ns;
-                        best_maker_idx = (int)i;
-                    }
-                }
-            } else if (order->side == FLOW_ORDER_SELL && maker->side == FLOW_ORDER_BUY) {
-                /* Crossed: bid >= ask (or market order) */
-                if (order->type == FLOW_ORDER_MARKET || maker->price >= taker_price) {
-                    if (maker->price > best_price ||
-                        (maker->price == best_price && maker->timestamp_ns < earliest_ts)) {
-                        best_price = maker->price;
-                        earliest_ts = maker->timestamp_ns;
-                        best_maker_idx = (int)i;
-                    }
-                }
+            int crossed = (order->type == FLOW_ORDER_MARKET) || (is_buy ? maker->price <= taker_price : maker->price >= taker_price);
+            if (!crossed) continue;
+
+            int better = is_buy ? (maker->price < best_price) : (maker->price > best_price);
+            if (better || (maker->price == best_price && maker->timestamp_ns < earliest_ts)) {
+                best_price = maker->price;
+                earliest_ts = maker->timestamp_ns;
+                best_maker_idx = (int)i;
             }
         }
 
-        if (best_maker_idx < 0) {
-            /* No more matching orders */
-            break;
-        }
+        if (best_maker_idx < 0) break; /* No more matching orders */
 
         /* Execute match at maker price */
         FlowOrder *maker = &book->orders[best_maker_idx];

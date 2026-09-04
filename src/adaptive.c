@@ -1,6 +1,5 @@
 #include "adaptive.h"
 #include "registry.h"
-
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,9 +10,7 @@ struct FlowAdaptiveController {
     void *host_context;
     FlowAdaptiveConfig config;
     FlowAdaptiveCandidate *candidates;
-    size_t candidate_count;
-    size_t current_index;
-    size_t calls_since_switch;
+    size_t candidate_count, current_index, calls_since_switch;
     int evaluating;
     FlowAdaptiveProbe probe;
     FlowAdaptiveMetrics metrics;
@@ -28,704 +25,364 @@ struct FlowAdaptiveController {
     pthread_mutex_t lock;
 };
 
+static const double PRESSURE_WEIGHTS[6][3] = {
+    [FLOW_ENV_PRESSURE_NONE]            = {1.0, 1.0, 0.0},
+    [FLOW_ENV_PRESSURE_MEMORY_MODERATE] = {1.0, 1.0, 0.0},
+    [FLOW_ENV_PRESSURE_MEMORY_CRITICAL] = {0.0, 100.0, -1.0 / 1024.0},
+    [FLOW_ENV_PRESSURE_CACHE_THRASHING] = {50.0, 20.0, 0.0},
+    [FLOW_ENV_PRESSURE_LATENCY_SPIKE]   = {100.0, 0.0, 0.0},
+    [FLOW_ENV_PRESSURE_BATTERY_SAVER]   = {1.0, 1.0, 0.0},
+};
+
+static const struct { const char *name; uint8_t mask; } BIAS_ATTRS[] = {
+    {"shards", 1}, {"buffer_bytes", 3}, {"growth_percent", 1},
+    {"arena_bytes", 2}, {"initial_capacity", 2}, {"threads", 4}, {"batch_size", 4}
+};
+
+static uint8_t lookup_bias_attr(const char *name) {
+    for (size_t i = 0; i < sizeof(BIAS_ATTRS) / sizeof(BIAS_ATTRS[0]); ++i)
+        if (!strcmp(BIAS_ATTRS[i].name, name)) return BIAS_ATTRS[i].mask;
+    return 0;
+}
+
 static uint64_t clock_ns(void) {
     struct timespec now;
-    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0;
-    return (uint64_t)now.tv_sec * UINT64_C(1000000000) +
-           (uint64_t)now.tv_nsec;
+    return clock_gettime(CLOCK_MONOTONIC, &now) == 0 ? (uint64_t)now.tv_sec * 1000000000ULL + now.tv_nsec : 0;
 }
 
-static int config_valid(const FlowAdaptiveConfig *config) {
-    return config != NULL && config->sample_window != 0 &&
-           config->cooldown_calls <= SIZE_MAX - config->sample_window &&
-           config->journal_capacity != 0 &&
-           config->min_improvement_percent >= 0.0 &&
-           config->min_improvement_percent < 100.0;
+static int config_valid(const FlowAdaptiveConfig *c) {
+    return c && c->sample_window && c->cooldown_calls <= SIZE_MAX - c->sample_window &&
+           c->journal_capacity && c->min_improvement_percent >= 0.0 && c->min_improvement_percent < 100.0;
 }
 
-static int candidate_matches_policy(const FlowAdaptiveConfig *config,
-                                    const FlowAdaptiveCandidate *candidate) {
-    const FlowAdaptivePolicy *policy = &config->policy;
-    size_t estimated;
-    if (policy->flow_name != NULL && policy->flow_name[0] != '\0' &&
-        candidate->flow_binding != NULL && candidate->flow_binding[0] != '\0' &&
-        strcmp(policy->flow_name, candidate->flow_binding) != 0 &&
-        !(policy->require_parallelizable &&
-          candidate->supports_parallelizable))
-        return 0;
-    if (policy->domain_contract != NULL && policy->domain_contract[0] != '\0' &&
-        (candidate->domain_contract == NULL ||
-         strcmp(policy->domain_contract, candidate->domain_contract) != 0))
-        return 0;
-    if (policy->resource != NULL && policy->resource[0] != '\0' &&
-        (candidate->resource == NULL ||
-         strcmp(policy->resource, candidate->resource) != 0))
-        return 0;
-    if (policy->capability != NULL && policy->capability[0] != '\0' &&
-        (candidate->capability == NULL ||
-         strcmp(policy->capability, candidate->capability) != 0))
-        return 0;
-    if (policy->require_parallelizable &&
-        !candidate->supports_parallelizable)
-        return 0;
-    if (policy->input_capacity == 0)
-        return policy->memory_limit_bytes == 0 ||
-               candidate->memory_fixed_bytes <= policy->memory_limit_bytes;
-    if (candidate->memory_bytes_per_capacity != 0 &&
-        policy->input_capacity >
-            (SIZE_MAX - candidate->memory_fixed_bytes) /
-                candidate->memory_bytes_per_capacity)
-        return 0;
-    estimated = candidate->memory_fixed_bytes +
-                policy->input_capacity * candidate->memory_bytes_per_capacity;
-    return policy->memory_limit_bytes == 0 || estimated <= policy->memory_limit_bytes;
+static int candidate_matches_policy(const FlowAdaptiveConfig *config, const FlowAdaptiveCandidate *cand) {
+    const FlowAdaptivePolicy *p = &config->policy;
+    if (p->flow_name && p->flow_name[0] && cand->flow_binding && cand->flow_binding[0] &&
+        strcmp(p->flow_name, cand->flow_binding) && !(p->require_parallelizable && cand->supports_parallelizable)) return 0;
+    const char * const reqs[3] = {p->domain_contract, p->resource, p->capability};
+    const char * const acts[3] = {cand->domain_contract, cand->resource, cand->capability};
+    for (int i = 0; i < 3; ++i)
+        if (reqs[i] && reqs[i][0] && (!acts[i] || strcmp(reqs[i], acts[i]))) return 0;
+    if (p->require_parallelizable && !cand->supports_parallelizable) return 0;
+    size_t cap = p->input_capacity, per = cand->memory_bytes_per_capacity, fix = cand->memory_fixed_bytes;
+    if (cap && per && cap > (SIZE_MAX - fix) / per) return 0;
+    return !p->memory_limit_bytes || (fix + cap * per) <= p->memory_limit_bytes;
 }
 
-FlowAdaptiveController *flow_adaptive_create(
-    FlowReloadContext *context, void *host_context,
-    const FlowAdaptiveConfig *config,
-    const FlowAdaptiveCandidate *candidates, size_t candidate_count,
-    size_t current_index, FlowAdaptiveProbe probe) {
-    FlowAdaptiveController *controller;
-    size_t i;
-    if (context == NULL || !config_valid(config) || candidates == NULL ||
-        candidate_count == 0 || current_index >= candidate_count ||
-        probe == NULL)
-        return NULL;
-    if (flow_reload_current_unit(context) != candidates[current_index].unit)
-        return NULL;
-    for (i = 0; i < candidate_count; ++i)
-        if (candidates[i].name == NULL || candidates[i].unit == NULL ||
-            candidates[i].unit->name == NULL ||
-            strcmp(candidates[i].name, candidates[i].unit->name) != 0 ||
-            !candidate_matches_policy(config, &candidates[i]))
-            return NULL;
-    controller = calloc(1, sizeof(*controller));
-    if (controller == NULL ||
-        candidate_count > SIZE_MAX / sizeof(*controller->candidates)) {
-        free(controller);
-        return NULL;
-    }
-    controller->candidates = calloc(candidate_count,
-                                    sizeof(*controller->candidates));
-    if (controller->candidates == NULL) {
-        free(controller);
-        return NULL;
-    }
-    if (pthread_mutex_init(&controller->lock, NULL) != 0) {
-        free(controller->candidates);
-        free(controller);
-        return NULL;
-    }
-    memcpy(controller->candidates, candidates,
-           candidate_count * sizeof(*controller->candidates));
-    controller->context = context;
-    controller->host_context = host_context;
-    controller->config = *config;
-    controller->candidate_count = candidate_count;
-    controller->current_index = current_index;
-    controller->probe = probe;
-    controller->anti_thrash.ema_alpha = 0.25;
-    controller->anti_thrash.anomaly_streak_required = 1;
-    controller->anti_thrash.cooldown_ticks = 0;
-    controller->anti_thrash.backoff_multiplier = 1.5;
-    controller->debounce.effective_cooldown_ticks = 0;
-    return controller;
+FlowAdaptiveController *flow_adaptive_create(FlowReloadContext *ctx, void *host_ctx, const FlowAdaptiveConfig *cfg,
+                                             const FlowAdaptiveCandidate *cands, size_t count, size_t cur_idx, FlowAdaptiveProbe probe) {
+    if (!ctx || !config_valid(cfg) || !cands || !count || cur_idx >= count || !probe ||
+        flow_reload_current_unit(ctx) != cands[cur_idx].unit) return NULL;
+    for (size_t i = 0; i < count; ++i)
+        if (!cands[i].name || !cands[i].unit || !cands[i].unit->name ||
+            strcmp(cands[i].name, cands[i].unit->name) || !candidate_matches_policy(cfg, &cands[i])) return NULL;
+
+    FlowAdaptiveController *ctrl = calloc(1, sizeof(*ctrl));
+    if (!ctrl || !(ctrl->candidates = calloc(count, sizeof(*ctrl->candidates)))) { free(ctrl); return NULL; }
+    if (pthread_mutex_init(&ctrl->lock, NULL)) { free(ctrl->candidates); free(ctrl); return NULL; }
+
+    memcpy(ctrl->candidates, cands, count * sizeof(*cands));
+    ctrl->context = ctx; ctrl->host_context = host_ctx; ctrl->config = *cfg;
+    ctrl->candidate_count = count; ctrl->current_index = cur_idx; ctrl->probe = probe;
+    ctrl->anti_thrash = (FlowAntiThrashingConfig){.ema_alpha = 0.25, .anomaly_streak_required = 1, .backoff_multiplier = 1.5};
+    return ctrl;
 }
 
-int flow_adaptive_destroy(FlowAdaptiveController *controller) {
-    if (controller == NULL) return FLOW_ADAPTIVE_INVALID;
-    pthread_mutex_destroy(&controller->lock);
-    free(controller->candidates);
-    free(controller);
+int flow_adaptive_destroy(FlowAdaptiveController *ctrl) {
+    if (!ctrl) return FLOW_ADAPTIVE_INVALID;
+    pthread_mutex_destroy(&ctrl->lock);
+    free(ctrl->candidates);
+    free(ctrl);
     return FLOW_ADAPTIVE_OK;
 }
 
-int flow_adaptive_register_ip_range(FlowAdaptiveController *controller,
-                                   uintptr_t start_ip, uintptr_t end_ip,
-                                   const char *name, uint32_t candidate_index) {
-    if (controller == NULL || start_ip >= end_ip) return 0;
-    pthread_mutex_lock(&controller->lock);
-    if (controller->ip_tracker.range_count >= FLOW_MAX_IP_RANGES) {
-        pthread_mutex_unlock(&controller->lock);
-        return 0;
+int flow_adaptive_register_ip_range(FlowAdaptiveController *ctrl, uintptr_t start_ip, uintptr_t end_ip, const char *name, uint32_t cand_idx) {
+    if (!ctrl || start_ip >= end_ip) return 0;
+    pthread_mutex_lock(&ctrl->lock);
+    int ok = ctrl->ip_tracker.range_count < FLOW_MAX_IP_RANGES;
+    if (ok) {
+        FlowIPRange *r = &ctrl->ip_tracker.ranges[ctrl->ip_tracker.range_count++];
+        *r = (FlowIPRange){.start_ip = start_ip, .end_ip = end_ip, .candidate_index = cand_idx};
+        strncpy(r->name, name ? name : "", sizeof(r->name) - 1);
     }
-    FlowIPRange *r = &controller->ip_tracker.ranges[controller->ip_tracker.range_count++];
-    r->start_ip = start_ip;
-    r->end_ip = end_ip;
-    r->candidate_index = candidate_index;
-    strncpy(r->name, name ? name : "", sizeof(r->name) - 1);
-    pthread_mutex_unlock(&controller->lock);
-    return 1;
+    pthread_mutex_unlock(&ctrl->lock);
+    return ok;
 }
 
-int flow_adaptive_is_ip_attributed(const FlowAdaptiveController *controller,
-                                  uintptr_t ip, uint32_t *candidate_index_out) {
-    if (controller == NULL) return 0;
-    for (size_t i = 0; i < controller->ip_tracker.range_count; ++i) {
-        const FlowIPRange *r = &controller->ip_tracker.ranges[i];
-        if (ip >= r->start_ip && ip < r->end_ip) {
-            if (candidate_index_out != NULL) *candidate_index_out = r->candidate_index;
-            return 1;
-        }
+int flow_adaptive_is_ip_attributed(const FlowAdaptiveController *ctrl, uintptr_t ip, uint32_t *cand_idx_out) {
+    if (!ctrl) return 0;
+    for (size_t i = 0; i < ctrl->ip_tracker.range_count; ++i) {
+        const FlowIPRange *r = &ctrl->ip_tracker.ranges[i];
+        if (ip >= r->start_ip && ip < r->end_ip) { if (cand_idx_out) *cand_idx_out = r->candidate_index; return 1; }
     }
     return 0;
 }
 
-int flow_adaptive_feed_attributed_pmu(FlowAdaptiveController *controller,
-                                      uintptr_t ip, const FlowPMUTelemetry *pmu) {
-    uint32_t cand_idx = 0;
-    if (controller == NULL || pmu == NULL) return FLOW_ADAPTIVE_INVALID;
-    if (!flow_adaptive_is_ip_attributed(controller, ip, &cand_idx)) return FLOW_ADAPTIVE_INVALID;
-    return flow_adaptive_feed_pmu(controller, pmu);
+int flow_adaptive_feed_attributed_pmu(FlowAdaptiveController *ctrl, uintptr_t ip, const FlowPMUTelemetry *pmu) {
+    uint32_t idx = 0;
+    return (ctrl && pmu && flow_adaptive_is_ip_attributed(ctrl, ip, &idx)) ? flow_adaptive_feed_pmu(ctrl, pmu) : FLOW_ADAPTIVE_INVALID;
 }
 
-void flow_adaptive_set_anti_thrashing(FlowAdaptiveController *controller,
-                                      const FlowAntiThrashingConfig *config) {
-    if (controller == NULL || config == NULL) return;
-    pthread_mutex_lock(&controller->lock);
-    controller->anti_thrash = *config;
-    controller->debounce.effective_cooldown_ticks = config->cooldown_ticks;
-    pthread_mutex_unlock(&controller->lock);
-}
-
-int flow_adaptive_get_debounce_state(const FlowAdaptiveController *controller,
-                                     FlowDebounceState *state_out) {
-    if (controller == NULL || state_out == NULL) return 0;
-    *state_out = controller->debounce;
-    return 1;
-}
-
-int flow_adaptive_call(FlowAdaptiveController *controller,
-                       FlowReloadReader *reader, const void *input,
-                       void *output) {
-    uint64_t start;
-    uint64_t elapsed;
-    int result;
-    if (controller == NULL || reader == NULL) return FLOW_ADAPTIVE_INVALID;
-    start = clock_ns();
-    result = flow_reload_call(controller->context, reader, input, output);
-    elapsed = clock_ns() - start;
-    pthread_mutex_lock(&controller->lock);
-    ++controller->metrics.calls;
-    controller->metrics.total_ns += elapsed;
-    ++controller->calls_since_switch;
-    if (result != FLOW_RELOAD_OK) ++controller->metrics.failures;
-    pthread_mutex_unlock(&controller->lock);
-    return result;
-}
-
-FlowAdaptiveStatus flow_adaptive_tick(FlowAdaptiveController *controller) {
-    FlowAdaptiveMetrics metrics;
-    double current_score;
-    double best_score;
-    size_t best_index;
-    size_t current_index;
-    size_t i;
-    int result;
-    if (controller == NULL) return FLOW_ADAPTIVE_INVALID;
-
-    pthread_mutex_lock(&controller->lock);
-    if (controller->evaluating ||
-        controller->metrics.calls < controller->config.sample_window ||
-        controller->calls_since_switch < controller->config.cooldown_calls) {
-        pthread_mutex_unlock(&controller->lock);
-        return FLOW_ADAPTIVE_NOT_READY;
+void flow_adaptive_set_anti_thrashing(FlowAdaptiveController *ctrl, const FlowAntiThrashingConfig *cfg) {
+    if (ctrl && cfg) {
+        pthread_mutex_lock(&ctrl->lock);
+        ctrl->anti_thrash = *cfg;
+        ctrl->debounce.effective_cooldown_ticks = cfg->cooldown_ticks;
+        pthread_mutex_unlock(&ctrl->lock);
     }
-    if (flow_reload_current_unit(controller->context) !=
-        controller->candidates[controller->current_index].unit) {
-        pthread_mutex_unlock(&controller->lock);
+}
+
+int flow_adaptive_get_debounce_state(const FlowAdaptiveController *ctrl, FlowDebounceState *out) {
+    return (ctrl && out) ? (*out = ctrl->debounce, 1) : 0;
+}
+
+int flow_adaptive_call(FlowAdaptiveController *ctrl, FlowReloadReader *reader, const void *input, void *output) {
+    if (!ctrl || !reader) return FLOW_ADAPTIVE_INVALID;
+    uint64_t start = clock_ns();
+    int res = flow_reload_call(ctrl->context, reader, input, output);
+    uint64_t el = clock_ns() - start;
+    pthread_mutex_lock(&ctrl->lock);
+    ctrl->metrics.calls++; ctrl->metrics.total_ns += el; ctrl->calls_since_switch++;
+    if (res != FLOW_RELOAD_OK) ctrl->metrics.failures++;
+    pthread_mutex_unlock(&ctrl->lock);
+    return res;
+}
+
+static FlowAdaptiveStatus commit_candidate_switch(FlowAdaptiveController *ctrl, size_t target_idx, int is_pmu) {
+    int res = flow_reload_live_begin(ctrl->context, ctrl->candidates[target_idx].unit, ctrl->config.journal_capacity);
+    if (res == FLOW_RELOAD_OK) res = flow_reload_live_finish(ctrl->context);
+    pthread_mutex_lock(&ctrl->lock);
+    ctrl->evaluating = 0;
+    if (res != FLOW_RELOAD_OK) { pthread_mutex_unlock(&ctrl->lock); return FLOW_ADAPTIVE_RELOAD_FAILED; }
+    ctrl->current_index = target_idx;
+    ctrl->calls_since_switch = ctrl->debounce.ticks_since_last_swap = ctrl->debounce.current_anomaly_streak = 0;
+    ctrl->debounce.swap_count++;
+    if (is_pmu && ctrl->anti_thrash.backoff_multiplier > 1.0 && ctrl->debounce.effective_cooldown_ticks > 0)
+        ctrl->debounce.effective_cooldown_ticks = (size_t)(ctrl->debounce.effective_cooldown_ticks * ctrl->anti_thrash.backoff_multiplier);
+    pthread_mutex_unlock(&ctrl->lock);
+    return FLOW_ADAPTIVE_OK;
+}
+
+FlowAdaptiveStatus flow_adaptive_tick(FlowAdaptiveController *ctrl) {
+    if (!ctrl) return FLOW_ADAPTIVE_INVALID;
+    pthread_mutex_lock(&ctrl->lock);
+    if (ctrl->evaluating || ctrl->metrics.calls < ctrl->config.sample_window ||
+        ctrl->calls_since_switch < ctrl->config.cooldown_calls) {
+        pthread_mutex_unlock(&ctrl->lock); return FLOW_ADAPTIVE_NOT_READY;
+    }
+    if (flow_reload_current_unit(ctrl->context) != ctrl->candidates[ctrl->current_index].unit) {
+        pthread_mutex_unlock(&ctrl->lock); return FLOW_ADAPTIVE_NO_CHANGE;
+    }
+    ctrl->evaluating = 1;
+    FlowAdaptiveMetrics m = ctrl->metrics;
+    ctrl->metrics = (FlowAdaptiveMetrics){0};
+    size_t cur = ctrl->current_index;
+    pthread_mutex_unlock(&ctrl->lock);
+
+    double cur_score, best_score;
+    if (ctrl->probe(ctrl->host_context, &ctrl->candidates[cur], &m, &cur_score) != 0) {
+        pthread_mutex_lock(&ctrl->lock); ctrl->evaluating = 0; pthread_mutex_unlock(&ctrl->lock);
         return FLOW_ADAPTIVE_NO_CHANGE;
     }
-    controller->evaluating = 1;
-    metrics = controller->metrics;
-    controller->metrics = (FlowAdaptiveMetrics){0};
-    current_index = controller->current_index;
-    pthread_mutex_unlock(&controller->lock);
-
-    if (controller->probe(controller->host_context,
-                          &controller->candidates[current_index],
-                          &metrics, &current_score) != 0) {
-        pthread_mutex_lock(&controller->lock);
-        controller->evaluating = 0;
-        pthread_mutex_unlock(&controller->lock);
-        return FLOW_ADAPTIVE_NO_CHANGE;
-    }
-    best_index = current_index;
-    best_score = current_score;
-    for (i = 0; i < controller->candidate_count; ++i) {
-        double candidate_score;
-        if (i == current_index) continue;
-        if (controller->probe(controller->host_context,
-                              &controller->candidates[i], &metrics,
-                              &candidate_score) != 0)
-            continue;
-        if (candidate_score < best_score) {
-            best_score = candidate_score;
-            best_index = i;
+    size_t best_idx = cur;
+    best_score = cur_score;
+    for (size_t i = 0; i < ctrl->candidate_count; ++i) {
+        double score;
+        if (i != cur && ctrl->probe(ctrl->host_context, &ctrl->candidates[i], &m, &score) == 0 && score < best_score) {
+            best_score = score;
+            best_idx = i;
         }
     }
-    if (best_index == current_index ||
-        current_score <= 0.0 ||
-        (current_score - best_score) * 100.0 <
-            current_score * controller->config.min_improvement_percent) {
-        pthread_mutex_lock(&controller->lock);
-        controller->evaluating = 0;
-        pthread_mutex_unlock(&controller->lock);
+    if (best_idx == cur || cur_score <= 0.0 || (cur_score - best_score) * 100.0 < cur_score * ctrl->config.min_improvement_percent) {
+        pthread_mutex_lock(&ctrl->lock); ctrl->evaluating = 0; pthread_mutex_unlock(&ctrl->lock);
         return FLOW_ADAPTIVE_NO_CHANGE;
     }
-    if (flow_reload_current_unit(controller->context) !=
-        controller->candidates[current_index].unit) {
-        pthread_mutex_lock(&controller->lock);
-        controller->evaluating = 0;
-        pthread_mutex_unlock(&controller->lock);
+    return commit_candidate_switch(ctrl, best_idx, 0);
+}
+
+FlowAdaptiveStatus flow_adaptive_tick_pmu(FlowAdaptiveController *ctrl, const FlowPMUThresholds *thresh) {
+    if (!ctrl || !thresh) return FLOW_ADAPTIVE_INVALID;
+    pthread_mutex_lock(&ctrl->lock);
+    if (ctrl->evaluating) { pthread_mutex_unlock(&ctrl->lock); return FLOW_ADAPTIVE_NOT_READY; }
+    ctrl->evaluating = 1;
+    ctrl->debounce.ticks_since_last_swap++;
+
+    double a = ctrl->anti_thrash.ema_alpha > 0.0 ? ctrl->anti_thrash.ema_alpha : 0.25;
+    #define EMA(v, c) (v = !v ? (c) : (1.0 - a) * (v) + a * (c))
+    EMA(ctrl->debounce.smoothed_miss_rate, ctrl->pmu.cache_miss_rate);
+    EMA(ctrl->debounce.smoothed_ipc, ctrl->pmu.ipc);
+    #undef EMA
+
+    int high_miss = (thresh->cache_miss_rate_threshold > 0.0 && ctrl->debounce.smoothed_miss_rate >= thresh->cache_miss_rate_threshold);
+    int low_ipc = (thresh->min_ipc_threshold > 0.0 && ctrl->debounce.smoothed_ipc > 0.0 && ctrl->debounce.smoothed_ipc <= thresh->min_ipc_threshold);
+    ctrl->debounce.current_anomaly_streak = (high_miss || low_ipc) ? (ctrl->debounce.current_anomaly_streak + 1) : 0;
+
+    int ready = (ctrl->debounce.current_anomaly_streak >= ctrl->anti_thrash.anomaly_streak_required);
+    int cooled = (ctrl->debounce.ticks_since_last_swap > ctrl->debounce.effective_cooldown_ticks || ctrl->debounce.swap_count == 0);
+    if (!ready || !cooled) {
+        ctrl->evaluating = 0; pthread_mutex_unlock(&ctrl->lock);
+        return !ready ? FLOW_ADAPTIVE_NO_CHANGE : FLOW_ADAPTIVE_NOT_READY;
+    }
+    size_t cur = ctrl->current_index;
+    pthread_mutex_unlock(&ctrl->lock);
+
+    size_t target = cur;
+    int best_val = high_miss ? ctrl->candidates[cur].memory_score : ctrl->candidates[cur].latency_score;
+    for (size_t i = 0; i < ctrl->candidate_count; ++i) {
+        int val = high_miss ? ctrl->candidates[i].memory_score : ctrl->candidates[i].latency_score;
+        if (val < best_val) { best_val = val; target = i; }
+    }
+    if (target == cur) {
+        pthread_mutex_lock(&ctrl->lock); ctrl->evaluating = 0; pthread_mutex_unlock(&ctrl->lock);
         return FLOW_ADAPTIVE_NO_CHANGE;
     }
-    result = flow_reload_live_begin(
-        controller->context, controller->candidates[best_index].unit,
-        controller->config.journal_capacity);
-    if (result == FLOW_RELOAD_OK)
-        result = flow_reload_live_finish(controller->context);
-    if (result != FLOW_RELOAD_OK) {
-        pthread_mutex_lock(&controller->lock);
-        controller->evaluating = 0;
-        pthread_mutex_unlock(&controller->lock);
-        return FLOW_ADAPTIVE_RELOAD_FAILED;
-    }
-    if (flow_reload_current_unit(controller->context) !=
-        controller->candidates[best_index].unit) {
-        pthread_mutex_lock(&controller->lock);
-        controller->evaluating = 0;
-        pthread_mutex_unlock(&controller->lock);
-        return FLOW_ADAPTIVE_NO_CHANGE;
-    }
-    pthread_mutex_lock(&controller->lock);
-    if (controller->current_index != current_index) {
-        controller->evaluating = 0;
-        pthread_mutex_unlock(&controller->lock);
-        return FLOW_ADAPTIVE_NO_CHANGE;
-    }
-    controller->current_index = best_index;
-    controller->calls_since_switch = 0;
-    controller->evaluating = 0;
-    pthread_mutex_unlock(&controller->lock);
+    return commit_candidate_switch(ctrl, target, 1);
+}
+
+size_t flow_adaptive_current_index(const FlowAdaptiveController *c) {
+    if (!c) return SIZE_MAX;
+    pthread_mutex_lock((pthread_mutex_t *)&c->lock);
+    size_t idx = c->current_index;
+    pthread_mutex_unlock((pthread_mutex_t *)&c->lock);
+    return idx;
+}
+
+int flow_adaptive_metrics(const FlowAdaptiveController *c, FlowAdaptiveMetrics *m) {
+    return (c && m) ? (pthread_mutex_lock((pthread_mutex_t *)&c->lock), *m = c->metrics, pthread_mutex_unlock((pthread_mutex_t *)&c->lock), FLOW_ADAPTIVE_OK) : FLOW_ADAPTIVE_INVALID;
+}
+
+int flow_adaptive_feed_pmu(FlowAdaptiveController *c, const FlowPMUTelemetry *p) {
+    if (!c || !p) return FLOW_ADAPTIVE_INVALID;
+    pthread_mutex_lock(&c->lock);
+    c->pmu = *p;
+    if (p->l3_cache_references > 0) c->pmu.cache_miss_rate = (double)p->l3_cache_misses / (double)p->l3_cache_references;
+    if (p->cpu_cycles > 0) c->pmu.ipc = (double)p->instructions / (double)p->cpu_cycles;
+    pthread_mutex_unlock(&c->lock);
     return FLOW_ADAPTIVE_OK;
 }
 
-size_t flow_adaptive_current_index(const FlowAdaptiveController *controller) {
-    size_t index;
-    if (controller == NULL) return SIZE_MAX;
-    pthread_mutex_lock((pthread_mutex_t *)&controller->lock);
-    index = controller->current_index;
-    pthread_mutex_unlock((pthread_mutex_t *)&controller->lock);
-    return index;
+int flow_adaptive_pmu_metrics(const FlowAdaptiveController *c, FlowPMUTelemetry *p) {
+    return (c && p) ? (pthread_mutex_lock((pthread_mutex_t *)&c->lock), *p = c->pmu, pthread_mutex_unlock((pthread_mutex_t *)&c->lock), FLOW_ADAPTIVE_OK) : FLOW_ADAPTIVE_INVALID;
 }
 
-int flow_adaptive_metrics(const FlowAdaptiveController *controller,
-                          FlowAdaptiveMetrics *metrics_out) {
-    if (controller == NULL || metrics_out == NULL)
-        return FLOW_ADAPTIVE_INVALID;
-    pthread_mutex_lock((pthread_mutex_t *)&controller->lock);
-    *metrics_out = controller->metrics;
-    pthread_mutex_unlock((pthread_mutex_t *)&controller->lock);
-    return FLOW_ADAPTIVE_OK;
+const char *flow_adaptive_status_name(FlowAdaptiveStatus s) {
+    static const char * const names[] = {"ok", "not_ready", "no_change", "invalid", "reload_failed"};
+    return (s >= 0 && s <= 4) ? names[s] : "unknown";
 }
 
-int flow_adaptive_feed_pmu(FlowAdaptiveController *controller,
-                           const FlowPMUTelemetry *pmu) {
-    if (controller == NULL || pmu == NULL) return FLOW_ADAPTIVE_INVALID;
-    pthread_mutex_lock(&controller->lock);
-    controller->pmu = *pmu;
-    if (pmu->l3_cache_references > 0) {
-        controller->pmu.cache_miss_rate =
-            (double)pmu->l3_cache_misses / (double)pmu->l3_cache_references;
-    }
-    if (pmu->cpu_cycles > 0) {
-        controller->pmu.ipc =
-            (double)pmu->instructions / (double)pmu->cpu_cycles;
-    }
-    pthread_mutex_unlock(&controller->lock);
-    return FLOW_ADAPTIVE_OK;
-}
-
-int flow_adaptive_pmu_metrics(const FlowAdaptiveController *controller,
-                              FlowPMUTelemetry *pmu_out) {
-    if (controller == NULL || pmu_out == NULL) return FLOW_ADAPTIVE_INVALID;
-    pthread_mutex_lock((pthread_mutex_t *)&controller->lock);
-    *pmu_out = controller->pmu;
-    pthread_mutex_unlock((pthread_mutex_t *)&controller->lock);
-    return FLOW_ADAPTIVE_OK;
-}
-
-FlowAdaptiveStatus flow_adaptive_tick_pmu(FlowAdaptiveController *controller,
-                                         const FlowPMUThresholds *thresholds) {
-    FlowPMUTelemetry pmu;
-    size_t current_index;
-    size_t target_index;
-    size_t i;
-    int high_miss_rate = 0;
-    int low_ipc = 0;
-    int is_anomaly = 0;
-    int result;
-    double alpha;
-
-    if (controller == NULL || thresholds == NULL) return FLOW_ADAPTIVE_INVALID;
-
-    pthread_mutex_lock(&controller->lock);
-    if (controller->evaluating) {
-        pthread_mutex_unlock(&controller->lock);
-        return FLOW_ADAPTIVE_NOT_READY;
-    }
-    pmu = controller->pmu;
-    current_index = controller->current_index;
-    controller->evaluating = 1;
-    controller->debounce.ticks_since_last_swap++;
-
-    /* Exponential Moving Average (EMA) Smoothing */
-    alpha = controller->anti_thrash.ema_alpha > 0.0 ? controller->anti_thrash.ema_alpha : 0.25;
-    if (controller->debounce.smoothed_miss_rate == 0.0) {
-        controller->debounce.smoothed_miss_rate = pmu.cache_miss_rate;
-    } else {
-        controller->debounce.smoothed_miss_rate =
-            (1.0 - alpha) * controller->debounce.smoothed_miss_rate + alpha * pmu.cache_miss_rate;
-    }
-
-    if (controller->debounce.smoothed_ipc == 0.0) {
-        controller->debounce.smoothed_ipc = pmu.ipc;
-    } else {
-        controller->debounce.smoothed_ipc =
-            (1.0 - alpha) * controller->debounce.smoothed_ipc + alpha * pmu.ipc;
-    }
-
-    /* Anomaly Detection over Smoothed Signal */
-    if (thresholds->cache_miss_rate_threshold > 0.0 &&
-        controller->debounce.smoothed_miss_rate >= thresholds->cache_miss_rate_threshold) {
-        high_miss_rate = 1;
-        is_anomaly = 1;
-    }
-    if (thresholds->min_ipc_threshold > 0.0 &&
-        controller->debounce.smoothed_ipc > 0.0 &&
-        controller->debounce.smoothed_ipc <= thresholds->min_ipc_threshold) {
-        low_ipc = 1;
-        is_anomaly = 1;
-    }
-
-    if (is_anomaly) {
-        controller->debounce.current_anomaly_streak++;
-    } else {
-        controller->debounce.current_anomaly_streak = 0;
-    }
-
-    /* Check Anomaly Streak Requirement */
-    if (controller->debounce.current_anomaly_streak < controller->anti_thrash.anomaly_streak_required) {
-        controller->evaluating = 0;
-        pthread_mutex_unlock(&controller->lock);
-        return FLOW_ADAPTIVE_NO_CHANGE;
-    }
-
-    /* Check Anti-Thrashing Cooldown Window */
-    if (controller->debounce.ticks_since_last_swap <= controller->debounce.effective_cooldown_ticks &&
-        controller->debounce.swap_count > 0) {
-        controller->evaluating = 0;
-        pthread_mutex_unlock(&controller->lock);
-        return FLOW_ADAPTIVE_NOT_READY;
-    }
-
-    pthread_mutex_unlock(&controller->lock);
-
-    target_index = current_index;
-    if (high_miss_rate) {
-        /* Find candidate with best memory locality / minimal score */
-        int best_mem = controller->candidates[current_index].memory_score;
-        for (i = 0; i < controller->candidate_count; ++i) {
-            if (controller->candidates[i].memory_score < best_mem) {
-                best_mem = controller->candidates[i].memory_score;
-                target_index = i;
-            }
-        }
-    } else if (low_ipc) {
-        /* Find candidate with lowest latency / highest throughput */
-        int best_lat = controller->candidates[current_index].latency_score;
-        for (i = 0; i < controller->candidate_count; ++i) {
-            if (controller->candidates[i].latency_score < best_lat) {
-                best_lat = controller->candidates[i].latency_score;
-                target_index = i;
-            }
-        }
-    }
-
-    if (target_index == current_index) {
-        pthread_mutex_lock(&controller->lock);
-        controller->evaluating = 0;
-        pthread_mutex_unlock(&controller->lock);
-        return FLOW_ADAPTIVE_NO_CHANGE;
-    }
-
-    /* Live hot-swap to the hardware-adapted candidate */
-    result = flow_reload_live_begin(
-        controller->context, controller->candidates[target_index].unit,
-        controller->config.journal_capacity);
-    if (result == FLOW_RELOAD_OK)
-        result = flow_reload_live_finish(controller->context);
-
-    pthread_mutex_lock(&controller->lock);
-    controller->evaluating = 0;
-    if (result != FLOW_RELOAD_OK) {
-        pthread_mutex_unlock(&controller->lock);
-        return FLOW_ADAPTIVE_RELOAD_FAILED;
-    }
-    controller->current_index = target_index;
-    controller->calls_since_switch = 0;
-    controller->debounce.ticks_since_last_swap = 0;
-    controller->debounce.current_anomaly_streak = 0;
-    controller->debounce.swap_count++;
-    /* Exponential backoff on cooldown */
-    if (controller->anti_thrash.backoff_multiplier > 1.0 && controller->debounce.effective_cooldown_ticks > 0) {
-        controller->debounce.effective_cooldown_ticks =
-            (size_t)(controller->debounce.effective_cooldown_ticks * controller->anti_thrash.backoff_multiplier);
-    }
-    pthread_mutex_unlock(&controller->lock);
-    return FLOW_ADAPTIVE_OK;
-}
-
-const char *flow_adaptive_status_name(FlowAdaptiveStatus status) {
-    switch (status) {
-        case FLOW_ADAPTIVE_OK: return "ok";
-        case FLOW_ADAPTIVE_NOT_READY: return "not_ready";
-        case FLOW_ADAPTIVE_NO_CHANGE: return "no_change";
-        case FLOW_ADAPTIVE_INVALID: return "invalid";
-        case FLOW_ADAPTIVE_RELOAD_FAILED: return "reload_failed";
-    }
-    return "unknown";
-}
-
-uint64_t flow_adaptive_telemetry_bias_from_pmu(const FlowPMUTelemetry *pmu,
-                                               int write_heavy_state,
-                                               const FlowPlanDimensionSet *dims) {
-    if (dims == NULL || dims->count == 0) return 0;
+uint64_t flow_adaptive_telemetry_bias_from_pmu(const FlowPMUTelemetry *pmu, int write_heavy, const FlowPlanDimensionSet *dims) {
+    if (!dims || !dims->count) return 0;
     uint64_t bias_mask = 0;
     unsigned shift = 0;
-
-    int bias_contention = write_heavy_state;
-    int bias_cache_locality = (pmu != NULL && pmu->cache_miss_rate > 0.30);
-    int bias_concurrency = (pmu != NULL && pmu->ipc > 0.0 && pmu->ipc < 0.8);
+    uint8_t flags = (write_heavy ? 1 : 0) |
+                    ((pmu && pmu->cache_miss_rate > 0.30) ? 2 : 0) |
+                    ((pmu && pmu->ipc > 0.0 && pmu->ipc < 0.8) ? 4 : 0);
 
     for (size_t i = 0; i < dims->count; ++i) {
         const FlowPlanDimension *d = &dims->dimensions[i];
         unsigned bits = flow_dimension_bits(d);
-        if (bits == 0) continue;
-        uint64_t dim_mask = (bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << bits) - 1);
-
-        int should_bias = 0;
-        if (bias_contention && (strcmp(d->name, "shards") == 0 || strcmp(d->name, "buffer_bytes") == 0 || strcmp(d->name, "growth_percent") == 0)) {
-            should_bias = 1;
-        }
-        if (bias_cache_locality && (strcmp(d->name, "buffer_bytes") == 0 || strcmp(d->name, "arena_bytes") == 0 || strcmp(d->name, "initial_capacity") == 0)) {
-            should_bias = 1;
-        }
-        if (bias_concurrency && (strcmp(d->name, "threads") == 0 || strcmp(d->name, "batch_size") == 0)) {
-            should_bias = 1;
-        }
-        if (!bias_contention && !bias_cache_locality && !bias_concurrency) {
-            /* Default: tactile parameters prioritized for real-time micro-tuning */
-            if (d->dim_class == FLOW_DIM_CLASS_TACTILE_PARAM) {
-                should_bias = 1;
-            }
-        }
-
-        if (should_bias) {
-            bias_mask |= (dim_mask << shift);
-        }
+        if (!bits) continue;
+        uint64_t m = (bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << bits) - 1);
+        int bias = !flags ? (d->dim_class == FLOW_DIM_CLASS_TACTILE_PARAM) : ((lookup_bias_attr(d->name) & flags) != 0);
+        if (bias) bias_mask |= (m << shift);
         shift += bits;
     }
     return bias_mask;
 }
 
-uint64_t flow_adaptive_get_telemetry_bias(const FlowAdaptiveController *controller,
-                                          const Component *comp,
-                                          const FlowPlanDimensionSet *dims) {
+uint64_t flow_adaptive_get_telemetry_bias(const FlowAdaptiveController *c, const Component *comp, const FlowPlanDimensionSet *dims) {
     (void)comp;
-    if (controller == NULL || dims == NULL) return 0;
-    FlowPMUTelemetry pmu;
-    int write_heavy = 0;
-    pthread_mutex_lock((pthread_mutex_t *)&controller->lock);
-    pmu = controller->pmu;
-    if (controller->metrics.calls > 0 && controller->metrics.failures > 0) {
-        write_heavy = 1;
-    }
-    pthread_mutex_unlock((pthread_mutex_t *)&controller->lock);
-    return flow_adaptive_telemetry_bias_from_pmu(&pmu, write_heavy, dims);
+    if (!c || !dims) return 0;
+    pthread_mutex_lock((pthread_mutex_t *)&c->lock);
+    FlowPMUTelemetry p = c->pmu;
+    int wh = (c->metrics.calls > 0 && c->metrics.failures > 0);
+    pthread_mutex_unlock((pthread_mutex_t *)&c->lock);
+    return flow_adaptive_telemetry_bias_from_pmu(&p, wh, dims);
 }
 
-uint64_t flow_adaptive_synthesize_env_mask(const FlowAdaptiveController *controller,
-                                           const FlowEnvironmentState *env,
-                                           const Component *comp,
-                                           const FlowPlanDimensionSet *dims) {
-    (void)controller;
+uint64_t flow_adaptive_synthesize_env_mask(const FlowAdaptiveController *c, const FlowEnvironmentState *env, const Component *comp, const FlowPlanDimensionSet *dims) {
+    (void)c;
     return flow_component_environment_mask(NULL, comp, dims, env);
 }
 
-FlowAdaptiveStatus flow_adaptive_handle_pressure_event(
-    FlowAdaptiveController *controller,
-    const FlowEnvironmentState *env,
-    size_t *morphed_candidate_index_out) {
-    if (controller == NULL || env == NULL) return FLOW_ADAPTIVE_INVALID;
+FlowAdaptiveStatus flow_adaptive_handle_pressure_event(FlowAdaptiveController *ctrl, const FlowEnvironmentState *env, size_t *morphed_out) {
+    if (!ctrl || !env) return FLOW_ADAPTIVE_INVALID;
+    pthread_mutex_lock(&ctrl->lock);
+    size_t curr = ctrl->current_index, best_idx = (size_t)-1;
+    double best_score = -1.0e9;
+    const double *w = PRESSURE_WEIGHTS[(size_t)env->pressure_level < 6 ? env->pressure_level : 0];
 
-    size_t best_idx = (size_t)-1;
-    double best_suitability = -1.0e9;
-
-    pthread_mutex_lock(&controller->lock);
-    size_t curr = controller->current_index;
-
-    for (size_t i = 0; i < controller->candidate_count; ++i) {
-        const FlowAdaptiveCandidate *cand = &controller->candidates[i];
-        double score = 0.0;
-
-        if (env->pressure_level == FLOW_ENV_PRESSURE_MEMORY_CRITICAL) {
-            /* Under critical memory pressure: high memory_score candidate is top priority */
-            score = (double)cand->memory_score * 100.0 - (double)cand->memory_fixed_bytes / 1024.0;
-        } else if (env->pressure_level == FLOW_ENV_PRESSURE_CACHE_THRASHING) {
-            score = (double)cand->latency_score * 50.0 + (double)cand->memory_score * 20.0;
-        } else if (env->pressure_level == FLOW_ENV_PRESSURE_LATENCY_SPIKE) {
-            score = (double)cand->latency_score * 100.0;
-        } else {
-            /* Normal */
-            score = (double)(cand->latency_score + cand->memory_score);
-        }
-
-        if (score > best_suitability) {
-            best_suitability = score;
-            best_idx = i;
-        }
+    for (size_t i = 0; i < ctrl->candidate_count; ++i) {
+        const FlowAdaptiveCandidate *c = &ctrl->candidates[i];
+        double score = w[0] * c->latency_score + w[1] * c->memory_score + w[2] * c->memory_fixed_bytes;
+        if (score > best_score) { best_score = score; best_idx = i; }
     }
-
     if (best_idx == (size_t)-1 || best_idx == curr) {
-        pthread_mutex_unlock(&controller->lock);
-        if (morphed_candidate_index_out) *morphed_candidate_index_out = curr;
+        pthread_mutex_unlock(&ctrl->lock);
+        if (morphed_out) *morphed_out = curr;
         return FLOW_ADAPTIVE_NO_CHANGE;
     }
-
-    /* Perform live hot reload to morphed layout */
-    const FlowUnit *target_unit = controller->candidates[best_idx].unit;
-    int reload_res = flow_reload_activate(controller->context, target_unit);
-    if (reload_res != FLOW_RELOAD_OK) {
-        pthread_mutex_unlock(&controller->lock);
-        return FLOW_ADAPTIVE_RELOAD_FAILED;
-    }
-
-    controller->current_index = best_idx;
-    controller->calls_since_switch = 0;
-    controller->debounce.swap_count++;
-    pthread_mutex_unlock(&controller->lock);
-
-    if (morphed_candidate_index_out) *morphed_candidate_index_out = best_idx;
+    int res = flow_reload_activate(ctrl->context, ctrl->candidates[best_idx].unit);
+    if (res != FLOW_RELOAD_OK) { pthread_mutex_unlock(&ctrl->lock); return FLOW_ADAPTIVE_RELOAD_FAILED; }
+    ctrl->current_index = best_idx; ctrl->calls_since_switch = 0; ctrl->debounce.swap_count++;
+    pthread_mutex_unlock(&ctrl->lock);
+    if (morphed_out) *morphed_out = best_idx;
     return FLOW_ADAPTIVE_OK;
 }
 
-/* ========================================================================= */
-/* Golden Baseline Fallback & Anomaly Protection                             */
-/* ========================================================================= */
-
-int flow_adaptive_set_golden_baseline(FlowAdaptiveController *controller,
-                                      const FlowUnit *golden_unit,
-                                      void *golden_state) {
-    if (controller == NULL || golden_unit == NULL) return 0;
-    pthread_mutex_lock(&controller->lock);
-    controller->golden_unit = golden_unit;
-    controller->golden_state = golden_state;
-    atomic_store_explicit(&controller->is_running_golden, 0, memory_order_release);
-    atomic_store_explicit(&controller->consecutive_errors, 0, memory_order_release);
-    pthread_mutex_unlock(&controller->lock);
+int flow_adaptive_set_golden_baseline(FlowAdaptiveController *c, const FlowUnit *u, void *s) {
+    if (!c || !u) return 0;
+    pthread_mutex_lock(&c->lock);
+    c->golden_unit = u; c->golden_state = s;
+    atomic_store_explicit(&c->is_running_golden, 0, memory_order_release);
+    atomic_store_explicit(&c->consecutive_errors, 0, memory_order_release);
+    pthread_mutex_unlock(&c->lock);
     return 1;
 }
 
-int flow_adaptive_fallback_to_golden_baseline(FlowAdaptiveController *controller,
-                                              const char *reason_diagnostic) {
-    if (controller == NULL || controller->golden_unit == NULL) return 0;
-
-    pthread_mutex_lock(&controller->lock);
-    const FlowUnit *golden = controller->golden_unit;
-    int reload_res;
-    if (controller->golden_state != NULL) {
-        reload_res = flow_reload_publish(controller->context, golden, controller->golden_state);
-    } else {
-        reload_res = flow_reload_activate(controller->context, golden);
+int flow_adaptive_fallback_to_golden_baseline(FlowAdaptiveController *c, const char *reason) {
+    if (!c || !c->golden_unit) return 0;
+    pthread_mutex_lock(&c->lock);
+    int ok = (c->golden_state ? flow_reload_publish(c->context, c->golden_unit, c->golden_state)
+                              : flow_reload_activate(c->context, c->golden_unit)) == FLOW_RELOAD_OK;
+    if (ok) {
+        atomic_store_explicit(&c->is_running_golden, 1, memory_order_release);
+        atomic_store_explicit(&c->consecutive_errors, 0, memory_order_release);
+        FlowMutationSnapshot snap = {.timestamp_ns = clock_ns(), .is_golden_fallback = 1};
+        strncpy(snap.component_id, c->golden_unit->schema ? c->golden_unit->schema->name : "golden_baseline", sizeof(snap.component_id) - 1);
+        strncpy(snap.author_attestation, reason ? reason : "OOD_SPIKE_FALLBACK", sizeof(snap.author_attestation) - 1);
+        flow_audit_trail_record(c->context, &snap);
     }
-
-    if (reload_res == FLOW_RELOAD_OK) {
-        atomic_store_explicit(&controller->is_running_golden, 1, memory_order_release);
-        atomic_store_explicit(&controller->consecutive_errors, 0, memory_order_release);
-
-        /* Record snapshot in audit trail */
-        FlowMutationSnapshot snap;
-        memset(&snap, 0, sizeof(snap));
-        snap.timestamp_ns = clock_ns();
-        snap.is_golden_fallback = 1;
-        strncpy(snap.component_id, golden->schema ? golden->schema->name : "golden_baseline", sizeof(snap.component_id) - 1);
-        strncpy(snap.author_attestation, reason_diagnostic ? reason_diagnostic : "OOD_SPIKE_FALLBACK", sizeof(snap.author_attestation) - 1);
-        flow_audit_trail_record(controller->context, &snap);
-    }
-    pthread_mutex_unlock(&controller->lock);
-    return reload_res == FLOW_RELOAD_OK;
+    pthread_mutex_unlock(&c->lock);
+    return ok;
 }
 
-int flow_adaptive_record_error_and_check_fallback(FlowAdaptiveController *controller,
-                                                  size_t max_consecutive_errors) {
-    if (controller == NULL) return 0;
-    size_t threshold = max_consecutive_errors > 0 ? max_consecutive_errors : 3;
-    size_t errs = (size_t)atomic_fetch_add_explicit(&controller->consecutive_errors, 1, memory_order_acq_rel) + 1;
-    if (errs >= threshold && controller->golden_unit != NULL) {
-        return flow_adaptive_fallback_to_golden_baseline(controller, "EXCEEDED_CONSECUTIVE_ERROR_THRESHOLD");
-    }
-    return 0;
+int flow_adaptive_record_error_and_check_fallback(FlowAdaptiveController *c, size_t max_errs) {
+    if (!c) return 0;
+    size_t lim = max_errs ? max_errs : 3;
+    return ((size_t)atomic_fetch_add_explicit(&c->consecutive_errors, 1, memory_order_acq_rel) + 1 >= lim && c->golden_unit) ?
+        flow_adaptive_fallback_to_golden_baseline(c, "EXCEEDED_CONSECUTIVE_ERROR_THRESHOLD") : 0;
 }
 
-int flow_adaptive_is_running_golden(const FlowAdaptiveController *controller) {
-    if (controller == NULL) return 0;
-    return atomic_load_explicit(&controller->is_running_golden, memory_order_acquire);
+int flow_adaptive_is_running_golden(const FlowAdaptiveController *c) {
+    return c ? atomic_load_explicit(&c->is_running_golden, memory_order_acquire) : 0;
 }
-
-/* ========================================================================= */
-/* Schmitt Trigger Anti-Flapping & Hysteresis Controller Implementation      */
-/* ========================================================================= */
 
 void flow_schmitt_trigger_init(FlowSchmittTrigger *st, double base_min, uint64_t dwell_ns) {
-    if (st == NULL) return;
-    memset(st, 0, sizeof(*st));
-    st->drop_threshold = base_min * 0.8;      /* 80% of minimum threshold */
-    st->recovery_threshold = base_min * 1.5;  /* 150% of minimum threshold */
-    st->dwell_time_required_ns = dwell_ns > 0 ? dwell_ns : 500000000ULL; /* 500ms default */
-    st->stable_since_ns = 0;
-    st->current_state = 0; /* Nominal */
+    if (st) *st = (FlowSchmittTrigger){.drop_threshold = base_min * 0.8, .recovery_threshold = base_min * 1.5,
+                                      .dwell_time_required_ns = dwell_ns ? dwell_ns : 500000000ULL};
 }
 
-int flow_schmitt_trigger_update(FlowSchmittTrigger *st, double current_val, uint64_t current_time_ns, int *state_changed_out) {
-    if (st == NULL) return 0;
-    if (state_changed_out) *state_changed_out = 0;
-
-    if (st->current_state == 0) {
-        /* Nominal Mode -> Check for Drop Threshold breach */
-        if (current_val < st->drop_threshold) {
-            st->current_state = 1; /* Instant switch to survival mode */
-            st->stable_since_ns = 0;
-            if (state_changed_out) *state_changed_out = 1;
+int flow_schmitt_trigger_update(FlowSchmittTrigger *st, double val, uint64_t now_ns, int *changed) {
+    if (!st) return 0;
+    if (changed) *changed = 0;
+    if (!st->current_state) {
+        if (val < st->drop_threshold) { st->current_state = 1; st->stable_since_ns = 0; if (changed) *changed = 1; }
+    } else if (val >= st->recovery_threshold) {
+        if (!st->stable_since_ns) st->stable_since_ns = now_ns;
+        else if (now_ns - st->stable_since_ns >= st->dwell_time_required_ns) {
+            st->current_state = 0; st->stable_since_ns = 0; if (changed) *changed = 1;
         }
-    } else {
-        /* Survival Mode -> Check for sustained recovery above upper threshold */
-        if (current_val >= st->recovery_threshold) {
-            if (st->stable_since_ns == 0) {
-                st->stable_since_ns = current_time_ns;
-            } else if ((current_time_ns - st->stable_since_ns) >= st->dwell_time_required_ns) {
-                st->current_state = 0; /* Recover back to nominal mode after dwell period */
-                st->stable_since_ns = 0;
-                if (state_changed_out) *state_changed_out = 1;
-            }
-        } else {
-            /* Flapping reset */
-            st->stable_since_ns = 0;
-        }
-    }
-
+    } else st->stable_since_ns = 0;
     return st->current_state;
 }
-

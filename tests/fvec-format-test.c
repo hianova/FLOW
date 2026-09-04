@@ -3,13 +3,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 int main(void) {
     printf("==================================================================================\n");
     printf("  🧪 Running .fvec Binary Format, 1024-B Header & CRC32 Integrity Tests\n");
     printf("==================================================================================\n");
 
-    const char *test_path = "/tmp/test_model.fvec";
+    char test_path[256];
+    snprintf(test_path, sizeof(test_path), "/tmp/test_model_%d.fvec", (int)getpid());
 
     /* 1. Construct Header & Payload */
     FlowVecHeader hdr_in;

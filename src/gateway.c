@@ -104,59 +104,36 @@ int flow_gateway_adapt_entropy(FlowGateway *gw, const FlowTrafficEntropy *entrop
         struct timespec t_start, t_end;
         clock_gettime(CLOCK_MONOTONIC, &t_start);
 
-        const FlowPrimitiveDriver *next_driver = NULL;
-        FlowProtocolKind proto_kind = FLOW_PROTO_HTTP1;
-        uint32_t streams = 1;
-        uint32_t timeout = gw->config.normal_timeout_ms;
-        int hardened = 0;
+        typedef struct {
+            const FlowPrimitiveDriver *(*driver_fn)(void);
+            FlowProtocolKind proto_kind;
+            uint32_t streams;
+            int is_hardened;
+        } FlowGatewayModeDesc;
 
-        switch (target) {
-            case FLOW_GATEWAY_MODE_HTTP1_STATIC:
-                next_driver = flow_primitive_http1_driver();
-                proto_kind = FLOW_PROTO_HTTP1;
-                streams = 1;
-                timeout = gw->config.normal_timeout_ms;
-                hardened = 0;
-                break;
-            case FLOW_GATEWAY_MODE_HTTP2_BURST:
-                next_driver = flow_primitive_http2_driver();
-                proto_kind = FLOW_PROTO_HTTP2;
-                streams = 128;
-                timeout = gw->config.normal_timeout_ms;
-                hardened = 0;
-                break;
-            case FLOW_GATEWAY_MODE_QUIC_LOSSY:
-                next_driver = flow_primitive_quic_driver();
-                proto_kind = FLOW_PROTO_QUIC_HTTP3;
-                streams = 512;
-                timeout = gw->config.normal_timeout_ms;
-                hardened = 0;
-                break;
-            case FLOW_GATEWAY_MODE_DDOS_HARDENED:
-                next_driver = (entropy->packet_loss_permille >= gw->config.loss_threshold_permille)
-                                ? flow_primitive_quic_driver()
-                                : flow_primitive_http2_driver();
-                proto_kind = (entropy->packet_loss_permille >= gw->config.loss_threshold_permille)
-                                ? FLOW_PROTO_QUIC_HTTP3
-                                : FLOW_PROTO_HTTP2;
-                streams = 128;
-                timeout = gw->config.hardened_timeout_ms; /* 50ms aggressive clamp */
-                hardened = 1;
-                break;
-            case FLOW_GATEWAY_MODE_GRPC_RPC:
-                next_driver = flow_primitive_grpc_driver();
-                proto_kind = FLOW_PROTO_GRPC;
-                streams = 256;
-                timeout = gw->config.normal_timeout_ms;
-                hardened = 0;
-                break;
-            case FLOW_GATEWAY_MODE_WEBSOCKET_PUSH:
-                next_driver = flow_primitive_websocket_driver();
-                proto_kind = FLOW_PROTO_WEBSOCKET;
-                streams = 512;
-                timeout = gw->config.normal_timeout_ms;
-                hardened = 0;
-                break;
+        static const FlowGatewayModeDesc MODE_DESCS[6] = {
+            [FLOW_GATEWAY_MODE_HTTP1_STATIC]   = { flow_primitive_http1_driver,     FLOW_PROTO_HTTP1,      1,   0 },
+            [FLOW_GATEWAY_MODE_HTTP2_BURST]    = { flow_primitive_http2_driver,     FLOW_PROTO_HTTP2,      128, 0 },
+            [FLOW_GATEWAY_MODE_QUIC_LOSSY]     = { flow_primitive_quic_driver,      FLOW_PROTO_QUIC_HTTP3, 512, 0 },
+            [FLOW_GATEWAY_MODE_DDOS_HARDENED]  = { NULL,                            FLOW_PROTO_NONE,       128, 1 },
+            [FLOW_GATEWAY_MODE_GRPC_RPC]       = { flow_primitive_grpc_driver,      FLOW_PROTO_GRPC,       256, 0 },
+            [FLOW_GATEWAY_MODE_WEBSOCKET_PUSH] = { flow_primitive_websocket_driver, FLOW_PROTO_WEBSOCKET,  512, 0 },
+        };
+
+        const FlowGatewayModeDesc *desc = &MODE_DESCS[(size_t)target < 6 ? target : 0];
+        int hardened = desc->is_hardened;
+        uint32_t timeout = hardened ? gw->config.hardened_timeout_ms : gw->config.normal_timeout_ms;
+        uint32_t streams = desc->streams;
+        const FlowPrimitiveDriver *next_driver;
+        FlowProtocolKind proto_kind;
+
+        if (target == FLOW_GATEWAY_MODE_DDOS_HARDENED) {
+            int lossy = (entropy->packet_loss_permille >= gw->config.loss_threshold_permille);
+            next_driver = lossy ? flow_primitive_quic_driver() : flow_primitive_http2_driver();
+            proto_kind = lossy ? FLOW_PROTO_QUIC_HTTP3 : FLOW_PROTO_HTTP2;
+        } else {
+            next_driver = desc->driver_fn ? desc->driver_fn() : flow_primitive_http1_driver();
+            proto_kind = desc->proto_kind;
         }
 
         uint64_t genome = 0;
@@ -345,22 +322,15 @@ void flow_gateway_get_stats(const FlowGateway *gw, FlowGatewayStats *stats_out) 
 }
 
 const char *flow_gateway_mode_name(FlowGatewayMode mode) {
-    switch (mode) {
-        case FLOW_GATEWAY_MODE_HTTP1_STATIC:
-            return "HTTP/1.1 Static (Keep-Alive)";
-        case FLOW_GATEWAY_MODE_HTTP2_BURST:
-            return "HTTP/2 Burst (Multiplexing)";
-        case FLOW_GATEWAY_MODE_QUIC_LOSSY:
-            return "HTTP/3 QUIC (Loss-Resistant UDP)";
-        case FLOW_GATEWAY_MODE_DDOS_HARDENED:
-            return "SMT Hardened DDoS (Slowloris Anti-Flood)";
-        case FLOW_GATEWAY_MODE_GRPC_RPC:
-            return "gRPC Microservice RPC (HTTP/2 Framed)";
-        case FLOW_GATEWAY_MODE_WEBSOCKET_PUSH:
-            return "WebSocket Duplex Push (RFC 6455)";
-        default:
-            return "Unknown";
-    }
+    static const char *const s_mode_names[6] = {
+        "HTTP/1.1 Static (Keep-Alive)",
+        "HTTP/2 Burst (Multiplexing)",
+        "HTTP/3 QUIC (Loss-Resistant UDP)",
+        "SMT Hardened DDoS (Slowloris Anti-Flood)",
+        "gRPC Microservice RPC (HTTP/2 Framed)",
+        "WebSocket Duplex Push (RFC 6455)"
+    };
+    return ((size_t)mode < 6) ? s_mode_names[mode] : "Unknown";
 }
 
 int flow_gateway_cache_lookup(FlowGateway *gw, uint64_t key_hash, void *buf_out, size_t *len_out) {
