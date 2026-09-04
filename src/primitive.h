@@ -18,7 +18,7 @@ extern "C" {
  * ============================================================================
  * 
  * Philosophy:
- * - FLOW Core is the Brain (1-Bit Chaos Annealing + SMT Supreme Court).
+ * - FLOW Core is the Brain (BMF Optimization + SMT Supreme Court).
  * - .fvec is the Long-Term Memory (Learned architecture weights / archetypes).
  * - Primitive Driver is the Sensory Organs & Muscles (Physical Hardware Drivers).
  * 
@@ -46,7 +46,7 @@ typedef struct {
 
 /* Execution Context passed during dynamic runtime activation */
 typedef struct {
-    uint64_t active_genome;         /* Configuration selected by 1-Bit Chaos engine */
+    uint64_t active_genome;         /* Configuration selected by BMF Engine */
     void *user_data;                /* IO buffer, socket, or descriptor */
     size_t data_len;                /* Payload size in bytes */
     uint64_t flags;                 /* Runtime operational flags */

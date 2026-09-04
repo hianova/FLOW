@@ -56,7 +56,7 @@ int main(void) {
     CHECK(passed_count + pruned_count == 1000);
 
     /* 2. End-to-End Search with Epigenetic Environmental Mask */
-    FlowChaosAnnealConfig anneal_cfg = {
+    FlowBMFConfig anneal_cfg = {
         .initial_temperature = 80.0,
         .cooling_decay = 0.98,
         .plateau_stagnation_limit = 6,

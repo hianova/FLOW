@@ -77,7 +77,7 @@ void flow_topology_build_codebase_graph(FlowTopologyGraph *graph) {
     uint32_t n_doc_ch01 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch01_what_is_flow", "book", 0, 4);
     uint32_t n_doc_ch02 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch02_intent_vs_implementation", "book", 0, 4);
     uint32_t n_doc_ch03 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch03_topology_graph", "book", 0, 4);
-    uint32_t n_doc_ch04 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch04_1bit_chaos_engine", "book", 0, 4);
+    uint32_t n_doc_ch04 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch04_bitmanifold_engine", "book", 0, 4);
     uint32_t n_doc_ch05 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch05_smt_formal_verification", "book", 0, 4);
     uint32_t n_doc_ch06 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch06_jit_and_geometric_morphing", "book", 0, 4);
     uint32_t n_doc_ch07 = flow_topology_add_node(graph, FLOW_NODE_DOC_CHAPTER, "ch07_qsbr_lockfree_hotswap", "book", 0, 4);

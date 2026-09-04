@@ -52,7 +52,7 @@ int main(void) {
     printf("    -> System Alert: %s\n", diag_oom);
     printf("    -> Injected Antibody Model: %s (Confidence: %.0f%%)\n", rec_oom->header.filepath, conf_oom * 100.0);
     printf("    -> SMT Proof: %s\n", rec_oom->header.smt_signature);
-    printf("    ✓ PASSED (Crisis bypassed chaos tax via instant gene prescription)\n");
+    printf("    ✓ PASSED (Crisis bypassed BMF tax via instant gene prescription)\n");
 
     /* Step 5: Scenario B: Human Prompt-to-Vector Query (HFT Trading) */
     printf("\n  [Scenario B: Natural Language Prompt-to-Vector Query]\n");

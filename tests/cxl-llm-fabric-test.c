@@ -84,14 +84,14 @@ int main(void) {
     /* ---------------------------------------------------------------------------------- */
     /* STAGE 5: 1-Bit Chaotic KV-Cache Attention Entropy Eviction                        */
     /* ---------------------------------------------------------------------------------- */
-    FLOW_STAGE_BEGIN(5, "1-Bit Chaos KV-Cache Eviction & CXL Demotion");
+    FLOW_STAGE_BEGIN(5, "BMF KV-Cache Eviction & CXL Demotion");
     /* Simulate High Memory Pressure (90%) */
-    int evicted = flow_cxl_adapt_eviction_chaos(&fabric, 0.90);
+    int evicted = flow_cxl_adapt_eviction_bmf(&fabric, 0.90);
     FLOW_ASSERT_TRUE(evicted > 0);
     FLOW_ASSERT_TRUE(fabric.total_chaotic_evictions > 0);
     FLOW_ASSERT_TRUE(fabric.count_cxl >= (size_t)evicted);
 
-    printf("  ✓ Memory Pressure 90%%: 1-Bit Chaos evicted %d low-entropy KV pages from HBM to Remote CXL Pool.\n", evicted);
+    printf("  ✓ Memory Pressure 90%%: BMF evicted %d low-entropy KV pages from HBM to Remote CXL Pool.\n", evicted);
     printf("  ✓ Active HBM count reduced to %zu/%zu, freeing space for active generation tokens.\n\n",
            fabric.count_hbm, fabric.cap_hbm);
 

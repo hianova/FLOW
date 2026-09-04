@@ -89,7 +89,7 @@ int main(void) {
     FLOW_ASSERT_EQ(res.bytes_transferred, sizeof(h2_frame));
     FLOW_ASSERT_EQ(res.zero_copy_active, 1);
 
-    printf("  ✓ 1-Bit Chaos morphed to HTTP/2 Multiplexing under 85k QPS burst. Driver: %s.\n\n",
+    printf("  ✓ BMF morphed to HTTP/2 Multiplexing under 85k QPS burst. Driver: %s.\n\n",
            gw.current_driver->driver_name);
 
     /* ---------------------------------------------------------------------------------- */
@@ -116,7 +116,7 @@ int main(void) {
     FLOW_ASSERT_EQ(res.status_code, 200);
     FLOW_ASSERT_TRUE(res.latency_cycles <= 50);
 
-    printf("  ✓ 1-Bit Chaos morphed to HTTP/3 QUIC Datagram under 5%% packet loss. Zero Head-of-Line Blocking.\n\n");
+    printf("  ✓ BMF morphed to HTTP/3 QUIC Datagram under 5%% packet loss. Zero Head-of-Line Blocking.\n\n");
 
     /* ---------------------------------------------------------------------------------- */
     /* STAGE 5: Mode 4 - Slowloris DDoS Attack & SMT Hard Polytope Defense                */

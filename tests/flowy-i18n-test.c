@@ -43,12 +43,12 @@ int main(void) {
     CHECK(a_zh_qsbr.primary_module != NULL && strcmp(a_zh_qsbr.primary_module->module_id, "reload") == 0);
     CHECK(a_cn_qsbr.primary_module != NULL && strcmp(a_cn_qsbr.primary_module->module_id, "reload") == 0);
 
-    /* (b) BitSpace / 1-Bit Chaos module */
-    FlowyIntrospectiveAnswer a_en_chaos, a_zh_chaos;
-    CHECK(flowy_query_codebase_lang(&graph, "1-bit chaos mutation mask canvas", FLOW_LANG_EN, &a_en_chaos) == 1);
-    CHECK(flowy_query_codebase_lang(&graph, "1-bit 混沌退火與遮罩畫布", FLOW_LANG_ZH, &a_zh_chaos) == 1);
-    CHECK(strcmp(a_en_chaos.primary_module->module_id, "bitspace") == 0);
-    CHECK(strcmp(a_zh_chaos.primary_module->module_id, "bitspace") == 0);
+    /* (b) BitSpace / BMF module */
+    FlowyIntrospectiveAnswer a_en_BMF, a_zh_BMF;
+    CHECK(flowy_query_codebase_lang(&graph, "BMF mutation mask canvas", FLOW_LANG_EN, &a_en_BMF) == 1);
+    CHECK(flowy_query_codebase_lang(&graph, "BMF 最佳化與遮罩畫布", FLOW_LANG_ZH, &a_zh_BMF) == 1);
+    CHECK(strcmp(a_en_BMF.primary_module->module_id, "bitspace") == 0);
+    CHECK(strcmp(a_zh_BMF.primary_module->module_id, "bitspace") == 0);
 
     /* (c) SMT Formal Verification module */
     FlowyIntrospectiveAnswer a_en_smt, a_zh_smt;
@@ -98,7 +98,7 @@ int main(void) {
     CHECK(mem_zh != NULL);
     CHECK(flowy_show_book_lang("4", FLOW_LANG_ZH, mem_zh) == 1);
     fclose(mem_zh);
-    CHECK(strstr(buf_zh, "第四章：1-Bit 混沌退火") != NULL);
+    CHECK(strstr(buf_zh, "第四章：BMF 最佳化") != NULL);
     CHECK(strstr(buf_zh, "混沌") != NULL);
 
     FILE *mem_en = fmemopen(buf_en, sizeof(buf_en), "w");

@@ -192,7 +192,7 @@ int main(void) {
     }
 
     /* ========================================================================= */
-    /* 6. Mask Superposition & 1-Bit Chaos Early Pruning Execution               */
+    /* 6. Mask Superposition & BMF Early Pruning Execution               */
     /* ========================================================================= */
     {
         SemanticIR ir;
@@ -234,7 +234,7 @@ int main(void) {
         CHECK(valid_count + pruned_count == 500);
 
         /* Perform end-to-end configured search with superposed canvas */
-        FlowChaosAnnealConfig cfg = {
+        FlowBMFConfig cfg = {
             .initial_temperature = 90.0,
             .cooling_decay = 0.98,
             .plateau_stagnation_limit = 5,

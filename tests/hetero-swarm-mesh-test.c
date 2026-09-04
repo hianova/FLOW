@@ -90,20 +90,20 @@ int main(void) {
     printf("  ✓ Failover Steering: Node 3 hit 100%% queue -> instantly failed over to Node 2 (0 drop).\n\n");
 
     /* ---------------------------------------------------------------------------------- */
-    /* STAGE 4: 1-Bit Chaos Ingress Concurrency Adaptation under Mesh Backpressure        */
+    /* STAGE 4: BMF Ingress Concurrency Adaptation under Mesh Backpressure        */
     /* ---------------------------------------------------------------------------------- */
-    FLOW_STAGE_BEGIN(4, "1-Bit Chaos Subspace Concurrency Auto-Throttling");
+    FLOW_STAGE_BEGIN(4, "BMF Subspace Concurrency Auto-Throttling");
     uint64_t ingress_genome = 0;
     /* Ingress begins in full-throttle mode (HTTP/3, 512 streams) */
     flow_protocol_encode_genome(FLOW_PROTO_QUIC_HTTP3, 512, 4096, 1, &ingress_genome);
 
     /* When mesh aggregate backpressure exceeds threshold (both compute nodes stressed),
-     * 1-Bit Chaos flips concurrency mask bit to throttle streams to safe capacity */
+     * BMF transitions concurrency mask bit to throttle streams to safe capacity */
     uint64_t throttled_genome = ingress_genome ^ (1ULL << 8); /* Flip stream concurrency bit */
     uint32_t active_streams = 0;
     flow_protocol_decode_genome(throttled_genome, NULL, &active_streams, NULL, NULL);
     FLOW_ASSERT_TRUE(active_streams < 512);
-    printf("  ✓ 1-Bit Chaos Reaction: Ingress autonomously throttled concurrency (512 -> %u streams) on fleet backpressure.\n\n",
+    printf("  ✓ BMF Reaction: Ingress autonomously throttled concurrency (512 -> %u streams) on fleet backpressure.\n\n",
            active_streams);
 
     /* ---------------------------------------------------------------------------------- */

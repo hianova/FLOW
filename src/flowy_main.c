@@ -522,7 +522,7 @@ int main(int argc, char **argv) {
                         printf("  🌙 FLOW Nightly Annealing Daemon (Background Architecture Optimizer)\n");
                         printf("  Target Spec:       %s\n", target_spec);
             printf("  Iterations:        %zu (Seed: %u)\n", anneal_iters, anneal_seed);
-            printf("  Convergence:       1-Bit Chaos Annealing Converged (Initial: %.2f -> Optimized: %.2f)\n",
+            printf("  Convergence:       BMF Optimization Converged (Initial: %.2f -> Optimized: %.2f)\n",
                    initial_energy, best_plan.eval.energy);
             printf("  SMT Supreme Court: 4/4 Theorems Verified (UNSAT Zero-Defect Soundness)\n");
             printf("  Crystallized To:   %s\n", out_fvec);

@@ -237,7 +237,7 @@ FlowSecurityOutcome flow_security_check_composition_gate(
 }
 
 /* ========================================================================= */
-/* Compositional 1-Bit Chaos Fuzzer & Auditor                                */
+/* Compositional BMF Fuzzer & Auditor                                */
 /* ========================================================================= */
 
 #include "bitspace.h"
@@ -511,7 +511,7 @@ void flow_security_mtd_report(const FlowMTDLayout *layout, FILE *out) {
 }
 
 /* ========================================================================= */
-/* Bounded Chaos Compliance Mode Implementation                             */
+/* Bounded BMF Compliance Mode Implementation                             */
 /* ========================================================================= */
 
 uint64_t flow_security_get_compliance_mask(FlowComplianceMode mode,

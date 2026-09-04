@@ -8,13 +8,13 @@
 #include <string.h>
 #include <math.h>
 
-#define CHECK(cond) if (!(cond)) { fprintf(stderr, "two-tier-chaos-test failed at %s:%d: %s\n", __FILE__, __LINE__, #cond); exit(1); }
+#define CHECK(cond) if (!(cond)) { fprintf(stderr, "two-tier-BMF-test failed at %s:%d: %s\n", __FILE__, __LINE__, #cond); exit(1); }
 
 /*
  * Scientific Comparative Proof:
  * 1. Pure Greedy 1-Bit (No Biasing) -> 100% Trapped in Saddle Trap
  * 2. Hardcoded 2-Tier Nested Loop -> 75% Escape Rate
- * 3. Continuous Probability-Biased Single-Loop 1-Bit Chaos -> 99% Escape Rate
+ * 3. Continuous Probability-Biased Single-Loop BMF -> 99% Escape Rate
  *    (Emergent Multi-Scale Weather & Attractor Penetration)
  */
 
@@ -152,6 +152,6 @@ int main(void) {
     CHECK(hardcoded_2tier_escapes >= 70);           /* Hardcoded 2-tier achieves ~75% */
     CHECK(biased_1bit_escapes >= 95);               /* Single-loop probability biasing achieves >= 95% */
 
-    printf("\nTWO_TIER_CHAOS_TEST=passed probability_biasing_superiority=verified emergent_multiscale=sound monte_carlo_seeds=100\n");
+    printf("\nTWO_TIER_BMF_TEST=passed probability_biasing_superiority=verified emergent_multiscale=sound monte_carlo_seeds=100\n");
     return 0;
 }

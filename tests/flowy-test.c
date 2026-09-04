@@ -38,11 +38,11 @@ int main(void) {
     CHECK(strstr(ans_qsbr.explanation, "src/reload.h") != NULL);
 
     /* Query: 1-Bit chaotic search & mask canvas */
-    FlowyIntrospectiveAnswer ans_chaos;
-    CHECK(flowy_query_codebase(&graph, "1-bit chaos mutation mask canvas", &ans_chaos) == 1);
-    CHECK(ans_chaos.primary_module != NULL);
-    CHECK(strcmp(ans_chaos.primary_module->module_id, "bitspace") == 0);
-    CHECK(strstr(ans_chaos.explanation, "BitSpace") != NULL);
+    FlowyIntrospectiveAnswer ans_BMF;
+    CHECK(flowy_query_codebase(&graph, "BMF mutation mask canvas", &ans_BMF) == 1);
+    CHECK(ans_BMF.primary_module != NULL);
+    CHECK(strcmp(ans_BMF.primary_module->module_id, "bitspace") == 0);
+    CHECK(strstr(ans_BMF.explanation, "BitSpace") != NULL);
 
     /* Query: SMT mathematical proofs */
     FlowyIntrospectiveAnswer ans_smt;

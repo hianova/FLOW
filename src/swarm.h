@@ -40,7 +40,7 @@ typedef struct {
     uint64_t rng_state;
 } FlowSwarmCluster;
 
-/* Swarm Intelligence & Federated Chaos APIs */
+/* Swarm Intelligence & Federated BMF APIs */
 int flow_swarm_init(FlowSwarmCluster *cluster, const FlowBitSpace *space,
                     size_t particle_count, uint32_t base_seed);
 

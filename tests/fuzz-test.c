@@ -102,7 +102,7 @@ int main(int argc, char **argv) {
         LLVMFuzzerTestOneInput((const uint8_t *)corpus[i], strlen(corpus[i]));
     }
 
-    /* 2. Automated Pseudo-Random Chaos Mutation Engine (1,000 randomized streams) */
+    /* 2. Automated Pseudo-Random BMF Mutation Engine (1,000 randomized streams) */
     uint64_t rng = UINT64_C(0x1337c0de);
     uint8_t buffer[512];
     for (int run = 0; run < 1000; ++run) {

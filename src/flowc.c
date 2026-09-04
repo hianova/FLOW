@@ -285,7 +285,7 @@ int flowc_main(int argc, char **argv) {
         }
     }
 
-    /* Apply Pre-baked .fvec Architecture Feature Model (Skip Chaos Search) */
+    /* Apply Pre-baked .fvec Architecture Feature Model (Skip BMF Search) */
     if (apply_fvec_path != NULL) {
         FlowVecHeader fvec_hdr;
         FlowVecPayload fvec_payload;
@@ -325,7 +325,7 @@ int flowc_main(int argc, char **argv) {
                (unsigned long long)plan.genome, component ? component->id : "(auto)",
                plan.eval.energy, fvec_hdr.smt_signature);
     } else if (use_search) {
-        /* 1-Bit Chaos Search Engine with Multimodal Domain Masks */
+        /* BMF Search Engine with Multimodal Domain Masks */
         search = search_best(&ir, iterations, seed, use_benchmark,
                              profile.available ? &profile : NULL);
         component = search.component;

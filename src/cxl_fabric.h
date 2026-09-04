@@ -98,8 +98,8 @@ int flow_cxl_access_kv_page(FlowCxlFabric *fabric,
 /* QSBR Zero-Downtime Page Migration Across Tiers */
 int flow_cxl_migrate_page(FlowCxlFabric *fabric, uint64_t page_id, FlowCxlTier target_tier);
 
-/* 1-Bit Chaos Dynamic KV Eviction / Demotion under Memory Pressure */
-int flow_cxl_adapt_eviction_chaos(FlowCxlFabric *fabric, double memory_pressure_ratio);
+/* BMF Dynamic KV Eviction / Demotion under Memory Pressure */
+int flow_cxl_adapt_eviction_bmf(FlowCxlFabric *fabric, double memory_pressure_ratio);
 
 /* SMT Formal Verification of Memory Quotas and Multi-Session Non-Aliasing */
 FlowSMTResult flow_cxl_verify_smt(const FlowCxlFabric *fabric,

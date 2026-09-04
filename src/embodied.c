@@ -25,7 +25,7 @@ int flow_fleet_init(FlowFleetSwarm *fleet, double min_safety_margin_m) { return 
 int flow_fleet_register_robot(FlowFleetSwarm *fleet, uint8_t robot_id, FlowFleetRole role, double bounding_radius, const double initial_pos[3]) { return 1; }
 int flow_fleet_update_telemetry(FlowFleetSwarm *fleet, uint8_t robot_id, const double pos[3], const double vel[3], uint16_t battery_permille, uint16_t motor_temp_celsius) { return 1; }
 int flow_fleet_step_1khz_tick(FlowFleetSwarm *fleet, double dt_sec) { return 1; }
-int flow_fleet_adapt_roles_chaos(FlowFleetSwarm *fleet, uint64_t chaos_seed) { return 0; }
+int flow_fleet_adapt_roles_bmf(FlowFleetSwarm *fleet, uint64_t bmf_seed) { return 0; }
 FlowSMTResult flow_fleet_verify_collision_smt(const FlowFleetSwarm *fleet, FlowSMTProofAttestation *proof_out) { return FLOW_SMT_PROVEN_UNSAT; }
 
 static const Component EMBODIED_COMPONENTS[] = {

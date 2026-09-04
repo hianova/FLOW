@@ -145,7 +145,7 @@ int flow_adaptive_metrics(const FlowAdaptiveController *controller,
                           FlowAdaptiveMetrics *metrics_out);
 const char *flow_adaptive_status_name(FlowAdaptiveStatus status);
 
-/* Dynamic Telemetry Bias Generator (Soft/Dynamic Chaos Biasing) */
+/* Dynamic Telemetry Bias Generator (Soft/Dynamic BMF Biasing) */
 uint64_t flow_adaptive_telemetry_bias_from_pmu(const FlowPMUTelemetry *pmu,
                                                int write_heavy_state,
                                                const FlowPlanDimensionSet *dims);

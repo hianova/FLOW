@@ -459,7 +459,7 @@ void flow_fvec_inspect(const FlowVecHeader *hdr, const FlowVecPayload *payload, 
     fprintf(out, "│ Energy Score:     %-52.2f │\n", hdr->energy_score);
     fprintf(out, "│ File Path:        %-52s │\n", hdr->filepath[0] ? hdr->filepath : "(in-memory)");
     fprintf(out, "├────────────────────────────────────────────────────────────────────────┤\n");
-    fprintf(out, "│ 🧬 Binary Payload (1-Bit Chaos & JIT Engine Parameters):               │\n");
+    fprintf(out, "│ 🧬 Binary Payload (BMF & JIT Engine Parameters):               │\n");
     fprintf(out, "│   Pure Genome:    0x%016llx                             │\n", (unsigned long long)payload->pure_genome);
     fprintf(out, "│   Hard Mask:      0x%016llx (1-cycle bitwise pruning)   │\n", (unsigned long long)payload->hard_composite_mask);
     fprintf(out, "│   Soft Bias:      0x%016llx (Boltzmann manifold bias)   │\n", (unsigned long long)payload->soft_composite_bias);

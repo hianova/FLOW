@@ -95,16 +95,16 @@ int main(void) {
     flow_fleet_update_telemetry(&fleet, 2, safe_pos2, NULL, 900, 40);
 
     /* ---------------------------------------------------------------------------------- */
-    /* STAGE 4: 1-Bit Chaos Autonomous Role Reassignment (Battery / Thermal Degrade)      */
+    /* STAGE 4: BMF Autonomous Role Reassignment (Battery / Thermal Degrade)      */
     /* ---------------------------------------------------------------------------------- */
-    FLOW_STAGE_BEGIN(4, "1-Bit Chaos Dynamic Role Reassignment");
+    FLOW_STAGE_BEGIN(4, "BMF Dynamic Role Reassignment");
     /* Robot 1 (Scout) battery collapses to 10% (100 permille) and motor overheats to 88C */
     flow_fleet_update_telemetry(&fleet, 1, NULL, NULL, 100, 88);
     FLOW_ASSERT_EQ(fleet.robots[0].role, FLOW_FLEET_ROLE_SCOUT);
     FLOW_ASSERT_EQ(fleet.robots[5].role, FLOW_FLEET_ROLE_RELAY);
 
-    /* Trigger 1-Bit Chaos Role Reallocation */
-    int reallocated = flow_fleet_adapt_roles_chaos(&fleet, 42);
+    /* Trigger BMF Role Reallocation */
+    int reallocated = flow_fleet_adapt_roles_bmf(&fleet, 42);
     FLOW_ASSERT_EQ(reallocated, 1);
     FLOW_ASSERT_EQ(fleet.robots[0].role, FLOW_FLEET_ROLE_IDLE);  /* Degraded robot safely set to IDLE */
     FLOW_ASSERT_EQ(fleet.robots[5].role, FLOW_FLEET_ROLE_SCOUT); /* Healthy relay promoted to SCOUT */

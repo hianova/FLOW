@@ -951,7 +951,7 @@ double flow_bitspace_calculate_transition_penalty(const FlowTransitionCostModel 
 }
 
 int flow_bitspace_search_two_tier(const FlowBitSpace *space,
-                                  const FlowTwoTierChaosConfig *config,
+                                  const FlowTwoTierBMFConfig *config,
                                   uint32_t seed, int measured,
                                   const FlowTransitionCostModel *transition_model,
                                   FlowBitSearchResult *result_out) {
@@ -999,7 +999,7 @@ int flow_bitspace_search_two_tier(const FlowBitSpace *space,
         pareto_update_bitspace(result_out, &best_plan);
     }
 
-    /* Two-Tier Nested Chaos Engine Execution */
+    /* Two-Tier Nested bmf engine Execution */
     for (size_t macro = 0; macro < macro_cycles; ++macro) {
         /* Outer Tier: Macro Phase Jump / Correlated Multi-Bit Tunneling */
         if (macro > 0) {
@@ -1226,7 +1226,7 @@ int flow_bitspace_search_single_tier(const FlowBitSpace *space, size_t iteration
 
 int flow_bitspace_search_configured(const FlowBitSpace *space, size_t iterations, uint32_t seed,
                                     int measured, const FlowTransitionCostModel *transition_model,
-                                    const FlowChaosAnnealConfig *anneal_config,
+                                    const FlowBMFConfig *anneal_config,
                                     FlowBitSearchResult *result_out) {
     if (space == NULL || result_out == NULL || space->candidate_count == 0) return 0;
     memset(result_out, 0, sizeof(*result_out));
@@ -1385,7 +1385,7 @@ int flow_bitspace_search_configured(const FlowBitSpace *space, size_t iterations
 int flow_bitspace_search_adaptive(const FlowBitSpace *space, size_t iterations, uint32_t seed,
                                   int measured, const FlowTransitionCostModel *transition_model,
                                   FlowBitSearchResult *result_out) {
-    FlowChaosAnnealConfig config = {
+    FlowBMFConfig config = {
         .initial_temperature = 80.0,
         .cooling_decay = 0.98,
         .plateau_stagnation_limit = 6,

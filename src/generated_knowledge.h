@@ -94,7 +94,7 @@ static const FlowModuleKnowledge CODEBASE_KNOWLEDGE[] = {
     },
     {
         .module_id = "security",
-        .title = "Bounded Chaos Security & Moving Target Defense (MTD)",
+        .title = "Bounded BMF Security & Moving Target Defense (MTD)",
         .header_file = "src/security.h",
         .source_file = "src/security.c",
         .layer = 0,
@@ -106,7 +106,7 @@ static const FlowModuleKnowledge CODEBASE_KNOWLEDGE[] = {
     },
     {
         .module_id = "swarm",
-        .title = "Swarm Intelligence & Federated Chaos Search",
+        .title = "Swarm Intelligence & Federated BMF Search",
         .header_file = "src/swarm.h",
         .source_file = "src/swarm.c",
         .layer = 0,

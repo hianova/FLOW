@@ -228,7 +228,7 @@ int flow_fleet_update_telemetry(FlowFleetSwarm *fleet,
 int flow_fleet_step_1khz_tick(FlowFleetSwarm *fleet, double dt_sec);
 
 /* 1-Bit Chaotic Dynamic Role Reassignment: Automatically shifts role when battery < 20% or motor temp > 80C */
-int flow_fleet_adapt_roles_chaos(FlowFleetSwarm *fleet, uint64_t chaos_seed);
+int flow_fleet_adapt_roles_bmf(FlowFleetSwarm *fleet, uint64_t bmf_seed);
 
 /* SMT Formal Spatial Separation & Collision-Avoidance Polytope Theorem */
 FlowSMTResult flow_fleet_verify_collision_smt(const FlowFleetSwarm *fleet, FlowSMTProofAttestation *proof_out);

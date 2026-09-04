@@ -86,7 +86,7 @@ typedef struct {
 } FlowVecHeader;
 
 /* ------------------------------------------------------------------------- */
-/* 2. Binary Payload (Highly Compressed for 1-Bit Chaos & JIT Engine)        */
+/* 2. Binary Payload (Highly Compressed for BMF & JIT Engine)        */
 /* ------------------------------------------------------------------------- */
 typedef struct {
     double features[FLOW_VAULT_DIM];           /* 16-D normalized continuous embedding (128 bytes) */

@@ -28,8 +28,8 @@ extern "C" {
  * 
  * FlowGateway is an autopoietic topological organism:
  * - Mode 1 (Static Low-Load): HTTP/1.1 Keep-Alive + zero-alloc static memory.
- * - Mode 2 (100k QPS Burst):  1-Bit Chaos flip -> HTTP/2 binary multiplexing.
- * - Mode 3 (5% Lossy Network): 1-Bit Chaos flip -> HTTP/3 QUIC UDP datagrams.
+ * - Mode 2 (100k QPS Burst):  BMF transition -> HTTP/2 binary multiplexing.
+ * - Mode 3 (5% Lossy Network): BMF transition -> HTTP/3 QUIC UDP datagrams.
  * - Mode 4 (Slowloris DDoS):   SMT hard timeout tightening (30s -> 50ms) in 2.5us.
  * ============================================================================
  */

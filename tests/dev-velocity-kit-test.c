@@ -80,7 +80,7 @@ int main(void) {
         FLOW_ASSERT_TRUE(flow_str_starts_with("FLOW_CORE", "FLOW"));
         FLOW_ASSERT_FALSE(flow_str_starts_with("FLOW_CORE", "CORE"));
         FLOW_ASSERT_TRUE(flow_str_contains("BitManifold Architecture", "Manifold"));
-        FLOW_ASSERT_FALSE(flow_str_contains("BitManifold Architecture", "ChaosQuantum"));
+        FLOW_ASSERT_FALSE(flow_str_contains("BitManifold Architecture", "BMFQuantum"));
 
         printf("  ✓ Safe string bounded copying, formatting, and 64-bit hashing verified.\n\n");
     }

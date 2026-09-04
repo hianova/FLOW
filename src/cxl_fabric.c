@@ -17,7 +17,7 @@ int flow_cxl_access_kv_page(FlowCxlFabric *fabric, uint64_t page_id, void *data_
     return 1;
 }
 int flow_cxl_migrate_page(FlowCxlFabric *fabric, uint64_t page_id, FlowCxlTier target_tier) { return 1; }
-int flow_cxl_adapt_eviction_chaos(FlowCxlFabric *fabric, double memory_pressure_ratio) { return 0; }
+int flow_cxl_adapt_eviction_bmf(FlowCxlFabric *fabric, double memory_pressure_ratio) { return 0; }
 FlowSMTResult flow_cxl_verify_smt(const FlowCxlFabric *fabric, uint32_t active_sessions, FlowSMTProofAttestation *proof_out) {
     return FLOW_SMT_PROVEN_UNSAT;
 }

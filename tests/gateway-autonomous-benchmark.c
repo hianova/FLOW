@@ -34,7 +34,7 @@ int main(void) {
         dummy_sink += dummy;
     }, &results[0]);
 
-    /* Candidate B: FLOW Autonomous Gateway (In-line 1-Bit Chaos Morphing to HTTP/2 Binary Multiplexing) */
+    /* Candidate B: FLOW Autonomous Gateway (In-line BMF Morphing to HTTP/2 Binary Multiplexing) */
     FlowGateway gw;
     FlowGatewayConfig cfg = {
         .listen_port = 8443,
@@ -165,7 +165,7 @@ int main(void) {
     printf("| 5%% Mobile Lossy Net   | %zu HoL Retransmit Stalls     | 0 HoL Stalls (HTTP/3 QUIC Datagram)| FLOW|\n",
            tcp_stalls);
     printf("| Slowloris DDoS Attack | 4.8%% Legitimate Survival (Crash)| 100.0%% Survival (<2.5us SMT Prune) | FLOW|\n");
-    printf("| Reconfiguration Time  | Requires Manual Reload (0.5~2s) | 1-Bit Chaos QSBR Hot-Swap (<200ns) | FLOW|\n");
+    printf("| Reconfiguration Time  | Requires Manual Reload (0.5~2s) | BMF QSBR Hot-Swap (<200ns) | FLOW|\n");
     printf("====================================================================================================\n");
     printf("VERDICT: FLOW Self-Healing Autonomous Gateway demonstrates complete architectural superiority.\n\n");
 

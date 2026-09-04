@@ -14,7 +14,7 @@ static const ChapterInfo ALL_CHAPTERS[] = {
     {"ch01_what_is_flow.md", "Chapter 1: What is FLOW? (Paradigm Shift from Static Compiler to Living System)"},
     {"ch02_intent_vs_implementation.md", "Chapter 2: Intent vs. Implementation (.flow: We Declare Invariants, Not Logic)"},
     {"ch03_topology_graph.md", "Chapter 3: Topology Graph (Dimensionality Reduction into Computable Invariants)"},
-    {"ch04_1bit_chaos_engine.md", "Chapter 4: 1-Bit Chaos Annealing & BitManifold (BMF)"},
+    {"ch04_bitmanifold_engine.md", "Chapter 4: BMF Optimization & BitManifold (BMF)"},
     {"ch05_smt_formal_verification.md", "Chapter 5: Formal Supreme Court (SMT UNSAT Proofs & 1-Cycle Pruning)"},
     {"ch06_jit_and_geometric_morphing.md", "Chapter 6: JIT Emission & Geometric Morphing (AoS to SoA)"},
     {"ch07_memory_order_and_qsbr.md", "Chapter 7: Lock-Free QSBR & Atomic Hot-Swapping (Zero-Copy Immune System)"},
@@ -31,7 +31,7 @@ typedef struct {
 } ModuleMap;
 
 static const ModuleMap MODULE_BINDINGS[] = {
-    {"bitspace", "ch04_1bit_chaos_engine.md"},
+    {"bitspace", "ch04_bitmanifold_engine.md"},
     {"reload", "ch07_memory_order_and_qsbr.md"},
     {"orchestrator", "ch03_topology_graph.md"},
     {"embodied", "ch11_four_frontier_pillars.md"},
@@ -47,7 +47,7 @@ static const ModuleMap MODULE_BINDINGS[] = {
     {"fvec", "ch09_hardware_agnostic_genes.md"},
     {"hub", "ch09_hardware_agnostic_genes.md"},
     {"backend", "ch06_jit_and_geometric_morphing.md"},
-    {"primitive", "ch04_1bit_chaos_engine.md"}
+    {"primitive", "ch04_bitmanifold_engine.md"}
 };
 #define MODULE_COUNT (sizeof(MODULE_BINDINGS) / sizeof(MODULE_BINDINGS[0]))
 

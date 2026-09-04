@@ -106,7 +106,7 @@ static int muscle_memory_store_add(MuscleMemoryStore *store,
     /* Pre-converge and solve the pure state */
     flow_mask_canvas_compose(&e->archetype_ir, e->space.candidates[0], &e->space.candidate_dims[0], NULL, &e->pure_canvas);
 
-    FlowChaosAnnealConfig cfg = {
+    FlowBMFConfig cfg = {
         .initial_temperature = 80.0,
         .cooling_decay = 0.98,
         .plateau_stagnation_limit = 6,
@@ -176,10 +176,10 @@ static BenchmarkTrialResult run_trial(const MuscleMemoryStore *store,
     }
 
     /* ------------------------------------------------------------- */
-    /* APPROACH 1: 過去的 FLOW（動態推進 Canva / Cold-Start Chaos）    */
+    /* APPROACH 1: 過去的 FLOW（動態推進 Canva / Cold-Start BMF）    */
     /* ------------------------------------------------------------- */
     {
-        FlowChaosAnnealConfig old_cfg = {
+        FlowBMFConfig old_cfg = {
             .initial_temperature = 80.0,
             .cooling_decay = 0.98,
             .plateau_stagnation_limit = 6,
@@ -216,7 +216,7 @@ static BenchmarkTrialResult run_trial(const MuscleMemoryStore *store,
 
         const MuscleMemoryEntry *matched = &store->entries[best_idx];
 
-        /* Step 2: Instant Muscle Memory Warm-Start & Localized Micro-Chaos */
+        /* Step 2: Instant Muscle Memory Warm-Start & Localized Micro-BMF */
         FlowPlan baseline_plan;
         space.decode(&space, matched->pure_genome, &baseline_plan);
         space.evaluate(&space, &baseline_plan, &baseline_plan.eval);
@@ -226,7 +226,7 @@ static BenchmarkTrialResult run_trial(const MuscleMemoryStore *store,
             .baseline_plan = &baseline_plan
         };
 
-        FlowChaosAnnealConfig micro_cfg = {
+        FlowBMFConfig micro_cfg = {
             .initial_temperature = 10.0, /* Low-temperature localized refinement */
             .cooling_decay = 0.90,
             .plateau_stagnation_limit = 3,
@@ -258,7 +258,7 @@ int main(void) {
 
     printf("========================================================================================================\n");
     printf("   FLOW 實驗驗證：過去的動態推進 Canva vs 現在的 Canva 壓成 Vec (肌肉記憶)\n");
-    printf("   Scientific Empirical Proof: Cold-Start Chaos Tax vs Out-of-the-Box Muscle Memory\n");
+    printf("   Scientific Empirical Proof: Cold-Start BMF Tax vs Out-of-the-Box Muscle Memory\n");
     printf("========================================================================================================\n\n");
 
     /* Initialize Muscle Memory Database (Knowledge Vault) with Diverse Archetypes */
@@ -472,12 +472,12 @@ int main(void) {
         printf("  - ⚠️ 邊界風險警告：若在此情境盲目套用肌肉記憶，將強套多執行緒原型到單執行緒 IR，導致 SMT 結構性駁回！\n");
         printf("  - 🛡️ FLOW 雙軌架構保護 (Cognitive Switch)：\n");
         printf("    1. 判定 Sim < 0.70 -> 判定為「前所未見的全新異質流形 (Novel Paradigm Shift)」\n");
-        printf("    2. 自動啟動「1-Bit 混沌開拓 (Unconstrained Chaos Discovery)」從零現場解題\n");
+        printf("    2. 自動啟動「1-Bit 混沌開拓 (Unconstrained BMF Discovery)」從零現場解題\n");
 
         uint64_t t0 = audit_time_ns();
         FlowBitSpace space;
         flow_bitspace_init_for_ir(&ir_novel, &space);
-        FlowChaosAnnealConfig cold_cfg = {
+        FlowBMFConfig cold_cfg = {
             .initial_temperature = 80.0,
             .cooling_decay = 0.98,
             .plateau_stagnation_limit = 6,

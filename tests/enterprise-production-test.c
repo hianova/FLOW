@@ -150,7 +150,7 @@ int main(void) {
     CHECK(out == 105); /* golden_unit: 5 + 100 = 105 */
 
     /* ===================================================================== */
-    /* 3. Test Bounded Chaos & Production Compliance Mask                    */
+    /* 3. Test Bounded BMF & Production Compliance Mask                    */
     /* ===================================================================== */
     FlowPlanDimensionSet dims;
     dims.count = 4;

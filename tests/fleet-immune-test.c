@@ -56,12 +56,12 @@ int main(void) {
     /* --------------------------------------------------------------------- */
     printf("--- [Phase 1: Patient Zero (Node 0) Novel Attack Emergence] ---\n");
     printf("  * Node 0 suffers an unclassified Slowloris attack (Socket saturation, high miss rate).\n");
-    printf("  * No existing antibody in Node 0's local vault. 1-Bit Chaos activates from scratch.\n");
+    printf("  * No existing antibody in Node 0's local vault. BMF activates from scratch.\n");
 
     uint64_t t0 = timer_now_ns();
 
-    /* Node 0 runs full deliberative chaos search (Prefrontal Cortex) */
-    FlowChaosAnnealConfig chaos_cfg = {
+    /* Node 0 runs full deliberative BMF search (Prefrontal Cortex) */
+    FlowBMFConfig bmf_cfg = {
         .initial_temperature = 80.0,
         .cooling_decay = 0.98,
         .plateau_stagnation_limit = 6,
@@ -69,13 +69,13 @@ int main(void) {
         .use_mask_canvas = 0
     };
     FlowBitSearchResult patient_zero_res;
-    CHECK(flow_bitspace_search_configured(&space, 200, 42, 0, NULL, &chaos_cfg, &patient_zero_res));
+    CHECK(flow_bitspace_search_configured(&space, 200, 42, 0, NULL, &bmf_cfg, &patient_zero_res));
     CHECK(patient_zero_res.best_plan.eval.hard_gate_passed);
 
     uint64_t t1 = timer_now_ns();
     double patient_zero_discovery_us = (double)(t1 - t0) / 1000.0;
 
-    printf("  * Node 0 synthesized defensive Mask Canva in %.2f us (Paying Chaos Tax: %llu mutations, %llu rejections)\n",
+    printf("  * Node 0 synthesized defensive Mask Canva in %.2f us (Paying BMF Tax: %llu mutations, %llu rejections)\n",
            patient_zero_discovery_us,
            (unsigned long long)patient_zero_res.heatmap.total_mutations,
            (unsigned long long)patient_zero_res.heatmap.total_failures);
@@ -109,7 +109,7 @@ int main(void) {
 
     double total_ingest_time_us = 0.0;
     double total_switch_time_us = 0.0;
-    size_t herd_chaos_avoided_count = 0;
+    size_t herd_bmf_avoided_count = 0;
 
     for (size_t n = 1; n < FLEET_SIZE; ++n) {
         FlowVectorVault node_vault;
@@ -122,7 +122,7 @@ int main(void) {
         uint64_t in1 = timer_now_ns();
         total_ingest_time_us += (double)(in1 - in0) / 1000.0;
 
-        /* 2. Instant zero-chaos state mount */
+        /* 2. Instant zero-BMF state mount */
         uint64_t sw0 = timer_now_ns();
         const FlowVaultEntry *ab = flow_vault_get(&node_vault, ingested_idx);
         FlowPlan node_defense_plan;
@@ -132,25 +132,25 @@ int main(void) {
         uint64_t sw1 = timer_now_ns();
 
         total_switch_time_us += (double)(sw1 - sw0) / 1000.0;
-        herd_chaos_avoided_count++;
+        herd_bmf_avoided_count++;
     }
 
     double avg_ingest_ns = (total_ingest_time_us / (double)(FLEET_SIZE - 1)) * 1000.0;
     double avg_switch_ns = (total_switch_time_us / (double)(FLEET_SIZE - 1)) * 100.0;
 
     printf("  * %zu / %zu Nodes successfully ingested and mounted antibody with 100%% SMT Soundness.\n",
-           herd_chaos_avoided_count, (size_t)FLEET_SIZE - 1);
+           herd_bmf_avoided_count, (size_t)FLEET_SIZE - 1);
     printf("  * Average Ingestion Time per Node:  %.1f ns\n", avg_ingest_ns);
     printf("  * Average QSBR Switch Time per Node: %.1f ns\n", avg_switch_ns);
 
     /* Compute Cluster Resource Comparison */
-    double cluster_chaos_without_antibodies_us = patient_zero_discovery_us * (double)FLEET_SIZE;
+    double cluster_bmf_without_antibodies_us = patient_zero_discovery_us * (double)FLEET_SIZE;
     double cluster_actual_time_us = patient_zero_discovery_us + total_ingest_time_us + total_switch_time_us;
-    double compute_savings_percent = ((cluster_chaos_without_antibodies_us - cluster_actual_time_us) / cluster_chaos_without_antibodies_us) * 100.0;
+    double compute_savings_percent = ((cluster_bmf_without_antibodies_us - cluster_actual_time_us) / cluster_bmf_without_antibodies_us) * 100.0;
 
     printf("\n  ========================================================================================\n");
-    printf("  Cluster Compute Without Antibodies (1,000 Redundant Chaos Searches): %.2f ms\n",
-           cluster_chaos_without_antibodies_us / 1000.0);
+    printf("  Cluster Compute Without Antibodies (1,000 Redundant BMF Searches): %.2f ms\n",
+           cluster_bmf_without_antibodies_us / 1000.0);
     printf("  Cluster Compute With Antibody Memory (1 Discovery + 999 Instant Swaps): %.2f ms\n",
            cluster_actual_time_us / 1000.0);
     printf("  => 🛡️ Fleet-Wide Herd Immunity Efficiency: %.2f%% Cluster CPU Overhead Eliminated!\n",

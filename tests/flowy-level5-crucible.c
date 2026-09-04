@@ -56,7 +56,7 @@ static int flowy_crucible_run(FlowyCrucibleResult *result_out, FILE *log_stream)
         snprintf(result_out->stage1_rejection_log, sizeof(result_out->stage1_rejection_log),
                  "[FLOWY-AUDIT] Proposed Mask 0x%02llX rejected by SMT. Theorem: (Memory < 64MB) ∧ (Connections > 10K) ∧ (Lock_Based_Queue) = Livelock. Probability bias zeroed.\n"
                  "  📖 知識庫檢索：此現象屬於【上位效應壁壘 (Epistasis Barrier)】。\n"
-                 "  💡 延伸閱讀：《The FLOW Book》 第 4 章：1-Bit 混沌退火 (暫存器位元翻轉、連鎖群與量子漂移)。",
+                 "  💡 延伸閱讀：《The FLOW Book》 第 4 章：BMF 最佳化 (暫存器位元翻轉、連鎖群與量子漂移)。",
                  (unsigned long long)candidate_mask);
         fprintf(out, "%s\n", result_out->stage1_rejection_log);
     }

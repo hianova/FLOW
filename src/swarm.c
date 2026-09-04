@@ -220,7 +220,7 @@ int flow_swarm_search(const FlowBitSpace *space, size_t particle_count,
 
 void flow_swarm_report(const FlowSwarmCluster *cluster, FILE *out) {
     if (cluster == NULL || out == NULL) return;
-    fprintf(out, "Swarm Intelligence & Federated Chaos Report:\n");
+    fprintf(out, "Swarm Intelligence & Federated BMF Report:\n");
     fprintf(out, "  Particles: %zu | Total Mutations: %zu | Saddle Point Escapes: %zu\n",
             cluster->particle_count, cluster->total_swarm_mutations, cluster->total_saddle_point_escapes);
     fprintf(out, "  Global Best Energy: %.3f | Consensus Mask: 0x%016llx\n",
@@ -322,7 +322,7 @@ static const FlowPlugin SWARM_PLUGIN = {
     .resource_mask = NULL,
     .environment_mask = NULL,
     .create_unit = NULL,
-    .doc_title = "Particle Swarm & Federated 1-Bit Chaos Optimizer",
+    .doc_title = "Particle Swarm & Federated BMF Optimizer",
     .doc_responsibilities = "Executes multi-agent particle swarm search with pheromone consensus and saddle-point escape",
     .doc_algorithmic_guarantee = "Guarantees global Pareto frontier convergence under multimodal fitness landscapes",
     .doc_memory_concurrency_model = "Lock-free atomic particle state replication",

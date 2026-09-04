@@ -132,7 +132,7 @@ int main(void) {
     CHECK(gov.is_chaotic_engine_sleeping == true);
     CHECK(gov.sleep_cycles_total == 1);
 
-    /* Sudden 10kg payload shock (e.g. grabbed heavy box) -> WAKE UP CHAOS */
+    /* Sudden 10kg payload shock (e.g. grabbed heavy box) -> WAKE UP BMF */
     CHECK(flow_energy_governor_check_wakeup(&gov, 36.0, 10.0) == true);
     CHECK(gov.is_chaotic_engine_sleeping == false);
     CHECK(gov.shock_wakeups_total == 1);

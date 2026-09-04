@@ -83,7 +83,7 @@ FlowSecurityOutcome flow_security_check_resource_quota_gate(
 FlowSecurityOutcome flow_security_check_composition_gate(
     const FlowCompositionSpec *spec, char *message, size_t message_size);
 
-/* Full compositional security audit with 1-bit chaos probing */
+/* Full compositional security audit with BMF probing */
 int flow_security_audit_composition(const FlowCompositionSpec *spec,
                                    uint64_t seed, uint32_t rounds,
                                    FlowSecurityReport *report);
@@ -129,7 +129,7 @@ int flow_security_mtd_verify_alignment(const FlowMTDLayout *layout, const size_t
 void flow_security_mtd_report(const FlowMTDLayout *layout, FILE *out);
 
 /* ========================================================================= */
-/* Bounded Chaos Compliance Mode & Regulatory Production Gate                */
+/* Bounded BMF Compliance Mode & Regulatory Production Gate                */
 /* ========================================================================= */
 
 typedef enum {

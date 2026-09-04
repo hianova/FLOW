@@ -196,7 +196,7 @@ typedef struct {
     uint64_t failure_counts[FLOW_GATE_CATEGORY_MAX];
 } FlowSearchHeatmap;
 
-/* Search / Optimize over Hierarchical FlowBitSpace using 1-Bit Chaos Engine */
+/* Search / Optimize over Hierarchical FlowBitSpace using BMF Engine */
 typedef struct {
     FlowPlan best_plan;
     size_t pareto_count;
@@ -238,7 +238,7 @@ double flow_bitspace_calculate_transition_penalty(const FlowTransitionCostModel 
                                                   const FlowPlan *candidate,
                                                   int *is_structural_out);
 
-/* Thermodynamic Boltzmann Probability-Biasing Chaos Configuration */
+/* Thermodynamic Boltzmann Probability-Biasing BMF Configuration */
 typedef struct {
     double initial_temperature;      /* Starting thermal energy (default: 80.0 ~ 100.0) */
     double cooling_decay;            /* Geometric cooling rate (default: 0.95 ~ 0.995) */
@@ -248,16 +248,16 @@ typedef struct {
     FlowMaskCanvas mask_canvas;      /* 3-Tier Dynamic Mask Superposition Canvas */
     double soft_bias_weight;         /* Probability weight for soft bias (default: 0.70) */
     int use_mask_canvas;             /* Flag indicating custom mask canvas is active */
-} FlowChaosAnnealConfig;
+} FlowBMFConfig;
 
-/* Canonical Adaptive Chaos Search with Thermodynamic Probability Biasing */
+/* Canonical Adaptive BMF Search with Thermodynamic Probability Biasing */
 int flow_bitspace_search_adaptive(const FlowBitSpace *space, size_t iterations, uint32_t seed,
                                   int measured, const FlowTransitionCostModel *transition_model,
                                   FlowBitSearchResult *result_out);
 
 int flow_bitspace_search_configured(const FlowBitSpace *space, size_t iterations, uint32_t seed,
                                     int measured, const FlowTransitionCostModel *transition_model,
-                                    const FlowChaosAnnealConfig *anneal_config,
+                                    const FlowBMFConfig *anneal_config,
                                     FlowBitSearchResult *result_out);
 
 int flow_bitspace_search(const FlowBitSpace *space, size_t iterations, uint32_t seed,
@@ -272,10 +272,10 @@ typedef struct {
     size_t micro_steps_per_cycle;
     double macro_tunneling_prob;
     size_t plateau_stagnation_limit;
-} FlowTwoTierChaosConfig;
+} FlowTwoTierBMFConfig;
 
 int flow_bitspace_search_two_tier(const FlowBitSpace *space,
-                                  const FlowTwoTierChaosConfig *config,
+                                  const FlowTwoTierBMFConfig *config,
                                   uint32_t seed, int measured,
                                   const FlowTransitionCostModel *transition_model,
                                   FlowBitSearchResult *result_out);

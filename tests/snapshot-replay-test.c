@@ -160,7 +160,7 @@ int main(void) {
     elapsed_us = (double)(t1 - t0) / 1000.0;
 #endif
 
-    printf("  ✓ Foreground O(1) Model Ingestion & BitSpace Decode: %.2f microseconds (Zero Chaos Search Overhead)!\n\n", elapsed_us);
+    printf("  ✓ Foreground O(1) Model Ingestion & BitSpace Decode: %.2f microseconds (Zero BMF Search Overhead)!\n\n", elapsed_us);
 
     printf("========================================================================================\n");
     printf("SNAPSHOT_REPLAY_TEST=passed universal_lockfile=verified gitops_sync=sound replay_testing=sound\n");

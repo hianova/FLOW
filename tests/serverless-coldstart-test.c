@@ -61,9 +61,9 @@ int main(void) {
     size_t vault_smt_failures = 0;
 
     for (size_t c = 0; c < NUM_CONTAINERS; ++c) {
-        /* Track A: Conventional Cold-Start (150 iterations of Chaos Search) */
+        /* Track A: Conventional Cold-Start (150 iterations of BMF Search) */
         {
-            FlowChaosAnnealConfig cold_cfg = {
+            FlowBMFConfig cold_cfg = {
                 .initial_temperature = 80.0,
                 .cooling_decay = 0.98,
                 .plateau_stagnation_limit = 6,
@@ -94,7 +94,7 @@ int main(void) {
                 .has_active_baseline = 1,
                 .baseline_plan = &instant_plan
             };
-            FlowChaosAnnealConfig micro_cfg = {
+            FlowBMFConfig micro_cfg = {
                 .initial_temperature = 10.0,
                 .cooling_decay = 0.90,
                 .plateau_stagnation_limit = 3,
@@ -120,7 +120,7 @@ int main(void) {
 
     printf("  Serverless Containers Tested:  %zu independent cold boots\n", NUM_CONTAINERS);
     printf("  [Baseline: Conventional Cold-Start JIT Annealing]\n");
-    printf("    - Average Cold Boot Latency: %.2f us (Paying Chaos Tax)\n", avg_cold_jit_us);
+    printf("    - Average Cold Boot Latency: %.2f us (Paying BMF Tax)\n", avg_cold_jit_us);
     printf("    - Average SMT Rejections:    %.1f failures / boot\n", avg_cold_fail);
     printf("  [Canva_Vec Hippocampus Zero-Cold-Start]\n");
     printf("    - Average Cold Boot Latency: %.2f us (AOT-Speed Instant Boot)\n", avg_vault_boot_us);

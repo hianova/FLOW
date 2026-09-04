@@ -8,7 +8,7 @@
 
 int main(void) {
     printf("========================================================================================\n");
-    printf("  🧬 Epistasis Barrier Traversal: 1-Bit Chaos & Quantum Drift vs Destructive Crossover\n");
+    printf("  🧬 Epistasis Barrier Traversal: BMF & Quantum Drift vs Destructive Crossover\n");
     printf("========================================================================================\n");
 
     /* 1. Test 1-bit mutation maintains exact Hamming distance = 1 */

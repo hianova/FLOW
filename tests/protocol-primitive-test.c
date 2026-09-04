@@ -145,9 +145,9 @@ int main(void) {
            (unsigned long long)encoded_genome);
 
     /* ---------------------------------------------------------------------------------- */
-    /* STAGE 5: 1-Bit Chaos Dynamic Protocol Morphing Simulation                          */
+    /* STAGE 5: BMF Dynamic Protocol Morphing Simulation                          */
     /* ---------------------------------------------------------------------------------- */
-    FLOW_STAGE_BEGIN(5, "1-Bit Chaos Dynamic Protocol Morphing Simulation");
+    FLOW_STAGE_BEGIN(5, "BMF Dynamic Protocol Morphing Simulation");
     uint64_t current_genome = 0;
     flow_protocol_encode_genome(FLOW_PROTO_HTTP1, 1, 0, 1, &current_genome);
 
@@ -156,13 +156,13 @@ int main(void) {
     FlowProtocolKind morph_kind;
     flow_protocol_decode_genome(morphed_genome_h2, &morph_kind, NULL, NULL, NULL);
     FLOW_ASSERT_EQ(morph_kind, FLOW_PROTO_HTTP2);
-    printf("  ✓ 1-Bit Chaos Phase Transition: Morphed HTTP/1.1 -> HTTP/2 under 100k QPS burst.\n");
+    printf("  ✓ BMF Phase Transition: Morphed HTTP/1.1 -> HTTP/2 under 100k QPS burst.\n");
 
     /* Network shifts to Mobile 5% Packet Loss: 1-Bit flip changes kind to 11 (QUIC) */
     uint64_t morphed_genome_quic = (morphed_genome_h2 & ~0x3ULL) | FLOW_PROTO_QUIC_HTTP3;
     flow_protocol_decode_genome(morphed_genome_quic, &morph_kind, NULL, NULL, NULL);
     FLOW_ASSERT_EQ(morph_kind, FLOW_PROTO_QUIC_HTTP3);
-    printf("  ✓ 1-Bit Chaos Phase Transition: Morphed HTTP/2 -> HTTP/3 QUIC under mobile lossy channel.\n\n");
+    printf("  ✓ BMF Phase Transition: Morphed HTTP/2 -> HTTP/3 QUIC under mobile lossy channel.\n\n");
 
     FLOW_TEST_SUITE_END();
     return 0;
