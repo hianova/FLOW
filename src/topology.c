@@ -61,6 +61,7 @@ void flow_topology_build_codebase_graph(FlowTopologyGraph *graph) {
     uint32_t n_registry     = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "registry", "interface", 1, 1);
     uint32_t n_abi          = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "abi", "interface", 1, 1);
     uint32_t n_primitive    = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "primitive", "interface", 1, 1);
+    uint32_t n_gateway      = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "gateway", "interface", 1, 1);
     uint32_t n_flowy_cli    = flow_topology_add_node(graph, FLOW_NODE_CORE_MODULE, "flowy_cli", "interface", 1, 1);
 
     /* Layer 2: Domain Plugins & Components */
@@ -106,6 +107,9 @@ void flow_topology_build_codebase_graph(FlowTopologyGraph *graph) {
     flow_topology_add_edge(graph, n_search, n_registry, FLOW_EDGE_CALLS, 1.0, "lookup_components");
     flow_topology_add_edge(graph, n_backend, n_registry, FLOW_EDGE_CALLS, 1.0, "query_emitters");
     flow_topology_add_edge(graph, n_primitive, n_registry, FLOW_EDGE_CALLS, 1.0, "register_primitive");
+    flow_topology_add_edge(graph, n_gateway, n_primitive, FLOW_EDGE_CALLS, 1.0, "dispatch_primitive");
+    flow_topology_add_edge(graph, n_gateway, n_swarm, FLOW_EDGE_USES, 1.0, "hetero_mesh_routing");
+    flow_topology_add_edge(graph, n_gateway, n_reload, FLOW_EDGE_CALLS, 1.0, "qsbr_hotswap");
     flow_topology_add_edge(graph, n_flowy_cli, n_audit, FLOW_EDGE_CALLS, 1.0, "render_telemetry_reports");
 
     /* Plugin Implementation Bindings (Layer 2 -> Layer 1) */
@@ -131,6 +135,7 @@ void flow_topology_build_codebase_graph(FlowTopologyGraph *graph) {
     flow_topology_add_edge(graph, n_audit, n_doc_ch10, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
     flow_topology_add_edge(graph, n_orchestrator, n_doc_ch10, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
     flow_topology_add_edge(graph, n_comp_sharded, n_doc_ch11, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
+    flow_topology_add_edge(graph, n_gateway, n_doc_ch11, FLOW_EDGE_DOCUMENTS, 1.0, "documents_why");
     (void)n_doc_ch03;
 }
 

@@ -13,6 +13,7 @@ fn main() {
         .file("src/flowy.c")
         .file("src/flowy_cli.c")
         .file("src/flowy_fvec.c")
+        .file("src/gateway.c")
         .file("src/jit.c")
         .file("src/orchestrator.c")
         .file("src/parser.c")

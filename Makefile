@@ -22,7 +22,7 @@ INCLUDEDIR ?= $(PREFIX)/include/flow
 
 PLUGINS_SO := $(BUILD_DIR)/libflow_embodied.so $(BUILD_DIR)/libflow_smt.so $(BUILD_DIR)/libflow_security.so $(BUILD_DIR)/libflow_swarm.so
 
-.PHONY: all clean test demos demo benchmark chaos-benchmark autopoiesis-check acceptance install uninstall fuzz test-build test-run test-e2e sync-book level5-contest audit-mechanisms fvec-flowc-apply-test reload-stress-nightly plugins flowy libflow
+.PHONY: all clean test demos demo benchmark chaos-benchmark gateway-benchmark autopoiesis-check acceptance install uninstall fuzz test-build test-run test-e2e sync-book level5-contest audit-mechanisms fvec-flowc-apply-test reload-stress-nightly plugins flowy libflow
 
 all: src/generated_book_knowledge.h $(LIBFLOW_A) $(FLOWC) $(FLOWY) plugins
 
@@ -99,6 +99,10 @@ chaos-benchmark: tests/chaos-fp-vs-int-benchmark.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $< -o $(BUILD_DIR)/chaos-fp-vs-int-benchmark -lm
 	$(BUILD_DIR)/chaos-fp-vs-int-benchmark
 
+gateway-benchmark: tests/gateway-autonomous-benchmark.c $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $(BUILD_DIR)/gateway-autonomous-benchmark $(LDLIBS)
+	$(BUILD_DIR)/gateway-autonomous-benchmark
+
 # ==============================================================================
 # Two-Stage Native Makefile Test Pipeline (Native Hermetic Barrier)
 # ==============================================================================
@@ -164,7 +168,8 @@ TEST_BINARIES := \
 	$(BUILD_DIR)/protocol-primitive-test \
 	$(BUILD_DIR)/fvec-hub-test \
 	$(BUILD_DIR)/hetero-swarm-mesh-test \
-	$(BUILD_DIR)/snapshot-replay-test
+	$(BUILD_DIR)/snapshot-replay-test \
+	$(BUILD_DIR)/gateway-autonomous-test
 
 # Specific build prerequisites for targets with inter-module dependencies
 $(BUILD_DIR)/plugin-test: plugins
@@ -263,6 +268,7 @@ test-run: $(TEST_BINARIES) fvec-flowc-apply-test
 	@$(BUILD_DIR)/plugin-abi-v2-test
 	@$(BUILD_DIR)/primitive-driver-test
 	@$(BUILD_DIR)/protocol-primitive-test
+	@$(BUILD_DIR)/gateway-autonomous-test
 	@$(BUILD_DIR)/enterprise-production-test
 	@$(BUILD_DIR)/hardened-production-test
 	@$(BUILD_DIR)/decoupling-test
@@ -380,7 +386,7 @@ test: test-build
 	@$(MAKE) --no-print-directory test-run
 	@$(MAKE) --no-print-directory test-e2e
 	@echo "================================================================================"
-	@echo "          ALL 62 TEST SUITES & E2E VERIFICATIONS 100% SOUND & PASSED!           "
+	@echo "          ALL 63 TEST SUITES & E2E VERIFICATIONS 100% SOUND & PASSED!           "
 	@echo "================================================================================"
 
 clean:
