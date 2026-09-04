@@ -98,6 +98,7 @@ FlowSMTResult flow_primitive_verify_smt(const FlowPrimitiveDriver *driver,
 /* Standard Built-in Primitive Driver Singletons */
 const FlowPrimitiveDriver *flow_primitive_io_uring_driver(void);
 const FlowPrimitiveDriver *flow_primitive_rdma_driver(void);
+const FlowPrimitiveDriver *flow_primitive_accelerator_driver(void);
 
 /* ============================================================================
  * Protocol-as-Primitive: HTTP/1.1, HTTP/2, and HTTP/3 QUIC Drivers

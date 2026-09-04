@@ -120,5 +120,37 @@ FLOW 徹底捨棄傳統 C++ `std::map` 紅黑樹帶來的記憶體零碎與指�
   $$V_{\text{phys}}(x) = w_{\text{cycles}} \cdot \frac{\Delta \text{Cycles}}{10^4} + w_{\text{energy}} \cdot \frac{\Delta \mu\text{J}}{10^3} + V_{\text{constraint}}(x)$$
   將硬體週期的消耗與半導體耗散的焦耳熱直接反饋至自適應退火的李雅普諾夫能量泛函中，使編譯與架構搜尋不再只是抽象的數學符號遊戲，而是在真實物理矽晶片熱力學約束下的收斂。
 
+---
 
+## 8.7 異質加速器與匯流排相變引擎：自適應中斷-無中斷輪詢流形 (`src/bus_hybrid_poll.h`, `src/bus_hybrid_poll.c`)
 
+在現代異質計算架構（CPU + GPU/NPU/TPU/FPGA + CXL.mem + NVMe + RDMA）中，等待加速器或高速匯流排完成任務長期存在著最嚴重的軟體工程黑魔法（Hack）：
+* **硬體中斷派 (MSI-X / IRQ)**：CPU 核心頻繁上下文切換、TLB 抖動與快取沖刷，次微秒任務被拉長至 $2\sim 10\mu\text{s}$。
+* **無中斷死輪詢派 (DPDK / SPDK / CUDA Spin)**：100% 榨乾單核，產生巨大焦耳熱耗散與熱節流，破壞系統能效比。
+* **經驗補丁 (The Industry Hack)**：以寫死的魔數定時器（如 `sq_thread_idle`、NAPI `weight=64`、手寫 `_mm_pause` 迴圈）通靈猜測。
+
+FLOW 徹底切除經驗魔數，將中斷與輪詢降維為嚴格的**非平滑相變流形（Non-Smooth Phase Transition Manifold）**：
+
+### 1. Moreau 掃掠幾何法錐遲滯 (`moreau_hysteresis.h`)
+* 將佇列深度 $q(t)$ 與事件抵達率 $\lambda(t)$ 映射為狀態變數。
+* 定義凸死區法錐區間 $C = [q_{\text{exit}}, q_{\text{enter}}]$（例如 $[4.0, 16.0]$）。
+* 依循微分包含式 $-\dot{x} \in N_C(x)$：
+  * 當 $q(t) \ge q_{\text{enter}}$：系統瞬時無縫相變至 **Zero-Interrupt Busy Polling**。
+  * 當 $q(t) \le q_{\text{exit}}$：回退至 **Power-Saving Hardware Interrupt (WFI/eventfd)**。
+  * 當 $q(t) \in (q_{\text{exit}}, q_{\text{enter}})$：幾何法錐完全吸收微震盪，**消滅任何人工防抖計時器與抖動（Flapping）**。
+
+### 2. 在線凸最佳化 (OCO) 與物理微焦耳拉格朗日對偶
+* 建立實體雙目標極小化損失函數：
+  $$\mathcal{L}(\tau) = \alpha \cdot \text{P99\_Latency}(\tau) + \lambda_{\text{thermal}} \cdot \text{Energy\_uJ}(\tau)$$
+* 根據裸機計時器與微焦耳能耗即時更新熱耗散影子價格 $\lambda_{\text{thermal}}$，並透過次梯度在線迭代動態計算最佳輪詢預算 $\tau^*$：
+  $$\tau_{t+1} = \Pi_{[\tau_{\min}, \tau_{\max}]}\left(\tau_t - \eta \cdot \nabla \mathcal{L}\right)$$
+  在微秒時間尺度上精確平衡延遲與功耗，零經驗魔數！
+
+### 3. 無鎖異質加速器命令環與零丟失喚醒 (Lost-Wakeup Freedom)
+* **命令與完成環 (SQ / CQ Ring)**：採用無鎖原子序列號推進（Acquire-Release 語意），快路徑在 $\tau^*$ 預算內於暫存器級別完成（延遲 $< 50\text{ns}$，0 次中斷睡眠）。
+* **雙重記憶體屏障檢查**：在由輪詢切換至省電睡眠前，執行全域順序一致性屏障（`seq_cst`）再次檢查完成隊列，在數學上徹底消滅時序競爭造成的喚醒丟失（Lost Wakeup）。
+
+### 4. SMT 形式化保證與 3-Function 原語驅動單例
+* **SMT 4/4 定理證明**：形式化驗證法錐非退化、輪詢預算物理有界性、完成隊列安全性與有界完成延遲定理。
+* **標準加速器驅動單例 (`flow_primitive_accelerator_driver`)**：
+  提供 8192 隊列深度、1024MB DMA 空間、零拷貝核心旁路能力的標準 3-Function 原語驅動，使任何宣告式 `.flow` 意圖能直接調度異質加速器與匯流排。

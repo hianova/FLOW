@@ -129,6 +129,7 @@ const FlowPrimitiveDriver *flow_primitive_##id##_driver(void) { \
 /* Built-in Standard Reference Drivers */
 FLOW_DEFINE_PRIMITIVE_DRIVER(io_uring, "io_uring", "v2.5", 4096, 64, 1, 0, 4, 120, (void)0)
 FLOW_DEFINE_PRIMITIVE_DRIVER(rdma, "rdma_qp", "v1.2", 16384, 512, 1, 1, 6, 45, (void)0)
+FLOW_DEFINE_PRIMITIVE_DRIVER(accelerator, "accelerator", "v1.0", 8192, 1024, 1, 1, 8, 25, (void)0)
 
 /* Built-in Protocol Drivers */
 FLOW_DEFINE_PRIMITIVE_DRIVER(http1, "http1_stream", "v1.1", 1, 16, 1, 0, 4, 80, \

@@ -29,6 +29,7 @@ FLOW compiles declarative intents (`.flow`) into zero-overhead native code. Oper
 │      • jit.c           : 即時組合語言與 C 源碼發射器                         │
 │      • reload.c        : 零原子鎖 QSBR 熱替換與世代追蹤 (>390M ops/s)        │
 │      • primitive.c     : 極簡 3-Function 實體硬體驅動 (io_uring/RDMA/eBPF)   │
+│      • bus_hybrid_poll.c: 異質加速器 (GPU/NPU/CXL) Moreau 遲滯與 OCO 自適應相變│
 │      • adaptive.c      : 硬體 PMU 遙測與控制器                               │
 │      • backend.c       : 多後端發射 (LLVM/MLIR/C/Rust/Python)                │
 │                                                                        │
@@ -117,6 +118,16 @@ FLOW compiles declarative intents (`.flow`) into zero-overhead native code. Oper
   原生 `__attribute__((vector_size(64)))` 對接 AVX-512 與 ARM Neon。在單一向量指令週期內平行完成 8 組 64-bit 正交子空間的離散注意力投影 (`flow_v512_project`)、半格交匯 (`flow_v512_semilattice_join`)、全域族群計數 (`flow_v512_popcount`) 與水平位元規約。
 - **3. 裸機物理硬體遙測與熱力學閉環 (`src/hardware_telemetry.h`, `src/hardware_telemetry.c`)**：
   以內聯組合語言讀取裸機 CPU 週期計數器（ARM64 `mrs cntvct_el0` 零開銷、x86-64 `__rdtsc()`），透過 Intel/AMD RAPL 暫存器或校準物理模型取得微焦耳（$\mu\text{J}$）能量耗散。實體李雅普諾夫候選泛函 $V_{\text{phys}}(x) = w_{\text{cyc}} \cdot \frac{\Delta \text{Cycles}}{10^4} + w_{\text{ene}} \cdot \frac{\Delta \mu\text{J}}{10^3} + V_{\text{constraint}}(x)$，使軟體演進受制於真實矽晶片物理熱力學閉環。
+
+### 10. 異質加速器與 I/O 匯流排自適應相變引擎 (`src/bus_hybrid_poll.h`, `src/bus_hybrid_poll.c`)
+- **Moreau 掃掠過程幾何法錐遲滯**：
+  以凸死區法錐 $C = [q_{\text{exit}}, q_{\text{enter}}]$ 接管中斷（Interrupt）與死輪詢（Busy-Poll）的動態切換，徹底消滅抖動（Flapping）與經驗防抖計時器。
+- **在線凸最佳化 (OCO) 與物理微焦耳影子價格尋優**：
+  在線次梯度迭代動態收斂出最佳輪詢預算 $\tau^*$，在微秒級尺度精確平衡延遲與焦耳熱耗散，消滅手動通靈魔數。
+- **無鎖異質命令環與零丟失喚醒 (Lost-Wakeup Freedom)**：
+  雙重記憶體屏障消除時序競爭，SMT 形式化證明 Lost-Wakeup Free 與有界完成延遲定理。
+- **3-Function 極簡原語驅動單例 (`flow_primitive_accelerator_driver`)**：
+  提供 8192 隊列深度、1024MB DMA 空間與零拷貝內核旁路能力。
 
 ---
 
