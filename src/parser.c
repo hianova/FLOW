@@ -88,12 +88,52 @@ int parse_spec(FILE *input, FlowSpec *spec) {
     int parse_error = 0;
     int brace_depth = 0;
 
+    int is_literate = 0;
+    int in_code_block = 0;
+    int flow_block_completed = 0;
+
+    /* Scan to detect literate markdown fences (```flow or ~~~flow) */
+    long start_pos = ftell(input);
+    if (start_pos >= 0) {
+        char scan_buf[FLOW_LINE];
+        while (fgets(scan_buf, sizeof(scan_buf), input) != NULL) {
+            char *p = trim(scan_buf);
+            if (strncmp(p, "```flow", 7) == 0 || strncmp(p, "~~~flow", 7) == 0) {
+                is_literate = 1;
+                break;
+            }
+        }
+        fseek(input, start_pos, SEEK_SET);
+    }
+
     memset(spec, 0, sizeof(*spec));
     while (fgets(raw, sizeof(raw), input) != NULL) {
         char *line;
         ++line_number;
         line = trim(raw);
-        if (*line == '\0' || *line == '#') continue;
+
+        if (is_literate) {
+            if (!in_code_block) {
+                if (strncmp(line, "```flow", 7) == 0 || strncmp(line, "~~~flow", 7) == 0) {
+                    if (flow_block_completed) {
+                        break;
+                    }
+                    in_code_block = 1;
+                }
+                continue;
+            } else {
+                if (strncmp(line, "```", 3) == 0 || strncmp(line, "~~~", 3) == 0) {
+                    in_code_block = 0;
+                    if (spec->flow_name[0] != '\0' && spec->input_name[0] != '\0') {
+                        flow_block_completed = 1;
+                        break;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if (*line == '\0' || *line == '#' || strncmp(line, "//", 2) == 0) continue;
         if (strchr(line, '{') != NULL) ++brace_depth;
 
         if (starts_with(line, "input ")) {

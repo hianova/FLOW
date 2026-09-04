@@ -16,10 +16,11 @@
 | **4** | **靜態配置解析器（YAML / JSON Configs）** | 冗長的解析代碼、驗證語法、手動調參與配置漂移 | **BMF 自創生相空間能量極小化 (Autopoiesis)** (`src/entropy_collapse.c`) | 系統參數化為 64-bit 相空間自組織座標，朝能量極小點自發收斂 $\nabla E = 0$，0 配置文件 |
 | **5** | **動態字串格式化與熱路徑日誌 (`snprintf`)** | 字串拼接、動態記憶體分配、.rodata 字串膨脹、臨界區阻塞 | **語義哈希流形向量 (64-Bit Binary Event Manifolds)** (`src/entropy_collapse.c`) | 熱路徑 1 個 CPU 週期完成純二進制位翻轉（$O(1)$），人類可讀字串解碼移至離線 Post-Mortem |
 | **6** | **引用計數與垃圾回收 (Ref-Counting & GC)** | 原子計數增減（`shared_ptr`）、GC 標記清除週期、解構子級聯 | **仿射時空測地線 (Affine Spatiotemporal Geodesics)** (`src/entropy_collapse.c`) | 線性所有權單出度數據流 DAG，原位緩衝區流水線漸進變異，0 引用計數、0 解構子、0 GC 停頓 |
+| **7** | **靜態死文檔與規格雙軌維護 (Dead Docs vs Spec)** | 外部工具鏈（mdBook/Sphinx）、文檔與規格漂移脫節、文檔無可執行驗證能力 | **Doc-as-Intent 文檔即意圖 (Literate Specifications)** (`src/parser.c`) | 文檔即正式合約、`flowc` 原生編譯 Markdown、消滅 mdBook 外部工具依賴、100% 形式驗證與原生二進位編譯 |
 
 ---
 
-## 2. 深度剖析：三大典型消解範式
+## 2. 深度剖析：四大典型消解範式
 
 ### A. Curry-Howard 同構：消滅防禦性瀑布
 在傳統 C/C++ 專案中，幾乎每個函數開頭都是排山倒海的：
@@ -34,3 +35,7 @@ if (len > MAX_LEN) return ERR_INVALID_LEN;
 
 ### C. 語義哈希流形：告別 `snprintf` 效能黑洞
 在低延遲交易或即時控制系統中，一次字串格式化（`snprintf`）可能耗費數百個奈秒，甚至誘發記憶體配置。FLOW 的熱路徑日誌退化為單一 64-bit 語義事件流形向量：每個事件為向量上的一位（Bit-flip），發射操作只需一條加法或邏輯或指令（1 個 CPU 週期）。字串合成、時區換算與格式美化被完全推遲至系統外的離線自省工具（如 `flowy why`），保證熱路徑絕對平穩。
+
+### D. Doc-as-Intent：文檔即意圖，消滅規格與代碼的雙軌維護
+傳統軟體工程中，規格書與文檔寫在獨立的 Wiki、Markdown 或外部工具（如 Rust mdBook、Doxygen）中。隨著系統演進，文檔不可避免地與真實代碼發生語義漂移（Documentation Drift），文檔變成失去可信度的「死文字」。FLOW 實現了 **Doc-as-Intent（文檔意圖同構）**：
+Markdown 文件本身就是一份經過 SMT 形式化定理證明的第一類可執行規格。`flowc` 編譯器原生剖析包含散文、數學公式與 ```` ```flow ```` 代碼區塊的 Markdown 檔案，無須經過任何中介工具或外部 mdBook 套件。編譯器直接自文檔提取幾何約束，驅動模擬退火演算法合成二進位執行檔。這徹底消滅了「寫文檔」與「寫代碼」的雙軌結構熵，讓文檔與代碼在數學意義上達成永不脫節的絕對同一性。

@@ -184,7 +184,8 @@ TEST_BINARIES := \
 	$(BUILD_DIR)/token-ring-test \
 	$(BUILD_DIR)/embodied-coordination-test \
 	$(BUILD_DIR)/six-pillars-math-test \
-	$(BUILD_DIR)/entropy-collapse-test
+	$(BUILD_DIR)/entropy-collapse-test \
+	$(BUILD_DIR)/doc-as-intent-test
 
 # Specific build prerequisites for targets with inter-module dependencies
 $(BUILD_DIR)/plugin-test: plugins
@@ -258,6 +259,7 @@ test-run: $(TEST_BINARIES) fvec-flowc-apply-test
 	@$(BUILD_DIR)/mlir-llvm-test
 	@$(BUILD_DIR)/vertical-slice-test
 	@$(BUILD_DIR)/security-test
+	@$(BUILD_DIR)/doc-as-intent-test
 	@echo "=== [Phase 2/5] Running Concurrency, QSBR & State Morphing ==="
 	@$(BUILD_DIR)/reload-test
 	@$(BUILD_DIR)/live-reload-test
@@ -407,12 +409,20 @@ test-e2e: $(FLOWC) $(FLOWY) plugins
 	! $(FLOWC) examples/invalid_import.flow -o /tmp/flow-invalid-import.c
 	! $(FLOWC) examples/invalid_unbounded.flow -o /tmp/flow-invalid-unbounded.c
 	! $(FLOWC) examples/invalid_no_input.flow -o /tmp/flow-invalid-no-input.c
+	@$(MAKE) --no-print-directory test-literate
+
+test-literate: $(FLOWC) | $(BUILD_DIR)
+	$(FLOWC) flow-book/src/ch02_intent_vs_implementation.md -o generated/ch02-literate.c --search --iterations 50 --seed 42
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) generated/ch02-literate.c -o $(BUILD_DIR)/ch02-literate
+	$(BUILD_DIR)/ch02-literate | grep -q 'flow: browser_pipeline'
+	$(BUILD_DIR)/ch02-literate | grep -q 'component: parallel_map'
+	grep -q 'Verification: status=runtime_check' generated/ch02-literate.c
 
 test: test-build
 	@$(MAKE) --no-print-directory test-run
 	@$(MAKE) --no-print-directory test-e2e
 	@echo "================================================================================"
-	@echo "          ALL 73 TEST SUITES & E2E VERIFICATIONS 100% SOUND & PASSED!           "
+	@echo "          ALL 74 TEST SUITES & E2E VERIFICATIONS 100% SOUND & PASSED!           "
 	@echo "================================================================================"
 
 clean:

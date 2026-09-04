@@ -81,6 +81,7 @@ FLOW compiles declarative intents (`.flow`) into zero-overhead native code. Oper
 - **4. BMF 自創生相空間能量極小化**：系統參數自組織收斂至 $\min E(\vec{x})$，0 YAML/JSON 配置文件。
 - **5. 64-Bit 語義哈希流形向量**：熱路徑 1 個 CPU 週期完成位元事件發射，消滅熱路徑 `snprintf` 效能黑洞。
 - **6. 仿射時空測地線**：單出度數據流原位推進，0 引用計數、0 解構子、0 GC 停頓。
+- **7. Doc-as-Intent 文檔意圖同構 (Literate Living Specifications)**：`flowc` 原生編譯 Markdown 意圖文檔，消滅外部工具鏈依賴與規格漂移，文檔即經 SMT 形式證明的執行檔。
 
 ### 4. 具身知覺超幾何疊加與雙重束縛生存 (`src/embodied.h`)
 - **64-Bit 具身子空間切片**：正交劃分 Gait (4b), Torque (8b), Sensor (6b), Thermal (6b), Smith (8b), Fleet (16b), Survival (16b)。
@@ -189,7 +190,7 @@ flowy shell
 # 編譯純粹四大主軸核心庫、flowc、flowy 與動態外掛
 make all
 
-# 執行全套 73 項形式化數學與生產重放測試套件 (全綠燈，100% Sound & Verified)
+# 執行全套 74 項形式化數學與生產重放測試套件 (全綠燈，100% Sound & Verified)
 make test
 
 # 執行端到端編譯器與跨語言代碼生成煙霧測試
