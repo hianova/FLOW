@@ -124,6 +124,19 @@ typedef struct {
         } \
     } while (0)
 
+#define FLOW_ASSERT_FLOAT_NEAR(a, b, epsilon) \
+    do { \
+        _flow_test_state.total_tests++; \
+        double _diff = fabs((double)(a) - (double)(b)); \
+        if (_diff > (double)(epsilon)) { \
+            _flow_test_state.failed_tests++; \
+            fprintf(stderr, "❌ ASSERT_FLOAT_NEAR FAILED [%s:%d]: |%s - %s| = %f > %f\n", \
+                    __FILE__, __LINE__, #a, #b, _diff, (double)(epsilon)); \
+        } else { \
+            _flow_test_state.passed_tests++; \
+        } \
+    } while (0)
+
 /*
  * SMT Formal Assertions
  */

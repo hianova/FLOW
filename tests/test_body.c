@@ -7,6 +7,9 @@
 #include "flow_mock_driver.h"
 #include "bus_hybrid_poll.h"
 #include "cxl_fabric.h"
+#include "driver_can.h"
+#include "driver_imu.h"
+#include "embodied_physics_scenarios.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -314,6 +317,187 @@ int main(void) {
         FLOW_ASSERT_SMT_SOUND(cxl_proof);
 
         printf("  ✓ Stage 7 Passed: CXL multi-tier KV cache allocation & sub-microsecond access verified.\n\n");
+    }
+
+    /* ========================================================================= */
+    /* STAGE 8: SocketCAN / CAN-FD Real-Time Robot Actuator Driver & SMT Proof   */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(8, "SocketCAN / CAN-FD Real-Time Actuator Bus & SMT Arbitration");
+    {
+        /* 1. Loopback CAN Transceiver Pair */
+        FlowCANBus *bus_tx = NULL;
+        FlowCANBus *bus_rx = NULL;
+        FLOW_ASSERT_EQ(flow_can_create_loopback_pair(&bus_tx, &bus_rx), 1);
+        FLOW_ASSERT_TRUE(bus_tx != NULL && bus_rx != NULL);
+
+        /* 2. Encode Motor Command Frame */
+        FlowMotorCommand cmd = {
+            .motor_id = 3,
+            .mode = FLOW_MOTOR_MODE_MIT_HYBRID,
+            .target_position_rad = 1.5708f, /* 90 degrees */
+            .target_velocity_rad_s = 5.0f,
+            .target_torque_nm = 12.5f,
+            .kp = 80.0f,
+            .kd = 2.5f
+        };
+        FlowCANFrame tx_frame;
+        FLOW_ASSERT_EQ(flow_can_encode_motor_cmd(&cmd, &tx_frame), 1);
+        FLOW_ASSERT_EQ(flow_can_send(bus_tx, &tx_frame), 1);
+
+        /* 3. Receive & Decode Motor Command Frame */
+        FlowCANFrame rx_frame;
+        FLOW_ASSERT_EQ(flow_can_recv(bus_rx, &rx_frame, 10), 1);
+        FlowMotorCommand decoded_cmd;
+        FLOW_ASSERT_EQ(flow_can_decode_motor_cmd(&rx_frame, &decoded_cmd), 1);
+        FLOW_ASSERT_EQ(decoded_cmd.motor_id, 3);
+        FLOW_ASSERT_EQ(decoded_cmd.mode, FLOW_MOTOR_MODE_MIT_HYBRID);
+        FLOW_ASSERT_FLOAT_NEAR(decoded_cmd.target_position_rad, 1.5708f, 0.01f);
+        FLOW_ASSERT_FLOAT_NEAR(decoded_cmd.target_torque_nm, 12.5f, 0.1f);
+
+        /* 4. Encode & Send Motor Feedback Frame */
+        FlowMotorFeedback fb = {
+            .motor_id = 3,
+            .actual_position_rad = 1.5690f,
+            .actual_velocity_rad_s = 4.95f,
+            .actual_torque_nm = 12.4f,
+            .motor_temp_celsius = 42.0f,
+            .fault_flags = 0
+        };
+        FlowCANFrame fb_frame;
+        FLOW_ASSERT_EQ(flow_can_encode_motor_feedback(&fb, &fb_frame), 1);
+        FLOW_ASSERT_EQ(flow_can_send(bus_rx, &fb_frame), 1);
+
+        FlowCANFrame rx_fb_frame;
+        FLOW_ASSERT_EQ(flow_can_recv(bus_tx, &rx_fb_frame, 10), 1);
+        FlowMotorFeedback decoded_fb;
+        FLOW_ASSERT_EQ(flow_can_decode_motor_feedback(&rx_fb_frame, &decoded_fb), 1);
+        FLOW_ASSERT_EQ(decoded_fb.motor_id, 3);
+        FLOW_ASSERT_FLOAT_NEAR(decoded_fb.actual_position_rad, 1.5690f, 0.01f);
+        FLOW_ASSERT_FLOAT_NEAR(decoded_fb.motor_temp_celsius, 42.0f, 0.5f);
+
+        /* 5. Verify Primitive Driver ABI */
+        const FlowPrimitiveDriver *can_drv = flow_primitive_can_driver();
+        FLOW_ASSERT_TRUE(can_drv != NULL);
+        FLOW_ASSERT_STR_EQ(can_drv->driver_name, "socketcan_fd");
+        FlowHardwareBounds bounds;
+        FLOW_ASSERT_EQ(can_drv->get_hardware_bounds(&bounds), 1);
+        FLOW_ASSERT_TRUE(bounds.max_queue_depth >= 1024);
+
+        /* 6. SMT Real-Time Priority Arbitration Invariant */
+        FlowSMTProofAttestation can_proof;
+        memset(&can_proof, 0, sizeof(can_proof));
+        FLOW_ASSERT_EQ(flow_can_verify_arbitration_smt(0x001, 0x700, 1000, 300.0, &can_proof), FLOW_SMT_PROVEN_UNSAT);
+        FLOW_ASSERT_SMT_SOUND(can_proof);
+
+        flow_can_close(bus_tx);
+        flow_can_close(bus_rx);
+
+        printf("  ✓ Stage 8 Passed: SocketCAN-FD driver roundtrip verified; SMT Priority Arbitration Sound.\n\n");
+    }
+
+    /* ========================================================================= */
+    /* STAGE 9: 6-DOF / 9-DOF IMU Sensor Stream & Attitude Filter Invariants     */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(9, "6-DOF / 9-DOF IMU Sensor Stream & Attitude Filter Invariants");
+    {
+        FlowIMUAttitudeFilter filter;
+        flow_imu_filter_init(&filter, 0.98f);
+
+        /* Stationary horizontal state: accel = [0, 0, 9.81], gyro = [0, 0, 0] */
+        FlowIMUSample stationary = {
+            .accel_m_s2 = {0.0f, 0.0f, 9.80665f},
+            .gyro_rad_s = {0.0f, 0.0f, 0.0f},
+            .mag_uT = {25.0f, 0.0f, 40.0f},
+            .temp_celsius = 32.5f,
+            .timestamp_ns = 1000000ULL,
+            .sequence = 1
+        };
+
+        for (int i = 0; i < 50; i++) {
+            flow_imu_filter_update(&filter, &stationary, 0.001f);
+        }
+        FLOW_ASSERT_FLOAT_NEAR(filter.roll_rad, 0.0f, 0.02f);
+        FLOW_ASSERT_FLOAT_NEAR(filter.pitch_rad, 0.0f, 0.02f);
+
+        /* Dynamic tilt motion: 30-degree roll (0.5236 rad) */
+        FlowIMUSample tilted = {
+            .accel_m_s2 = {0.0f, 4.903f, 8.492f},
+            .gyro_rad_s = {0.52f, 0.0f, 0.0f},
+            .mag_uT = {25.0f, 10.0f, 38.0f},
+            .temp_celsius = 33.0f,
+            .timestamp_ns = 2000000ULL,
+            .sequence = 2
+        };
+        for (int i = 0; i < 100; i++) {
+            flow_imu_filter_update(&filter, &tilted, 0.001f);
+        }
+        FLOW_ASSERT_TRUE(filter.roll_rad > 0.40f);
+
+        /* Verify Primitive Driver ABI */
+        const FlowPrimitiveDriver *imu_drv = flow_primitive_imu_driver();
+        FLOW_ASSERT_TRUE(imu_drv != NULL);
+        FLOW_ASSERT_STR_EQ(imu_drv->driver_name, "sensor_imu_6dof");
+
+        /* SMT Invariant Verification */
+        FlowSMTProofAttestation imu_proof;
+        memset(&imu_proof, 0, sizeof(imu_proof));
+        FLOW_ASSERT_EQ(flow_imu_verify_bounds_smt(&tilted, &filter, &imu_proof), FLOW_SMT_PROVEN_UNSAT);
+        FLOW_ASSERT_SMT_SOUND(imu_proof);
+
+        printf("  ✓ Stage 9 Passed: IMU sensor streaming & complementary filter verified; SMT Bounds Sound.\n\n");
+    }
+
+    /* ========================================================================= */
+    /* STAGE 10: Advanced Physical Mechanics (Friction Cone, Impact, Co-Manip)   */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(10, "Advanced Physical Mechanics: Friction Cone, Impact & Dual-Robot Co-Manipulation");
+    {
+        /* 1. Coulomb Friction Cone: Gripping a delicate 60g egg with crush limit 15.0N */
+        FlowGraspFrictionCone cone;
+        FLOW_ASSERT_EQ(flow_friction_cone_init(&cone, 0.060, 0.35, 15.0), 1);
+        FLOW_ASSERT_FALSE(cone.is_slipping);
+        FLOW_ASSERT_FALSE(cone.is_crushed);
+
+        /* Apply sudden 5g acceleration disturbance */
+        FLOW_ASSERT_EQ(flow_friction_cone_step_reflex(&cone, 5.0 * 9.81, 0.001), 1);
+        FLOW_ASSERT_FALSE(cone.is_slipping); /* Reflex dynamically increased Fn without slippage */
+        FLOW_ASSERT_FALSE(cone.is_crushed);  /* Stays under 15N limit */
+
+        FlowSMTProofAttestation fric_proof;
+        memset(&fric_proof, 0, sizeof(fric_proof));
+        FLOW_ASSERT_EQ(flow_friction_cone_verify_smt(&cone, &fric_proof), FLOW_SMT_PROVEN_UNSAT);
+        FLOW_ASSERT_SMT_SOUND(fric_proof);
+
+        /* 2. Non-Smooth Restitution & Touchdown Impact: 45kg biped landing from 0.5m drop */
+        FlowImpactAbsorber ia;
+        FLOW_ASSERT_EQ(flow_impact_absorber_init(&ia, 45.0, 0.15, 10000.0), 1);
+        FLOW_ASSERT_EQ(flow_impact_absorber_simulate_touchdown(&ia, 0.5, 0.001), 1);
+        FLOW_ASSERT_FALSE(ia.gear_damaged);    /* Peak impact within 10kN rating */
+        FLOW_ASSERT_FALSE(ia.rebound_detected); /* Restitution e <= 0.05 (critical damping) */
+        FLOW_ASSERT_TRUE(ia.restitution_e <= 0.05);
+
+        FlowSMTProofAttestation impact_proof;
+        memset(&impact_proof, 0, sizeof(impact_proof));
+        FLOW_ASSERT_EQ(flow_impact_absorber_verify_smt(&ia, &impact_proof), FLOW_SMT_PROVEN_UNSAT);
+        FLOW_ASSERT_SMT_SOUND(impact_proof);
+
+        /* 3. Dual-Robot Rigid Co-Manipulation: 1.5m carbon-fiber beam co-transport */
+        FlowDualCoManipulation cm;
+        FLOW_ASSERT_EQ(flow_dual_comanip_init(&cm, 1.50, 200000.0, 500.0), 1);
+
+        double dist_vel[3] = {0.8, 0.2, 0.0}; /* Robot A swerves sideways */
+        for (int i = 0; i < 200; i++) {
+            FLOW_ASSERT_EQ(flow_dual_comanip_step(&cm, dist_vel, 0.001), 1);
+        }
+        FLOW_ASSERT_FALSE(cm.yield_violated);
+        FLOW_ASSERT_TRUE(cm.max_sync_error_m <= 0.005); /* <= 5mm rigid boundary */
+
+        FlowSMTProofAttestation cm_proof;
+        memset(&cm_proof, 0, sizeof(cm_proof));
+        FLOW_ASSERT_EQ(flow_dual_comanip_verify_smt(&cm, &cm_proof), FLOW_SMT_PROVEN_UNSAT);
+        FLOW_ASSERT_SMT_SOUND(cm_proof);
+
+        printf("  ✓ Stage 10 Passed: Friction cone, impact absorption, and dual-robot co-manipulation SMT Sound.\n\n");
     }
 
     FLOW_TEST_SUITE_END();

@@ -32,3 +32,4 @@
 
 # 第七部：流形代數與活體自創生 (Manifold Algebra & Autopoiesis)
 - [15. 流形代數、神經-符號橋、時空光錐反事實預演與活體自創生 (Manifold Algebra, Neuro-Bit Bridge, Spacetime Pre-Play & Swarm Autopoiesis)](ch15_manifold_algebra_autopoiesis.md)
+- [16. 具身物理實機串接、深度 SIMD 神經橋與極限力學證明 (Embodied Hardware Interfacing, Deep SIMD Neuro-Bridge & Advanced Mechanics Proofs)](ch16_embodied_physical_mechanisms.md)

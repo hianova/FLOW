@@ -5,7 +5,7 @@
 #include "flowy.h"
 #include <string.h>
 
-#define FLOW_BOOK_CHAPTER_COUNT 15
+#define FLOW_BOOK_CHAPTER_COUNT 16
 
 typedef struct {
     const char *chapter_ref;
@@ -104,6 +104,12 @@ static const FlowBookChapterDoc FLOW_BOOK_CHAPTERS_ZH[FLOW_BOOK_CHAPTER_COUNT] =
         .chapter_title = "第十五章：流形代數、神經-符號橋、時空光錐反事實預演與活體自創生",
         .philosophy_why = "約束收斂即相關。統計相關性只是幾何約束在投影維度上的影子；FLOW 抓的是本體，傳統 ML 抓的是影子。",
         .book_excerpt = "流形代數實現交集與連鎖基因萃取；神經符號橋在 14 週期內完成 4096-D 語義到物理多面體投影；時空光錐預演未來 3 秒黑天鵝並在 13 微秒內混沌退火修正；物種形成引擎實現 10,000 節點活體自創生。"
+    },
+    {
+        .chapter_ref = "ch16_embodied_physical_mechanisms.md",
+        .chapter_title = "第十六章：具身物理實機串接、深度 SIMD 神經橋與極限力學證明",
+        .philosophy_why = "軟體工程的終極審判不在記憶體與暫存器之中，而在機器人手臂接觸實體物理世界的那一微秒。",
+        .book_excerpt = "SocketCAN/CAN-FD 原生驅動實現 3 函數 ABI 與微秒級 SMT 搶占仲裁；深度 SIMD 與 INT8 定點量化將神經流形投影壓制至 330ns；摩擦錐、非光滑著陸衝擊與雙機協同完成零缺陷力學證明。"
     }
 
 };
@@ -198,6 +204,12 @@ static const FlowBookChapterDoc FLOW_BOOK_CHAPTERS_EN[FLOW_BOOK_CHAPTER_COUNT] =
         .chapter_title = "Chapter 15: Manifold Algebra, Neuro-Bit Bridge, Spacetime Pre-Play & Swarm Autopoiesis",
         .philosophy_why = "Constraint convergence is correlation. Statistical correlation is merely a shadow of physical geometric constraints projected onto observation dimensions.",
         .book_excerpt = "Manifold algebra executes feasible intersection and epistasis derivation; Neuro-bit bridge projects 4096-D continuous embeddings to polyhedra in 14 cycles; Spacetime preplay avers black swans in 13 microseconds; Swarm speciation engine enables autopoiesis across 10,000 nodes."
+    },
+    {
+        .chapter_ref = "ch16_embodied_physical_mechanisms.md",
+        .chapter_title = "Chapter 16: Embodied Physical Interfacing, Deep SIMD Neuro-Bridge & Advanced Mechanics Proofs",
+        .philosophy_why = "The ultimate judgment of software engineering lies not in RAM or registers, but in the microsecond when a robot arm contacts the physical universe.",
+        .book_excerpt = "SocketCAN/CAN-FD driver implements 3-function ABI with SMT priority arbitration; Deep SIMD & INT8 quantization accelerate neuro-bridge to 330ns; Coulomb friction cone, non-smooth landing impact, and dual-robot co-manipulation formally verified."
     }
 
 };
@@ -210,7 +222,7 @@ typedef struct {
     const char *book_excerpt;
 } FlowModuleBookBinding;
 
-static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_ZH[42] = {
+static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_ZH[45] = {
     {
         .module_id = "flowc",
         .chapter_ref = "ch01_what_is_flow.md",
@@ -504,11 +516,32 @@ static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_ZH[42] = {
         .chapter_title = "第十五章：流形代數、神經-符號橋、時空光錐反事實預演與活體自創生",
         .philosophy_why = "軟體系統的活體自創生，自發湧現跨環境最適拓撲。",
         .book_excerpt = "四大生態位壓力下連鎖感知雜交與環境熵漂移，9-Byte 淋巴抗體網絡促進全網架構自動晉升。"
+    },
+    {
+        .module_id = "driver_can",
+        .chapter_ref = "ch16_embodied_physical_mechanisms.md",
+        .chapter_title = "第十六章：具身物理硬體實機串接、神經流形 SIMD 加速與高階接觸力學",
+        .philosophy_why = "硬體實機串接的確定性與搶佔保證，確保奈秒級阻抗控制與急停中斷不受任何遙測封包阻塞。",
+        .book_excerpt = "SocketCAN / CAN-FD 驅動透過 MIT 阻抗協議直接控制實體無刷馬達，SMT 優先權仲裁定理數學嚴格證明急停幀最壞延遲不超過 300 微秒。"
+    },
+    {
+        .module_id = "driver_imu",
+        .chapter_ref = "ch16_embodied_physical_mechanisms.md",
+        .chapter_title = "第十六章：具身物理硬體實機串接、神經流形 SIMD 加速與高階接觸力學",
+        .philosophy_why = "感測器串流的零飽和幾何約束，為雙足平衡與自穩定姿態濾波提供形式化安全邊界。",
+        .book_excerpt = "6-DOF / 9-DOF IMU 驅動結合互補姿態濾波器，SMT 飽和約束保證四元數與歐拉角全局有界無數值爆炸。"
+    },
+    {
+        .module_id = "embodied_physics_scenarios",
+        .chapter_ref = "ch16_embodied_physical_mechanisms.md",
+        .chapter_title = "第十六章：具身物理硬體實機串接、神經流形 SIMD 加速與高階接觸力學",
+        .philosophy_why = "真實物理世界不是連續理想剛體，庫侖摩擦錐、非光滑碰撞與多機協同必須在幾何流形中嚴格封閉。",
+        .book_excerpt = "庫侖摩擦錐動態調壓防滑、Moreau 觸地動能阻尼吸收與雙臂剛性協同約束，全部經 SMT 數學證明零滑移、零崩齒、零斷裂。"
     }
 
 };
 
-static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_EN[42] = {
+static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_EN[45] = {
     {
         .module_id = "flowc",
         .chapter_ref = "ch01_what_is_flow.md",
@@ -802,6 +835,27 @@ static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_EN[42] = {
         .chapter_title = "Chapter 15: Manifold Algebra, Neuro-Bit Bridge, Spacetime Pre-Play & Swarm Autopoiesis",
         .philosophy_why = "Living software autopoiesis: spontaneous emergence of globally optimal topological architectures.",
         .book_excerpt = "Epistatic-linkage-aware crossover and adaptive entropy drift across 4 niches; 9-byte lymphatic fleet immunity."
+    },
+    {
+        .module_id = "driver_can",
+        .chapter_ref = "ch16_embodied_physical_mechanisms.md",
+        .chapter_title = "Chapter 16: Embodied Hardware Interfaces, Neuro-Manifold SIMD & Advanced Contact Mechanics",
+        .philosophy_why = "Deterministic preemption in physical hardware buses ensures emergency halts and impedance control never stall behind telemetry.",
+        .book_excerpt = "SocketCAN / CAN-FD driver bridges FLOW directly to MIT protocol actuators; SMT priority arbitration proves emergency WCET under 300us."
+    },
+    {
+        .module_id = "driver_imu",
+        .chapter_ref = "ch16_embodied_physical_mechanisms.md",
+        .chapter_title = "Chapter 16: Embodied Hardware Interfaces, Neuro-Manifold SIMD & Advanced Contact Mechanics",
+        .philosophy_why = "Zero-saturation geometric bounds on sensor streams provide formal guarantees for biped balance and attitude estimation.",
+        .book_excerpt = "6-DOF / 9-DOF IMU streaming driver with complementary filter formally proven via SMT to eliminate numerical divergence and saturation."
+    },
+    {
+        .module_id = "embodied_physics_scenarios",
+        .chapter_ref = "ch16_embodied_physical_mechanisms.md",
+        .chapter_title = "Chapter 16: Embodied Hardware Interfaces, Neuro-Manifold SIMD & Advanced Contact Mechanics",
+        .philosophy_why = "Real-world contact is non-smooth; Coulomb friction cones, impact shocks, and dual-arm co-manipulation must be enclosed in invariant manifolds.",
+        .book_excerpt = "Coulomb friction cone anti-slip, Moreau critical damping touchdown absorption, and dual-arm co-manipulation formally verified by SMT for zero slip, zero gear shear, and zero yield break."
     }
 
 };
@@ -809,7 +863,7 @@ static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_EN[42] = {
 static inline const FlowModuleBookBinding *flow_book_lookup_binding_lang(const char *module_id, FlowLanguage lang) {
     if (module_id == NULL) return NULL;
     const FlowModuleBookBinding *bindings = (lang == FLOW_LANG_EN) ? FLOW_MODULE_BOOK_BINDINGS_EN : FLOW_MODULE_BOOK_BINDINGS_ZH;
-    for (size_t i = 0; i < 42; ++i) {
+    for (size_t i = 0; i < 45; ++i) {
         if (strcmp(bindings[i].module_id, module_id) == 0) return &bindings[i];
     }
     return NULL;

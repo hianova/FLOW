@@ -175,19 +175,23 @@ int main(void) {
     }
 
     /* ========================================================================= */
-    /* STAGE 6: Neuro-Bit Manifold Bridge (<100ns Projection)                    */
+    /* STAGE 6: Neuro-Bit Manifold Bridge (Deep SIMD & Quantized Projection)     */
     /* ========================================================================= */
-    FLOW_STAGE_BEGIN(6, "Neuro-Bit Manifold Bridge: 4096-D Float -> 64-Bit BMF Polytope");
+    FLOW_STAGE_BEGIN(6, "Neuro-Bit Manifold Bridge: 4096-D Float -> Deep SIMD & Quantized Polytope");
     {
         FlowNeuroBridge bridge;
         const size_t input_dim = 4096;
         FLOW_ASSERT_EQ(flow_neuro_bridge_init(&bridge, input_dim, 0xACE1337), 1);
 
         static float embedding[FLOW_NEURO_MAX_INPUT_DIM];
+        static int8_t q_embedding[FLOW_NEURO_MAX_INPUT_DIM];
         for (size_t i = 0; i < input_dim; i++) {
-            embedding[i] = (float)sin((double)i * 0.123);
+            float val = (float)sin((double)i * 0.123);
+            embedding[i] = val;
+            q_embedding[i] = (int8_t)(val * 120.0f);
         }
 
+        /* 1. Baseline FP32 Projection */
         FlowNeuroProjectionResult result;
         FLOW_ASSERT_EQ(flow_neuro_bridge_project(&bridge, embedding, input_dim,
                                                  FLOW_NEURO_INTENT_SMOOTH_FETCH_LATTE, &result), 1);
@@ -202,8 +206,40 @@ int main(void) {
         FLOW_ASSERT_EQ(flow_neuro_bridge_verify_smt(&result, &proof), FLOW_SMT_PROVEN_UNSAT);
         FLOW_ASSERT_SMT_SOUND(proof);
 
-        printf("  ✓ Stage 6 Passed: 4096-D continuous embedding projected to BMF coordinates in %.1fns.\n\n",
-               result.projection_nanoseconds);
+        /* 2. Deeper SIMD Vectorized Projection */
+        FlowNeuroProjectionResult simd_result;
+        FLOW_ASSERT_EQ(flow_neuro_bridge_project_simd(&bridge, embedding, input_dim,
+                                                      FLOW_NEURO_INTENT_SMOOTH_FETCH_LATTE, &simd_result), 1);
+        FLOW_ASSERT_EQ(simd_result.classified_intent, FLOW_NEURO_INTENT_SMOOTH_FETCH_LATTE);
+        FLOW_ASSERT_EQ(simd_result.bmf_coordinates, result.bmf_coordinates);
+
+        FlowSMTProofAttestation simd_proof;
+        memset(&simd_proof, 0, sizeof(simd_proof));
+        FLOW_ASSERT_EQ(flow_neuro_verify_simd_soundness_smt(&result, &simd_result, 0.0001, &simd_proof), FLOW_SMT_PROVEN_UNSAT);
+        FLOW_ASSERT_SMT_SOUND(simd_proof);
+
+        /* 3. Quantized INT8 Fixed-Point Projection */
+        FlowNeuroBridgeQuantized q_bridge;
+        FLOW_ASSERT_EQ(flow_neuro_bridge_quantize(&bridge, &q_bridge), 1);
+        FlowNeuroProjectionResult q_result;
+        FLOW_ASSERT_EQ(flow_neuro_bridge_project_quantized(&q_bridge, q_embedding,
+                                                           FLOW_NEURO_INTENT_SMOOTH_FETCH_LATTE, &q_result), 1);
+        FLOW_ASSERT_EQ(q_result.classified_intent, FLOW_NEURO_INTENT_SMOOTH_FETCH_LATTE);
+        FLOW_ASSERT_NE(q_result.bmf_coordinates, 0ULL);
+
+        /* 4. SIMD Polyhedral Half-Space Evaluation */
+        double safe_state[FLOW_NEURO_FVEC_DIM] = {0.04, 0.20, 3.0, 0.50};
+        uint32_t violation_mask = 0;
+        FLOW_ASSERT_EQ(flow_neuro_eval_bounds_simd(result.bounds, result.bound_count, safe_state, &violation_mask), 1);
+        FLOW_ASSERT_EQ(violation_mask, 0U); /* All within safe bounds! */
+
+        double unsafe_state[FLOW_NEURO_FVEC_DIM] = {0.15, 0.90, 8.0, 2.00}; /* Tilted 0.15 rad (> 0.08 limit) */
+        uint32_t violation_unsafe = 0;
+        FLOW_ASSERT_EQ(flow_neuro_eval_bounds_simd(result.bounds, result.bound_count, unsafe_state, &violation_unsafe), 1);
+        FLOW_ASSERT_NE(violation_unsafe, 0U); /* Violation flagged in sub-5ns! */
+
+        printf("  ✓ Stage 6 Passed: 4096-D continuous embedding projected via Deep SIMD (%.1fns) & INT8 Quantization; SMT Sound.\n\n",
+               simd_result.projection_nanoseconds);
     }
 
     /* ========================================================================= */

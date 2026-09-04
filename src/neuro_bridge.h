@@ -79,13 +79,23 @@ typedef struct {
     double cumulative_latency_ns;
 } FlowNeuroBridge;
 
+/*
+ * Quantized INT8 Fixed-Point SIMD Acceleration Struct
+ */
+typedef struct {
+    size_t input_dimension;
+    uint16_t bmf_indices[FLOW_NEURO_BMF_BITS][FLOW_NEURO_SPARSITY_BMF];
+    int8_t   bmf_weights[FLOW_NEURO_BMF_BITS][FLOW_NEURO_SPARSITY_BMF];
+    int16_t  bmf_thresholds[FLOW_NEURO_BMF_BITS];
+    uint16_t fvec_indices[FLOW_NEURO_FVEC_DIM][FLOW_NEURO_SPARSITY_FVEC];
+    int8_t   fvec_weights[FLOW_NEURO_FVEC_DIM][FLOW_NEURO_SPARSITY_FVEC];
+} FlowNeuroBridgeQuantized;
+
 /* Initialize Neuro-Bit Manifold Bridge for a given embedding dimension */
 int flow_neuro_bridge_init(FlowNeuroBridge *bridge, size_t input_dim, uint32_t seed);
 
 /*
- * Ultra-Fast Projection:
- * Projects a high-dimensional continuous embedding into 64-bit BMF coordinates,
- * 16-D .fvec features, and synthesized polyhedral bounds.
+ * Ultra-Fast Reference & SIMD Vectorized Projections:
  * Guarantees execution latency < 100 ns on modern hardware.
  */
 int flow_neuro_bridge_project(FlowNeuroBridge *bridge,
@@ -93,6 +103,25 @@ int flow_neuro_bridge_project(FlowNeuroBridge *bridge,
                               size_t embedding_len,
                               FlowNeuroIntentType intent_hint,
                               FlowNeuroProjectionResult *result_out);
+
+int flow_neuro_bridge_project_simd(FlowNeuroBridge *bridge,
+                                   const float *input_embedding,
+                                   size_t embedding_len,
+                                   FlowNeuroIntentType intent_hint,
+                                   FlowNeuroProjectionResult *result_out);
+
+/* Quantization Engine & Fixed-point INT8 SIMD Projection */
+int flow_neuro_bridge_quantize(const FlowNeuroBridge *src, FlowNeuroBridgeQuantized *dst_out);
+int flow_neuro_bridge_project_quantized(const FlowNeuroBridgeQuantized *q_bridge,
+                                        const int8_t *quantized_embedding,
+                                        FlowNeuroIntentType intent_hint,
+                                        FlowNeuroProjectionResult *result_out);
+
+/* Vectorized Polyhedral Half-Space Classifier (parallel evaluation of <= 8 bounds) */
+int flow_neuro_eval_bounds_simd(const FlowNeuroPhysicalBound *bounds,
+                                size_t bound_count,
+                                const double *state_vec,
+                                uint32_t *violation_mask_out);
 
 /*
  * SMT Formal Verification of Synthesized Physical Bounds:
@@ -104,6 +133,16 @@ int flow_neuro_bridge_project(FlowNeuroBridge *bridge,
  */
 FlowSMTResult flow_neuro_bridge_verify_smt(const FlowNeuroProjectionResult *result,
                                            FlowSMTProofAttestation *proof_out);
+
+/*
+ * SMT Precision & Soundness Proof:
+ * Proves that SIMD/Quantized execution produces identical topological intent
+ * classification and error epsilon <= max_allowed_error relative to FP32 reference.
+ */
+FlowSMTResult flow_neuro_verify_simd_soundness_smt(const FlowNeuroProjectionResult *baseline_res,
+                                                  const FlowNeuroProjectionResult *simd_res,
+                                                  double max_allowed_error,
+                                                  FlowSMTProofAttestation *proof_out);
 
 #ifdef __cplusplus
 }
