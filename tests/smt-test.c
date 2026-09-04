@@ -1,3 +1,4 @@
+#include "flow_test_kit.h"
 #include "flow.h"
 #include "registry.h"
 #include "smt.h"
@@ -13,8 +14,8 @@ int main(void) {
     flow_registry_init();
 
     /* 1. Formally verify proven bounded spec */
-    const char *proven_spec_src =
-        "input task_stream {\n"
+    FLOW_TEST_CASE("tests/smt-test.c",
+"input task_stream {\n"
         "    max_count 1024\n"
         "}\n"
         "flow parallel_pipeline {\n"
@@ -24,18 +25,9 @@ int main(void) {
         "require {\n"
         "    deterministic\n"
         "    memory < 16mb\n"
-        "}\n";
-
-    FILE *mem = fmemopen((void *)proven_spec_src, strlen(proven_spec_src), "r");
-    CHECK(mem != NULL);
-    FlowSpec spec;
-    CHECK(parse_spec(mem, &spec));
-    fclose(mem);
-
-    SemanticIR ir;
-    lower_to_ir(&spec, &ir);
-
-    const Component *comp = select_component(&ir);
+        "}\n",
+{
+const Component *comp = select_component(&ir);
     CHECK(comp != NULL);
 
     FlowPlanMetrics metrics = {
@@ -70,8 +62,11 @@ int main(void) {
     CHECK(strstr(smt_buffer, "; --- Theorem 4: Functional Determinism Invariant ---") != NULL);
     CHECK(strstr(smt_buffer, "(check-sat)") != NULL);
 
-    flow_ir_cleanup(&ir);
+    
+
 
     printf("SMT_TEST=passed logic=QF_BV theorems_proven=4/4 script_generation=verified zero_defect=attested\n");
     return 0;
+
+});
 }

@@ -1,3 +1,4 @@
+#include "flow_test_kit.h"
 #include "backend.h"
 #include "flow.h"
 #include "registry.h"
@@ -13,8 +14,8 @@
 int main(void) {
     flow_registry_init();
 
-    const char *spec_src =
-        "input task_stream {\n"
+    FLOW_TEST_CASE("tests/mlir-llvm-test.c",
+"input task_stream {\n"
         "    max_count 4096\n"
         "}\n"
         "flow parallel_pipeline {\n"
@@ -24,18 +25,9 @@ int main(void) {
         "require {\n"
         "    deterministic\n"
         "    memory < 32mb\n"
-        "}\n";
-
-    FILE *mem = fmemopen((void *)spec_src, strlen(spec_src), "r");
-    CHECK(mem != NULL);
-    FlowSpec spec;
-    CHECK(parse_spec(mem, &spec));
-    fclose(mem);
-
-    SemanticIR ir;
-    lower_to_ir(&spec, &ir);
-
-    const Component *comp = select_component(&ir);
+        "}\n",
+{
+const Component *comp = select_component(&ir);
     CHECK(comp != NULL);
 
     SearchResult search = {0};
@@ -73,8 +65,11 @@ int main(void) {
     CHECK(strstr(ll_buffer, "define i32 @flow_run(ptr %state, ptr %input, ptr %output)") != NULL);
     CHECK(strstr(ll_buffer, "define void @flow_drop(ptr %state)") != NULL);
 
-    flow_ir_cleanup(&ir);
+    
+
 
     printf("MLIR_LLVM_TEST=passed mlir_dialect=flow.intent llvm_ir=lto_ready\n");
     return 0;
+
+});
 }

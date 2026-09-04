@@ -178,6 +178,30 @@ typedef struct {
         } \
     } while (0)
 
+
+#define FLOW_TEST_CASE(name_str, spec_literal, ...) \
+    do { \
+        printf("--- [Test Case: %s] ---\n", name_str); \
+        const char *spec_src = (spec_literal); \
+        FILE *mem = tmpfile(); \
+        if (mem) { \
+            fputs(spec_src, mem); \
+            rewind(mem); \
+        } \
+        FlowSpec spec; \
+        memset(&spec, 0, sizeof(spec)); \
+        if (!mem || !parse_spec(mem, &spec)) { \
+            fprintf(stderr, "❌ parse_spec failed\n"); \
+            if (mem) fclose(mem); \
+            exit(1); \
+        } \
+        fclose(mem); \
+        SemanticIR ir; \
+        memset(&ir, 0, sizeof(ir)); \
+        lower_to_ir(&spec, &ir); \
+        __VA_ARGS__ \
+    } while(0)
+
 #define FLOW_TEST_SUITE_END() \
     do { \
         printf("\n========================================================================================\n"); \
