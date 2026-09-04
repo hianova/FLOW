@@ -524,3 +524,75 @@ int flow_neuro_bridge_to_1bit_canvas(FlowNeuroBridge *bridge,
     return 1;
 }
 
+int flow_neuro_bridge_project_fwht(const float *input_4096,
+                                   uint64_t seed,
+                                   FlowNeuroProjectionResult *result_out) {
+    if (!input_4096 || !result_out) return 0;
+    memset(result_out, 0, sizeof(*result_out));
+
+    uint64_t bmf = 0;
+    double fvec[FLOW_NEURO_FVEC_DIM];
+    double proj_ns = 0.0;
+
+    if (!flow_fwht_project_4096(input_4096, seed, &bmf, fvec, &proj_ns)) {
+        return 0;
+    }
+
+    result_out->bmf_coordinates = bmf;
+    memcpy(result_out->fvec_features, fvec, sizeof(result_out->fvec_features));
+    result_out->projection_nanoseconds = proj_ns;
+    result_out->projection_cycles = (uint64_t)(proj_ns * 2.4); /* Nominal 2.4GHz */
+    result_out->classified_intent = FLOW_NEURO_INTENT_GENERIC;
+    result_out->indexed_subspace_id = 0;
+    result_out->bmf_1bit_switches = FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_SIMD_VECTORIZED;
+
+    snprintf(result_out->intent_description, sizeof(result_out->intent_description),
+             "FWHT Zero-Table Fast Projection (K(H_N) = O(1))");
+
+    return 1;
+}
+
+int flow_neuro_bridge_to_morse_canvas(const float *input_4096,
+                                      uint64_t seed,
+                                      const FlowBmfMorseAtlas *atlas,
+                                      FlowBmf1BitCanvas *canvas_out,
+                                      FlowNeuroProjectionResult *result_out) {
+    if (!input_4096 || !canvas_out) return 0;
+    FlowNeuroProjectionResult local_res;
+    FlowNeuroProjectionResult *res = result_out ? result_out : &local_res;
+
+    if (!flow_neuro_bridge_project_fwht(input_4096, seed, res)) {
+        return 0;
+    }
+
+    uint32_t cell_id = 0;
+    if (atlas && atlas->cell_count > 0) {
+        cell_id = flow_morse_atlas_route(atlas, res->fvec_features, FLOW_NEURO_FVEC_DIM);
+        res->indexed_subspace_id = cell_id;
+        const FlowBmfMorseCell *cell = NULL;
+        for (size_t i = 0; i < atlas->cell_count; i++) {
+            if (atlas->cells[i].cell_id == cell_id) {
+                cell = &atlas->cells[i];
+                break;
+            }
+        }
+        if (cell) {
+            flow_bmf_canvas_init(canvas_out, cell->cell_id,
+                                 cell->invariant_mask,
+                                 cell->malleable_mask,
+                                 cell->default_switches);
+        } else {
+            flow_bmf_canvas_init(canvas_out, cell_id,
+                                 FLOW_BMF_SW_HARD_SAFETY, ~0ULL, FLOW_BMF_SW_HARD_SAFETY);
+        }
+    } else {
+        flow_bmf_canvas_init(canvas_out, 0,
+                             FLOW_BMF_SW_HARD_SAFETY, ~0ULL, FLOW_BMF_SW_HARD_SAFETY);
+    }
+
+    canvas_out->dynamic_bias = res->bmf_coordinates;
+    canvas_out->is_adjudicated_sound = flow_bmf_canvas_verify_invariants(canvas_out);
+    return 1;
+}
+
+

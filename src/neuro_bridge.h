@@ -6,6 +6,9 @@
 #include "smt.h"
 #include "flow_smt_dsl.h"
 #include "hardware_telemetry.h"
+#include "fwht_projection.h"
+#include "morse_atlas.h"
+#include "bmf_microcode.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -164,6 +167,20 @@ int flow_neuro_bridge_to_1bit_canvas(FlowNeuroBridge *bridge,
                                      const FlowBmfSubspaceRegistry *reg,
                                      FlowBmf1BitCanvas *canvas_out,
                                      FlowNeuroProjectionResult *result_out);
+
+/*
+ * Kolmogorov Minimal FWHT Zero-Table Projection & Morse Subspace Routing:
+ * Zero stored weight tables (K(H_N) = O(1)), pure integer additions/subtractions.
+ */
+int flow_neuro_bridge_project_fwht(const float *input_4096,
+                                   uint64_t seed,
+                                   FlowNeuroProjectionResult *result_out);
+
+int flow_neuro_bridge_to_morse_canvas(const float *input_4096,
+                                      uint64_t seed,
+                                      const FlowBmfMorseAtlas *atlas,
+                                      FlowBmf1BitCanvas *canvas_out,
+                                      FlowNeuroProjectionResult *result_out);
 
 #ifdef __cplusplus
 }

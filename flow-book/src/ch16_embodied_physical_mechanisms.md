@@ -88,9 +88,9 @@ $$\|p_A(t) - p_B(t)\| = L \pm \delta \quad (\delta \le 5\text{mm})$$
 
 ## 5. 領域測試套件與形式化斷言全景
 
-經過本章擴充，FLOW 5 大領域測試套件的形式化斷言總數達到 **1,140 個**，且全數在 5.5 秒內 100% 通過：
-- **Brain**: 340 斷言 (BMF、SMT 4 定理、Moreau Sweeping、代數拓撲、流形代數、1-Bit Canvas 與子空間索引)
+經過本章擴充，FLOW 5 大領域測試套件的形式化斷言總數達到 **1,185 個**，且全數在 5.5 秒內 100% 通過：
+- **Brain**: 381 斷言 (BMF、SMT 4 定理、Moreau Sweeping、代數拓撲、流形代數、1-Bit Canvas、FWHT 零常數表投影、莫爾斯圖冊與 1-Bit 微碼)
 - **Body**: 456 斷言 (NUMA、SIMD、CAN-FD、IMU、ZMP、摩擦錐、著陸衝擊、雙機協同)
 - **Concurrency**: 211 斷言 (QSBR、Live Reload、Zero-TLB JIT、動態變形、MTD)
-- **Fvec & Swarm**: 85 斷言 (架構記憶、4096-D 深度 SIMD 神經橋、時空錐預演、自創生、子空間路由)
+- **Fvec & Swarm**: 89 斷言 (架構記憶、4096-D 深度 SIMD 神經橋、時空錐預演、自創生、子空間路由、FWHT 莫爾斯直通)
 - **System**: 48 斷言 (編譯器管線、插件 ABI、邊緣網關、撮合引擎、書籍即規範)

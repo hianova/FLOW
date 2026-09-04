@@ -4,6 +4,9 @@
 #include "spacetime_preplay.h"
 #include "swarm_autopoiesis.h"
 #include "hardware_telemetry.h"
+#include "fwht_projection.h"
+#include "morse_atlas.h"
+#include "bmf_microcode.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -263,8 +266,20 @@ int main(void) {
         FLOW_ASSERT_TRUE(flow_bmf_canvas_adjudicate_smt(&bmf_canvas));
         FLOW_ASSERT_TRUE(bmf_canvas.is_adjudicated_sound);
 
-        printf("  ✓ Stage 6 Passed: 4096-D continuous embedding routed to Subspace & 1-Bit BMF Canvas via Deep SIMD (%.1fns); SMT Sound.\n\n",
-               simd_result.projection_nanoseconds);
+        /* 6. Kolmogorov Zero-Table FWHT Projection -> Morse Atlas Direct Mapping */
+        FlowBmfMorseAtlas morse_atlas;
+        flow_morse_atlas_seed_canonical(&morse_atlas);
+
+        FlowBmf1BitCanvas morse_canvas;
+        FlowNeuroProjectionResult fwht_res;
+        FLOW_ASSERT_EQ(flow_neuro_bridge_to_morse_canvas(embedding, 0x1337BEEF,
+                                                         &morse_atlas, &morse_canvas, &fwht_res), 1);
+        FLOW_ASSERT_TRUE(flow_bmf_canvas_get_switch(&morse_canvas, FLOW_BMF_SW_HARD_SAFETY));
+        FLOW_ASSERT_TRUE(morse_canvas.is_adjudicated_sound);
+        FLOW_ASSERT_TRUE(fwht_res.projection_nanoseconds < 50000.0);
+
+        printf("  ✓ Stage 6 Passed: 4096-D continuous embedding routed to Subspace & 1-Bit BMF Canvas via Deep SIMD (%.1fns) & Zero-Table FWHT (%.1fns); SMT Sound.\n\n",
+               simd_result.projection_nanoseconds, fwht_res.projection_nanoseconds);
     }
 
     /* ========================================================================= */
