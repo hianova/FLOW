@@ -38,12 +38,12 @@ static void init_knowledge_book_bindings(void) {
     for (size_t i = 0; i < KNOWLEDGE_COUNT; ++i) {
         FlowModuleKnowledge *k = (FlowModuleKnowledge *)&CODEBASE_KNOWLEDGE[i];
         if (k->book_chapter_ref == NULL) {
-            const FlowModuleBookBinding *b = flow_book_lookup_binding(k->module_id);
+            const FlowModuleBookBinding *b = flow_book_lookup_binding_lang(k->module_id, FLOW_LANG_EN);
             if (b) {
                 k->book_chapter_ref = b->chapter_ref;
                 k->book_chapter_title = b->chapter_title;
-                k->design_philosophy_why = b->philosophy_why;
-                k->book_excerpt = b->book_excerpt;
+                k->design_philosophy_why = "";
+                k->book_excerpt = "";
             }
         }
     }
@@ -142,7 +142,7 @@ void flowy_explain_decision_lang(const FlowDecisionEvent *event, FlowLanguage la
              b ? b->chapter_title : "The FLOW Book",
              b ? b->chapter_ref : "introduction.md",
              (lang == FLOW_LANG_EN ? "Design Philosophy" : "設計哲學"),
-             b ? b->philosophy_why : "Autopoietic topology runtime adaptation.");
+             b ? "" : "Autopoietic topology runtime adaptation.");
 }
 
 void flowy_explain_decision(const FlowDecisionEvent *event, char *buf_out, size_t max_len) {
@@ -362,13 +362,13 @@ int flowy_query_codebase_lang(const FlowTopologyGraph *graph,
     const FlowyLocaleTemplate *tpl = &LOCALE_TEMPLATES[lang == FLOW_LANG_EN ? FLOW_LANG_EN : FLOW_LANG_ZH];
     const FlowModuleBookBinding *binding = flow_book_lookup_binding_lang(best_m->module_id, lang);
 
-    const char *phil_why = (binding && binding->philosophy_why) ? binding->philosophy_why :
+    const char *phil_why = (binding && "") ? "" :
                            (best_m->design_philosophy_why ? best_m->design_philosophy_why : "Autopoietic living system guarantees.");
     const char *book_chap = (binding && binding->chapter_title) ? binding->chapter_title :
                             (best_m->book_chapter_title ? best_m->book_chapter_title : "The FLOW Book");
     const char *book_ref = (binding && binding->chapter_ref) ? binding->chapter_ref :
                            (best_m->book_chapter_ref ? best_m->book_chapter_ref : "introduction.md");
-    const char *book_exc = (binding && binding->book_excerpt) ? binding->book_excerpt :
+    const char *book_exc = (binding && "") ? "" :
                            (best_m->book_excerpt ? best_m->book_excerpt : "Refer to 《The FLOW Book》 for comprehensive architectural details.");
 
     snprintf(answer_out->explanation, sizeof(answer_out->explanation),

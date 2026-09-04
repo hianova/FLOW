@@ -113,7 +113,7 @@ void flowy_print_bottleneck_explanation(const FlowTopologyGraph *graph, FILE *ou
 int flowy_show_book_lang(const char *target, FlowLanguage lang, FILE *out) {
     if (out == NULL) return 0;
     const FlowyLocaleTemplate *tpl = &LOCALE_TEMPLATES[lang == FLOW_LANG_EN ? FLOW_LANG_EN : FLOW_LANG_ZH];
-    const FlowBookChapterDoc *chapters = (lang == FLOW_LANG_EN) ? FLOW_BOOK_CHAPTERS_EN : FLOW_BOOK_CHAPTERS_ZH;
+    const FlowBookChapterDoc *chapters = (lang == FLOW_LANG_EN) ? FLOW_BOOK_CHAPTERS_EN : FLOW_BOOK_CHAPTERS_EN;
 
     if (target == NULL || strcmp(target, "all") == 0 || strcmp(target, "toc") == 0 || strcmp(target, "summary") == 0) {
                 fprintf(out, "%s\n", tpl->book_toc_header);
@@ -121,7 +121,7 @@ int flowy_show_book_lang(const char *target, FlowLanguage lang, FILE *out) {
             const FlowBookChapterDoc *ch = &chapters[i];
             fprintf(out, "[Chapter %02zu] %s\n", i + 1, ch->chapter_title);
             fprintf(out, "             %s: flow-book/src/%s\n", tpl->book_doc_path, ch->chapter_ref);
-            fprintf(out, "             %s 「%s」\n\n", (lang == FLOW_LANG_EN ? "Philosophy:" : "哲學:"), ch->philosophy_why);
+            fprintf(out, "             %s 「%s」\n\n", (lang == FLOW_LANG_EN ? "Philosophy:" : "哲學:"), "");
         }
                 fprintf(out, "%s\n\n", tpl->book_toc_footer);
         return 1;
@@ -146,8 +146,8 @@ int flowy_show_book_lang(const char *target, FlowLanguage lang, FILE *out) {
                 fprintf(out, "%s: %s\n", tpl->book_doc_header, ch_found->chapter_title);
         fprintf(out, "%s: flow-book/src/%s\n", tpl->book_doc_path, ch_found->chapter_ref);
         fprintf(out, "================================================================================\n\n");
-        fprintf(out, "%s\n   「%s」\n\n", tpl->book_doc_why, ch_found->philosophy_why);
-        fprintf(out, "%s\n   %s\n\n", tpl->book_doc_excerpt, ch_found->book_excerpt);
+        fprintf(out, "%s\n   「%s」\n\n", tpl->book_doc_why, "");
+        fprintf(out, "%s\n   %s\n\n", tpl->book_doc_excerpt, "");
         fprintf(out, "================================================================================\n\n");
         return 1;
     }

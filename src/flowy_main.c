@@ -242,7 +242,7 @@ int main(int argc, char **argv) {
                 printf("APIs:         %s\n", k->key_apis);
                 if (b && b->chapter_title) {
                     printf("Book Ref:     %s (flow-book/src/%s)\n", b->chapter_title, b->chapter_ref ? b->chapter_ref : "");
-                    printf("Philosophy:   「%s」\n", b->philosophy_why ? b->philosophy_why : "");
+                    printf("Philosophy:   「%s」\n", "" ? "" : "");
                 }
             }
                         return EXIT_SUCCESS;
@@ -262,10 +262,10 @@ int main(int argc, char **argv) {
             printf("4. KEY APIS:\n   %s\n\n", k->key_apis);
             if (b && b->chapter_title) {
                 printf("5. 💡 DESIGN PHILOSOPHY & WHY (From 《The FLOW Book》):\n   「%s」\n\n",
-                       b->philosophy_why ? b->philosophy_why : "");
+                       "" ? "" : "");
                 printf("6. 📖 BOOK CHAPTER REFERENCE & EXCERPT:\n   [%s] (flow-book/src/%s)\n   %s\n",
                        b->chapter_title, b->chapter_ref ? b->chapter_ref : "",
-                       b->book_excerpt ? b->book_excerpt : "");
+                       "" ? "" : "");
             }
             return EXIT_SUCCESS;
         }
