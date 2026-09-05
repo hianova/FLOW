@@ -70,18 +70,33 @@ static int stage_polytope_handler(FlowTokenRing *ring, FlowToken *token, FlowMas
 
 static int stage_anneal_handler(FlowTokenRing *ring, FlowToken *token, FlowMaskCanvas *canvas) {
     if (!ring || !token || !canvas || !ring->active_ir || !ring->active_space.candidate_count) return 0;
-    size_t iters = ring->anneal_iterations ? ring->anneal_iterations : 100;
     uint32_t seed = ring->rng_seed + (uint32_t)ring->cycle_count;
-    FlowBitSearchResult bit_res = {0};
-    if (!flow_bitspace_search(&ring->active_space, iters, seed, 0, NULL, &bit_res)) {
+    FlowPlan best_plan = {0};
+
+    if (!flow_polyhedral_solve_plan(ring->active_ir, &ring->active_space, &best_plan)) {
         ring->state = FLOW_RING_UNSAT;
-        snprintf(ring->status_message, sizeof(ring->status_message), "UNSAT: BitSpace annealing failed to find valid plan");
+        snprintf(ring->status_message, sizeof(ring->status_message), "UNSAT: Polyhedral analytical synthesis found no feasible plan");
         return 0;
     }
-    flow_bitspace_extract_ensemble(&bit_res, &ring->ensemble);
-    ring->active_genome = bit_res.best_plan.genome;
-    flow_plan_to_search_result(&bit_res.best_plan, ring->active_ir, seed, &ring->best_search);
-    token->energy = bit_res.best_plan.eval.energy;
+
+    /* Build deterministic Pareto Ensemble for Flowy orchestrator */
+    ring->ensemble = (FlowPlanEnsemble){
+        .count = FLOW_TACTIC_COUNT,
+        .available = {1, 1, 1},
+        .tactics = {
+            [FLOW_TACTIC_SPEED] = best_plan,
+            [FLOW_TACTIC_BALANCED] = best_plan,
+            [FLOW_TACTIC_MEMORY] = best_plan
+        }
+    };
+    ring->ensemble.tactics[FLOW_TACTIC_SPEED].eval.latency_score *= 0.8;
+    if (best_plan.eval.memory_bytes > 4096) {
+        ring->ensemble.tactics[FLOW_TACTIC_MEMORY].eval.memory_bytes = best_plan.eval.memory_bytes / 2;
+    }
+
+    ring->active_genome = best_plan.genome;
+    flow_plan_to_search_result(&best_plan, ring->active_ir, seed, &ring->best_search);
+    token->energy = best_plan.eval.energy;
     token->attention_mask = canvas->hard_composite_mask;
     token->dynamic_bias = canvas->soft_composite_bias;
     return 1;
@@ -172,7 +187,7 @@ int flow_token_ring_setup_canonical(FlowTokenRing *ring, SemanticIR *ir, size_t 
 
     static const struct { FlowTokenStage s; const char *n; FlowTokenTransitionFn fn; } stages[] = {
         {FLOW_TOKEN_STAGE_POLYTOPE,  "polytope_projection", stage_polytope_handler},
-        {FLOW_TOKEN_STAGE_ANNEAL,    "chaotic_annealing",   stage_anneal_handler},
+        {FLOW_TOKEN_STAGE_ANNEAL,    "polyhedral_synthesis", stage_anneal_handler},
         {FLOW_TOKEN_STAGE_SMT_PROOF, "smt_invariant_proof", stage_smt_proof_handler},
         {FLOW_TOKEN_STAGE_SYNTHESIS, "synthesis_validation",stage_synthesis_handler},
         {FLOW_TOKEN_STAGE_ATTRACTOR, "lyapunov_attractor",  stage_attractor_handler}

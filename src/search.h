@@ -73,6 +73,10 @@ uint64_t flow_plan_get_value(const FlowPlanDimensionSet *dims,
 FlowTuning flow_default_tuning(const SemanticIR *ir,
                                const Component *component);
 
+int flow_polyhedral_solve_plan(const SemanticIR *ir,
+                               const FlowBitSpace *space,
+                               FlowPlan *plan_out);
+
 SearchResult search_best(const SemanticIR *ir, size_t iterations, uint32_t seed,
                          int measured, const ProfileSeed *profile);
 
