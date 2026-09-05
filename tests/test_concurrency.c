@@ -10,6 +10,8 @@
 #include "token_ring.h"
 #include "entropy_collapse.h"
 #include "flow_jet.h"
+#include "flow_time_crystal.h"
+#include "flow_speculative_jit.h"
 #include "flow_prefetch.h"
 
 #include <stdio.h>
@@ -745,6 +747,93 @@ int main(void) {
 
         printf("  ✓ Stage 10 Passed: Streaming EDMD adapted (Tr(K)=%.2f); PMU barrier preserved (|q|<1.5); 64-D Jet bundle serialized & SMT proven.\n\n",
                trace_K);
+    }
+
+    /* ========================================================================= */
+    /* STAGE 11: Discrete Time Crystal (DTC): Floquet DTTSB & Cyclic Memory      */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(11, "Discrete Time Crystal (DTC): Floquet DTTSB, Limit-Cycle Memory & Subharmonic Rigidity");
+    {
+        FlowJet jet_dtc;
+        FLOW_ASSERT_EQ(flow_jet_init(&jet_dtc, "jet_dtc_crystal", "DTC Quantum Memory Jet"), 1);
+
+        FlowTimeCrystal dtc;
+        FLOW_ASSERT_EQ(flow_dtc_init(&dtc, &jet_dtc, 0.02, 0.95 * 3.141592653589793, 1.2), 1);
+        FLOW_ASSERT_EQ(dtc.floquet_cycles_total, 0);
+
+        /* 1. Run 20 Floquet driving cycles */
+        FLOW_ASSERT_EQ(flow_dtc_step_floquet(&dtc, 20, 0.001), 1);
+        FLOW_ASSERT_EQ(dtc.floquet_cycles_total, 20);
+
+        /* 2. Subharmonic 2T Fourier peak locked */
+        double ratio = flow_dtc_get_fourier_subharmonic_ratio(&dtc);
+        FLOW_ASSERT_TRUE(ratio >= 0.85);
+        FLOW_ASSERT_EQ(dtc.is_subharmonic_locked, 1);
+
+        /* 3. Non-thermalizing MBL energy conservation */
+        FLOW_ASSERT_TRUE(dtc.max_energy_drift < 0.35);
+
+        /* 4. Cyclic Computational Memory: Encode & Decode bit */
+        FLOW_ASSERT_EQ(flow_dtc_encode_bit(&dtc, 1), 1);
+        FLOW_ASSERT_EQ(flow_dtc_step_floquet(&dtc, 10, 0.001), 1);
+        FLOW_ASSERT_EQ(flow_dtc_decode_bit(&dtc), 1);
+
+        FLOW_ASSERT_EQ(flow_dtc_encode_bit(&dtc, 0), 1);
+        FLOW_ASSERT_EQ(flow_dtc_step_floquet(&dtc, 10, 0.001), 1);
+        FLOW_ASSERT_EQ(flow_dtc_decode_bit(&dtc), 0);
+
+        /* 5. SMT Supreme Court Formal Proof */
+        FlowSMTProofAttestation dtc_proof;
+        memset(&dtc_proof, 0, sizeof(dtc_proof));
+        FLOW_ASSERT_EQ(flow_dtc_verify_soundness_smt(&dtc, &dtc_proof), FLOW_SMT_PROVEN_UNSAT);
+        FLOW_ASSERT_SMT_SOUND(dtc_proof);
+
+        printf("  ✓ Stage 11 Passed: Discrete Time Crystal sustained 2T subharmonic lock (ratio=%.2f%%); bit memory preserved; SMT proven.\n\n",
+               ratio * 100.0);
+    }
+
+    /* ========================================================================= */
+    /* STAGE 12: Speculative JIT: Koopman Moreau Crossing & Negative Latency Swap */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(12, "Speculative JIT: Koopman Moreau Crossing & Negative Latency Hot-Swap");
+    {
+        FlowJet jet_sjit;
+        FLOW_ASSERT_EQ(flow_jet_init(&jet_sjit, "jet_speculative", "Speculative JIT Jet"), 1);
+        jet_sjit.payload.q[0] = 1.05;
+        jet_sjit.payload.p[0] = 2.0; /* Approaching boundary threshold 1.1 */
+        jet_sjit.payload.a[0] = 0.0;
+
+        FlowReloadContext *reload_ctx = flow_reload_create(NULL);
+        FLOW_ASSERT_TRUE(reload_ctx != NULL);
+        uint64_t initial_gen = flow_reload_generation(reload_ctx);
+
+        FlowSpeculativeJIT sjit;
+        FLOW_ASSERT_EQ(flow_speculative_jit_init(&sjit, &jet_sjit, NULL, reload_ctx, 50000000.0, 1.1, 0), 1);
+        FLOW_ASSERT_EQ(sjit.is_compilation_dispatched, 0);
+
+        /* 1. Evaluate trajectory: lookahead anticipates boundary crossing */
+        FLOW_ASSERT_EQ(flow_speculative_jit_evaluate(&sjit, 0.001), 1);
+        FLOW_ASSERT_EQ(sjit.is_compilation_dispatched, 1);
+        FLOW_ASSERT_EQ(sjit.is_compilation_ready, 1);
+        FLOW_ASSERT_TRUE(sjit.predicted_crossing_time_ns > 0.0);
+
+        /* 2. Trajectory reaches threshold: auto-commits negative-latency swap */
+        jet_sjit.payload.q[0] = 1.15;
+        FLOW_ASSERT_EQ(flow_speculative_jit_evaluate(&sjit, 0.0), 1);
+        FLOW_ASSERT_EQ(sjit.is_hot_swapped, 1);
+        FLOW_ASSERT_EQ(sjit.total_negative_latency_swaps, 1);
+        FLOW_ASSERT_EQ(flow_reload_generation(reload_ctx), initial_gen + 1);
+
+        /* 3. SMT Highest Court Verification */
+        FlowSMTProofAttestation sjit_proof;
+        memset(&sjit_proof, 0, sizeof(sjit_proof));
+        FLOW_ASSERT_EQ(flow_speculative_jit_verify_smt(&sjit, &sjit_proof), FLOW_SMT_PROVEN_UNSAT);
+        FLOW_ASSERT_SMT_SOUND(sjit_proof);
+
+        flow_reload_destroy(reload_ctx);
+
+        printf("  ✓ Stage 12 Passed: Speculative JIT anticipated Moreau crossing (t_pred=%.1fns); negative latency hot-swap committed; SMT proven.\n\n",
+               sjit.predicted_crossing_time_ns);
     }
 
     FLOW_TEST_SUITE_END();

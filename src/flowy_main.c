@@ -238,6 +238,8 @@ static void flowy_print_jet_usage(FILE *out) {
     fprintf(out, "  sim <file.fjet> [--steps N] [--dt D] Symplectic orbit leapfrog simulation\n");
     fprintf(out, "  phase-portrait <file.fjet> [options] ASCII terminal phase space (q, p) trajectory plot\n");
     fprintf(out, "  learn <file.fjet> [--samples N]      Online Streaming EDMD assimilation & stability proof\n");
+    fprintf(out, "  dtc <file.fjet> [options]            Discrete Time Crystal subharmonic oscillation simulation\n");
+    fprintf(out, "  dead-reckon <file.fjet> [options]    CXL cluster dead-reckoning bandwidth reduction simulation\n");
 }
 
 static void flowy_print_test_usage(FILE *out) {
@@ -881,6 +883,52 @@ int main(int argc, char **argv) {
                 return EXIT_FAILURE;
             }
             flowy_jet_learn_demo(&jet, samples, stdout);
+            return EXIT_SUCCESS;
+        }
+
+        /* Subcommand: flowy jet dtc <file.fjet> [--cycles N] [--period T] [--imperfection E] */
+        if (strcmp(action, "dtc") == 0 || strcmp(action, "time-crystal") == 0) {
+            if (arg_offset >= argc) {
+                fprintf(stderr, "usage: flowy jet dtc <file.fjet> [--cycles N] [--period T] [--imperfection E]\n");
+                return EXIT_FAILURE;
+            }
+            const char *filepath = argv[arg_offset++];
+            uint32_t cycles = 24;
+            double period_T = 0.02;
+            double imperfection = 0.05;
+            for (int i = arg_offset; i < argc; ++i) {
+                if (strcmp(argv[i], "--cycles") == 0 && i + 1 < argc) cycles = (uint32_t)atoi(argv[++i]);
+                else if (strcmp(argv[i], "--period") == 0 && i + 1 < argc) period_T = atof(argv[++i]);
+                else if (strcmp(argv[i], "--imperfection") == 0 && i + 1 < argc) imperfection = atof(argv[++i]);
+            }
+            FlowJet jet;
+            if (!flow_jet_read_file(filepath, &jet)) {
+                fprintf(stderr, "flowy jet: failed to load or verify '%s'\n", filepath);
+                return EXIT_FAILURE;
+            }
+            flowy_jet_dtc_simulate(&jet, cycles, period_T, imperfection, stdout);
+            return EXIT_SUCCESS;
+        }
+
+        /* Subcommand: flowy jet dead-reckon <file.fjet> [--ticks N] [--threshold EPS] */
+        if (strcmp(action, "dead-reckon") == 0 || strcmp(action, "reckon") == 0) {
+            if (arg_offset >= argc) {
+                fprintf(stderr, "usage: flowy jet dead-reckon <file.fjet> [--ticks N] [--threshold EPS]\n");
+                return EXIT_FAILURE;
+            }
+            const char *filepath = argv[arg_offset++];
+            uint32_t ticks = 50;
+            double threshold = 0.08;
+            for (int i = arg_offset; i < argc; ++i) {
+                if (strcmp(argv[i], "--ticks") == 0 && i + 1 < argc) ticks = (uint32_t)atoi(argv[++i]);
+                else if (strcmp(argv[i], "--threshold") == 0 && i + 1 < argc) threshold = atof(argv[++i]);
+            }
+            FlowJet jet;
+            if (!flow_jet_read_file(filepath, &jet)) {
+                fprintf(stderr, "flowy jet: failed to load or verify '%s'\n", filepath);
+                return EXIT_FAILURE;
+            }
+            flowy_jet_dead_reckon_demo(&jet, ticks, threshold, stdout);
             return EXIT_SUCCESS;
         }
 

@@ -10,6 +10,7 @@
 #include "driver_can.h"
 #include "driver_imu.h"
 #include "embodied_physics_scenarios.h"
+#include "flow_embodied_mz.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -498,6 +499,37 @@ int main(void) {
         FLOW_ASSERT_SMT_SOUND(cm_proof);
 
         printf("  ✓ Stage 10 Passed: Friction cone, impact absorption, and dual-robot co-manipulation SMT Sound.\n\n");
+    }
+
+    /* ========================================================================= */
+    /* STAGE 11: Embodied Non-Markovian Shock Impedance Control (Mori-Zwanzig)   */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(11, "Embodied AI Non-Markovian Shock Impedance Control (Mori-Zwanzig Viscoelastic Kernel)");
+    {
+        FlowMoriZwanzigImpedanceController ctrl;
+        FLOW_ASSERT_EQ(flow_embodied_mz_init(&ctrl, 6, NULL, 8), 1);
+        FLOW_ASSERT_EQ(ctrl.joint_count, 6ULL);
+        FLOW_ASSERT_EQ(ctrl.tap_count, 8ULL);
+
+        /* 1. Simulate severe sudden impact impulse (stepping on ice at 3.5 m/s) */
+        double settling_time_ms = 0.0;
+        double peak_torque = 0.0;
+        FLOW_ASSERT_EQ(flow_embodied_mz_simulate_impact(&ctrl, 15.0, &settling_time_ms, &peak_torque), 1);
+
+        /* Viscoelastic memory convolution dissipates shock in < 5.0ms with zero chatter */
+        FLOW_ASSERT_TRUE(settling_time_ms < 5.0);
+        FLOW_ASSERT_TRUE(peak_torque <= 80.0);
+        FLOW_ASSERT_TRUE(ctrl.dissipated_energy_joules > 0.0);
+        FLOW_ASSERT_EQ(ctrl.collision_shocks_absorbed, 1ULL);
+
+        /* 2. SMT Supreme Court Passivity & Safety Proof */
+        FlowSMTProofAttestation mz_proof;
+        memset(&mz_proof, 0, sizeof(mz_proof));
+        FLOW_ASSERT_EQ(flow_embodied_mz_verify_smt(&ctrl, &mz_proof), FLOW_SMT_PROVEN_UNSAT);
+        FLOW_ASSERT_SMT_SOUND(mz_proof);
+
+        printf("  ✓ Stage 11 Passed: Mori-Zwanzig viscoelastic kernel settled impact shock in %.2fms (<5ms limit, peak=%.1fNm); SMT passivity proven.\n\n",
+               settling_time_ms, peak_torque);
     }
 
     FLOW_TEST_SUITE_END();

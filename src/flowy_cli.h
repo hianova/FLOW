@@ -41,6 +41,8 @@ void flowy_print_jet_inspection(const struct FlowJet *jet, FILE *out);
 void flowy_render_phase_portrait(const struct FlowJet *jet, uint32_t dim_x, uint32_t dim_y, int steps, double dt, FILE *out);
 int flowy_jet_simulate_run(const struct FlowJet *jet, int steps, double dt, FILE *out);
 int flowy_jet_learn_demo(struct FlowJet *jet, int sample_count, FILE *out);
+int flowy_jet_dtc_simulate(struct FlowJet *jet, uint32_t cycles, double period_T, double imperfection, FILE *out);
+int flowy_jet_dead_reckon_demo(struct FlowJet *jet, uint32_t ticks, double threshold, FILE *out);
 
 /* Interactive REPL Loop */
 int flowy_interactive_loop(FlowOrchestrator *orch, FILE *in, FILE *out);

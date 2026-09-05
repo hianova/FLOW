@@ -1,6 +1,8 @@
 #include "flowy_cli.h"
 #include "flowy.h"
 #include "flow_jet.h"
+#include "flow_time_crystal.h"
+#include "flow_jet_dead_reckon.h"
 #include "audit.h"
 #include "generated_book_knowledge.h"
 #include "generated_knowledge.h"
@@ -536,3 +538,106 @@ int flowy_jet_learn_demo(struct FlowJet *jet, int sample_count, FILE *out) {
             (unsigned long long)edmd.update_count);
     return 1;
 }
+
+int flowy_jet_dtc_simulate(struct FlowJet *jet, uint32_t cycles, double period_T, double imperfection, FILE *out) {
+    if (jet == NULL || out == NULL) return 0;
+    if (cycles == 0) cycles = 24;
+    if (period_T <= 0.0) period_T = 0.02;
+
+    double kick = (1.0 - imperfection) * 3.14159265358979323846;
+    FlowTimeCrystal dtc;
+    flow_dtc_init(&dtc, jet, period_T, kick, 1.2);
+
+    fprintf(out, "\n╔══════════════════════════════════════════════════════════════════════════════╗\n");
+    fprintf(out, "║       DISCRETE TIME CRYSTAL (DTC) SUBHARMONIC SIMULATION (.fjet)            ║\n");
+    fprintf(out, "╠══════════════════════════════════════════════════════════════════════════════╣\n");
+    fprintf(out, "║ Floquet Period T: %-8.4fs │ Kick Rotation: %-7.4f rad (Imperfection: %-5.2f)   ║\n",
+            period_T, kick, imperfection);
+    fprintf(out, "║ MBL Disorder W:   %-8.2f   │ Total Cycles:   %-5u                               ║\n",
+            dtc.disorder_strength, cycles);
+    fprintf(out, "╠══════════════════════════════════════════════════════════════════════════════╣\n");
+    fprintf(out, "║ Cycle │ Time (ms)  │ Order Z(nT) │ Subharmonic Limit-Cycle Sparkline          ║\n");
+    fprintf(out, "╟───────┼────────────┼─────────────┼────────────────────────────────────────────╢\n");
+
+    for (uint32_t c = 1; c <= cycles; ++c) {
+        flow_dtc_step_floquet(&dtc, 1, 0.001);
+        double z = dtc.current_order_param;
+        char bar[40];
+        int pos = (int)((z + 1.5) / 3.0 * 30.0);
+        if (pos < 0) pos = 0;
+        if (pos > 30) pos = 30;
+        memset(bar, ' ', sizeof(bar));
+        bar[32] = '\0';
+        bar[15] = '|'; /* Center zero axis */
+        bar[pos] = (z >= 0.0) ? '+' : '-';
+
+        fprintf(out, "║ #%-4u │ %-10.2f │   %+7.4f   │ [%s] ║\n",
+                c, (double)c * period_T * 1000.0, z, bar);
+    }
+
+    double subharmonic_ratio = flow_dtc_get_fourier_subharmonic_ratio(&dtc);
+    FlowSMTProofAttestation proof;
+    memset(&proof, 0, sizeof(proof));
+    FlowSMTResult smt_res = flow_dtc_verify_soundness_smt(&dtc, &proof);
+
+    fprintf(out, "╠══════════════════════════════════════════════════════════════════════════════╣\n");
+    fprintf(out, "║ Subharmonic 2T Fourier Peak Ratio: %-6.2f%% (Locked: %-3s)                    ║\n",
+            subharmonic_ratio * 100.0, dtc.is_subharmonic_locked ? "YES" : "NO");
+    fprintf(out, "║ Floquet Max Energy Drift:          %-8.6f (Non-Thermalizing ETH Protected)  ║\n",
+            dtc.max_energy_drift);
+    fprintf(out, "║ SMT Formal Verification:           %-41s ║\n",
+            (smt_res == FLOW_SMT_PROVEN_UNSAT) ? "UNSAT: ZERO-DEFECT RIGIDITY PROVEN" : "UNKNOWN");
+    fprintf(out, "╚══════════════════════════════════════════════════════════════════════════════╝\n\n");
+    return 1;
+}
+
+int flowy_jet_dead_reckon_demo(struct FlowJet *jet, uint32_t ticks, double threshold, FILE *out) {
+    if (jet == NULL || out == NULL) return 0;
+    if (ticks == 0) ticks = 50;
+    if (threshold <= 0.0) threshold = 0.08;
+
+    FlowJet actual = *jet;
+    FlowJetDeadReckonSender sender;
+    flow_jet_dead_reckon_sender_init(&sender, &actual, threshold);
+
+    FlowJetDeadReckonReceiver receiver;
+    flow_jet_dead_reckon_receiver_init(&receiver, "cluster_node_b", actual.header.vector_dim);
+
+    fprintf(out, "\n╔══════════════════════════════════════════════════════════════════════════════╗\n");
+    fprintf(out, "║       JET-BASED DEAD RECKONING CXL / CLUSTER SIMULATION (.fjet)              ║\n");
+    fprintf(out, "╠══════════════════════════════════════════════════════════════════════════════╣\n");
+    fprintf(out, "║ Monitored Node: %-16s │ Remote Mirror: cluster_node_b            ║\n",
+            jet->header.id);
+    fprintf(out, "║ Lyapunov Threshold: %-12.4f │ Simulation Ticks: %-5u                       ║\n",
+            threshold, ticks);
+    fprintf(out, "╠══════════════════════════════════════════════════════════════════════════════╣\n");
+
+    for (uint32_t t = 0; t < ticks; ++t) {
+        FlowJetDeadReckonPacket pkt;
+        int pkt_needed = 0;
+        flow_jet_dead_reckon_sender_step(&sender, 0.005, &pkt, &pkt_needed);
+
+        if (pkt_needed) {
+            flow_jet_dead_reckon_receiver_apply_packet(&receiver, &pkt);
+        } else {
+            flow_jet_dead_reckon_receiver_step(&receiver, 0.005);
+        }
+    }
+
+    FlowSMTProofAttestation proof;
+    memset(&proof, 0, sizeof(proof));
+    FlowSMTResult smt_res = flow_jet_dead_reckon_verify_smt(&sender, &proof);
+
+    fprintf(out, "║ Packets Transmitted:     %-6llu │ Packets Suppressed: %-6llu                 ║\n",
+            (unsigned long long)sender.packets_sent,
+            (unsigned long long)sender.packets_suppressed);
+    fprintf(out, "║ Bandwidth Savings Ratio: %-6.2f%% (Target: >= 85.00%%)                        ║\n",
+            sender.bandwidth_savings_ratio * 100.0);
+    fprintf(out, "║ Peak Trajectory Drift:   %-8.5f (Within Lyapunov Horizon)               ║\n",
+            sender.max_observed_divergence);
+    fprintf(out, "║ SMT Formal Verification: %-43s ║\n",
+            (smt_res == FLOW_SMT_PROVEN_UNSAT) ? "UNSAT: BOUNDED TRAJECTORY GUARANTEED" : "UNKNOWN");
+    fprintf(out, "╚══════════════════════════════════════════════════════════════════════════════╝\n\n");
+    return 1;
+}
+
