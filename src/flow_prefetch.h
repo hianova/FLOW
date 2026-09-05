@@ -77,6 +77,14 @@ int flow_prefetch_token_ring_slot(const void *next_slot_canvas_ptr,
                                   const void *next_component_ptr);
 
 /*
+ * Jet Phase-Space Geodesic Prefetching:
+ * Inspects Hamiltonian phase velocity p and Koopman observable projection,
+ * and issues L1/L2 prefetch instructions along the cotangent geodesic bundle.
+ */
+struct FlowJet;
+int flow_prefetch_jet_trajectory(const struct FlowJet *jet, double lookahead_ns);
+
+/*
  * SMT Supreme Court Prefetch Alignment Theorem:
  * Mathematically verifies that:
  * 1. sizeof(FlowBmf1BitCanvas) == 64 bytes (exact single cache line).

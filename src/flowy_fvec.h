@@ -296,6 +296,11 @@ int flow_vault_query_nearest(FlowVectorVault *vault, const double *query_feature
                              FlowVaultCategory category_filter,
                              size_t *best_idx_out, double *best_sim_out);
 
+/* Mori-Zwanzig & Phase Space Nearest Neighbor Query */
+struct FlowJet;
+int flow_vault_query_nearest_jet(FlowVectorVault *vault, const struct FlowJet *query_jet,
+                                 size_t *best_idx_out, double *best_dist_out);
+
 void flow_vault_embed_prompt(const char *prompt, double *out_features);
 int flow_vault_query_semantic(FlowVectorVault *vault, const char *prompt,
                               size_t *best_idx_out, double *best_sim_out);

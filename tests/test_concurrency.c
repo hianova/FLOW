@@ -6,11 +6,17 @@
 #include "bitspace.h"
 #include "smt.h"
 #include "registry.h"
+#include "bitmanifold.h"
+#include "token_ring.h"
+#include "entropy_collapse.h"
+#include "flow_jet.h"
+#include "flow_prefetch.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdatomic.h>
+#include <math.h>
 
 typedef struct {
     uint64_t multiplier;
@@ -375,6 +381,278 @@ int main(void) {
                (unsigned long long)safety_mask);
     }
 
+    /* ========================================================================= */
+    /* STAGE 7: Wavefront-Coupled QSBR & 64B Atomic Phase Shift                  */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(7, "Wavefront-Coupled QSBR & 64B Atomic Phase Shift: Zero-Cost Temporal Invariant & SMT Soundness");
+    {
+        /* 1. 64-Byte Atomic Phase Shift (FLOW_ATOMIC_STAGE_SWAP & FLOW_ATOMIC_STAGE_LOAD) */
+        FlowBmf1BitCanvas canvas_active;
+        flow_bmf_canvas_init(&canvas_active, 1, FLOW_BMF_SW_HARD_SAFETY, ~0ULL, FLOW_BMF_SW_HARD_SAFETY);
+
+        FlowBmf1BitCanvas canvas_staged;
+        flow_bmf_canvas_init(&canvas_staged, 2, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_ANTI_SPILL_TILT, ~0ULL,
+                             FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_ANTI_SPILL_TILT | FLOW_BMF_SW_GRIPPER_FORCE_SAFE);
+
+        FLOW_ASSERT_NE(canvas_active.switchboard_bits, canvas_staged.switchboard_bits);
+        FLOW_ASSERT_NE(canvas_active.subspace_id, canvas_staged.subspace_id);
+
+        /* Single-Copy 64-Byte Atomic Phase Shift */
+        FLOW_ATOMIC_STAGE_SWAP(&canvas_active, &canvas_staged);
+        FLOW_ASSERT_EQ(canvas_active.switchboard_bits, canvas_staged.switchboard_bits);
+        FLOW_ASSERT_EQ(canvas_active.subspace_id, 2U);
+
+        /* Atomic Acquire Load */
+        FlowBmf1BitCanvas loaded = FLOW_ATOMIC_STAGE_LOAD(&canvas_active);
+        FLOW_ASSERT_EQ(loaded.subspace_id, 2U);
+        FLOW_ASSERT_EQ(loaded.switchboard_bits, canvas_staged.switchboard_bits);
+
+        /* 2. Wavefront-Coupled Implicit QSBR (Zero Manual Checkpoints) */
+        uint8_t backing_buf[4096];
+        FlowBumpQsbrArena arena;
+        FLOW_ASSERT_EQ(flow_bump_qsbr_init(&arena, backing_buf, sizeof(backing_buf)), 1);
+        FLOW_ASSERT_EQ(arena.generation, 1ULL);
+        FLOW_ASSERT_EQ(arena.total_folds, 0ULL);
+
+        /* Allocate within Generation 1 */
+        void *p1 = flow_bump_qsbr_alloc(&arena, 256);
+        void *p2 = flow_bump_qsbr_alloc(&arena, 512);
+        FLOW_ASSERT_TRUE(p1 != NULL);
+        FLOW_ASSERT_TRUE(p2 != NULL);
+        FLOW_ASSERT_TRUE(arena.cursor >= 768);
+
+        /* Initialize Wavefront Ring and Bind Arena */
+        SemanticIR ir;
+        memset(&ir, 0, sizeof(ir));
+        strncpy(ir.flow_name, "wavefront_concur_flow", sizeof(ir.flow_name) - 1);
+        ir.input_max_count = 1000;
+        ir.state_shared = 1;
+        ir.state_read_heavy = 1;
+        ir.fact_unordered = 1;
+
+        FlowWavefrontRing wring;
+        FLOW_ASSERT_EQ(flow_wavefront_ring_init(&wring, &ir, 4, 2), 1);
+        FLOW_ASSERT_EQ(flow_wavefront_ring_bind_arena(&wring, &arena), 1);
+        wring.state = FLOW_RING_CIRCULATING;
+
+        /* Advance Wavefront: Quiescence occurs naturally without manual checkpoint/fold! */
+        FLOW_ASSERT_EQ(flow_wavefront_ring_step_parallel(&wring), 1);
+        FLOW_ASSERT_EQ(wring.wave_cycle_count, 1ULL);
+        FLOW_ASSERT_EQ(wring.quiescent_generation, 2ULL);
+
+        /* Verification: The arena folded implicitly via wavefront rotation (0ns manual cleanup) */
+        FLOW_ASSERT_EQ(arena.cursor, 0ULL);
+        FLOW_ASSERT_EQ(arena.generation, 2ULL);
+        FLOW_ASSERT_EQ(arena.total_folds, 1ULL);
+
+        /* Allocate in Generation 2 */
+        void *p3 = flow_bump_qsbr_alloc(&arena, 128);
+        FLOW_ASSERT_TRUE(p3 != NULL);
+        FLOW_ASSERT_EQ(arena.cursor, 128ULL);
+
+        /* Step Wavefront again -> Generation 3 fold */
+        wring.state = FLOW_RING_CIRCULATING;
+        FLOW_ASSERT_EQ(flow_wavefront_ring_step_parallel(&wring), 1);
+        FLOW_ASSERT_EQ(arena.cursor, 0ULL);
+        FLOW_ASSERT_EQ(arena.generation, 3ULL);
+        FLOW_ASSERT_EQ(arena.total_folds, 2ULL);
+
+        /* 3. SMT Formal Temporal Safety Theorem Verification */
+        FlowSMTProofAttestation temporal_proof;
+        memset(&temporal_proof, 0, sizeof(temporal_proof));
+        FLOW_ASSERT_EQ(flow_wavefront_verify_temporal_safety_smt(&wring, &temporal_proof), FLOW_SMT_PROVEN_UNSAT);
+        FLOW_ASSERT_SMT_SOUND(temporal_proof);
+
+        flow_wavefront_ring_destroy(&wring);
+
+        printf("  ✓ Stage 7 Passed: Wavefront-Coupled implicit QSBR folded 2 generations automatically; 64B atomic phase shift SMT sound.\n\n");
+    }
+
+    /* ========================================================================= */
+    /* STAGE 8: Topological Wavefront Quiescence & Zero-Cost Elimination         */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(8, "Topological Natural Invariant: Wavefront-Coupled Evacuation Horizon & Zero-Cost Generational Folding");
+    {
+        /* 1. Context creation and publication of multiple generations */
+        FlowReloadContext *ctx = flow_reload_create(NULL);
+        FLOW_ASSERT_TRUE(ctx != NULL);
+
+        FlowUnit u1 = {
+            .abi_version = FLOW_RELOAD_ABI_VERSION,
+            .name = "wavefront_u1",
+            .init = mock_concur_init,
+            .run = mock_concur_run,
+            .drop = mock_concur_drop,
+            .migrate = mock_concur_migrate
+        };
+        FlowUnit u2 = u1;
+        u2.name = "wavefront_u2";
+
+        FLOW_ASSERT_EQ(flow_reload_activate(ctx, &u1), FLOW_RELOAD_OK);
+        FLOW_ASSERT_EQ(flow_reload_generation(ctx), 1ULL);
+
+        /* Publish generation 2 */
+        void *st2 = NULL;
+        FLOW_ASSERT_EQ(u2.init(NULL, &st2), 0);
+        FLOW_ASSERT_EQ(flow_reload_publish(ctx, &u2, st2), FLOW_RELOAD_OK);
+        FLOW_ASSERT_EQ(flow_reload_generation(ctx), 2ULL);
+
+        /* 2. Bind Wavefront Ring and Generational Bump Arena */
+        SemanticIR ir;
+        memset(&ir, 0, sizeof(ir));
+        strncpy(ir.flow_name, "topological_reload_flow", sizeof(ir.flow_name) - 1);
+        ir.input_max_count = 500;
+        ir.state_shared = 1;
+        ir.state_read_heavy = 1;
+        ir.fact_unordered = 1;
+
+        FlowWavefrontRing wring;
+        FLOW_ASSERT_EQ(flow_wavefront_ring_init(&wring, &ir, 4, 2), 1);
+        wring.state = FLOW_RING_CIRCULATING;
+
+        uint8_t arena_mem[2048];
+        FlowBumpQsbrArena arena;
+        FLOW_ASSERT_EQ(flow_bump_qsbr_init(&arena, arena_mem, sizeof(arena_mem)), 1);
+
+        /* Allocate scratch space in arena */
+        void *arena_alloc = flow_bump_qsbr_alloc(&arena, 256);
+        FLOW_ASSERT_TRUE(arena_alloc != NULL);
+        FLOW_ASSERT_TRUE(arena.cursor >= 256);
+
+        /* Bind Wavefront Ring and Bump Arena to Reload Context */
+        FLOW_ASSERT_EQ(flow_reload_bind_wavefront(ctx, &wring), 1);
+        FLOW_ASSERT_EQ(flow_reload_bind_arena(ctx, &arena), 1);
+
+        /* Advance Wavefront Ring so quiescent_generation >= retired generation */
+        FLOW_ASSERT_EQ(flow_wavefront_ring_step_parallel(&wring), 1);
+        FLOW_ASSERT_TRUE(wring.quiescent_generation >= 2ULL);
+
+        /* 3. Reclaim: O(1) Instantaneous Topological Quiescent Evacuation */
+        size_t reclaimed = flow_reload_reclaim(ctx);
+        FLOW_ASSERT_EQ(reclaimed, 1ULL);
+
+        /* Verify generational folding occurred automatically (0ns cleanup) */
+        FLOW_ASSERT_EQ(arena.cursor, 0ULL);
+        FLOW_ASSERT_EQ(arena.total_folds, 1ULL);
+
+        /* 4. Lock-Free Zero-Contention QSBR Checkpoints & Synchronization */
+        FlowReloadReader reader1, reader2;
+        memset(&reader1, 0, sizeof(reader1));
+        memset(&reader2, 0, sizeof(reader2));
+        FLOW_ASSERT_EQ(flow_reload_reader_register(ctx, &reader1), FLOW_RELOAD_OK);
+        FLOW_ASSERT_EQ(flow_reload_reader_register(ctx, &reader2), FLOW_RELOAD_OK);
+
+        /* Checkpoint without mutex lock contention */
+        flow_qsbr_checkpoint(&reader1);
+        flow_qsbr_checkpoint(&reader2);
+
+        /* Synchronize: Wavefront-coupled 0-sleep synchronization */
+        FLOW_ASSERT_EQ(flow_qsbr_synchronize(ctx, 10000000ULL), FLOW_RELOAD_OK);
+
+        /* 5. Formal SMT Topological Safety Verification */
+        FlowSMTProofAttestation safety_proof;
+        memset(&safety_proof, 0, sizeof(safety_proof));
+        FLOW_ASSERT_EQ(flow_reload_verify_topological_safety_smt(ctx, &safety_proof), FLOW_SMT_PROVEN_UNSAT);
+        FLOW_ASSERT_SMT_SOUND(safety_proof);
+
+        FLOW_ASSERT_EQ(flow_reload_reader_unregister(&reader1), FLOW_RELOAD_OK);
+        FLOW_ASSERT_EQ(flow_reload_reader_unregister(&reader2), FLOW_RELOAD_OK);
+        flow_wavefront_ring_destroy(&wring);
+        flow_reload_destroy(ctx);
+
+        printf("  ✓ Stage 8 Passed: Wavefront topological natural state evacuated retired generation in O(1); arena folded; SMT verified.\n\n");
+    }
+
+    /* ========================================================================= */
+    /* STAGE 9: Phase Space Jet Bundle (.fjet), Mori-Zwanzig & Koopman Operator  */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(9, "Phase Space Jet Bundle: Mori-Zwanzig Memory Kernel, Symplectic Hamiltonian & Koopman Transfer Operator");
+    {
+        /* 1. Mori-Zwanzig Non-Markovian Projection Barrier Resolution */
+        FlowJet jet_forward, jet_backward;
+        FLOW_ASSERT_EQ(flow_jet_init(&jet_forward, "jet_hft_fwd", "HFT Forward Flow"), 1);
+        FLOW_ASSERT_EQ(flow_jet_init(&jet_backward, "jet_hft_bwd", "HFT Backward Flow"), 1);
+
+        /* Identical static coordinates q, but opposing momentum/velocity p */
+        for (size_t d = 0; d < FLOW_JET_DIM; ++d) {
+            jet_forward.payload.q[d] = 0.5;
+            jet_backward.payload.q[d] = 0.5;
+            jet_forward.payload.p[d] = 1.0;
+            jet_backward.payload.p[d] = -1.0;
+        }
+
+        /* Verify static fvec embedding would be identical (0-jet collision) */
+        double static_diff = 0.0;
+        for (size_t d = 0; d < FLOW_JET_DIM; ++d) {
+            static_diff += fabs(jet_forward.payload.q[d] - jet_backward.payload.q[d]);
+        }
+        FLOW_ASSERT_EQ(static_diff, 0.0);
+
+        /* Convolve memory kernel across both branches */
+        FLOW_ASSERT_EQ(flow_jet_mori_zwanzig_step(&jet_forward, 0.05), 1);
+        FLOW_ASSERT_EQ(flow_jet_mori_zwanzig_step(&jet_backward, 0.05), 1);
+
+        /* Cotangent phase space distance breaks the Mori-Zwanzig degeneracy! */
+        double phase_dist = flow_jet_phase_distance(&jet_forward, &jet_backward);
+        FLOW_ASSERT_TRUE(phase_dist > 5.0);
+
+        /* 2. Symplectic Hamiltonian Dynamics (Verlet Integration Energy Conservation) */
+        double initial_energy = flow_jet_hamiltonian(&jet_forward);
+        FLOW_ASSERT_TRUE(initial_energy > 0.0);
+
+        /* Step forward 100 symplectic leapfrog steps */
+        for (int step = 0; step < 100; ++step) {
+            FLOW_ASSERT_EQ(flow_jet_symplectic_step(&jet_forward, 0.005), 1);
+        }
+        double evolved_energy = flow_jet_hamiltonian(&jet_forward);
+
+        /* Energy conserved within 0.5% tolerance */
+        double energy_err = fabs(evolved_energy - initial_energy) / initial_energy;
+        FLOW_ASSERT_TRUE(energy_err < 0.005);
+
+        /* 3. Koopman Linear Observable Transfer Extrapolation */
+        double predicted_obs[FLOW_JET_KOOPMAN_DIM];
+        FLOW_ASSERT_EQ(flow_jet_koopman_predict(&jet_forward, 0.02, predicted_obs), 1);
+        FLOW_ASSERT_TRUE(!isnan(predicted_obs[0]));
+        FLOW_ASSERT_TRUE(!isinf(predicted_obs[0]));
+
+        /* 4. Binary .fjet Serialization, Deserialization & CRC32 Integrity */
+        const char *test_fjet_path = "/tmp/flow_test_jet_bundle.fjet";
+        jet_forward.payload.crc32 = flow_jet_crc32(&jet_forward.payload, offsetof(FlowJetPayload, crc32));
+        FLOW_ASSERT_EQ(flow_jet_write_file(&jet_forward, test_fjet_path), 1);
+
+        FlowJet jet_loaded;
+        FLOW_ASSERT_EQ(flow_jet_read_file(test_fjet_path, &jet_loaded), 1);
+        FLOW_ASSERT_EQ(jet_loaded.payload.crc32, jet_forward.payload.crc32);
+        FLOW_ASSERT_TRUE(jet_loaded.payload.crc32 != 0);
+        FLOW_ASSERT_EQ(strcmp(jet_loaded.header.id, jet_forward.header.id), 0);
+        FLOW_ASSERT_EQ(jet_loaded.payload.pure_genome, jet_forward.payload.pure_genome);
+
+        /* Bidirectional .fvec <-> .fjet interoperability */
+        FlowVecHeader fvec_hdr;
+        FlowVecPayload fvec_payload;
+        FLOW_ASSERT_EQ(flow_jet_to_fvec(&jet_loaded, &fvec_hdr, &fvec_payload), 1);
+        FLOW_ASSERT_EQ(strcmp(fvec_hdr.magic, FLOW_FVEC_MAGIC), 0);
+
+        FlowJet jet_reconstructed;
+        FLOW_ASSERT_EQ(flow_jet_from_fvec(&fvec_hdr, &fvec_payload, &jet_reconstructed), 1);
+        FLOW_ASSERT_EQ(jet_reconstructed.payload.pure_genome, jet_loaded.payload.pure_genome);
+
+        /* 5. CPU Hardware Cache Prefetching Along Jet Phase Trajectory */
+        int prefetched_lines = flow_prefetch_jet_trajectory(&jet_forward, 50.0);
+        FLOW_ASSERT_TRUE(prefetched_lines >= 3);
+
+        /* 6. Formal SMT Verification of Symplectic Soundness */
+        FlowSMTProofAttestation jet_proof;
+        memset(&jet_proof, 0, sizeof(jet_proof));
+        FLOW_ASSERT_EQ(flow_jet_verify_symplectic_soundness_smt(&jet_forward, &jet_proof), FLOW_SMT_PROVEN_UNSAT);
+        FLOW_ASSERT_SMT_SOUND(jet_proof);
+
+        printf("  ✓ Stage 9 Passed: Phase Space Jet Bundle broke Mori-Zwanzig degeneracy (dist=%.2f); symplectic energy conserved (err=%.4f%%); Koopman predicted; SMT sound.\n\n",
+               phase_dist, energy_err * 100.0);
+    }
+
     FLOW_TEST_SUITE_END();
     return 0;
 }
+

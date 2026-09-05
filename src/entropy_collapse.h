@@ -26,19 +26,30 @@ extern "C" {
 /* ------------------------------------------------------------------------- */
 /* 1. Bump-Pointer QSBR Arena (Replaces Slab / Size Classes / Free Lists)    */
 /* ------------------------------------------------------------------------- */
-typedef struct {
+typedef struct FlowBumpQsbrArena FlowBumpQsbrArena;
+
+struct FlowBumpQsbrArena {
     uint8_t *buffer;
     size_t capacity;
     size_t cursor;
     uint64_t generation;
     size_t total_allocs;
     size_t total_folds;
-} FlowBumpQsbrArena;
+    uint64_t bound_wavefront_epoch;
+};
 
 int flow_bump_qsbr_init(FlowBumpQsbrArena *arena, void *backing_memory, size_t capacity);
 void *flow_bump_qsbr_alloc(FlowBumpQsbrArena *arena, size_t size_bytes);
 int flow_bump_qsbr_quiescent_fold(FlowBumpQsbrArena *arena);
 FlowSMTResult flow_bump_qsbr_verify_smt(const FlowBumpQsbrArena *arena, FlowSMTProofAttestation *proof_out);
+
+/* Wavefront-coupled implicit fold: folds arena automatically when wavefront advances */
+static inline void flow_bump_qsbr_sync_wavefront(FlowBumpQsbrArena *arena, uint64_t current_wavefront_cycle) {
+    if (arena && current_wavefront_cycle > arena->bound_wavefront_epoch) {
+        flow_bump_qsbr_quiescent_fold(arena);
+        arena->bound_wavefront_epoch = current_wavefront_cycle;
+    }
+}
 
 /* ------------------------------------------------------------------------- */
 /* 2. Curry-Howard Pre-Condition SMT (Eliminates Defensive Null Cascades)    */

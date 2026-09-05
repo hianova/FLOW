@@ -1,4 +1,5 @@
 #include "flow_prefetch.h"
+#include "flow_jet.h"
 #include "flow_smt_dsl.h"
 #include <string.h>
 #include <stdio.h>
@@ -48,6 +49,30 @@ int flow_prefetch_token_ring_slot(const void *next_slot_canvas_ptr,
         count++;
     }
     return count;
+}
+
+int flow_prefetch_jet_trajectory(const struct FlowJet *jet, double lookahead_ns) {
+    if (jet == NULL) return 0;
+    int prefetched_lines = 0;
+
+    /* 1. Prefetch current jet's 64-byte aligned switchboard canvas */
+    flow_prefetch_l1(&jet->payload.staged_canvas);
+    prefetched_lines++;
+
+    /* 2. Lookahead phase space extrapolation via Koopman linear generator */
+    double dt = (lookahead_ns > 0.0) ? (lookahead_ns * 1.0e-9) : 50.0e-9;
+    double pred_obs[FLOW_JET_KOOPMAN_DIM];
+    if (flow_jet_koopman_predict(jet, dt, pred_obs)) {
+        flow_prefetch_l1(pred_obs);
+        prefetched_lines++;
+    }
+
+    /* 3. Prefetch Mori-Zwanzig memory kernel taps & historical integral */
+    flow_prefetch_l2(jet->payload.memory_kernel);
+    flow_prefetch_l2(jet->memory_integral);
+    prefetched_lines += 2;
+
+    return prefetched_lines;
 }
 
 FlowSMTResult flow_prefetch_verify_alignment_smt(const FlowBmf1BitCanvas *canvas,

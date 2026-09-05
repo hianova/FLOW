@@ -1,5 +1,6 @@
 #include "adaptive.h"
 #include "registry.h"
+#include "moreau_hysteresis.h"
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,6 +19,7 @@ struct FlowAdaptiveController {
     FlowIPRangeTracker ip_tracker;
     FlowAntiThrashingConfig anti_thrash;
     FlowDebounceState debounce;
+    FlowMoreauHysteresis moreau_hysteresis;
     const FlowUnit *golden_unit;
     void *golden_state;
     _Atomic int is_running_golden;
@@ -85,6 +87,7 @@ FlowAdaptiveController *flow_adaptive_create(FlowReloadContext *ctx, void *host_
     ctrl->context = ctx; ctrl->host_context = host_ctx; ctrl->config = *cfg;
     ctrl->candidate_count = count; ctrl->current_index = cur_idx; ctrl->probe = probe;
     ctrl->anti_thrash = (FlowAntiThrashingConfig){.ema_alpha = 0.25, .anomaly_streak_required = 1, .backoff_multiplier = 1.5};
+    flow_moreau_init(&ctrl->moreau_hysteresis, 0.05, 0.25, 0);
     return ctrl;
 }
 
@@ -213,7 +216,13 @@ FlowAdaptiveStatus flow_adaptive_tick_pmu(FlowAdaptiveController *ctrl, const Fl
     EMA(ctrl->debounce.smoothed_ipc, ctrl->pmu.ipc);
     #undef EMA
 
-    int high_miss = (thresh->cache_miss_rate_threshold > 0.0 && ctrl->debounce.smoothed_miss_rate >= thresh->cache_miss_rate_threshold);
+    int moreau_state = 0;
+    if (thresh->cache_miss_rate_threshold > 0.0) {
+        ctrl->moreau_hysteresis.threshold_high = thresh->cache_miss_rate_threshold;
+        ctrl->moreau_hysteresis.threshold_low = thresh->cache_miss_rate_threshold * 0.8;
+        moreau_state = flow_moreau_step(&ctrl->moreau_hysteresis, ctrl->debounce.smoothed_miss_rate);
+    }
+    int high_miss = (moreau_state == 1) || (thresh->cache_miss_rate_threshold > 0.0 && ctrl->debounce.smoothed_miss_rate >= thresh->cache_miss_rate_threshold);
     int low_ipc = (thresh->min_ipc_threshold > 0.0 && ctrl->debounce.smoothed_ipc > 0.0 && ctrl->debounce.smoothed_ipc <= thresh->min_ipc_threshold);
     ctrl->debounce.current_anomaly_streak = (high_miss || low_ipc) ? (ctrl->debounce.current_anomaly_streak + 1) : 0;
 

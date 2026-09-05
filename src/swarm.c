@@ -94,6 +94,18 @@ int flow_swarm_diffuse_pheromone(FlowSwarmCluster *cluster) {
             mask |= (UINT64_C(1) << b);
         }
     }
+
+    /* Join-Semilattice Confluence: algebraic least upper bound of passing particle states */
+    uint64_t semilattice_consensus = 0;
+    for (size_t i = 0; i < cluster->particle_count; ++i) {
+        if (cluster->particles[i].best_plan.eval.hard_gate_passed) {
+            semilattice_consensus |= (cluster->particles[i].best_genome & cluster->particles[i].local_mask);
+        }
+    }
+    if (semilattice_consensus != 0) {
+        mask |= semilattice_consensus;
+    }
+
     if (mask == 0) mask = (bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << bits) - 1);
     if (cluster->space->env_mask != 0) mask &= cluster->space->env_mask;
 

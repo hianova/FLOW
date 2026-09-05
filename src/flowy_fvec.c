@@ -1,4 +1,5 @@
 #include "flowy_fvec.h"
+#include "flow_jet.h"
 #include "registry.h"
 #include "flow_smt_dsl.h"
 #if defined(__APPLE__) || defined(__MACH__)
@@ -1236,6 +1237,40 @@ int flow_vault_query_nearest(FlowVectorVault *vault, const double *query_feature
     return 0;
 }
 
+int flow_vault_query_nearest_jet(FlowVectorVault *vault, const struct FlowJet *query_jet,
+                                 size_t *best_idx_out, double *best_dist_out) {
+    if (vault == NULL || query_jet == NULL || vault->count == 0) return 0;
+
+    size_t best_idx = 0;
+    double min_dist = 1.0e18;
+    int found = 0;
+
+    for (size_t i = 0; i < vault->count; ++i) {
+        FlowJet entry_jet;
+        flow_jet_init(&entry_jet, vault->entries[i].id, vault->entries[i].name);
+        for (size_t d = 0; d < FLOW_JET_DIM; ++d) {
+            entry_jet.payload.q[d] = vault->entries[i].features[d];
+            entry_jet.payload.p[d] = 0.0; /* Resting baseline for static entries */
+        }
+        double dist = flow_jet_phase_distance(query_jet, &entry_jet);
+        if (dist < min_dist) {
+            min_dist = dist;
+            best_idx = i;
+            found = 1;
+        }
+    }
+
+    if (found) {
+        vault->entries[best_idx].times_recalled++;
+        vault->total_lookups++;
+        if (best_idx_out) *best_idx_out = best_idx;
+        if (best_dist_out) *best_dist_out = min_dist;
+        return 1;
+    }
+    return 0;
+}
+
+
 
 void flow_vault_embed_prompt(const char *prompt, double *out_features) {
     if (out_features == NULL) return;
@@ -2098,8 +2133,8 @@ int flow_fvec_prestaging_swap_atomic(FlowFvecPreStagingVault *vault,
     clock_gettime(CLOCK_MONOTONIC, &ts0);
 #endif
 
-    /* Atomic QSBR Memory Swap: exact 64-byte single cache line copy */
-    *active_canvas_out = matched->staged_canvas;
+    /* Atomic QSBR Memory Swap: exact 64-byte single cache line copy via FLOW_ATOMIC_STAGE_SWAP */
+    FLOW_ATOMIC_STAGE_SWAP(active_canvas_out, &matched->staged_canvas);
 
 #if defined(__APPLE__) || defined(__MACH__)
     uint64_t t1 = mach_absolute_time();

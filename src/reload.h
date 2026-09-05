@@ -6,11 +6,24 @@
 #include <stdatomic.h>
 #include <stdio.h>
 
+#ifndef FLOW_SMT_RESULT_DEFINED
+#define FLOW_SMT_RESULT_DEFINED
+typedef enum {
+    FLOW_SMT_PROVEN_UNSAT = 0,
+    FLOW_SMT_VIOLATION_SAT = 1,
+    FLOW_SMT_UNKNOWN = 2
+} FlowSMTResult;
+#endif
+
+typedef struct FlowSMTProofAttestation FlowSMTProofAttestation;
+
 #define FLOW_RELOAD_ABI_VERSION UINT32_C(3)
 
 typedef struct FlowReloadContext FlowReloadContext;
 struct FlowPlanArtifact;
 struct SemanticIR;
+struct FlowWavefrontRing;
+struct FlowBumpQsbrArena;
 
 typedef enum {
     FLOW_MUTATION_UPSERT = 1,
@@ -221,6 +234,12 @@ int flow_qsbr_watchdog_sweep(FlowReloadContext *context, uint64_t current_time_n
 int flow_qsbr_quarantine_reader(FlowReloadReader *reader, void *page_addr, size_t page_size);
 int flow_qsbr_unquarantine_reader(FlowReloadReader *reader);
 int flow_qsbr_is_reader_quarantined(const FlowReloadReader *reader);
+
+/* Topological Wavefront & Generational Bump Arena Coupling (Zero Imperative Loops) */
+int flow_reload_bind_wavefront(FlowReloadContext *context, const struct FlowWavefrontRing *ring);
+int flow_reload_bind_arena(FlowReloadContext *context, struct FlowBumpQsbrArena *arena);
+FlowSMTResult flow_reload_verify_topological_safety_smt(const FlowReloadContext *context,
+                                                        FlowSMTProofAttestation *proof_out);
 
 /* ========================================================================= */
 /* FlowPluginRuntimeScope: RAII-style Zero-Cost QSBR Lifecycle Scope         */

@@ -8,13 +8,16 @@
 #include <stdio.h>
 #include <stdint.h>
 
+#ifndef FLOW_SMT_RESULT_DEFINED
+#define FLOW_SMT_RESULT_DEFINED
 typedef enum {
     FLOW_SMT_PROVEN_UNSAT = 0,    /* Negation is UNSAT -> Theorem holds universally */
     FLOW_SMT_VIOLATION_SAT = 1,   /* Counterexample found -> Invariant violated */
     FLOW_SMT_UNKNOWN = 2          /* Unconstrained or unbounded */
 } FlowSMTResult;
+#endif
 
-typedef struct {
+typedef struct FlowSMTProofAttestation {
     FlowSMTResult buffer_bounds_safety;
     FlowSMTResult memory_quota_bound;
     FlowSMTResult shard_non_aliasing;

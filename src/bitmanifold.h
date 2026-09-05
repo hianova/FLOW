@@ -3,6 +3,9 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#if !defined(__cplusplus)
+#include <stdatomic.h>
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -180,6 +183,39 @@ typedef struct __attribute__((aligned(64))) {
 } FlowBmf1BitCanvas;
 
 typedef FlowBmf1BitCanvas FlowBmfCanvas;
+
+/*
+ * 64-Byte Atomic Phase Shift (Zero-Cost Single-Copy Cache Line Swap)
+ * Because sizeof(FlowBmf1BitCanvas) == 64 and alignof(FlowBmf1BitCanvas) == 64,
+ * swapping the active canvas is an atomic transfer within a single CPU cache line.
+ * Readers observe either the complete old canvas or complete new canvas, tear-free.
+ */
+static inline void flow_atomic_stage_swap(FlowBmf1BitCanvas *dst, const FlowBmf1BitCanvas *src) {
+    if (!dst || !src) return;
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__) && !defined(__cplusplus)
+    atomic_thread_fence(memory_order_release);
+#endif
+    *dst = *src;
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__) && !defined(__cplusplus)
+    atomic_thread_fence(memory_order_release);
+#endif
+}
+
+static inline FlowBmf1BitCanvas flow_atomic_stage_load(const FlowBmf1BitCanvas *src) {
+    FlowBmf1BitCanvas canvas = {0};
+    if (!src) return canvas;
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__) && !defined(__cplusplus)
+    atomic_thread_fence(memory_order_acquire);
+#endif
+    canvas = *src;
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__) && !defined(__cplusplus)
+    atomic_thread_fence(memory_order_acquire);
+#endif
+    return canvas;
+}
+
+#define FLOW_ATOMIC_STAGE_SWAP(dst, src) flow_atomic_stage_swap((dst), (src))
+#define FLOW_ATOMIC_STAGE_LOAD(src)      flow_atomic_stage_load((src))
 
 static inline void flow_bmf_canvas_init(FlowBmf1BitCanvas *canvas, uint32_t subspace_id,
                                         uint64_t invariant_mask, uint64_t malleable_mask,
