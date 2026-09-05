@@ -349,4 +349,38 @@ int flow_vault_sync_to_dir(const FlowVectorVault *vault, const char *dirpath);
 void flow_vault_print_entry(const FlowVaultEntry *entry, FILE *out);
 void flow_vault_print_summary(const FlowVectorVault *vault, FILE *out);
 
+/* ========================================================================= */
+/* 5. Speculative Gene Pre-Staging Vault (Zero-Coldstart Architecture Swap)  */
+/* ========================================================================= */
+#define FLOW_FVEC_MAX_PRESTAGED 8
+
+typedef struct {
+    char trigger_condition[64];      /* e.g. "HIGH_LATENCY_BURST", "OOM_SURGE", "FREEZE_RECOVERY" */
+    char fvec_path[256];             /* Pinned source .fvec file */
+    FlowVecHeader header;            /* Pre-parsed header */
+    FlowVecPayload payload;          /* Pre-parsed payload with verified CRC32 */
+    FlowBmf1BitCanvas staged_canvas; /* Pre-compiled 1-bit switchboard canvas */
+    int is_staged_sound;             /* Pre-attested SMT 4-theorems proof status */
+} FlowFvecPreStagingSlot;
+
+typedef struct {
+    FlowFvecPreStagingSlot slots[FLOW_FVEC_MAX_PRESTAGED];
+    size_t slot_count;
+    uint64_t total_speculative_swaps;
+    double last_swap_latency_ns;
+} FlowFvecPreStagingVault;
+
+int flow_fvec_prestaging_init(FlowFvecPreStagingVault *vault);
+int flow_fvec_prestaging_register(FlowFvecPreStagingVault *vault,
+                                  const char *fvec_file_path,
+                                  const char *trigger_condition);
+int flow_fvec_prestaging_swap_atomic(FlowFvecPreStagingVault *vault,
+                                     const char *trigger_condition,
+                                     FlowBmf1BitCanvas *active_canvas_out,
+                                     double *swap_latency_ns_out);
+FlowSMTResult flow_fvec_verify_prestaging_soundness_smt(const FlowFvecPreStagingVault *vault,
+                                                        const char *trigger_condition,
+                                                        double swap_latency_ns,
+                                                        FlowSMTProofAttestation *proof_out);
+
 #endif /* FLOW_FLOWY_FVEC_H */

@@ -315,7 +315,20 @@ int main(void) {
         FLOW_ASSERT_EQ(flow_spacetime_preplay_verify_smt(&engine, &annealed, &proof), FLOW_SMT_PROVEN_UNSAT);
         FLOW_ASSERT_SMT_SOUND(proof);
 
-        printf("  ✓ Stage 7 Passed: Pre-play annealed 3.0s spacetime cone in %.1fus; black swan avoided.\n\n",
+        /* Speculative Meso-scale L1I/L1D emergency cache warmup upon threat detection */
+        uint32_t lines_warmed = 0;
+        FLOW_ASSERT_EQ(flow_spacetime_warmup_emergency_cache(&engine, &baseline,
+                                                             (const void *)flow_spacetime_preplay_and_anneal,
+                                                             (const void *)&engine.pre_emptive_bias,
+                                                             &lines_warmed), 1);
+        FLOW_ASSERT_TRUE(lines_warmed >= 3);
+
+        FlowSMTProofAttestation prefetch_proof;
+        memset(&prefetch_proof, 0, sizeof(prefetch_proof));
+        FLOW_ASSERT_EQ(flow_spacetime_verify_prefetch_soundness_smt(&engine, lines_warmed, 35.0, &prefetch_proof), FLOW_SMT_PROVEN_UNSAT);
+        FLOW_ASSERT_SMT_SOUND(prefetch_proof);
+
+        printf("  ✓ Stage 7 Passed: Pre-play annealed 3.0s spacetime cone in %.1fus; black swan avoided and emergency cache pre-warmed.\n\n",
                engine.preplay_duration_us);
     }
 
@@ -353,6 +366,53 @@ int main(void) {
         FLOW_ASSERT_SMT_SOUND(proof);
 
         printf("  ✓ Stage 8 Passed: 5 generations evolved with epistatic linkage preserved; SMT sound.\n\n");
+    }
+
+    /* ========================================================================= */
+    /* STAGE 9: Speculative Gene Pre-Staging Vault (Zero-Coldstart Swap)         */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(9, "Speculative Gene Pre-Staging Vault: Zero-Coldstart Atomic Architecture Swap");
+    {
+        /* Ensure canonical .fvec repository directory is ready */
+        const char *test_vault_dir = ".flow/vecs";
+        flow_fvec_seed_canonical_files(test_vault_dir);
+
+        FlowFvecPreStagingVault vault;
+        FLOW_ASSERT_EQ(flow_fvec_prestaging_init(&vault), 1);
+        FLOW_ASSERT_EQ(vault.slot_count, 0ULL);
+
+        /* Register pre-staged architectural genes */
+        char hft_fvec_path[256];
+        char oom_fvec_path[256];
+        snprintf(hft_fvec_path, sizeof(hft_fvec_path), "%s/hft_ultra_low_latency.fvec", test_vault_dir);
+        snprintf(oom_fvec_path, sizeof(oom_fvec_path), "%s/oom_survival_v3.fvec", test_vault_dir);
+
+        FLOW_ASSERT_EQ(flow_fvec_prestaging_register(&vault, hft_fvec_path, "HFT_BURST"), 1);
+        FLOW_ASSERT_EQ(flow_fvec_prestaging_register(&vault, oom_fvec_path, "OOM_SURGE"), 1);
+        FLOW_ASSERT_EQ(vault.slot_count, 2ULL);
+
+        /* Execute atomic QSBR memory swap in < 100ns */
+        FlowBmf1BitCanvas active_canvas;
+        double swap_latency_ns = 0.0;
+        FLOW_ASSERT_EQ(flow_fvec_prestaging_swap_atomic(&vault, "HFT_BURST", &active_canvas, &swap_latency_ns), 1);
+        FLOW_ASSERT_TRUE(swap_latency_ns < 100.0);
+        FLOW_ASSERT_EQ(vault.total_speculative_swaps, 1ULL);
+        FLOW_ASSERT_TRUE(active_canvas.is_adjudicated_sound);
+
+        /* Execute second atomic swap to OOM survival */
+        double swap2_latency_ns = 0.0;
+        FLOW_ASSERT_EQ(flow_fvec_prestaging_swap_atomic(&vault, "OOM_SURGE", &active_canvas, &swap2_latency_ns), 1);
+        FLOW_ASSERT_TRUE(swap2_latency_ns < 100.0);
+        FLOW_ASSERT_EQ(vault.total_speculative_swaps, 2ULL);
+
+        /* SMT Soundness Verification for Zero-Coldstart Deadline (< 100ns) */
+        FlowSMTProofAttestation prestaging_proof;
+        memset(&prestaging_proof, 0, sizeof(prestaging_proof));
+        FLOW_ASSERT_EQ(flow_fvec_verify_prestaging_soundness_smt(&vault, "HFT_BURST", swap_latency_ns, &prestaging_proof), FLOW_SMT_PROVEN_UNSAT);
+        FLOW_ASSERT_SMT_SOUND(prestaging_proof);
+
+        printf("  ✓ Stage 9 Passed: Speculative Gene Pre-Staging Vault swapped architecture in %.2fns (<100ns SMT deadline); zero-coldstart guaranteed.\n\n",
+               swap_latency_ns);
     }
 
     FLOW_TEST_SUITE_END();

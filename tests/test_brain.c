@@ -16,6 +16,7 @@
 #include "morse_atlas.h"
 #include "bmf_microcode.h"
 #include "neuro_bridge.h"
+#include "flow_prefetch.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -539,6 +540,43 @@ int main(void) {
         FLOW_ASSERT_TRUE(morse_canvas.is_adjudicated_sound);
 
         printf("  ✓ Stage 8 Passed: Kolmogorov compression (FWHT zero-table projection, Morse Atlas & 1-bit microcode) SMT verified.\n\n");
+    }
+
+    /* ========================================================================= */
+    /* STAGE 9: Unified Pre-Staging Spectrum: 64B Cache Line Confinement & Prefetch */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(9, "Unified Pre-Staging Spectrum: 64B Cache Line Confinement, Manifold Prefetch & SMT Soundness");
+    {
+        /* 1. Exact 64-Byte Cache Line Confinement & Alignment */
+        FLOW_ASSERT_EQ(sizeof(FlowBmf1BitCanvas), 64);
+        FLOW_ASSERT_EQ(_Alignof(FlowBmf1BitCanvas), 64);
+
+        FlowBmf1BitCanvas canvas;
+        flow_bmf_canvas_init(&canvas, 1, FLOW_BMF_SW_HARD_SAFETY, ~0ULL, FLOW_BMF_SW_HARD_SAFETY);
+        FLOW_ASSERT_EQ(((uintptr_t)&canvas) & 63ULL, 0ULL);
+
+        /* 2. Low-level Hardware Cache Prefetch Primitives */
+        flow_prefetch_l1(&canvas);
+        flow_prefetch_l2(&canvas);
+        flow_prefetch_write(&canvas);
+
+        /* 3. Riemannian Manifold Geodesic Topo-Prefetching */
+        FlowBmfMorseAtlas atlas;
+        flow_morse_atlas_seed_canonical(&atlas);
+        FLOW_ASSERT_TRUE(flow_prefetch_manifold_geodesic(&canvas, &atlas, 0x1fULL) >= 1);
+
+        /* 4. Token Ring Slot Prefetching */
+        FlowBmf1BitCanvas next_slot_canvas;
+        flow_bmf_canvas_init(&next_slot_canvas, 2, FLOW_BMF_SW_HARD_SAFETY, ~0ULL, FLOW_BMF_SW_HARD_SAFETY);
+        FLOW_ASSERT_TRUE(flow_prefetch_token_ring_slot(&next_slot_canvas, NULL) >= 1);
+
+        /* 5. SMT Supreme Court Prefetch Alignment Theorem Proof */
+        FlowSMTProofAttestation proof;
+        memset(&proof, 0, sizeof(proof));
+        FLOW_ASSERT_EQ(flow_prefetch_verify_alignment_smt(&canvas, &proof), FLOW_SMT_PROVEN_UNSAT);
+        FLOW_ASSERT_SMT_SOUND(proof);
+
+        printf("  ✓ Stage 9 Passed: 64B cache line confinement, manifold geodesic prefetcher and SMT soundness verified.\n\n");
     }
 
     FLOW_TEST_SUITE_END();

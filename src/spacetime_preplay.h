@@ -115,6 +115,21 @@ FlowSMTResult flow_spacetime_preplay_verify_smt(const FlowSpacetimeEngine *engin
                                                const FlowSpacetimeConeResult *result,
                                                FlowSMTProofAttestation *proof_out);
 
+/*
+ * Spacetime Pre-Play Cache Warmup:
+ * Speculative L1I and L1D prefetch of emergency braking routines and CAN DMA buffers.
+ */
+int flow_spacetime_warmup_emergency_cache(const FlowSpacetimeEngine *engine,
+                                         const FlowSpacetimeConeResult *result,
+                                         const void *emergency_code_ptr,
+                                         const void *emergency_data_ptr,
+                                         uint32_t *lines_warmed_out);
+
+FlowSMTResult flow_spacetime_verify_prefetch_soundness_smt(const FlowSpacetimeEngine *engine,
+                                                          uint32_t lines_warmed,
+                                                          double warmup_latency_ns,
+                                                          FlowSMTProofAttestation *proof_out);
+
 #ifdef __cplusplus
 }
 #endif

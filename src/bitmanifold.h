@@ -168,14 +168,15 @@ static inline uint64_t flow_manifold_transition(uint64_t genome, uint64_t mask,
 /* Telemetry, Biasing & Dynamic Annealing Exploration Bits (Bits 32..63) */
 #define FLOW_BMF_SW_TELEMETRY_BIAS_MASK (0xFFFFFFFF00000000ULL)
 
-typedef struct {
+typedef struct __attribute__((aligned(64))) {
     uint32_t subspace_id;          /* Active Subspace / Chart ID (indexed from 4096-D embedding) */
+    int32_t  is_adjudicated_sound; /* True (1) if SMT Supreme Court has verified all invariant switches */
     uint64_t switchboard_bits;     /* 1-bit rigid physical switch states */
     uint64_t invariant_mask;       /* Invariant mask: bits that must strictly remain 1 for physical safety */
     uint64_t malleable_mask;       /* Malleable mask: bits allowed to undergo 1-bit chaotic mutation/annealing */
     uint64_t dynamic_bias;         /* Continuous telemetry / external soft perturbation bias */
     double   energy;               /* Physical energy / Lyapunov potential of current 1-bit configuration */
-    int      is_adjudicated_sound; /* True (1) if SMT Supreme Court has verified all invariant switches */
+    uint8_t  _cacheline_pad[16];   /* Pad to exactly 64 Bytes (1 L1 CPU Cache Line, Zero Cache Line Splitting) */
 } FlowBmf1BitCanvas;
 
 typedef FlowBmf1BitCanvas FlowBmfCanvas;
