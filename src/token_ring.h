@@ -225,11 +225,12 @@ typedef struct {
     bool is_strictly_orthogonal;      /* 1 if all pairwise intersections are empty */
 } FlowSubspaceDecomposition;
 
-/* Concurrent Pipeline Slot */
-typedef struct {
+/* Concurrent Pipeline Slot: alignas(64) single cacheline constraint eliminates torn reads */
+typedef struct __attribute__((aligned(64))) {
     uint32_t slot_id;
     FlowTokenStage current_stage;
     uint64_t slot_genome;
+    FlowBmf1BitCanvas bmf_canvas;
     FlowMaskCanvas slot_canvas;
     double energy;
     bool in_flight;

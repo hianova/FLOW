@@ -56,8 +56,8 @@ static void flow_dtc_eval_forces(const FlowTimeCrystal *dtc,
     double L = 0.15;   /* Duffing cubic nonlinearity */
 
     for (uint32_t i = 0; i < dim; ++i) {
-        double omega_sq = 1.0 + W * sin(2.71828 * (double)(i + 1) + 0.618);
-        if (omega_sq < 0.1) omega_sq = 0.1;
+        /* Branchless geometric positive stiffness regularization: guarantees omega_sq >= 0.1 */
+        double omega_sq = fmax(0.1, 1.0 + W * sin(2.71828 * (double)(i + 1) + 0.618));
 
         double force = omega_sq * q[i] + L * q[i] * q[i] * q[i];
 
@@ -70,12 +70,8 @@ static void flow_dtc_eval_forces(const FlowTimeCrystal *dtc,
 }
 
 int flow_dtc_step_floquet(FlowTimeCrystal *dtc, uint32_t cycles, double dt) {
-    if (dtc == NULL || dtc->jet == NULL || cycles == 0) return 0;
     FlowJet *jet = dtc->jet;
-    uint32_t dim = jet->header.vector_dim ? jet->header.vector_dim : FLOW_JET_STANDARD_DIM;
-    if (dim > FLOW_JET_MAX_DIM) dim = FLOW_JET_MAX_DIM;
-
-    if (dt <= 0.0) dt = 0.001;
+    uint32_t dim = jet->header.vector_dim;
 
     double cos_th = cos(dtc->kick_strength);
     double sin_th = sin(dtc->kick_strength);
@@ -130,15 +126,13 @@ int flow_dtc_step_floquet(FlowTimeCrystal *dtc, uint32_t cycles, double dt) {
 
         dtc->floquet_cycles_total++;
 
-        /* Track energy drift */
+        /* Track energy drift via branchless geometric fmax */
         dtc->current_energy = flow_jet_hamiltonian(jet);
         double drift = fabs(dtc->current_energy - dtc->initial_energy);
         if (dtc->initial_energy > 1e-6) {
             drift /= dtc->initial_energy;
         }
-        if (drift > dtc->max_energy_drift) {
-            dtc->max_energy_drift = drift;
-        }
+        dtc->max_energy_drift = fmax(dtc->max_energy_drift, drift);
     }
 
     /* Check Fourier subharmonic lock */
@@ -178,14 +172,13 @@ double flow_dtc_get_fourier_subharmonic_ratio(const FlowTimeCrystal *dtc) {
 }
 
 int flow_dtc_encode_bit(FlowTimeCrystal *dtc, int bit_val) {
-    if (dtc == NULL || dtc->jet == NULL) return 0;
     FlowJet *jet = dtc->jet;
-    uint32_t dim = jet->header.vector_dim ? jet->header.vector_dim : FLOW_JET_STANDARD_DIM;
+    uint32_t dim = jet->header.vector_dim;
 
     double sign = (bit_val != 0) ? +1.0 : -1.0;
     for (uint32_t i = 0; i < dim; ++i) {
-        double val = fabs(jet->payload.q[i]);
-        if (val < 0.1) val = 1.0;
+        double raw = fabs(jet->payload.q[i]);
+        double val = (raw < 0.1) ? 1.0 : raw;
         jet->payload.q[i] = sign * val;
         jet->payload.p[i] = 0.0;
     }

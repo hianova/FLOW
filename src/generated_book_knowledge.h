@@ -5,7 +5,7 @@
 #include "flowy.h"
 #include <string.h>
 
-#define FLOW_BOOK_CHAPTER_COUNT 16
+#define FLOW_BOOK_CHAPTER_COUNT 18
 
 typedef struct {
     const char *chapter_ref;
@@ -34,84 +34,95 @@ static const FlowBookChapterDoc FLOW_BOOK_CHAPTERS_ZH[FLOW_BOOK_CHAPTER_COUNT] =
         .book_excerpt = "FLOW 將核心模組、驅動、元件與意圖統構為 FlowTopologyGraph，實施嚴格的分層防火牆審計、動態神經遙測附著與零跨層滲漏保證。"
     },
     {
-        .chapter_ref = "ch04_1bit_chaos_engine.md",
-        .chapter_title = "第四章：BMF 最佳化與 1-Bit 混沌退火 (BitManifold BMF 暫存器位元翻轉、連鎖群與量子漂移)",
-        .philosophy_why = "在維度的詛咒與上位效應壁壘面前，傳統遺傳交叉必然撕裂拓樸；FLOW 以 12.96 奈秒純暫存器 1-Bit 混沌微步與 SMT 超級位元原子翻轉，突破局部鞍點。",
-        .book_excerpt = "1-Bit 狀態脊椎將系統維度壓縮為 64-bit 離散基因組，透過三層動態遮罩畫布（SMT 硬安全閘門、遙測偏置、領域偏好）在 1 個時鐘週期內修剪 99.9% 非法狀態，並以 9-Byte UDP 費洛蒙實現群體尋優。"
+        .chapter_ref = "ch04_jet_bundle_phase_space.md",
+        .chapter_title = "第四章：噴流束與辛幾何相空間 (.fjet、Hamiltonian 能量守恆與 Mori-Zwanzig 記憶核耗散)",
+        .philosophy_why = "在微分流形上，時間不是離散的定時器，而是相空間軌跡的幾何流。消滅熱路徑上的命令式防禦檢查，交由保辛力學與非光滑法錐反作用力接管。",
+        .book_excerpt = ".fjet 噴流束將系統建模於辛流形 (q, p)，Velocity-Verlet 二階積分嚴格守恆相積。雙曲勢能屏障與 Moreau 凸法錐斥力取代了所有命令式 if 截斷，Mori-Zwanzig 記憶核在 3.2ms 內平息高頻非馬可夫衝擊。"
     },
     {
-        .chapter_ref = "ch05_smt_formal_verification.md",
-        .chapter_title = "第五章：形式化最高法院 (SMT 4 大定理 UNSAT 證明與 1-Cycle 修剪)",
+        .chapter_ref = "ch05_discrete_time_crystal.md",
+        .chapter_title = "第五章：Floquet 離散時間晶體 (DTC 週期 2T 鎖定、時間平移對稱破缺與非熱化剛性)",
+        .philosophy_why = "在混沌噪聲的熱寂深淵中，時間晶體自發打破時間平移對稱性，以次諧波 2T 剛性鎖定系統節拍，免疫一切無序擾動。",
+        .book_excerpt = "Floquet 週期驅動誘導離散時間平移對稱破缺 (DTSB)，形成非熱化多體局域化 (MBL) 剛性。次諧波峰值比超過 0.999，在百萬次震盪中維持零能量漂移，為具身協同提供拓撲時鐘。"
+    },
+    {
+        .chapter_ref = "ch06_smt_formal_verification.md",
+        .chapter_title = "第六章：形式化最高法院 (SMT 4 大定理 QF_LIA UNSAT 證明與 Curry-Howard 死碼消除)",
         .philosophy_why = "啟發式搜尋可以天馬行空，但發射出的每一行機器碼必須擁有無可爭辯的數學證明。SMT 定理證明器是 FLOW 宇宙的最高法院，凡無證明者，一律否決。",
-        .book_excerpt = "SMT 最高法院透過 QF_LIA 理論驗證緩衝區邊界、記憶體配額上限、分片隔離與確定性 4 大定理。合約檢查與硬體邊界在編譯期即刻生成 1-Cycle 多面體位元修剪遮罩。"
+        .book_excerpt = "SMT 最高法院透過 QF_LIA 理論驗證緩衝區邊界、記憶體配額上限、分片隔離與確定性 4 大定理。合約檢查與硬體邊界在編譯期即刻生成 1-Cycle 多面體位元修剪遮罩，下游防禦分支全部作為死碼消除。"
     },
     {
-        .chapter_ref = "ch06_jit_and_geometric_morphing.md",
-        .chapter_title = "第六章：JIT 代碼發射與幾何變形 (AoS 到 SoA 即時重映射與生存模式)",
+        .chapter_ref = "ch07_bmf_coordinate_canvas.md",
+        .chapter_title = "第七章：BMF 離散座標畫布 (從隨機退火到 1-Bit 座標畫布、代數流形交集與上位連鎖)",
+        .philosophy_why = "隨機退火搜尋只是開拓期的過渡工具；現代 FLOW 將 BMF 定位為離散座標畫布與流形代數交集，以多面體求解與連鎖群翻轉跨越上位效應壁壘。",
+        .book_excerpt = "64-bit 狀態脊椎不再依賴盲目隨機突變，而是連續約束流形向硬體暫存器投影的布林快照。流形代數在多面體交集邊界萃取連鎖基因群，以超級位元 (Super-Bit) 原子翻轉破除上位效應。"
+    },
+    {
+        .chapter_ref = "ch08_six_mathematical_pillars.md",
+        .chapter_title = "第八章：六大數學支柱：經驗啟發式的全息消解 (多面體模型、OCO、Lyapunov、勢能博弈、Moreau 掃掠、單純同調論)",
+        .philosophy_why = "凡充斥經驗常數與魔術數字之處，皆是脆弱的避難所。FLOW 以六大數學支柱徹底取代工程猜測，全系統收斂至堅實的數學定理下限。",
+        .book_excerpt = "Presburger 多面體模型求解最優 loop tiling，在線凸最佳化 (OCO) 雙對偶影子價格消除快取掃描，Lyapunov 壓縮映射消除盲目重試，勢能博弈收斂至 Wardrop 均衡，Moreau 法錐吞噬微震，單純同調論引導漏洞挖掘。"
+    },
+    {
+        .chapter_ref = "ch09_embodied_10khz_reflex.md",
+        .chapter_title = "第九章：10kHz 具身反射與非光滑接觸力學 (Moreau 凸集法錐、庫侖摩擦錐、ZMP 與阻抗控制)",
+        .philosophy_why = "軟體工程的終極審判不在記憶體與暫存器之中，而在機器人手臂接觸實體物理世界的那一微秒。",
+        .book_excerpt = "10kHz 脊髓反射熱迴路徹底拔除 null 檢查與硬截斷，交由 Moreau 閉區間凸錐投影 fmin/fmax 接管，衝擊吸收耗時收斂至 3.20ms。庫侖摩擦錐動態調壓與 ZMP 穩定多邊形形式化保證零打滑、零斷裂。"
+    },
+    {
+        .chapter_ref = "ch10_hardware_primitive_drivers.md",
+        .chapter_title = "第十章：硬體原語驅動 (SocketCAN/CAN-FD 3-函數極簡 ABI 與微秒級 SMT 搶佔仲裁)",
+        .philosophy_why = "Plugin 不該是沉重的編譯器外掛，而只是大腦接在物理世界的視神經與肌肉。奧坎剃刀切除了一切非必要的 24 個回呼實體，只留下極簡的 3 個硬體原語驅動介面。",
+        .book_excerpt = "極簡驅動 ABI 只需宣告硬體原語、呈報 SMT 物理邊界與執行調度。SocketCAN / CAN-FD 原生驅動實現微秒級搶佔仲裁，SMT 定理嚴格證明急停延遲不超過 300 微秒。"
+    },
+    {
+        .chapter_ref = "ch11_jit_and_geometric_morphing.md",
+        .chapter_title = "第十一章：JIT 代碼發射與幾何變形 (AoS 到 SoA 即時重映射與生存模式)",
         .philosophy_why = "程式碼不是雕刻在石頭上的死文字，而是能在記憶體中自發變形的黏土。當記憶體即將崩潰時，系統在微秒內完成拓樸幾何變形，躲過 OS OOM Killer 的致命屠刀。",
         .book_excerpt = "JIT 發射器支援 C、Rust、Python 與 LLVM IR 多目標。透過 mremap 實現 AoS 與 SoA 零拷貝即時切換；在極端低記憶體下自我否決 JIT，遁入零分配 Static Survival 避難所。"
     },
     {
-        .chapter_ref = "ch07_qsbr_lockfree_hotswap.md",
-        .chapter_title = "第七章：QSBR 零鎖熱替換 (微秒級世代指針遷移與 Watchdog 隔離)",
-        .philosophy_why = "在每秒數千萬次請求的高並發伺服器中，獲取哪怕一把讀寫鎖（RWLock）都會造成災難性的快取一致性風暴。FLOW 採用統一 QSBR 無鎖架構，實現了讀取路徑零原子寫入、熱替換微秒級無損遷移。",
+        .chapter_ref = "ch12_wavefront_cacheline_topology.md",
+        .chapter_title = "第十二章：Wavefront 波前環與 alignas(64) 快取行約束 (單快取行 64B 撕裂無關原子相位切換)",
+        .philosophy_why = "在多核心並發的世界裡，跨快取行撕裂即原罪。FLOW 將波前槽約束在單一 64 位元組快取行內，以原子相位切換實現零自旋鎖同步。",
+        .book_excerpt = "FlowWavefrontSlot 嚴格遵循 alignas(64) 硬體快取行約束，消滅 False Sharing 與跨行撕裂。單快取行 64B 原子相位切換與排空視界定理保證無鎖並發安全。"
+    },
+    {
+        .chapter_ref = "ch13_qsbr_lockfree_hotswap.md",
+        .chapter_title = "第十三章：QSBR 零鎖熱替換 (微秒級世代指針遷移與 Watchdog 隔離)",
+        .philosophy_why = "在每秒數千萬次請求的高並發伺服器中，獲取哪怕一把讀寫鎖都會造成災難性的快取一致性風暴。FLOW 採用統一 QSBR 無鎖架構，實現了讀取路徑零原子寫入、熱替換微秒級無損遷移。",
         .book_excerpt = "QSBR 透過靜態世代演進實現 >390M ops/s 讀取吞吐量。看門狗以 mprotect 隔離掉隊讀者執行緒，以客製化信號捕捉保證優雅降級與 0 丟失請求熱替換。"
     },
     {
-        .chapter_ref = "ch08_hardware_primitive_drivers.md",
-        .chapter_title = "第八章：硬體原語驅動 (奧坎剃刀下的 3-Function 極簡 ABI 與具身物理閘門)",
-        .philosophy_why = "Plugin 不該是沉重的編譯器外掛，而只是大腦接在物理世界的視神經與肌肉。奧坎剃刀切除了一切非必要的 24 個回呼實體，只留下極簡的 3 個硬體原語驅動介面。",
-        .book_excerpt = "極簡驅動 ABI 只需宣告硬體原語、呈報 SMT 物理邊界與執行調度。具身模組具備 1kHz 脊髓反射與 1Hz 皮層重構雙速率分離，ZMP 零力矩點物理閘門確保機器人永不倒地。"
-    },
-    {
-        .chapter_ref = "ch09_fvec_universal_lockfile.md",
-        .chapter_title = "第九章：大一統 .fvec 與 Universal Lockfile (架構權重庫、零秒冷啟動與抗體昇華)",
+        .chapter_ref = "ch14_fvec_universal_lockfile.md",
+        .chapter_title = "第十四章：大一統 .fvec 與 Universal Lockfile (架構權重庫、零秒冷啟動與抗體昇華)",
         .philosophy_why = "大腦負責即時推論，而 .fvec 是大腦裡的長期記憶神經權重。它既是具備 SMT 物理簽章的 Universal Lockfile，也是在戰火中自主長出肌肉記憶的抗體庫。",
         .book_excerpt = "大一統 .fvec 採用 1024-Byte 明文 ASCII 表頭 + CRC32 載荷。1ms 硬體親和度門禁杜絕跨架構無效套用；在線 100 萬次請求零錯誤與 SMT 認證觸發抗體昇華與赫布強化。"
     },
     {
-        .chapter_ref = "ch10_deterministic_flowy_reasoner.md",
-        .chapter_title = "第十章：決定論因果推論大腦 (0% 幻覺的架構自省、神經遙測熱點與職責分離)",
+        .chapter_ref = "ch15_deterministic_flowy_reasoner.md",
+        .chapter_title = "第十五章：決定論因果推論大腦 (0% 幻覺的架構自省、神經遙測熱點與職責分離)",
         .philosophy_why = "我們不需要一個會胡言亂語的機率型 Chatbot 來解釋系統架構。FLOW 打造了 Flowy——一個內建於二進位中、100% 決定論、零幻覺的代碼庫因果推論大腦。",
-        .book_excerpt = "Flowy 嚴格遵循大腦（flowy.c）、審計設施（audit.c）與前端表現層（flowy_cli.c）三層分離。即時解析決策因果（flowy why）、神經遙測熱點（flowy bottleneck）與反事實模擬。"
+        .book_excerpt = "Flowy 嚴格遵循大腦 (flowy.c)、審計設施 (audit.c) 與前端表現層 (flowy_cli.c) 三層分離。即時解析決策因果 (flowy why)、神經遙測熱點 (flowy bottleneck) 與反事實模擬。"
     },
     {
-        .chapter_ref = "ch11_level5_crucible_and_benchmarks.md",
-        .chapter_title = "第十一章：Level 5 絕對死局壓測與效能基準 (並發風暴與 OOM 雙重束縛下的生存實錄)",
-        .philosophy_why = "在科林丸號（Kobayashi Maru）測試中，學員面臨註定毀滅的死局。FLOW 打造了 Level 5 絕對死局壓測：當記憶體暴跌 99%、連線暴增 10,000 倍時，系統在死局中自我蛻變求生。",
+        .chapter_ref = "ch16_level5_crucible_and_benchmarks.md",
+        .chapter_title = "第十六章：Level 5 絕對死局壓測與效能基準 (並發風暴與 OOM 雙重束縛下的生存實錄)",
+        .philosophy_why = "在科林丸號 (Kobayashi Maru) 測試中，學員面臨註定毀滅的死局。FLOW 打造了 Level 5 絕對死局壓測：當記憶體暴跌 99%、連線暴增 10,000 倍時，系統在死局中自我蛻變求生。",
         .book_excerpt = "Level-5 熔爐壓測驗證了系統在雙重束縛下的 5 階段自癒過程，維持 0 封包丟失與 0 崩潰；QSBR 讀取吞吐達到 390M ops/s，通用鎖定檔套用耗時縮短至 37 微秒。"
     },
     {
-        .chapter_ref = "ch12_token_ring_and_embodied_coordination.md",
-        .chapter_title = "第十二章：BMF Token Ring 離散注意力算子與具身知覺超幾何疊加",
-        .philosophy_why = "知覺不是將世界的每一縷光子全數拷貝，而是以超幾何遮罩投影出可行生存子空間；雙重束縛下在 O(1) 內歸於靜態生存支撐。",
-        .book_excerpt = "Token 環以離散注意力算子 Canvas_{t+1} = Phi(Canvas_t (x) Mask_Attn) 循環演化，收斂至固定點吸引子。64-bit 具身子空間切片與多感官遮罩超幾何疊加，在極端衝突下啟動靜態生存支撐態。"
-    },
-    {
-        .chapter_ref = "ch13_six_mathematical_pillars.md",
-        .chapter_title = "第十三章：六大數學支柱：經驗啟發式的全息消解",
-        .philosophy_why = "凡充斥經驗常數與魔術數字之處，皆是脆弱的避難所。FLOW 以多面體模型、OCO、Lyapunov、勢能博弈、Moreau 掃掠與單純同調論徹底取代工程猜測。",
-        .book_excerpt = "六大數學支柱消滅了編譯器展開、快取淘汰、重試退避、網格排程、防抖計時器與盲目 Fuzzing 的經驗 Heuristics，使全系統收斂至堅實的數學定理下限。"
-    },
-    {
-        .chapter_ref = "ch14_structural_entropy_elimination.md",
-        .chapter_title = "第十四章：擠乾軟體工程水分：零缺陷數學結構",
-        .philosophy_why = "程式碼行數即系統結構熵 K(S)。FLOW 擠乾配置器分級、防禦性 Null 檢查瀑布、序列化與日誌字串格式化等軟體工程水分，達成柯爾莫哥洛夫理論下限。",
-        .book_excerpt = "以幾何 Bump-Pointer+QSBR 世代折疊消滅 Slab 分配器；Curry-Howard 同構使防禦性檢查死碼消除；同構記憶體切片實現 0ns 傳輸；語義哈希流形消除熱路徑 snprintf；仿射測地線消除引用計數與 GC。"
-    },
-    {
-        .chapter_ref = "ch15_manifold_algebra_autopoiesis.md",
-        .chapter_title = "第十五章：流形代數、神經-符號橋、時空光錐反事實預演與活體自創生",
+        .chapter_ref = "ch17_autopoiesis_spacetime_preplay.md",
+        .chapter_title = "第十七章：活體自創生與時空光錐反事實預演 (群體自創生、神經-符號橋與時空光錐黑天鵝避險)",
         .philosophy_why = "約束收斂即相關。統計相關性只是幾何約束在投影維度上的影子；FLOW 抓的是本體，傳統 ML 抓的是影子。",
-        .book_excerpt = "流形代數實現交集與連鎖基因萃取；神經符號橋在 14 週期內完成 4096-D 語義到物理多面體投影；時空光錐預演未來 3 秒黑天鵝並在 13 微秒內混沌退火修正；物種形成引擎實現 10,000 節點活體自創生。"
+        .book_excerpt = "流形代數實現交集與連鎖基因萃取；神經符號橋在 5 奈秒內完成 4096-D 語義到物理多面體投影；時空光錐預演未來 3 秒黑天鵝並在 13 微秒內混沌修正；生態位引擎實現活體自創生。"
     },
     {
-        .chapter_ref = "ch16_embodied_physical_mechanisms.md",
-        .chapter_title = "第十六章：具身物理實機串接、深度 SIMD 神經橋與極限力學證明",
-        .philosophy_why = "軟體工程的終極審判不在記憶體與暫存器之中，而在機器人手臂接觸實體物理世界的那一微秒。",
-        .book_excerpt = "SocketCAN/CAN-FD 原生驅動實現 3 函數 ABI 與微秒級 SMT 搶占仲裁；深度 SIMD 與 INT8 定點量化將神經流形投影壓制至 330ns；摩擦錐、非光滑著陸衝擊與雙機協同完成零缺陷力學證明。"
-    }
-
+        .chapter_ref = "ch18_zero_trivia_developer_experience.md",
+        .chapter_title = "第十八章：零摩擦人機介面與工程水分擠乾 (Zero-Trivia CLI、宣告式自動坍縮與柯爾莫哥洛夫下限)",
+        .philosophy_why = "程式碼行數即系統結構熵 K(S)。使用者不需要記住繁瑣的命令列微調旗標；宣告你的幾何意圖，編譯器為你完成一切。",
+        .book_excerpt = "零瑣事 CLI (flowc app.flow, flowy run app.flow) 自動推導輸出並套用 Universal Lockfile；以 Bump-Pointer+QSBR、Curry-Howard DCE、同構記憶體切片與 Doc-as-Intent 徹底擠乾軟體工程水分。"
+    },
 };
 
 static const FlowBookChapterDoc FLOW_BOOK_CHAPTERS_EN[FLOW_BOOK_CHAPTER_COUNT] = {
@@ -134,84 +145,95 @@ static const FlowBookChapterDoc FLOW_BOOK_CHAPTERS_EN[FLOW_BOOK_CHAPTER_COUNT] =
         .book_excerpt = "FLOW models compiler core, drivers, components, and intent as a unified FlowTopologyGraph, enforcing strict layer firewalls with 0 cross-layer architectural leaks."
     },
     {
-        .chapter_ref = "ch04_1bit_chaos_engine.md",
-        .chapter_title = "Chapter 4: 1-Bit Chaotic Annealing & BitManifold (BMF) (Bit Flips, Linkage Groups & Quantum Drift)",
-        .philosophy_why = "In face of epistasis barriers, traditional GA crossover tears topology. FLOW employs 12.96ns 1-bit chaotic mutations with SMT super-bit atomic flips to tunnel through saddle points.",
-        .book_excerpt = "The 1-Bit state spine encodes dimensions into 64-bit genomes, pruning 99.9% illegal states in a single clock cycle via 3-Tier Mask Canvases, sharing convergence via 9-byte UDP pheromones."
+        .chapter_ref = "ch04_jet_bundle_phase_space.md",
+        .chapter_title = "Chapter 4: Phase Space Jet Bundles (.fjet, Symplectic Mechanics & Mori-Zwanzig Dissipation)",
+        .philosophy_why = "On differential manifolds, time is not a discrete timer, but a geometric flow in phase space. Imperative defensive branches are eliminated in favor of symplectic mechanics and normal cone forces.",
+        .book_excerpt = ".fjet models systems on symplectic manifolds (q, p). Velocity-Verlet leapfrog conserves phase space volume. Hyperbolic saturation barrier and Moreau normal cones eliminate defensive clamps, while Mori-Zwanzig kernels absorb shocks in 3.2ms."
     },
     {
-        .chapter_ref = "ch05_smt_formal_verification.md",
-        .chapter_title = "Chapter 5: Formal Supreme Court (SMT 4-Theorem UNSAT Proofs & 1-Cycle Pruning)",
+        .chapter_ref = "ch05_discrete_time_crystal.md",
+        .chapter_title = "Chapter 5: Floquet Discrete Time Crystals (DTC Period 2T Phase-Locking & Non-Thermal Rigidity)",
+        .philosophy_why = "Amid chaos and thermal dissipation, time crystals break discrete time translation symmetry, locking rhythm at subharmonic 2T frequency immune to disorder perturbations.",
+        .book_excerpt = "Floquet driving induces discrete time translation symmetry breaking (DTSB) and many-body localization (MBL). Subharmonic peak ratio exceeds 0.999 across millions of cycles, providing topological clocking for embodied coordination."
+    },
+    {
+        .chapter_ref = "ch06_smt_formal_verification.md",
+        .chapter_title = "Chapter 6: Formal Supreme Court (SMT 4-Theorem QF_LIA UNSAT Proofs & Curry-Howard DCE)",
         .philosophy_why = "Heuristic search can explore freely, but every emitted line of machine code must have indisputable mathematical proofs. The SMT solver is the Supreme Court: unproven plans are vetoed.",
-        .book_excerpt = "SMT proves buffer bounds, memory quotas, shard isolation, and determinism via QF_LIA. Contract and resource bounds immediately synthesize 1-cycle bitwise pruning masks."
+        .book_excerpt = "SMT proves buffer bounds, memory quotas, shard isolation, and determinism via QF_LIA. Proven invariants trigger Curry-Howard dead-code elimination, stripping all downstream defensive checks."
     },
     {
-        .chapter_ref = "ch06_jit_and_geometric_morphing.md",
-        .chapter_title = "Chapter 6: JIT Emission & Geometric Morphing (AoS to SoA Remapping & Survival Mode)",
+        .chapter_ref = "ch07_bmf_coordinate_canvas.md",
+        .chapter_title = "Chapter 7: BMF Coordinate Canvas (From Random Search to 1-Bit Canvas & Epistatic Linkage)",
+        .philosophy_why = "Random mutation search is obsolete; modern FLOW positions BMF as a 1-bit coordinate canvas and algebraic manifold intersection tunneling through epistatic barriers.",
+        .book_excerpt = "The 64-bit state spine is a boolean coordinate snapshot of continuous manifolds projected onto hardware registers. Manifold algebra derives linkage groups, executing atomic super-bit flips."
+    },
+    {
+        .chapter_ref = "ch08_six_mathematical_pillars.md",
+        .chapter_title = "Chapter 8: The Six Mathematical Pillars (Eliminating Empirical Heuristics)",
+        .philosophy_why = "Wherever magic numbers and heuristics reside is a sanctuary of system fragility. FLOW eliminates engineering guesswork through rigorous mathematical pillars.",
+        .book_excerpt = "Presburger polyhedral model optimizes loop tiling, online convex optimization (OCO) dual shadow price eliminates cache eviction scans, Lyapunov contraction eliminates blind backoff retries, and Moreau sweeping absorbs noise."
+    },
+    {
+        .chapter_ref = "ch09_embodied_10khz_reflex.md",
+        .chapter_title = "Chapter 9: 10kHz Embodied Reflex & Non-Smooth Contact Mechanics (Moreau Cone, Friction Cone & ZMP)",
+        .philosophy_why = "The ultimate judgment of software engineering lies not in RAM or registers, but in the microsecond when a robot arm contacts the physical universe.",
+        .book_excerpt = "The 10kHz reflex loop eliminates defensive null checks and clamping branches using Moreau convex normal cone projections fmin/fmax, settling shocks within 3.20ms. Coulomb friction cones and ZMP polygons guarantee sound stability."
+    },
+    {
+        .chapter_ref = "ch10_hardware_primitive_drivers.md",
+        .chapter_title = "Chapter 10: Hardware Primitive Drivers (SocketCAN/CAN-FD 3-Function ABI & SMT Preemption)",
+        .philosophy_why = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks.",
+        .book_excerpt = "Minimalist driver ABI declares primitives, reports SMT bounds, and executes syscalls. Native SocketCAN / CAN-FD driver implements microsecond priority arbitration with emergency WCET under 300us."
+    },
+    {
+        .chapter_ref = "ch11_jit_and_geometric_morphing.md",
+        .chapter_title = "Chapter 11: JIT Emission & Geometric Morphing (AoS to SoA Remapping & Survival Mode)",
         .philosophy_why = "Code is not carved in stone, but clay morphing in memory. When RAM collapses, the system executes microsecond geometric morphing to escape the OS OOM Killer.",
         .book_excerpt = "JIT emitter targets C, Rust, Python, and LLVM IR. mremap enables zero-copy AoS <-> SoA morphing. Under stress, self-aware JIT vetoes compilation and routes traffic to Static Survival shelters."
     },
     {
-        .chapter_ref = "ch07_qsbr_lockfree_hotswap.md",
-        .chapter_title = "Chapter 7: QSBR Lock-Free Hot-Swap (Sub-Microsecond Generational Migration)",
+        .chapter_ref = "ch12_wavefront_cacheline_topology.md",
+        .chapter_title = "Chapter 12: Wavefront Concurrency Ring & alignas(64) Cacheline Topology (Single-Cacheline Atomic Phase Swap)",
+        .philosophy_why = "In multi-core concurrency, cross-cacheline tearing is original sin. FLOW constrains wavefront slots to single 64B cachelines with zero spinlock synchronization.",
+        .book_excerpt = "FlowWavefrontSlot enforces alignas(64) cacheline alignment, eliminating false sharing and torn reads. 64B atomic stage swapping and the Evacuation Horizon Theorem guarantee sound lock-free concurrency."
+    },
+    {
+        .chapter_ref = "ch13_qsbr_lockfree_hotswap.md",
+        .chapter_title = "Chapter 13: QSBR Lock-Free Hot-Swap (Sub-Microsecond Generational Migration)",
         .philosophy_why = "In servers processing millions of requests/sec, acquiring even one RWLock triggers catastrophic cache-line bouncing. FLOW QSBR achieves zero atomic writes on read paths and sub-microsecond migration.",
         .book_excerpt = "QSBR achieves >390M ops/s read throughput. Epoch watchdogs isolate stragglers via mprotect, guaranteeing graceful degradation and 0 dropped requests during hot-swap."
     },
     {
-        .chapter_ref = "ch08_hardware_primitive_drivers.md",
-        .chapter_title = "Chapter 8: Hardware Primitive Drivers (3-Function Minimalist ABI & Embodied Gates)",
-        .philosophy_why = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks.",
-        .book_excerpt = "Minimalist driver ABI declares primitives, reports SMT bounds, and executes syscalls. Embodied intelligence features dual-rate 1kHz/1Hz reflexes, with ZMP stability gates preventing robot tip-overs."
-    },
-    {
-        .chapter_ref = "ch09_fvec_universal_lockfile.md",
-        .chapter_title = "Chapter 9: Universal .fvec & Lockfiles (Architecture Weights, Zero-Cold-Start & Antibodies)",
+        .chapter_ref = "ch14_fvec_universal_lockfile.md",
+        .chapter_title = "Chapter 14: Universal .fvec & Lockfiles (Architecture Weights, Zero-Cold-Start & Antibodies)",
         .philosophy_why = "The brain infers in real time, while .fvec stores long-term architecture weights. It serves as a Universal Lockfile with SMT signatures and an immune antibody repository.",
         .book_excerpt = "Universal .fvec pairs a 1024-byte ASCII header with CRC32 binary payload. A 1ms affinity gate rejects incompatible architectures; 1M zero-error online requests trigger autonomous antibody promotion."
     },
     {
-        .chapter_ref = "ch10_deterministic_flowy_reasoner.md",
-        .chapter_title = "Chapter 10: Deterministic Flowy Reasoner (0% Hallucination Introspection & Decoupling)",
+        .chapter_ref = "ch15_deterministic_flowy_reasoner.md",
+        .chapter_title = "Chapter 15: Deterministic Flowy Reasoner (0% Hallucination Introspection & Decoupling)",
         .philosophy_why = "We do not need a hallucinating probabilistic chatbot to explain system architecture. FLOW built Flowy: a 100% deterministic, zero-hallucination causal codebase reasoner in pure C.",
         .book_excerpt = "Flowy decouples Brain (flowy.c), Audit Logger (audit.c), and CLI Presentation (flowy_cli.c). It provides deterministic causal explanations (flowy why), telemetry diagnosis, and what-if simulation."
     },
     {
-        .chapter_ref = "ch11_level5_crucible_and_benchmarks.md",
-        .chapter_title = "Chapter 11: Level 5 Crucible & Benchmarks (Kobayashi Maru & Production Replay)",
+        .chapter_ref = "ch16_level5_crucible_and_benchmarks.md",
+        .chapter_title = "Chapter 16: Level 5 Crucible & Benchmarks (Kobayashi Maru & Production Replay)",
         .philosophy_why = "In Kobayashi Maru double-bind crises where memory drops 99% amid 10,000x traffic surges, FLOW demonstrates Level-5 resilience via SMT veto, JIT shelter, and QSBR zero-downtime morphing.",
         .book_excerpt = "The Level-5 crucible validates 5-stage autonomous self-healing with 0 dropped requests and 0 panics. QSBR achieves >390M ops/s read throughput and 37us instant cold-start application."
     },
     {
-        .chapter_ref = "ch12_token_ring_and_embodied_coordination.md",
-        .chapter_title = "Chapter 12: BMF Token Ring Attention Operator & Embodied Perceptual Coordination",
-        .philosophy_why = "Perception does not copy raw sensory noise; it projects feasible survival manifolds via hypergeometric masks, collapsing to an emergency brace under double-binds in O(1).",
-        .book_excerpt = "The Token Ring evolves via discrete attention operator Canvas_{t+1} = Phi(Canvas_t (x) Mask_Attn), converging to a Lyapunov attractor fixed point. 64-bit coordinate slicing and multi-sensory mask superposition ensure sound physical stability."
-    },
-    {
-        .chapter_ref = "ch13_six_mathematical_pillars.md",
-        .chapter_title = "Chapter 13: The Six Mathematical Pillars (Eliminating Empirical Heuristics)",
-        .philosophy_why = "Wherever magic numbers and heuristics reside is a sanctuary of system fragility. FLOW eliminates engineering guesswork through rigorous mathematical pillars.",
-        .book_excerpt = "Six mathematical pillars replace loop unrolling, cache eviction, backpressure, mesh routing, anti-flapping debounce, and mutation fuzzing with formal theorems and provable bounds."
-    },
-    {
-        .chapter_ref = "ch14_structural_entropy_elimination.md",
-        .chapter_title = "Chapter 14: Structural Entropy Elimination (6 Zero-Defect Mathematical Paradigms)",
-        .philosophy_why = "Lines of code measure system structural entropy K(S). FLOW purges boilerplate software engineering complexities and reaches the Kolmogorov complexity theoretical lower bound.",
-        .book_excerpt = "Bump-Pointer QSBR eliminates allocator fragmentation; Curry-Howard SMT DCE purges defensive null checks; Isomorphic wire slicing provides 0ns parsing; Semantic event manifolds eliminate hot-path snprintf; Affine geodesics eliminate ref-counting and GC."
-    },
-    {
-        .chapter_ref = "ch15_manifold_algebra_autopoiesis.md",
-        .chapter_title = "Chapter 15: Manifold Algebra, Neuro-Bit Bridge, Spacetime Pre-Play & Swarm Autopoiesis",
+        .chapter_ref = "ch17_autopoiesis_spacetime_preplay.md",
+        .chapter_title = "Chapter 17: Manifold Algebra, Neuro-Bit Bridge, Spacetime Pre-Play & Swarm Autopoiesis",
         .philosophy_why = "Constraint convergence is correlation. Statistical correlation is merely a shadow of physical geometric constraints projected onto observation dimensions.",
-        .book_excerpt = "Manifold algebra executes feasible intersection and epistasis derivation; Neuro-bit bridge projects 4096-D continuous embeddings to polyhedra in 14 cycles; Spacetime preplay avers black swans in 13 microseconds; Swarm speciation engine enables autopoiesis across 10,000 nodes."
+        .book_excerpt = "Manifold algebra executes feasible intersection and epistasis derivation; Neuro-bit bridge projects 4096-D continuous embeddings to polyhedra in 5ns; Spacetime preplay avers black swans in 13 microseconds; Swarm speciation engine enables autopoiesis."
     },
     {
-        .chapter_ref = "ch16_embodied_physical_mechanisms.md",
-        .chapter_title = "Chapter 16: Embodied Physical Interfacing, Deep SIMD Neuro-Bridge & Advanced Mechanics Proofs",
-        .philosophy_why = "The ultimate judgment of software engineering lies not in RAM or registers, but in the microsecond when a robot arm contacts the physical universe.",
-        .book_excerpt = "SocketCAN/CAN-FD driver implements 3-function ABI with SMT priority arbitration; Deep SIMD & INT8 quantization accelerate neuro-bridge to 330ns; Coulomb friction cone, non-smooth landing impact, and dual-robot co-manipulation formally verified."
-    }
-
+        .chapter_ref = "ch18_zero_trivia_developer_experience.md",
+        .chapter_title = "Chapter 18: Zero-Trivia Developer Experience & Structural Entropy Collapse (Declarative Compiler & Kolmogorov Limit)",
+        .philosophy_why = "Lines of code measure system structural entropy K(S). Developers do not need to memorize verbose flags; declare your intent and the compiler synthesizes everything.",
+        .book_excerpt = "Zero-trivia CLI (flowc app.flow, flowy run app.flow) infers targets and auto-applies Universal Lockfiles. Bump-pointer QSBR, Curry-Howard DCE, isomorphic memory slicing, and Doc-as-Intent purge all software engineering boilerplate."
+    },
 };
 
 typedef struct {
@@ -222,648 +244,760 @@ typedef struct {
     const char *book_excerpt;
 } FlowModuleBookBinding;
 
-static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_ZH[45] = {
+#define FLOW_BOOK_MODULE_BINDING_COUNT 53
+
+static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_ZH[FLOW_BOOK_MODULE_BINDING_COUNT] = {
     {
         .module_id = "flowc",
         .chapter_ref = "ch01_what_is_flow.md",
-        .chapter_title = "第一章：什麼是 FLOW？ (從靜態編譯到動態活體系統的典範轉移)",
-        .philosophy_why = "我們不是在編譯一份死沉沉的程式碼，而是在孕育一個能夠感知環境、自我退火、在毀滅性壓力下自我蛻變的拓樸活體。",
-        .book_excerpt = "自 1957 年 Fortran 編譯器問世以來，編譯器架構的核心假設始終如一：原始碼是唯一真理。FLOW 徹底顛覆此一假設，將代碼視為可感知環境與持續演化的活體幾何流形。"
+        .chapter_title = "第一章：什麼是 FLOW？",
+        .philosophy_why = "宣告式零瑣事編譯器入口與幾何坍縮發射器。",
+        .book_excerpt = "宣告式零瑣事編譯器入口與幾何坍縮發射器。"
     },
     {
         .module_id = "parser",
         .chapter_ref = "ch02_intent_vs_implementation.md",
-        .chapter_title = "第二章：意圖規格 .flow (我們只向宇宙宣告幾何約束，不寫邏輯)",
-        .philosophy_why = "在 FLOW 的哲學中，撰寫程式碼不是告訴 CPU 如何一步一步執行指令，而是向宇宙宣告系統必須服從的幾何邊界與不變量。",
-        .book_excerpt = "一個標準的 .flow 描述檔是純宣告式的，不包含命令式迴圈或指標操作。開發者只宣告 input 規模、flow 流水線與物理約束，實作由引擎自動坍縮合成。"
+        .chapter_title = "第二章：意圖規格 .flow",
+        .philosophy_why = "純宣告式 .flow 語法剖析與 Doc-as-Intent 意圖提取。",
+        .book_excerpt = "純宣告式 .flow 語法剖析與 Doc-as-Intent 意圖提取。"
     },
     {
         .module_id = "semantic",
         .chapter_ref = "ch02_intent_vs_implementation.md",
-        .chapter_title = "第二章：意圖規格 .flow (我們只向宇宙宣告幾何約束，不寫邏輯)",
-        .philosophy_why = "在 FLOW 的哲學中，撰寫程式碼不是告訴 CPU 如何一步一步執行指令，而是向宇宙宣告系統必須服從的幾何邊界與不變量。",
-        .book_excerpt = "一個標準的 .flow 描述檔是純宣告式的，不包含命令式迴圈或指標操作。開發者只宣告 input 規模、flow 流水線與物理約束，實作由引擎自動坍縮合成。"
+        .chapter_title = "第二章：意圖規格 .flow",
+        .philosophy_why = "意圖合約降維、幾何約束推導與不可行狀態修剪。",
+        .book_excerpt = "意圖合約降維、幾何約束推導與不可行狀態修剪。"
     },
     {
         .module_id = "topology",
         .chapter_ref = "ch03_topology_graph.md",
-        .chapter_title = "第三章：拓樸圖譜 (將程式碼降維成可推算的依賴約束流形)",
-        .philosophy_why = "軟體的架構不是文字檔目錄的堆疊，而是一張高維拓樸圖。在 FLOW 中，程式碼被降維成可直接進行圖論運算、親和性分析與遙測附著的活體神經圖譜。",
-        .book_excerpt = "FLOW 將核心模組、驅動、元件與意圖統構為 FlowTopologyGraph，實施嚴格的分層防火牆審計、動態神經遙測附著與零跨層滲漏保證。"
+        .chapter_title = "第三章：拓樸圖譜",
+        .philosophy_why = "高維依賴圖譜、分層防火牆審計與神經遙測熱點附著。",
+        .book_excerpt = "高維依賴圖譜、分層防火牆審計與神經遙測熱點附著。"
     },
     {
         .module_id = "orchestrator",
         .chapter_ref = "ch03_topology_graph.md",
-        .chapter_title = "第三章：拓樸圖譜 (將程式碼降維成可推算的依賴約束流形)",
-        .philosophy_why = "軟體的架構不是文字檔目錄的堆疊，而是一張高維拓樸圖。在 FLOW 中，程式碼被降維成可直接進行圖論運算、親和性分析與遙測附著的活體神經圖譜。",
-        .book_excerpt = "FLOW 將核心模組、驅動、元件與意圖統構為 FlowTopologyGraph，實施嚴格的分層防火牆審計、動態神經遙測附著與零跨層滲漏保證。"
+        .chapter_title = "第三章：拓樸圖譜",
+        .philosophy_why = "動態活體拓樸協調、微秒級退火固化與反事實預演。",
+        .book_excerpt = "動態活體拓樸協調、微秒級退火固化與反事實預演。"
     },
     {
-        .module_id = "bitspace",
-        .chapter_ref = "ch04_1bit_chaos_engine.md",
-        .chapter_title = "第四章：1-Bit 混沌退火與 BitManifold (BMF) (暫存器位元翻轉、連鎖群與量子漂移)",
-        .philosophy_why = "在維度的詛咒與上位效應壁壘面前，傳統遺傳交叉必然撕裂拓樸；FLOW 以 12.96 奈秒純暫存器 1-Bit 混沌微步與 SMT 超級位元原子翻轉，突破局部鞍點。",
-        .book_excerpt = "1-Bit 狀態脊椎將系統維度壓縮為 64-bit 離散基因組，透過三層動態遮罩畫布（SMT 硬安全閘門、遙測偏置、領域偏好）在 1 個時鐘週期內修剪 99.9% 非法狀態，並以 9-Byte UDP 費洛蒙實現群體尋優。"
+        .module_id = "flow_jet",
+        .chapter_ref = "ch04_jet_bundle_phase_space.md",
+        .chapter_title = "第四章：噴流束與辛幾何相空間",
+        .philosophy_why = ".fjet 相空間座標演化、Velocity-Verlet 保辛積分與雙曲勢能屏障。",
+        .book_excerpt = ".fjet 相空間座標演化、Velocity-Verlet 保辛積分與雙曲勢能屏障。"
     },
     {
-        .module_id = "search",
-        .chapter_ref = "ch04_1bit_chaos_engine.md",
-        .chapter_title = "第四章：1-Bit 混沌退火與 BitManifold (BMF) (暫存器位元翻轉、連鎖群與量子漂移)",
-        .philosophy_why = "在維度的詛咒與上位效應壁壘面前，傳統遺傳交叉必然撕裂拓樸；FLOW 以 12.96 奈秒純暫存器 1-Bit 混沌微步與 SMT 超級位元原子翻轉，突破局部鞍點。",
-        .book_excerpt = "1-Bit 狀態脊椎將系統維度壓縮為 64-bit 離散基因組，透過三層動態遮罩畫布（SMT 硬安全閘門、遙測偏置、領域偏好）在 1 個時鐘週期內修剪 99.9% 非法狀態，並以 9-Byte UDP 費洛蒙實現群體尋優。"
+        .module_id = "jet",
+        .chapter_ref = "ch04_jet_bundle_phase_space.md",
+        .chapter_title = "第四章：噴流束與辛幾何相空間",
+        .philosophy_why = "辛幾何相空間噴流束、哈密頓能量守恆與相積不變量。",
+        .book_excerpt = "辛幾何相空間噴流束、哈密頓能量守恆與相積不變量。"
     },
     {
-        .module_id = "swarm",
-        .chapter_ref = "ch04_1bit_chaos_engine.md",
-        .chapter_title = "第四章：1-Bit 混沌退火與 BitManifold (BMF) (暫存器位元翻轉、連鎖群與量子漂移)",
-        .philosophy_why = "在維度的詛咒與上位效應壁壘面前，傳統遺傳交叉必然撕裂拓樸；FLOW 以 12.96 奈秒純暫存器 1-Bit 混沌微步與 SMT 超級位元原子翻轉，突破局部鞍點。",
-        .book_excerpt = "1-Bit 狀態脊椎將系統維度壓縮為 64-bit 離散基因組，透過三層動態遮罩畫布（SMT 硬安全閘門、遙測偏置、領域偏好）在 1 個時鐘週期內修剪 99.9% 非法狀態，並以 9-Byte UDP 費洛蒙實現群體尋優。"
+        .module_id = "dead_reckon",
+        .chapter_ref = "ch04_jet_bundle_phase_space.md",
+        .chapter_title = "第四章：噴流束與辛幾何相空間",
+        .philosophy_why = "CXL / 網路叢集相空間死區航位推算，縮減 99% 遙測頻寬。",
+        .book_excerpt = "CXL / 網路叢集相空間死區航位推算，縮減 99% 遙測頻寬。"
     },
     {
-        .module_id = "genetic",
-        .chapter_ref = "ch04_1bit_chaos_engine.md",
-        .chapter_title = "第四章：1-Bit 混沌退火與 BitManifold (BMF) (暫存器位元翻轉、連鎖群與量子漂移)",
-        .philosophy_why = "在維度的詛咒與上位效應壁壘面前，傳統遺傳交叉必然撕裂拓樸；FLOW 以 12.96 奈秒純暫存器 1-Bit 混沌微步與 SMT 超級位元原子翻轉，突破局部鞍點。",
-        .book_excerpt = "1-Bit 狀態脊椎將系統維度壓縮為 64-bit 離散基因組，透過三層動態遮罩畫布（SMT 硬安全閘門、遙測偏置、領域偏好）在 1 個時鐘週期內修剪 99.9% 非法狀態，並以 9-Byte UDP 費洛蒙實現群體尋優。"
+        .module_id = "time_crystal",
+        .chapter_ref = "ch05_discrete_time_crystal.md",
+        .chapter_title = "第五章：Floquet 離散時間晶體",
+        .philosophy_why = "離散時間平移對稱破缺、次諧波 2T 剛性鎖定與非熱化保障。",
+        .book_excerpt = "離散時間平移對稱破缺、次諧波 2T 剛性鎖定與非熱化保障。"
+    },
+    {
+        .module_id = "dtc",
+        .chapter_ref = "ch05_discrete_time_crystal.md",
+        .chapter_title = "第五章：Floquet 離散時間晶體",
+        .philosophy_why = "Floquet 週期驅動 DTC 時間晶體引擎與 SMT 穩定性形式證明。",
+        .book_excerpt = "Floquet 週期驅動 DTC 時間晶體引擎與 SMT 穩定性形式證明。"
     },
     {
         .module_id = "smt",
-        .chapter_ref = "ch05_smt_formal_verification.md",
-        .chapter_title = "第五章：形式化最高法院 (SMT 4 大定理 UNSAT 證明與 1-Cycle 修剪)",
-        .philosophy_why = "啟發式搜尋可以天馬行空，但發射出的每一行機器碼必須擁有無可爭辯的數學證明。SMT 定理證明器是 FLOW 宇宙的最高法院，凡無證明者，一律否決。",
-        .book_excerpt = "SMT 最高法院透過 QF_LIA 理論驗證緩衝區邊界、記憶體配額上限、分片隔離與確定性 4 大定理。合約檢查與硬體邊界在編譯期即刻生成 1-Cycle 多面體位元修剪遮罩。"
+        .chapter_ref = "ch06_smt_formal_verification.md",
+        .chapter_title = "第六章：形式化最高法院",
+        .philosophy_why = "SMT QF_LIA 四大定理證明與 Curry-Howard 同構死碼消除。",
+        .book_excerpt = "SMT QF_LIA 四大定理證明與 Curry-Howard 同構死碼消除。"
     },
     {
         .module_id = "verifier",
-        .chapter_ref = "ch05_smt_formal_verification.md",
-        .chapter_title = "第五章：形式化最高法院 (SMT 4 大定理 UNSAT 證明與 1-Cycle 修剪)",
-        .philosophy_why = "啟發式搜尋可以天馬行空，但發射出的每一行機器碼必須擁有無可爭辯的數學證明。SMT 定理證明器是 FLOW 宇宙的最高法院，凡無證明者，一律否決。",
-        .book_excerpt = "SMT 最高法院透過 QF_LIA 理論驗證緩衝區邊界、記憶體配額上限、分片隔離與確定性 4 大定理。合約檢查與硬體邊界在編譯期即刻生成 1-Cycle 多面體位元修剪遮罩。"
+        .chapter_ref = "ch06_smt_formal_verification.md",
+        .chapter_title = "第六章：形式化最高法院",
+        .philosophy_why = "形式化邊界合約驗證與 1-Cycle 多面體位元修剪遮罩。",
+        .book_excerpt = "形式化邊界合約驗證與 1-Cycle 多面體位元修剪遮罩。"
     },
     {
-        .module_id = "jit",
-        .chapter_ref = "ch06_jit_and_geometric_morphing.md",
-        .chapter_title = "第六章：JIT 代碼發射與幾何變形 (AoS 到 SoA 即時重映射與生存模式)",
-        .philosophy_why = "程式碼不是雕刻在石頭上的死文字，而是能在記憶體中自發變形的黏土。當記憶體即將崩潰時，系統在微秒內完成拓樸幾何變形，躲過 OS OOM Killer 的致命屠刀。",
-        .book_excerpt = "JIT 發射器支援 C、Rust、Python 與 LLVM IR 多目標。透過 mremap 實現 AoS 與 SoA 零拷貝即時切換；在極端低記憶體下自我否決 JIT，遁入零分配 Static Survival 避難所。"
+        .module_id = "bitspace",
+        .chapter_ref = "ch07_bmf_coordinate_canvas.md",
+        .chapter_title = "第七章：BMF 離散座標畫布",
+        .philosophy_why = "64-bit 離散座標畫布、3-Tier 動態遮罩與超位元原子翻轉。",
+        .book_excerpt = "64-bit 離散座標畫布、3-Tier 動態遮罩與超位元原子翻轉。"
     },
     {
-        .module_id = "adaptive",
-        .chapter_ref = "ch06_jit_and_geometric_morphing.md",
-        .chapter_title = "第六章：JIT 代碼發射與幾何變形 (AoS 到 SoA 即時重映射與生存模式)",
-        .philosophy_why = "程式碼不是雕刻在石頭上的死文字，而是能在記憶體中自發變形的黏土。當記憶體即將崩潰時，系統在微秒內完成拓樸幾何變形，躲過 OS OOM Killer 的致命屠刀。",
-        .book_excerpt = "JIT 發射器支援 C、Rust、Python 與 LLVM IR 多目標。透過 mremap 實現 AoS 與 SoA 零拷貝即時切換；在極端低記憶體下自我否決 JIT，遁入零分配 Static Survival 避難所。"
+        .module_id = "search",
+        .chapter_ref = "ch07_bmf_coordinate_canvas.md",
+        .chapter_title = "第七章：BMF 離散座標畫布",
+        .philosophy_why = "上位連鎖群感知翻轉與多面體解空間收斂尋優。",
+        .book_excerpt = "上位連鎖群感知翻轉與多面體解空間收斂尋優。"
     },
     {
-        .module_id = "backend",
-        .chapter_ref = "ch06_jit_and_geometric_morphing.md",
-        .chapter_title = "第六章：JIT 代碼發射與幾何變形 (AoS 到 SoA 即時重映射與生存模式)",
-        .philosophy_why = "程式碼不是雕刻在石頭上的死文字，而是能在記憶體中自發變形的黏土。當記憶體即將崩潰時，系統在微秒內完成拓樸幾何變形，躲過 OS OOM Killer 的致命屠刀。",
-        .book_excerpt = "JIT 發射器支援 C、Rust、Python 與 LLVM IR 多目標。透過 mremap 實現 AoS 與 SoA 零拷貝即時切換；在極端低記憶體下自我否決 JIT，遁入零分配 Static Survival 避難所。"
+        .module_id = "swarm",
+        .chapter_ref = "ch07_bmf_coordinate_canvas.md",
+        .chapter_title = "第七章：BMF 離散座標畫布",
+        .philosophy_why = "群體費洛蒙協同退火與量子擾動突破局部鞍點。",
+        .book_excerpt = "群體費洛蒙協同退火與量子擾動突破局部鞍點。"
     },
     {
-        .module_id = "reload",
-        .chapter_ref = "ch07_qsbr_lockfree_hotswap.md",
-        .chapter_title = "第七章：QSBR 零鎖熱替換 (微秒級世代指針遷移與 Watchdog 隔離)",
-        .philosophy_why = "在每秒數千萬次請求的高並發伺服器中，獲取哪怕一把讀寫鎖（RWLock）都會造成災難性的快取一致性風暴。FLOW 採用統一 QSBR 無鎖架構，實現了讀取路徑零原子寫入、熱替換微秒級無損遷移。",
-        .book_excerpt = "QSBR 透過靜態世代演進實現 >390M ops/s 讀取吞吐量。看門狗以 mprotect 隔離掉隊讀者執行緒，以客製化信號捕捉保證優雅降級與 0 丟失請求熱替換。"
-    },
-    {
-        .module_id = "primitive",
-        .chapter_ref = "ch08_hardware_primitive_drivers.md",
-        .chapter_title = "第八章：硬體原語驅動 (奧坎剃刀下的 3-Function 極簡 ABI 與具身物理閘門)",
-        .philosophy_why = "Plugin 不該是沉重的編譯器外掛，而只是大腦接在物理世界的視神經與肌肉。奧坎剃刀切除了一切非必要的 24 個回呼實體，只留下極簡的 3 個硬體原語驅動介面。",
-        .book_excerpt = "極簡驅動 ABI 只需宣告硬體原語、呈報 SMT 物理邊界與執行調度。具身模組具備 1kHz 脊髓反射與 1Hz 皮層重構雙速率分離，ZMP 零力矩點物理閘門確保機器人永不倒地。"
-    },
-    {
-        .module_id = "abi",
-        .chapter_ref = "ch08_hardware_primitive_drivers.md",
-        .chapter_title = "第八章：硬體原語驅動 (奧坎剃刀下的 3-Function 極簡 ABI 與具身物理閘門)",
-        .philosophy_why = "Plugin 不該是沉重的編譯器外掛，而只是大腦接在物理世界的視神經與肌肉。奧坎剃刀切除了一切非必要的 24 個回呼實體，只留下極簡的 3 個硬體原語驅動介面。",
-        .book_excerpt = "極簡驅動 ABI 只需宣告硬體原語、呈報 SMT 物理邊界與執行調度。具身模組具備 1kHz 脊髓反射與 1Hz 皮層重構雙速率分離，ZMP 零力矩點物理閘門確保機器人永不倒地。"
-    },
-    {
-        .module_id = "registry",
-        .chapter_ref = "ch08_hardware_primitive_drivers.md",
-        .chapter_title = "第八章：硬體原語驅動 (奧坎剃刀下的 3-Function 極簡 ABI 與具身物理閘門)",
-        .philosophy_why = "Plugin 不該是沉重的編譯器外掛，而只是大腦接在物理世界的視神經與肌肉。奧坎剃刀切除了一切非必要的 24 個回呼實體，只留下極簡的 3 個硬體原語驅動介面。",
-        .book_excerpt = "極簡驅動 ABI 只需宣告硬體原語、呈報 SMT 物理邊界與執行調度。具身模組具備 1kHz 脊髓反射與 1Hz 皮層重構雙速率分離，ZMP 零力矩點物理閘門確保機器人永不倒地。"
-    },
-    {
-        .module_id = "security",
-        .chapter_ref = "ch08_hardware_primitive_drivers.md",
-        .chapter_title = "第八章：硬體原語驅動 (奧坎剃刀下的 3-Function 極簡 ABI 與具身物理閘門)",
-        .philosophy_why = "Plugin 不該是沉重的編譯器外掛，而只是大腦接在物理世界的視神經與肌肉。奧坎剃刀切除了一切非必要的 24 個回呼實體，只留下極簡的 3 個硬體原語驅動介面。",
-        .book_excerpt = "極簡驅動 ABI 只需宣告硬體原語、呈報 SMT 物理邊界與執行調度。具身模組具備 1kHz 脊髓反射與 1Hz 皮層重構雙速率分離，ZMP 零力矩點物理閘門確保機器人永不倒地。"
-    },
-    {
-        .module_id = "embodied",
-        .chapter_ref = "ch08_hardware_primitive_drivers.md",
-        .chapter_title = "第八章：硬體原語驅動 (奧坎剃刀下的 3-Function 極簡 ABI 與具身物理閘門)",
-        .philosophy_why = "Plugin 不該是沉重的編譯器外掛，而只是大腦接在物理世界的視神經與肌肉。奧坎剃刀切除了一切非必要的 24 個回呼實體，只留下極簡的 3 個硬體原語驅動介面。",
-        .book_excerpt = "極簡驅動 ABI 只需宣告硬體原語、呈報 SMT 物理邊界與執行調度。具身模組具備 1kHz 脊髓反射與 1Hz 皮層重構雙速率分離，ZMP 零力矩點物理閘門確保機器人永不倒地。"
-    },
-    {
-        .module_id = "flowy_fvec",
-        .chapter_ref = "ch09_fvec_universal_lockfile.md",
-        .chapter_title = "第九章：大一統 .fvec 與 Universal Lockfile (架構權重庫、零秒冷啟動與抗體昇華)",
-        .philosophy_why = "大腦負責即時推論，而 .fvec 是大腦裡的長期記憶神經權重。它既是具備 SMT 物理簽章的 Universal Lockfile，也是在戰火中自主長出肌肉記憶的抗體庫。",
-        .book_excerpt = "大一統 .fvec 採用 1024-Byte 明文 ASCII 表頭 + CRC32 載荷。1ms 硬體親和度門禁杜絕跨架構無效套用；在線 100 萬次請求零錯誤與 SMT 認證觸發抗體昇華與赫布強化。"
-    },
-    {
-        .module_id = "fvec",
-        .chapter_ref = "ch09_fvec_universal_lockfile.md",
-        .chapter_title = "第九章：大一統 .fvec 與 Universal Lockfile (架構權重庫、零秒冷啟動與抗體昇華)",
-        .philosophy_why = "大腦負責即時推論，而 .fvec 是大腦裡的長期記憶神經權重。它既是具備 SMT 物理簽章的 Universal Lockfile，也是在戰火中自主長出肌肉記憶的抗體庫。",
-        .book_excerpt = "大一統 .fvec 採用 1024-Byte 明文 ASCII 表頭 + CRC32 載荷。1ms 硬體親和度門禁杜絕跨架構無效套用；在線 100 萬次請求零錯誤與 SMT 認證觸發抗體昇華與赫布強化。"
-    },
-    {
-        .module_id = "vault",
-        .chapter_ref = "ch09_fvec_universal_lockfile.md",
-        .chapter_title = "第九章：大一統 .fvec 與 Universal Lockfile (架構權重庫、零秒冷啟動與抗體昇華)",
-        .philosophy_why = "大腦負責即時推論，而 .fvec 是大腦裡的長期記憶神經權重。它既是具備 SMT 物理簽章的 Universal Lockfile，也是在戰火中自主長出肌肉記憶的抗體庫。",
-        .book_excerpt = "大一統 .fvec 採用 1024-Byte 明文 ASCII 表頭 + CRC32 載荷。1ms 硬體親和度門禁杜絕跨架構無效套用；在線 100 萬次請求零錯誤與 SMT 認證觸發抗體昇華與赫布強化。"
-    },
-    {
-        .module_id = "flowy",
-        .chapter_ref = "ch10_deterministic_flowy_reasoner.md",
-        .chapter_title = "第十章：決定論因果推論大腦 (0% 幻覺的架構自省、神經遙測熱點與職責分離)",
-        .philosophy_why = "我們不需要一個會胡言亂語的機率型 Chatbot 來解釋系統架構。FLOW 打造了 Flowy——一個內建於二進位中、100% 決定論、零幻覺的代碼庫因果推論大腦。",
-        .book_excerpt = "Flowy 嚴格遵循大腦（flowy.c）、審計設施（audit.c）與前端表現層（flowy_cli.c）三層分離。即時解析決策因果（flowy why）、神經遙測熱點（flowy bottleneck）與反事實模擬。"
-    },
-    {
-        .module_id = "flowy_cli",
-        .chapter_ref = "ch10_deterministic_flowy_reasoner.md",
-        .chapter_title = "第十章：決定論因果推論大腦 (0% 幻覺的架構自省、神經遙測熱點與職責分離)",
-        .philosophy_why = "我們不需要一個會胡言亂語的機率型 Chatbot 來解釋系統架構。FLOW 打造了 Flowy——一個內建於二進位中、100% 決定論、零幻覺的代碼庫因果推論大腦。",
-        .book_excerpt = "Flowy 嚴格遵循大腦（flowy.c）、審計設施（audit.c）與前端表現層（flowy_cli.c）三層分離。即時解析決策因果（flowy why）、神經遙測熱點（flowy bottleneck）與反事實模擬。"
-    },
-    {
-        .module_id = "audit",
-        .chapter_ref = "ch10_deterministic_flowy_reasoner.md",
-        .chapter_title = "第十章：決定論因果推論大腦 (0% 幻覺的架構自省、神經遙測熱點與職責分離)",
-        .philosophy_why = "我們不需要一個會胡言亂語的機率型 Chatbot 來解釋系統架構。FLOW 打造了 Flowy——一個內建於二進位中、100% 決定論、零幻覺的代碼庫因果推論大腦。",
-        .book_excerpt = "Flowy 嚴格遵循大腦（flowy.c）、審計設施（audit.c）與前端表現層（flowy_cli.c）三層分離。即時解析決策因果（flowy why）、神經遙測熱點（flowy bottleneck）與反事實模擬。"
-    },
-    {
-        .module_id = "benchmark",
-        .chapter_ref = "ch11_level5_crucible_and_benchmarks.md",
-        .chapter_title = "第十一章：Level 5 絕對死局壓測與效能基準 (並發風暴與 OOM 雙重束縛下的生存實錄)",
-        .philosophy_why = "在科林丸號（Kobayashi Maru）測試中，學員面臨註定毀滅的死局。FLOW 打造了 Level 5 絕對死局壓測：當記憶體暴跌 99%、連線暴增 10,000 倍時，系統在死局中自我蛻變求生。",
-        .book_excerpt = "Level-5 熔爐壓測驗證了系統在雙重束縛下的 5 階段自癒過程，維持 0 封包丟失與 0 崩潰；QSBR 讀取吞吐達到 390M ops/s，通用鎖定檔套用耗時縮短至 37 微秒。"
-    },
-    {
-        .module_id = "gateway",
-        .chapter_ref = "ch11_level5_crucible_and_benchmarks.md",
-        .chapter_title = "第十一章：Level 5 絕對死局壓測與效能基準 (並發風暴與 OOM 雙重束縛下的生存實錄)",
-        .philosophy_why = "在科林丸號（Kobayashi Maru）測試中，學員面臨註定毀滅的死局。FLOW 打造了 Level 5 絕對死局壓測：當記憶體暴跌 99%、連線暴增 10,000 倍時，系統在死局中自我蛻變求生。",
-        .book_excerpt = "Level-5 熔爐壓測驗證了系統在雙重束縛下的 5 階段自癒過程，維持 0 封包丟失與 0 崩潰；QSBR 讀取吞吐達到 390M ops/s，通用鎖定檔套用耗時縮短至 37 微秒。"
-    },
-    {
-        .module_id = "matching",
-        .chapter_ref = "ch08_hardware_primitive_drivers.md",
-        .chapter_title = "第八章：硬體原語驅動 (奧坎剃刀下的 3-Function 極簡 ABI 與具身物理閘門)",
-        .philosophy_why = "Plugin 不該是沉重的編譯器外掛，而只是大腦接在物理世界的視神經與肌肉。奧坎剃刀切除了一切非必要的 24 個回呼實體，只留下極簡的 3 個硬體原語驅動介面。",
-        .book_excerpt = "極簡驅動 ABI 只需宣告硬體原語、呈報 SMT 物理邊界與執行調度。具身模組具備 1kHz 脊髓反射與 1Hz 皮層重構雙速率分離，ZMP 零力矩點物理閘門確保機器人永不倒地。"
-    },
-    {
-        .module_id = "cxl_fabric",
-        .chapter_ref = "ch08_hardware_primitive_drivers.md",
-        .chapter_title = "第八章：硬體原語驅動 (奧坎剃刀下的 3-Function 極簡 ABI 與具身物理閘門)",
-        .philosophy_why = "Plugin 不該是沉重的編譯器外掛，而只是大腦接在物理世界的視神經與肌肉。奧坎剃刀切除了一切非必要的 24 個回呼實體，只留下極簡的 3 個硬體原語驅動介面。",
-        .book_excerpt = "極簡驅動 ABI 只需宣告硬體原語、呈報 SMT 物理邊界與執行調度。具身模組具備 1kHz 脊髓反射與 1Hz 皮層重構雙速率分離，ZMP 零力矩點物理閘門確保機器人永不倒地。"
-    },
-    {
-        .module_id = "token_ring",
-        .chapter_ref = "ch12_token_ring_and_embodied_coordination.md",
-        .chapter_title = "第十二章：BMF Token Ring 離散注意力算子與具身知覺超幾何疊加",
-        .philosophy_why = "知覺不是將世界的每一縷光子全數拷貝，而是以超幾何遮罩投影出可行生存子空間；雙重束縛下在 O(1) 內歸於靜態生存支撐。",
-        .book_excerpt = "Token 環以離散注意力算子循環演化，收斂至固定點吸引子。"
+        .module_id = "genetic",
+        .chapter_ref = "ch07_bmf_coordinate_canvas.md",
+        .chapter_title = "第七章：BMF 離散座標畫布",
+        .philosophy_why = "淘汰盲目隨機交叉，轉向流形代數連鎖群原子變異。",
+        .book_excerpt = "淘汰盲目隨機交叉，轉向流形代數連鎖群原子變異。"
     },
     {
         .module_id = "polyhedral",
-        .chapter_ref = "ch13_six_mathematical_pillars.md",
-        .chapter_title = "第十三章：六大數學支柱：經驗啟發式的全息消解",
-        .philosophy_why = "凡充斥經驗常數與魔術數字之處，皆是脆弱的避難所。FLOW 以六大數學支柱徹底取代工程猜測。",
-        .book_excerpt = "Presburger 仿射約束多面體求解最優迴圈 Tiling 與 SIMD 寬度，消滅展開次數猜測。"
+        .chapter_ref = "ch08_six_mathematical_pillars.md",
+        .chapter_title = "第八章：六大數學支柱",
+        .philosophy_why = "Presburger 仿射約束多面體求解最優迴圈 Tiling 與 SIMD 寬度。",
+        .book_excerpt = "Presburger 仿射約束多面體求解最優迴圈 Tiling 與 SIMD 寬度。"
     },
     {
         .module_id = "oco_cache",
-        .chapter_ref = "ch13_six_mathematical_pillars.md",
-        .chapter_title = "第十三章：六大數學支柱：經驗啟發式的全息消解",
-        .philosophy_why = "在線凸最佳化雙對偶拉格朗日求解影子價格，消滅經驗快取淘汰掃描。",
-        .book_excerpt = "以超平面正交投影與邊際效用影子價格判定快取駐留，取代 LRU/LFU 啟發式。"
+        .chapter_ref = "ch08_six_mathematical_pillars.md",
+        .chapter_title = "第八章：六大數學支柱",
+        .philosophy_why = "在線凸最佳化雙對偶影子價格判定快取駐留，取代 LRU/LFU 啟發式。",
+        .book_excerpt = "在線凸最佳化雙對偶影子價格判定快取駐留，取代 LRU/LFU 啟發式。"
     },
     {
         .module_id = "lyapunov",
-        .chapter_ref = "ch13_six_mathematical_pillars.md",
-        .chapter_title = "第十三章：六大數學支柱：經驗啟發式的全息消解",
-        .philosophy_why = "流體微分方程與 Lyapunov Banach 壓縮映射消滅盲目重試與抖動退避。",
-        .book_excerpt = "隨機動力系統保證佇列以指數速度收斂至平衡態，Lipschitz 常數 L < 1。"
+        .chapter_ref = "ch08_six_mathematical_pillars.md",
+        .chapter_title = "第八章：六大數學支柱",
+        .philosophy_why = "隨機動力系統 Lyapunov 函數與 Banach 壓縮映射證明指數收斂。",
+        .book_excerpt = "隨機動力系統 Lyapunov 函數與 Banach 壓縮映射證明指數收斂。"
     },
     {
         .module_id = "potential_game",
-        .chapter_ref = "ch13_six_mathematical_pillars.md",
-        .chapter_title = "第十三章：六大數學支柱：經驗啟發式的全息消解",
-        .philosophy_why = "Beckmann 勢能函數負梯度流收斂至 Wardrop 第一均衡，消滅工作竊取猜測。",
-        .book_excerpt = "自組織分佈式調度使所有有效路徑邊際延遲完全相等，最小化全域擁塞。"
+        .chapter_ref = "ch08_six_mathematical_pillars.md",
+        .chapter_title = "第八章：六大數學支柱",
+        .philosophy_why = "Beckmann 勢能負梯度流收斂至 Wardrop 第一均衡，消滅工作竊取猜測。",
+        .book_excerpt = "Beckmann 勢能負梯度流收斂至 Wardrop 第一均衡，消滅工作竊取猜測。"
     },
     {
         .module_id = "moreau",
-        .chapter_ref = "ch13_six_mathematical_pillars.md",
-        .chapter_title = "第十三章：六大數學支柱：經驗啟發式的全息消解",
-        .philosophy_why = "Moreau 掃掠過程幾何法錐吸收高頻擾動，消滅手寫防抖計時器。",
-        .book_excerpt = "死區流形吞噬微小抖動，非平滑遲滯曲線阻絕邊界震盪假警報。"
+        .chapter_ref = "ch08_six_mathematical_pillars.md",
+        .chapter_title = "第八章：六大數學支柱",
+        .philosophy_why = "Moreau 掃掠過程凸法錐吞噬高頻噪聲，消滅手寫防抖計時器。",
+        .book_excerpt = "Moreau 掃掠過程凸法錐吞噬高頻噪聲，消滅手寫防抖計時器。"
     },
     {
         .module_id = "simplicial_homology",
-        .chapter_ref = "ch13_six_mathematical_pillars.md",
-        .chapter_title = "第十三章：六大數學支柱：經驗啟發式的全息消解",
-        .philosophy_why = "代數拓撲邊界算子與非零貝蒂數定向引導光線，消滅隨機盲目 Fuzzing。",
-        .book_excerpt = "d1 o d2 = 0 拓樸鏈複形驗證，b1 > 0 導航探索未穿透之狀態空間漏洞。"
+        .chapter_ref = "ch08_six_mathematical_pillars.md",
+        .chapter_title = "第八章：六大數學支柱",
+        .philosophy_why = "代數拓撲邊界算子與非零貝蒂數定向引導光線探索漏洞死角。",
+        .book_excerpt = "代數拓撲邊界算子與非零貝蒂數定向引導光線探索漏洞死角。"
     },
     {
-        .module_id = "entropy_collapse",
-        .chapter_ref = "ch14_structural_entropy_elimination.md",
-        .chapter_title = "第十四章：擠乾軟體工程水分：零缺陷數學結構",
-        .philosophy_why = "程式碼行數即系統結構熵 K(S)。FLOW 擠乾六大軟體工程水分，達到柯爾莫哥洛夫理論下限。",
-        .book_excerpt = "Bump-Pointer QSBR、Curry-Howard SMT DCE、同構記憶體切片、相空間自創生、語義哈希流形與仿射測地線。"
+        .module_id = "embodied",
+        .chapter_ref = "ch09_embodied_10khz_reflex.md",
+        .chapter_title = "第九章：10kHz 具身反射與非光滑接觸力學",
+        .philosophy_why = "10kHz 脊髓反射熱迴路、Moreau 閉區間凸錐投影與 ZMP 穩定閘門。",
+        .book_excerpt = "10kHz 脊髓反射熱迴路、Moreau 閉區間凸錐投影與 ZMP 穩定閘門。"
     },
     {
-        .module_id = "manifold_algebra",
-        .chapter_ref = "ch15_manifold_algebra_autopoiesis.md",
-        .chapter_title = "第十五章：流形代數、神經-符號橋、時空光錐反事實預演與活體自創生",
-        .philosophy_why = "約束收斂即相關。流形交集算子在多面體邊界自動萃取連鎖基因群。",
-        .book_excerpt = "M_A (cap) M_B 緊縮邊界並依影子價格計算 Pareto 共識中心，Moreau 投影保證零缺陷。"
-    },
-    {
-        .module_id = "neuro_bridge",
-        .chapter_ref = "ch15_manifold_algebra_autopoiesis.md",
-        .chapter_title = "第十五章：流形代數、神經-符號橋、時空光錐反事實預演與活體自創生",
-        .philosophy_why = "大模型負責理解世界，FLOW 負責物理防摔與微秒剛性執行。",
-        .book_excerpt = "稀疏 Johnson-Lindenstrauss SIMD 投影在 14 週期內將 4096-D 語義向量映射為 BMF 座標與剛性多面體。"
-    },
-    {
-        .module_id = "spacetime_preplay",
-        .chapter_ref = "ch15_manifold_algebra_autopoiesis.md",
-        .chapter_title = "第十五章：流形代數、神經-符號橋、時空光錐反事實預演與活體自創生",
-        .philosophy_why = "從當下安全到時空錐前瞻安全，消除數秒後潛伏的黑天鵝失穩。",
-        .book_excerpt = "哈密頓相空間前瞻預演未來 3 秒光錐，13 微秒內以 1-Bit 混沌退火修正結冰側翻舵角。"
-    },
-    {
-        .module_id = "swarm_autopoiesis",
-        .chapter_ref = "ch15_manifold_algebra_autopoiesis.md",
-        .chapter_title = "第十五章：流形代數、神經-符號橋、時空光錐反事實預演與活體自創生",
-        .philosophy_why = "軟體系統的活體自創生，自發湧現跨環境最適拓撲。",
-        .book_excerpt = "四大生態位壓力下連鎖感知雜交與環境熵漂移，9-Byte 淋巴抗體網絡促進全網架構自動晉升。"
-    },
-    {
-        .module_id = "driver_can",
-        .chapter_ref = "ch16_embodied_physical_mechanisms.md",
-        .chapter_title = "第十六章：具身物理硬體實機串接、神經流形 SIMD 加速與高階接觸力學",
-        .philosophy_why = "硬體實機串接的確定性與搶佔保證，確保奈秒級阻抗控制與急停中斷不受任何遙測封包阻塞。",
-        .book_excerpt = "SocketCAN / CAN-FD 驅動透過 MIT 阻抗協議直接控制實體無刷馬達，SMT 優先權仲裁定理數學嚴格證明急停幀最壞延遲不超過 300 微秒。"
-    },
-    {
-        .module_id = "driver_imu",
-        .chapter_ref = "ch16_embodied_physical_mechanisms.md",
-        .chapter_title = "第十六章：具身物理硬體實機串接、神經流形 SIMD 加速與高階接觸力學",
-        .philosophy_why = "感測器串流的零飽和幾何約束，為雙足平衡與自穩定姿態濾波提供形式化安全邊界。",
-        .book_excerpt = "6-DOF / 9-DOF IMU 驅動結合互補姿態濾波器，SMT 飽和約束保證四元數與歐拉角全局有界無數值爆炸。"
+        .module_id = "flow_embodied_mz",
+        .chapter_ref = "ch09_embodied_10khz_reflex.md",
+        .chapter_title = "第九章：10kHz 具身反射與非光滑接觸力學",
+        .philosophy_why = "Mori-Zwanzig 粘彈性記憶核在 3.2ms 內平息非馬可夫衝擊震顫。",
+        .book_excerpt = "Mori-Zwanzig 粘彈性記憶核在 3.2ms 內平息非馬可夫衝擊震顫。"
     },
     {
         .module_id = "embodied_physics_scenarios",
-        .chapter_ref = "ch16_embodied_physical_mechanisms.md",
-        .chapter_title = "第十六章：具身物理硬體實機串接、神經流形 SIMD 加速與高階接觸力學",
-        .philosophy_why = "真實物理世界不是連續理想剛體，庫侖摩擦錐、非光滑碰撞與多機協同必須在幾何流形中嚴格封閉。",
-        .book_excerpt = "庫侖摩擦錐動態調壓防滑、Moreau 觸地動能阻尼吸收與雙臂剛性協同約束，全部經 SMT 數學證明零滑移、零崩齒、零斷裂。"
-    }
-
+        .chapter_ref = "ch09_embodied_10khz_reflex.md",
+        .chapter_title = "第九章：10kHz 具身反射與非光滑接觸力學",
+        .philosophy_why = "庫侖摩擦錐動態調壓防滑、著陸衝擊動能吸收與雙臂剛性協同證明。",
+        .book_excerpt = "庫侖摩擦錐動態調壓防滑、著陸衝擊動能吸收與雙臂剛性協同證明。"
+    },
+    {
+        .module_id = "primitive",
+        .chapter_ref = "ch10_hardware_primitive_drivers.md",
+        .chapter_title = "第十章：硬體原語驅動",
+        .philosophy_why = "奧坎剃刀 3 函數極簡驅動 ABI 與微秒級 SMT 優先權仲裁。",
+        .book_excerpt = "奧坎剃刀 3 函數極簡驅動 ABI 與微秒級 SMT 優先權仲裁。"
+    },
+    {
+        .module_id = "abi",
+        .chapter_ref = "ch10_hardware_primitive_drivers.md",
+        .chapter_title = "第十章：硬體原語驅動",
+        .philosophy_why = "極簡硬體驅動介面與 C/Rust/Python 多語言 FFI 轉接器。",
+        .book_excerpt = "極簡硬體驅動介面與 C/Rust/Python 多語言 FFI 轉接器。"
+    },
+    {
+        .module_id = "registry",
+        .chapter_ref = "ch10_hardware_primitive_drivers.md",
+        .chapter_title = "第十章：硬體原語驅動",
+        .philosophy_why = "動態 DSO 與原生硬體驅動外掛註冊表與安全隔離。",
+        .book_excerpt = "動態 DSO 與原生硬體驅動外掛註冊表與安全隔離。"
+    },
+    {
+        .module_id = "security",
+        .chapter_ref = "ch10_hardware_primitive_drivers.md",
+        .chapter_title = "第十章：硬體原語驅動",
+        .philosophy_why = "Sim-to-Real 物理安全閘門與即時中斷急停仲裁。",
+        .book_excerpt = "Sim-to-Real 物理安全閘門與即時中斷急停仲裁。"
+    },
+    {
+        .module_id = "matching",
+        .chapter_ref = "ch10_hardware_primitive_drivers.md",
+        .chapter_title = "第十章：硬體原語驅動",
+        .philosophy_why = "高頻撮合核心與資產守恆幾何不變量證明。",
+        .book_excerpt = "高頻撮合核心與資產守恆幾何不變量證明。"
+    },
+    {
+        .module_id = "cxl_fabric",
+        .chapter_ref = "ch10_hardware_primitive_drivers.md",
+        .chapter_title = "第十章：硬體原語驅動",
+        .philosophy_why = "CXL 共享記憶體拓撲、零拷貝記憶體頁遷移與快取一致性維護。",
+        .book_excerpt = "CXL 共享記憶體拓撲、零拷貝記憶體頁遷移與快取一致性維護。"
+    },
+    {
+        .module_id = "driver_can",
+        .chapter_ref = "ch10_hardware_primitive_drivers.md",
+        .chapter_title = "第十章：硬體原語驅動",
+        .philosophy_why = "SocketCAN / CAN-FD 原生驅動與微秒級 SMT 急停搶佔保證。",
+        .book_excerpt = "SocketCAN / CAN-FD 原生驅動與微秒級 SMT 急停搶佔保證。"
+    },
+    {
+        .module_id = "driver_imu",
+        .chapter_ref = "ch10_hardware_primitive_drivers.md",
+        .chapter_title = "第十章：硬體原語驅動",
+        .philosophy_why = "6/9-DOF IMU 感測器串流、互補濾波與零飽和幾何約束。",
+        .book_excerpt = "6/9-DOF IMU 感測器串流、互補濾波與零飽和幾何約束。"
+    },
+    {
+        .module_id = "jit",
+        .chapter_ref = "ch11_jit_and_geometric_morphing.md",
+        .chapter_title = "第十一章：JIT 代碼發射與幾何變形",
+        .philosophy_why = "多目標代碼發射、mremap AoS <-> SoA 幾何變形與自覺避難所。",
+        .book_excerpt = "多目標代碼發射、mremap AoS <-> SoA 幾何變形與自覺避難所。"
+    },
+    {
+        .module_id = "adaptive",
+        .chapter_ref = "ch11_jit_and_geometric_morphing.md",
+        .chapter_title = "第十一章：JIT 代碼發射與幾何變形",
+        .philosophy_why = "自適應遙測引導架構遷移與 Static Survival 零分配模式。",
+        .book_excerpt = "自適應遙測引導架構遷移與 Static Survival 零分配模式。"
+    },
+    {
+        .module_id = "backend",
+        .chapter_ref = "ch11_jit_and_geometric_morphing.md",
+        .chapter_title = "第十一章：JIT 代碼發射與幾何變形",
+        .philosophy_why = "多語言後端代碼生成 (C, Rust, Python, MLIR, LLVM IR)。",
+        .book_excerpt = "多語言後端代碼生成 (C, Rust, Python, MLIR, LLVM IR)。"
+    },
+    {
+        .module_id = "token_ring",
+        .chapter_ref = "ch12_wavefront_cacheline_topology.md",
+        .chapter_title = "第十二章：Wavefront 波前環與 alignas(64)",
+        .philosophy_why = "單快取行約束、離散注意力算子與排空視界定理保證。",
+        .book_excerpt = "單快取行約束、離散注意力算子與排空視界定理保證。"
+    },
+    {
+        .module_id = "wavefront",
+        .chapter_ref = "ch12_wavefront_cacheline_topology.md",
+        .chapter_title = "第十二章：Wavefront 波前環與 alignas(64)",
+        .philosophy_why = "alignas(64) 快取行對齊、64B 原子相位切換與零撕裂並發。",
+        .book_excerpt = "alignas(64) 快取行對齊、64B 原子相位切換與零撕裂並發。"
+    },
+    {
+        .module_id = "reload",
+        .chapter_ref = "ch13_qsbr_lockfree_hotswap.md",
+        .chapter_title = "第十三章：QSBR 零鎖熱替換",
+        .philosophy_why = "QSBR 靜態世代演進、讀取零原子指令與看門狗掉隊者隔離。",
+        .book_excerpt = "QSBR 靜態世代演進、讀取零原子指令與看門狗掉隊者隔離。"
+    },
+    {
+        .module_id = "flowy_fvec",
+        .chapter_ref = "ch14_fvec_universal_lockfile.md",
+        .chapter_title = "第十四章：大一統 .fvec 與 Universal Lockfile",
+        .philosophy_why = "大一統架構權重庫、1ms 硬體親和度門禁與抗體昇華。",
+        .book_excerpt = "大一統架構權重庫、1ms 硬體親和度門禁與抗體昇華。"
+    },
+    {
+        .module_id = "fvec",
+        .chapter_ref = "ch14_fvec_universal_lockfile.md",
+        .chapter_title = "第十四章：大一統 .fvec 與 Universal Lockfile",
+        .philosophy_why = "1024-Byte ASCII 表頭 + CRC32 載荷之通用架構鎖定檔。",
+        .book_excerpt = "1024-Byte ASCII 表頭 + CRC32 載荷之通用架構鎖定檔。"
+    },
+    {
+        .module_id = "vault",
+        .chapter_ref = "ch14_fvec_universal_lockfile.md",
+        .chapter_title = "第十四章：大一統 .fvec 與 Universal Lockfile",
+        .philosophy_why = "活體架構海馬體、生態系 Hub 檢索與免疫抗體廣播。",
+        .book_excerpt = "活體架構海馬體、生態系 Hub 檢索與免疫抗體廣播。"
+    },
+    {
+        .module_id = "flowy",
+        .chapter_ref = "ch15_deterministic_flowy_reasoner.md",
+        .chapter_title = "第十五章：決定論因果推論大腦",
+        .philosophy_why = "100% 決定論因果推論大腦、0% 幻覺架構自省與 Why-Engine。",
+        .book_excerpt = "100% 決定論因果推論大腦、0% 幻覺架構自省與 Why-Engine。"
+    },
+    {
+        .module_id = "flowy_cli",
+        .chapter_ref = "ch15_deterministic_flowy_reasoner.md",
+        .chapter_title = "第十五章：決定論因果推論大腦",
+        .philosophy_why = "多國語言表現層、神經遙測熱點診斷與零瑣事命令列。",
+        .book_excerpt = "多國語言表現層、神經遙測熱點診斷與零瑣事命令列。"
+    },
+    {
+        .module_id = "audit",
+        .chapter_ref = "ch15_deterministic_flowy_reasoner.md",
+        .chapter_title = "第十五章：決定論因果推論大腦",
+        .philosophy_why = "動態決策環形審計日誌與反事實負載模擬驗證。",
+        .book_excerpt = "動態決策環形審計日誌與反事實負載模擬驗證。"
+    },
+    {
+        .module_id = "benchmark",
+        .chapter_ref = "ch16_level5_crucible_and_benchmarks.md",
+        .chapter_title = "第十六章：Level 5 絕對死局壓測與效能基準",
+        .philosophy_why = "科林丸號極限壓測、雙重束縛 5 階段自癒與生產級基準。",
+        .book_excerpt = "科林丸號極限壓測、雙重束縛 5 階段自癒與生產級基準。"
+    },
+    {
+        .module_id = "gateway",
+        .chapter_ref = "ch16_level5_crucible_and_benchmarks.md",
+        .chapter_title = "第十六章：Level 5 絕對死局壓測與效能基準",
+        .philosophy_why = "自癒邊緣網關、零拷貝請求分發與並發風暴吸收。",
+        .book_excerpt = "自癒邊緣網關、零拷貝請求分發與並發風暴吸收。"
+    },
+    {
+        .module_id = "manifold_algebra",
+        .chapter_ref = "ch17_autopoiesis_spacetime_preplay.md",
+        .chapter_title = "第十七章：活體自創生與時空光錐反事實預演",
+        .philosophy_why = "流形交集算子、Pareto 共識中心與連鎖基因群自動萃取。",
+        .book_excerpt = "流形交集算子、Pareto 共識中心與連鎖基因群自動萃取。"
+    },
+    {
+        .module_id = "neuro_bridge",
+        .chapter_ref = "ch17_autopoiesis_spacetime_preplay.md",
+        .chapter_title = "第十七章：活體自創生與時空光錐反事實預演",
+        .philosophy_why = "5ns 稀疏 Johnson-Lindenstrauss SIMD 語義到物理多面體投影。",
+        .book_excerpt = "5ns 稀疏 Johnson-Lindenstrauss SIMD 語義到物理多面體投影。"
+    },
+    {
+        .module_id = "spacetime_preplay",
+        .chapter_ref = "ch17_autopoiesis_spacetime_preplay.md",
+        .chapter_title = "第十七章：活體自創生與時空光錐反事實預演",
+        .philosophy_why = "哈密頓前瞻時空光錐預演 3.0 秒，13 微秒內消除黑天鵝失穩。",
+        .book_excerpt = "哈密頓前瞻時空光錐預演 3.0 秒，13 微秒內消除黑天鵝失穩。"
+    },
+    {
+        .module_id = "swarm_autopoiesis",
+        .chapter_ref = "ch17_autopoiesis_spacetime_preplay.md",
+        .chapter_title = "第十七章：活體自創生與時空光錐反事實預演",
+        .philosophy_why = "四大生態位壓力下群體活體自創生與 9-Byte 淋巴抗體網絡。",
+        .book_excerpt = "四大生態位壓力下群體活體自創生與 9-Byte 淋巴抗體網絡。"
+    },
+    {
+        .module_id = "entropy_collapse",
+        .chapter_ref = "ch18_zero_trivia_developer_experience.md",
+        .chapter_title = "第十八章：零摩擦人機介面與工程水分擠乾",
+        .philosophy_why = "擠乾記憶體分級、防禦性瀑布、序列化與日誌格式化等結構熵。",
+        .book_excerpt = "擠乾記憶體分級、防禦性瀑布、序列化與日誌格式化等結構熵。"
+    },
+    {
+        .module_id = "zero_trivia",
+        .chapter_ref = "ch18_zero_trivia_developer_experience.md",
+        .chapter_title = "第十八章：零摩擦人機介面與工程水分擠乾",
+        .philosophy_why = "極簡宣告式一鍵編譯與直接執行，使用者無需理解底層調優瑣事。",
+        .book_excerpt = "極簡宣告式一鍵編譯與直接執行，使用者無需理解底層調優瑣事。"
+    },
 };
 
-static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_EN[45] = {
+static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_EN[FLOW_BOOK_MODULE_BINDING_COUNT] = {
     {
         .module_id = "flowc",
         .chapter_ref = "ch01_what_is_flow.md",
         .chapter_title = "Chapter 1: What is FLOW? (Paradigm Shift from Static Compiler to Living System)",
         .philosophy_why = "We are not compiling dead code, but nurturing an autopoietic topological organism that senses environment, anneals autonomously, and morphs under destructive stress.",
-        .book_excerpt = "Since the 1957 Fortran compiler, the assumption has been that source code is static truth. FLOW inverts this: code declares immutable geometric boundaries, while the runtime organism evolves on manifolds."
+        .book_excerpt = "We are not compiling dead code, but nurturing an autopoietic topological organism that senses environment, anneals autonomously, and morphs under destructive stress."
     },
     {
         .module_id = "parser",
         .chapter_ref = "ch02_intent_vs_implementation.md",
         .chapter_title = "Chapter 2: Intent vs. Implementation (.flow: We Declare Invariants, Not Logic)",
         .philosophy_why = "In FLOW philosophy, writing code is not telling the CPU step-by-step instructions, but declaring the geometric boundaries and mathematical invariants the universe must obey.",
-        .book_excerpt = "A standard .flow spec is strictly declarative with no imperative loops or manual pointers. Developers declare input bounds and pipeline topology, letting the engine synthesize optimal implementations."
+        .book_excerpt = "In FLOW philosophy, writing code is not telling the CPU step-by-step instructions, but declaring the geometric boundaries and mathematical invariants the universe must obey."
     },
     {
         .module_id = "semantic",
         .chapter_ref = "ch02_intent_vs_implementation.md",
         .chapter_title = "Chapter 2: Intent vs. Implementation (.flow: We Declare Invariants, Not Logic)",
         .philosophy_why = "In FLOW philosophy, writing code is not telling the CPU step-by-step instructions, but declaring the geometric boundaries and mathematical invariants the universe must obey.",
-        .book_excerpt = "A standard .flow spec is strictly declarative with no imperative loops or manual pointers. Developers declare input bounds and pipeline topology, letting the engine synthesize optimal implementations."
+        .book_excerpt = "In FLOW philosophy, writing code is not telling the CPU step-by-step instructions, but declaring the geometric boundaries and mathematical invariants the universe must obey."
     },
     {
         .module_id = "topology",
         .chapter_ref = "ch03_topology_graph.md",
         .chapter_title = "Chapter 3: Topology Graph (Dimensionality Reduction into Computable Invariants)",
         .philosophy_why = "Software architecture is not a stack of directory text files, but a high-dimensional topology graph computed via graph theory, shard affinity, and neural telemetry.",
-        .book_excerpt = "FLOW models compiler core, drivers, components, and intent as a unified FlowTopologyGraph, enforcing strict layer firewalls with 0 cross-layer architectural leaks."
+        .book_excerpt = "Software architecture is not a stack of directory text files, but a high-dimensional topology graph computed via graph theory, shard affinity, and neural telemetry."
     },
     {
         .module_id = "orchestrator",
         .chapter_ref = "ch03_topology_graph.md",
         .chapter_title = "Chapter 3: Topology Graph (Dimensionality Reduction into Computable Invariants)",
         .philosophy_why = "Software architecture is not a stack of directory text files, but a high-dimensional topology graph computed via graph theory, shard affinity, and neural telemetry.",
-        .book_excerpt = "FLOW models compiler core, drivers, components, and intent as a unified FlowTopologyGraph, enforcing strict layer firewalls with 0 cross-layer architectural leaks."
+        .book_excerpt = "Software architecture is not a stack of directory text files, but a high-dimensional topology graph computed via graph theory, shard affinity, and neural telemetry."
     },
     {
-        .module_id = "bitspace",
-        .chapter_ref = "ch04_1bit_chaos_engine.md",
-        .chapter_title = "Chapter 4: 1-Bit Chaotic Annealing & BitManifold (BMF) (Bit Flips, Linkage Groups & Quantum Drift)",
-        .philosophy_why = "In face of epistasis barriers, traditional GA crossover tears topology. FLOW employs 12.96ns 1-bit chaotic mutations with SMT super-bit atomic flips to tunnel through saddle points.",
-        .book_excerpt = "The 1-Bit state spine encodes dimensions into 64-bit genomes, pruning 99.9% illegal states in a single clock cycle via 3-Tier Mask Canvases, sharing convergence via 9-byte UDP pheromones."
+        .module_id = "flow_jet",
+        .chapter_ref = "ch04_jet_bundle_phase_space.md",
+        .chapter_title = "Chapter 4: Phase Space Jet Bundles (.fjet, Symplectic Mechanics & Mori-Zwanzig Dissipation)",
+        .philosophy_why = "On differential manifolds, time is not a discrete timer, but a geometric flow in phase space. Imperative defensive branches are eliminated in favor of symplectic mechanics and normal cone forces.",
+        .book_excerpt = "On differential manifolds, time is not a discrete timer, but a geometric flow in phase space. Imperative defensive branches are eliminated in favor of symplectic mechanics and normal cone forces."
     },
     {
-        .module_id = "search",
-        .chapter_ref = "ch04_1bit_chaos_engine.md",
-        .chapter_title = "Chapter 4: 1-Bit Chaotic Annealing & BitManifold (BMF) (Bit Flips, Linkage Groups & Quantum Drift)",
-        .philosophy_why = "In face of epistasis barriers, traditional GA crossover tears topology. FLOW employs 12.96ns 1-bit chaotic mutations with SMT super-bit atomic flips to tunnel through saddle points.",
-        .book_excerpt = "The 1-Bit state spine encodes dimensions into 64-bit genomes, pruning 99.9% illegal states in a single clock cycle via 3-Tier Mask Canvases, sharing convergence via 9-byte UDP pheromones."
+        .module_id = "jet",
+        .chapter_ref = "ch04_jet_bundle_phase_space.md",
+        .chapter_title = "Chapter 4: Phase Space Jet Bundles (.fjet, Symplectic Mechanics & Mori-Zwanzig Dissipation)",
+        .philosophy_why = "On differential manifolds, time is not a discrete timer, but a geometric flow in phase space. Imperative defensive branches are eliminated in favor of symplectic mechanics and normal cone forces.",
+        .book_excerpt = "On differential manifolds, time is not a discrete timer, but a geometric flow in phase space. Imperative defensive branches are eliminated in favor of symplectic mechanics and normal cone forces."
     },
     {
-        .module_id = "swarm",
-        .chapter_ref = "ch04_1bit_chaos_engine.md",
-        .chapter_title = "Chapter 4: 1-Bit Chaotic Annealing & BitManifold (BMF) (Bit Flips, Linkage Groups & Quantum Drift)",
-        .philosophy_why = "In face of epistasis barriers, traditional GA crossover tears topology. FLOW employs 12.96ns 1-bit chaotic mutations with SMT super-bit atomic flips to tunnel through saddle points.",
-        .book_excerpt = "The 1-Bit state spine encodes dimensions into 64-bit genomes, pruning 99.9% illegal states in a single clock cycle via 3-Tier Mask Canvases, sharing convergence via 9-byte UDP pheromones."
+        .module_id = "dead_reckon",
+        .chapter_ref = "ch04_jet_bundle_phase_space.md",
+        .chapter_title = "Chapter 4: Phase Space Jet Bundles (.fjet, Symplectic Mechanics & Mori-Zwanzig Dissipation)",
+        .philosophy_why = "On differential manifolds, time is not a discrete timer, but a geometric flow in phase space. Imperative defensive branches are eliminated in favor of symplectic mechanics and normal cone forces.",
+        .book_excerpt = "On differential manifolds, time is not a discrete timer, but a geometric flow in phase space. Imperative defensive branches are eliminated in favor of symplectic mechanics and normal cone forces."
     },
     {
-        .module_id = "genetic",
-        .chapter_ref = "ch04_1bit_chaos_engine.md",
-        .chapter_title = "Chapter 4: 1-Bit Chaotic Annealing & BitManifold (BMF) (Bit Flips, Linkage Groups & Quantum Drift)",
-        .philosophy_why = "In face of epistasis barriers, traditional GA crossover tears topology. FLOW employs 12.96ns 1-bit chaotic mutations with SMT super-bit atomic flips to tunnel through saddle points.",
-        .book_excerpt = "The 1-Bit state spine encodes dimensions into 64-bit genomes, pruning 99.9% illegal states in a single clock cycle via 3-Tier Mask Canvases, sharing convergence via 9-byte UDP pheromones."
+        .module_id = "time_crystal",
+        .chapter_ref = "ch05_discrete_time_crystal.md",
+        .chapter_title = "Chapter 5: Floquet Discrete Time Crystals (DTC Period 2T Phase-Locking & Non-Thermal Rigidity)",
+        .philosophy_why = "Amid chaos and thermal dissipation, time crystals break discrete time translation symmetry, locking rhythm at subharmonic 2T frequency immune to disorder perturbations.",
+        .book_excerpt = "Amid chaos and thermal dissipation, time crystals break discrete time translation symmetry, locking rhythm at subharmonic 2T frequency immune to disorder perturbations."
+    },
+    {
+        .module_id = "dtc",
+        .chapter_ref = "ch05_discrete_time_crystal.md",
+        .chapter_title = "Chapter 5: Floquet Discrete Time Crystals (DTC Period 2T Phase-Locking & Non-Thermal Rigidity)",
+        .philosophy_why = "Amid chaos and thermal dissipation, time crystals break discrete time translation symmetry, locking rhythm at subharmonic 2T frequency immune to disorder perturbations.",
+        .book_excerpt = "Amid chaos and thermal dissipation, time crystals break discrete time translation symmetry, locking rhythm at subharmonic 2T frequency immune to disorder perturbations."
     },
     {
         .module_id = "smt",
-        .chapter_ref = "ch05_smt_formal_verification.md",
-        .chapter_title = "Chapter 5: Formal Supreme Court (SMT 4-Theorem UNSAT Proofs & 1-Cycle Pruning)",
+        .chapter_ref = "ch06_smt_formal_verification.md",
+        .chapter_title = "Chapter 6: Formal Supreme Court (SMT 4-Theorem QF_LIA UNSAT Proofs & Curry-Howard DCE)",
         .philosophy_why = "Heuristic search can explore freely, but every emitted line of machine code must have indisputable mathematical proofs. The SMT solver is the Supreme Court: unproven plans are vetoed.",
-        .book_excerpt = "SMT proves buffer bounds, memory quotas, shard isolation, and determinism via QF_LIA. Contract and resource bounds immediately synthesize 1-cycle bitwise pruning masks."
+        .book_excerpt = "Heuristic search can explore freely, but every emitted line of machine code must have indisputable mathematical proofs. The SMT solver is the Supreme Court: unproven plans are vetoed."
     },
     {
         .module_id = "verifier",
-        .chapter_ref = "ch05_smt_formal_verification.md",
-        .chapter_title = "Chapter 5: Formal Supreme Court (SMT 4-Theorem UNSAT Proofs & 1-Cycle Pruning)",
+        .chapter_ref = "ch06_smt_formal_verification.md",
+        .chapter_title = "Chapter 6: Formal Supreme Court (SMT 4-Theorem QF_LIA UNSAT Proofs & Curry-Howard DCE)",
         .philosophy_why = "Heuristic search can explore freely, but every emitted line of machine code must have indisputable mathematical proofs. The SMT solver is the Supreme Court: unproven plans are vetoed.",
-        .book_excerpt = "SMT proves buffer bounds, memory quotas, shard isolation, and determinism via QF_LIA. Contract and resource bounds immediately synthesize 1-cycle bitwise pruning masks."
+        .book_excerpt = "Heuristic search can explore freely, but every emitted line of machine code must have indisputable mathematical proofs. The SMT solver is the Supreme Court: unproven plans are vetoed."
     },
     {
-        .module_id = "jit",
-        .chapter_ref = "ch06_jit_and_geometric_morphing.md",
-        .chapter_title = "Chapter 6: JIT Emission & Geometric Morphing (AoS to SoA Remapping & Survival Mode)",
-        .philosophy_why = "Code is not carved in stone, but clay morphing in memory. When RAM collapses, the system executes microsecond geometric morphing to escape the OS OOM Killer.",
-        .book_excerpt = "JIT emitter targets C, Rust, Python, and LLVM IR. mremap enables zero-copy AoS <-> SoA morphing. Under stress, self-aware JIT vetoes compilation and routes traffic to Static Survival shelters."
+        .module_id = "bitspace",
+        .chapter_ref = "ch07_bmf_coordinate_canvas.md",
+        .chapter_title = "Chapter 7: BMF Coordinate Canvas (From Random Search to 1-Bit Canvas & Epistatic Linkage)",
+        .philosophy_why = "Random mutation search is obsolete; modern FLOW positions BMF as a 1-bit coordinate canvas and algebraic manifold intersection tunneling through epistatic barriers.",
+        .book_excerpt = "Random mutation search is obsolete; modern FLOW positions BMF as a 1-bit coordinate canvas and algebraic manifold intersection tunneling through epistatic barriers."
     },
     {
-        .module_id = "adaptive",
-        .chapter_ref = "ch06_jit_and_geometric_morphing.md",
-        .chapter_title = "Chapter 6: JIT Emission & Geometric Morphing (AoS to SoA Remapping & Survival Mode)",
-        .philosophy_why = "Code is not carved in stone, but clay morphing in memory. When RAM collapses, the system executes microsecond geometric morphing to escape the OS OOM Killer.",
-        .book_excerpt = "JIT emitter targets C, Rust, Python, and LLVM IR. mremap enables zero-copy AoS <-> SoA morphing. Under stress, self-aware JIT vetoes compilation and routes traffic to Static Survival shelters."
+        .module_id = "search",
+        .chapter_ref = "ch07_bmf_coordinate_canvas.md",
+        .chapter_title = "Chapter 7: BMF Coordinate Canvas (From Random Search to 1-Bit Canvas & Epistatic Linkage)",
+        .philosophy_why = "Random mutation search is obsolete; modern FLOW positions BMF as a 1-bit coordinate canvas and algebraic manifold intersection tunneling through epistatic barriers.",
+        .book_excerpt = "Random mutation search is obsolete; modern FLOW positions BMF as a 1-bit coordinate canvas and algebraic manifold intersection tunneling through epistatic barriers."
     },
     {
-        .module_id = "backend",
-        .chapter_ref = "ch06_jit_and_geometric_morphing.md",
-        .chapter_title = "Chapter 6: JIT Emission & Geometric Morphing (AoS to SoA Remapping & Survival Mode)",
-        .philosophy_why = "Code is not carved in stone, but clay morphing in memory. When RAM collapses, the system executes microsecond geometric morphing to escape the OS OOM Killer.",
-        .book_excerpt = "JIT emitter targets C, Rust, Python, and LLVM IR. mremap enables zero-copy AoS <-> SoA morphing. Under stress, self-aware JIT vetoes compilation and routes traffic to Static Survival shelters."
+        .module_id = "swarm",
+        .chapter_ref = "ch07_bmf_coordinate_canvas.md",
+        .chapter_title = "Chapter 7: BMF Coordinate Canvas (From Random Search to 1-Bit Canvas & Epistatic Linkage)",
+        .philosophy_why = "Random mutation search is obsolete; modern FLOW positions BMF as a 1-bit coordinate canvas and algebraic manifold intersection tunneling through epistatic barriers.",
+        .book_excerpt = "Random mutation search is obsolete; modern FLOW positions BMF as a 1-bit coordinate canvas and algebraic manifold intersection tunneling through epistatic barriers."
     },
     {
-        .module_id = "reload",
-        .chapter_ref = "ch07_qsbr_lockfree_hotswap.md",
-        .chapter_title = "Chapter 7: QSBR Lock-Free Hot-Swap (Sub-Microsecond Generational Migration)",
-        .philosophy_why = "In servers processing millions of requests/sec, acquiring even one RWLock triggers catastrophic cache-line bouncing. FLOW QSBR achieves zero atomic writes on read paths and sub-microsecond migration.",
-        .book_excerpt = "QSBR achieves >390M ops/s read throughput. Epoch watchdogs isolate stragglers via mprotect, guaranteeing graceful degradation and 0 dropped requests during hot-swap."
-    },
-    {
-        .module_id = "primitive",
-        .chapter_ref = "ch08_hardware_primitive_drivers.md",
-        .chapter_title = "Chapter 8: Hardware Primitive Drivers (3-Function Minimalist ABI & Embodied Gates)",
-        .philosophy_why = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks.",
-        .book_excerpt = "Minimalist driver ABI declares primitives, reports SMT bounds, and executes syscalls. Embodied intelligence features dual-rate 1kHz/1Hz reflexes, with ZMP stability gates preventing robot tip-overs."
-    },
-    {
-        .module_id = "abi",
-        .chapter_ref = "ch08_hardware_primitive_drivers.md",
-        .chapter_title = "Chapter 8: Hardware Primitive Drivers (3-Function Minimalist ABI & Embodied Gates)",
-        .philosophy_why = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks.",
-        .book_excerpt = "Minimalist driver ABI declares primitives, reports SMT bounds, and executes syscalls. Embodied intelligence features dual-rate 1kHz/1Hz reflexes, with ZMP stability gates preventing robot tip-overs."
-    },
-    {
-        .module_id = "registry",
-        .chapter_ref = "ch08_hardware_primitive_drivers.md",
-        .chapter_title = "Chapter 8: Hardware Primitive Drivers (3-Function Minimalist ABI & Embodied Gates)",
-        .philosophy_why = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks.",
-        .book_excerpt = "Minimalist driver ABI declares primitives, reports SMT bounds, and executes syscalls. Embodied intelligence features dual-rate 1kHz/1Hz reflexes, with ZMP stability gates preventing robot tip-overs."
-    },
-    {
-        .module_id = "security",
-        .chapter_ref = "ch08_hardware_primitive_drivers.md",
-        .chapter_title = "Chapter 8: Hardware Primitive Drivers (3-Function Minimalist ABI & Embodied Gates)",
-        .philosophy_why = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks.",
-        .book_excerpt = "Minimalist driver ABI declares primitives, reports SMT bounds, and executes syscalls. Embodied intelligence features dual-rate 1kHz/1Hz reflexes, with ZMP stability gates preventing robot tip-overs."
-    },
-    {
-        .module_id = "embodied",
-        .chapter_ref = "ch08_hardware_primitive_drivers.md",
-        .chapter_title = "Chapter 8: Hardware Primitive Drivers (3-Function Minimalist ABI & Embodied Gates)",
-        .philosophy_why = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks.",
-        .book_excerpt = "Minimalist driver ABI declares primitives, reports SMT bounds, and executes syscalls. Embodied intelligence features dual-rate 1kHz/1Hz reflexes, with ZMP stability gates preventing robot tip-overs."
-    },
-    {
-        .module_id = "flowy_fvec",
-        .chapter_ref = "ch09_fvec_universal_lockfile.md",
-        .chapter_title = "Chapter 9: Universal .fvec & Lockfiles (Architecture Weights, Zero-Cold-Start & Antibodies)",
-        .philosophy_why = "The brain infers in real time, while .fvec stores long-term architecture weights. It serves as a Universal Lockfile with SMT signatures and an immune antibody repository.",
-        .book_excerpt = "Universal .fvec pairs a 1024-byte ASCII header with CRC32 binary payload. A 1ms affinity gate rejects incompatible architectures; 1M zero-error online requests trigger autonomous antibody promotion."
-    },
-    {
-        .module_id = "fvec",
-        .chapter_ref = "ch09_fvec_universal_lockfile.md",
-        .chapter_title = "Chapter 9: Universal .fvec & Lockfiles (Architecture Weights, Zero-Cold-Start & Antibodies)",
-        .philosophy_why = "The brain infers in real time, while .fvec stores long-term architecture weights. It serves as a Universal Lockfile with SMT signatures and an immune antibody repository.",
-        .book_excerpt = "Universal .fvec pairs a 1024-byte ASCII header with CRC32 binary payload. A 1ms affinity gate rejects incompatible architectures; 1M zero-error online requests trigger autonomous antibody promotion."
-    },
-    {
-        .module_id = "vault",
-        .chapter_ref = "ch09_fvec_universal_lockfile.md",
-        .chapter_title = "Chapter 9: Universal .fvec & Lockfiles (Architecture Weights, Zero-Cold-Start & Antibodies)",
-        .philosophy_why = "The brain infers in real time, while .fvec stores long-term architecture weights. It serves as a Universal Lockfile with SMT signatures and an immune antibody repository.",
-        .book_excerpt = "Universal .fvec pairs a 1024-byte ASCII header with CRC32 binary payload. A 1ms affinity gate rejects incompatible architectures; 1M zero-error online requests trigger autonomous antibody promotion."
-    },
-    {
-        .module_id = "flowy",
-        .chapter_ref = "ch10_deterministic_flowy_reasoner.md",
-        .chapter_title = "Chapter 10: Deterministic Flowy Reasoner (0% Hallucination Introspection & Decoupling)",
-        .philosophy_why = "We do not need a hallucinating probabilistic chatbot to explain system architecture. FLOW built Flowy: a 100% deterministic, zero-hallucination causal codebase reasoner in pure C.",
-        .book_excerpt = "Flowy decouples Brain (flowy.c), Audit Logger (audit.c), and CLI Presentation (flowy_cli.c). It provides deterministic causal explanations (flowy why), telemetry diagnosis, and what-if simulation."
-    },
-    {
-        .module_id = "flowy_cli",
-        .chapter_ref = "ch10_deterministic_flowy_reasoner.md",
-        .chapter_title = "Chapter 10: Deterministic Flowy Reasoner (0% Hallucination Introspection & Decoupling)",
-        .philosophy_why = "We do not need a hallucinating probabilistic chatbot to explain system architecture. FLOW built Flowy: a 100% deterministic, zero-hallucination causal codebase reasoner in pure C.",
-        .book_excerpt = "Flowy decouples Brain (flowy.c), Audit Logger (audit.c), and CLI Presentation (flowy_cli.c). It provides deterministic causal explanations (flowy why), telemetry diagnosis, and what-if simulation."
-    },
-    {
-        .module_id = "audit",
-        .chapter_ref = "ch10_deterministic_flowy_reasoner.md",
-        .chapter_title = "Chapter 10: Deterministic Flowy Reasoner (0% Hallucination Introspection & Decoupling)",
-        .philosophy_why = "We do not need a hallucinating probabilistic chatbot to explain system architecture. FLOW built Flowy: a 100% deterministic, zero-hallucination causal codebase reasoner in pure C.",
-        .book_excerpt = "Flowy decouples Brain (flowy.c), Audit Logger (audit.c), and CLI Presentation (flowy_cli.c). It provides deterministic causal explanations (flowy why), telemetry diagnosis, and what-if simulation."
-    },
-    {
-        .module_id = "benchmark",
-        .chapter_ref = "ch11_level5_crucible_and_benchmarks.md",
-        .chapter_title = "Chapter 11: Level 5 Crucible & Benchmarks (Kobayashi Maru & Production Replay)",
-        .philosophy_why = "In Kobayashi Maru double-bind crises where memory drops 99% amid 10,000x traffic surges, FLOW demonstrates Level-5 resilience via SMT veto, JIT shelter, and QSBR zero-downtime morphing.",
-        .book_excerpt = "The Level-5 crucible validates 5-stage autonomous self-healing with 0 dropped requests and 0 panics. QSBR achieves >390M ops/s read throughput and 37us instant cold-start application."
-    },
-    {
-        .module_id = "gateway",
-        .chapter_ref = "ch11_level5_crucible_and_benchmarks.md",
-        .chapter_title = "Chapter 11: Level 5 Crucible & Benchmarks (Kobayashi Maru & Production Replay)",
-        .philosophy_why = "In Kobayashi Maru double-bind crises where memory drops 99% amid 10,000x traffic surges, FLOW demonstrates Level-5 resilience via SMT veto, JIT shelter, and QSBR zero-downtime morphing.",
-        .book_excerpt = "The Level-5 crucible validates 5-stage autonomous self-healing with 0 dropped requests and 0 panics. QSBR achieves >390M ops/s read throughput and 37us instant cold-start application."
-    },
-    {
-        .module_id = "matching",
-        .chapter_ref = "ch08_hardware_primitive_drivers.md",
-        .chapter_title = "Chapter 8: Hardware Primitive Drivers (3-Function Minimalist ABI & Embodied Gates)",
-        .philosophy_why = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks.",
-        .book_excerpt = "Minimalist driver ABI declares primitives, reports SMT bounds, and executes syscalls. Embodied intelligence features dual-rate 1kHz/1Hz reflexes, with ZMP stability gates preventing robot tip-overs."
-    },
-    {
-        .module_id = "cxl_fabric",
-        .chapter_ref = "ch08_hardware_primitive_drivers.md",
-        .chapter_title = "Chapter 8: Hardware Primitive Drivers (3-Function Minimalist ABI & Embodied Gates)",
-        .philosophy_why = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks.",
-        .book_excerpt = "Minimalist driver ABI declares primitives, reports SMT bounds, and executes syscalls. Embodied intelligence features dual-rate 1kHz/1Hz reflexes, with ZMP stability gates preventing robot tip-overs."
-    },
-    {
-        .module_id = "token_ring",
-        .chapter_ref = "ch12_token_ring_and_embodied_coordination.md",
-        .chapter_title = "Chapter 12: BMF Token Ring Attention Operator & Embodied Perceptual Coordination",
-        .philosophy_why = "Perception does not copy raw sensory noise; it projects feasible survival manifolds via hypergeometric masks, collapsing to an emergency brace under double-binds in O(1).",
-        .book_excerpt = "The Token Ring evolves via discrete attention operator Canvas_{t+1} = Phi(Canvas_t (x) Mask_Attn), converging to an attractor."
+        .module_id = "genetic",
+        .chapter_ref = "ch07_bmf_coordinate_canvas.md",
+        .chapter_title = "Chapter 7: BMF Coordinate Canvas (From Random Search to 1-Bit Canvas & Epistatic Linkage)",
+        .philosophy_why = "Random mutation search is obsolete; modern FLOW positions BMF as a 1-bit coordinate canvas and algebraic manifold intersection tunneling through epistatic barriers.",
+        .book_excerpt = "Random mutation search is obsolete; modern FLOW positions BMF as a 1-bit coordinate canvas and algebraic manifold intersection tunneling through epistatic barriers."
     },
     {
         .module_id = "polyhedral",
-        .chapter_ref = "ch13_six_mathematical_pillars.md",
-        .chapter_title = "Chapter 13: The Six Mathematical Pillars (Eliminating Empirical Heuristics)",
+        .chapter_ref = "ch08_six_mathematical_pillars.md",
+        .chapter_title = "Chapter 8: The Six Mathematical Pillars (Eliminating Empirical Heuristics)",
         .philosophy_why = "Wherever magic numbers and heuristics reside is a sanctuary of system fragility. FLOW eliminates engineering guesswork through rigorous mathematical pillars.",
-        .book_excerpt = "Presburger affine integer polyhedra solve optimal loop tiling T* and SIMD width V*."
+        .book_excerpt = "Wherever magic numbers and heuristics reside is a sanctuary of system fragility. FLOW eliminates engineering guesswork through rigorous mathematical pillars."
     },
     {
         .module_id = "oco_cache",
-        .chapter_ref = "ch13_six_mathematical_pillars.md",
-        .chapter_title = "Chapter 13: The Six Mathematical Pillars (Eliminating Empirical Heuristics)",
-        .philosophy_why = "Online convex optimization and Lagrangian duality determine shadow price for eviction.",
-        .book_excerpt = "Dual hyperplane projection eliminates heuristic cache eviction scans."
+        .chapter_ref = "ch08_six_mathematical_pillars.md",
+        .chapter_title = "Chapter 8: The Six Mathematical Pillars (Eliminating Empirical Heuristics)",
+        .philosophy_why = "Wherever magic numbers and heuristics reside is a sanctuary of system fragility. FLOW eliminates engineering guesswork through rigorous mathematical pillars.",
+        .book_excerpt = "Wherever magic numbers and heuristics reside is a sanctuary of system fragility. FLOW eliminates engineering guesswork through rigorous mathematical pillars."
     },
     {
         .module_id = "lyapunov",
-        .chapter_ref = "ch13_six_mathematical_pillars.md",
-        .chapter_title = "Chapter 13: The Six Mathematical Pillars (Eliminating Empirical Heuristics)",
-        .philosophy_why = "Fluid dynamics and Lyapunov Banach contraction eliminate blind backoff retries.",
-        .book_excerpt = "Stochastic dynamical systems guarantee exponential convergence with Lipschitz L < 1."
+        .chapter_ref = "ch08_six_mathematical_pillars.md",
+        .chapter_title = "Chapter 8: The Six Mathematical Pillars (Eliminating Empirical Heuristics)",
+        .philosophy_why = "Wherever magic numbers and heuristics reside is a sanctuary of system fragility. FLOW eliminates engineering guesswork through rigorous mathematical pillars.",
+        .book_excerpt = "Wherever magic numbers and heuristics reside is a sanctuary of system fragility. FLOW eliminates engineering guesswork through rigorous mathematical pillars."
     },
     {
         .module_id = "potential_game",
-        .chapter_ref = "ch13_six_mathematical_pillars.md",
-        .chapter_title = "Chapter 13: The Six Mathematical Pillars (Eliminating Empirical Heuristics)",
-        .philosophy_why = "Beckmann potential negative gradient flow converges to Wardrop First Equilibrium.",
-        .book_excerpt = "Equalized minimal latency across all active routes minimizes congestion."
+        .chapter_ref = "ch08_six_mathematical_pillars.md",
+        .chapter_title = "Chapter 8: The Six Mathematical Pillars (Eliminating Empirical Heuristics)",
+        .philosophy_why = "Wherever magic numbers and heuristics reside is a sanctuary of system fragility. FLOW eliminates engineering guesswork through rigorous mathematical pillars.",
+        .book_excerpt = "Wherever magic numbers and heuristics reside is a sanctuary of system fragility. FLOW eliminates engineering guesswork through rigorous mathematical pillars."
     },
     {
         .module_id = "moreau",
-        .chapter_ref = "ch13_six_mathematical_pillars.md",
-        .chapter_title = "Chapter 13: The Six Mathematical Pillars (Eliminating Empirical Heuristics)",
-        .philosophy_why = "Moreau sweeping process and non-smooth hysteresis geometric normal cones absorb flutters.",
-        .book_excerpt = "Convex deadband absorbs noise fluctuations without arbitrary timer debounce."
+        .chapter_ref = "ch08_six_mathematical_pillars.md",
+        .chapter_title = "Chapter 8: The Six Mathematical Pillars (Eliminating Empirical Heuristics)",
+        .philosophy_why = "Wherever magic numbers and heuristics reside is a sanctuary of system fragility. FLOW eliminates engineering guesswork through rigorous mathematical pillars.",
+        .book_excerpt = "Wherever magic numbers and heuristics reside is a sanctuary of system fragility. FLOW eliminates engineering guesswork through rigorous mathematical pillars."
     },
     {
         .module_id = "simplicial_homology",
-        .chapter_ref = "ch13_six_mathematical_pillars.md",
-        .chapter_title = "Chapter 13: The Six Mathematical Pillars (Eliminating Empirical Heuristics)",
-        .philosophy_why = "Algebraic topology boundary operators and Betti numbers guide fuzzing into unexplored holes.",
-        .book_excerpt = "d1 o d2 = 0 chain complex verification and b1 > 0 ray casting."
+        .chapter_ref = "ch08_six_mathematical_pillars.md",
+        .chapter_title = "Chapter 8: The Six Mathematical Pillars (Eliminating Empirical Heuristics)",
+        .philosophy_why = "Wherever magic numbers and heuristics reside is a sanctuary of system fragility. FLOW eliminates engineering guesswork through rigorous mathematical pillars.",
+        .book_excerpt = "Wherever magic numbers and heuristics reside is a sanctuary of system fragility. FLOW eliminates engineering guesswork through rigorous mathematical pillars."
     },
     {
-        .module_id = "entropy_collapse",
-        .chapter_ref = "ch14_structural_entropy_elimination.md",
-        .chapter_title = "Chapter 14: Structural Entropy Elimination (6 Zero-Defect Mathematical Paradigms)",
-        .philosophy_why = "Lines of code measure system structural entropy K(S). FLOW purges boilerplate complexity.",
-        .book_excerpt = "Bump-Pointer QSBR, Curry-Howard SMT DCE, Isomorphic Wire Slicing, BMF Autopoiesis, Semantic Event Manifolds, Affine Geodesics."
+        .module_id = "embodied",
+        .chapter_ref = "ch09_embodied_10khz_reflex.md",
+        .chapter_title = "Chapter 9: 10kHz Embodied Reflex & Non-Smooth Contact Mechanics (Moreau Cone, Friction Cone & ZMP)",
+        .philosophy_why = "The ultimate judgment of software engineering lies not in RAM or registers, but in the microsecond when a robot arm contacts the physical universe.",
+        .book_excerpt = "The ultimate judgment of software engineering lies not in RAM or registers, but in the microsecond when a robot arm contacts the physical universe."
     },
     {
-        .module_id = "manifold_algebra",
-        .chapter_ref = "ch15_manifold_algebra_autopoiesis.md",
-        .chapter_title = "Chapter 15: Manifold Algebra, Neuro-Bit Bridge, Spacetime Pre-Play & Swarm Autopoiesis",
-        .philosophy_why = "Constraint convergence is correlation. Manifold intersection automatically derives epistatic linkage groups.",
-        .book_excerpt = "M_A (cap) M_B tightens boundaries and computes Pareto consensus centers; Moreau projection guarantees zero defects."
-    },
-    {
-        .module_id = "neuro_bridge",
-        .chapter_ref = "ch15_manifold_algebra_autopoiesis.md",
-        .chapter_title = "Chapter 15: Manifold Algebra, Neuro-Bit Bridge, Spacetime Pre-Play & Swarm Autopoiesis",
-        .philosophy_why = "LLMs comprehend the world; FLOW enforces physical safety and microsecond rigid execution.",
-        .book_excerpt = "Sparse Johnson-Lindenstrauss SIMD projection maps 4096-D continuous semantic embeddings to BMF and polyhedra in 14 cycles."
-    },
-    {
-        .module_id = "spacetime_preplay",
-        .chapter_ref = "ch15_manifold_algebra_autopoiesis.md",
-        .chapter_title = "Chapter 15: Manifold Algebra, Neuro-Bit Bridge, Spacetime Pre-Play & Swarm Autopoiesis",
-        .philosophy_why = "From Now-Safe to Spacetime-Safe: eliminate black swan instabilities seconds before they materialize.",
-        .book_excerpt = "Hamiltonian phase-space forward cone simulates future 3.0s, annealing rudder bias in 13 microseconds to avert ice slips."
-    },
-    {
-        .module_id = "swarm_autopoiesis",
-        .chapter_ref = "ch15_manifold_algebra_autopoiesis.md",
-        .chapter_title = "Chapter 15: Manifold Algebra, Neuro-Bit Bridge, Spacetime Pre-Play & Swarm Autopoiesis",
-        .philosophy_why = "Living software autopoiesis: spontaneous emergence of globally optimal topological architectures.",
-        .book_excerpt = "Epistatic-linkage-aware crossover and adaptive entropy drift across 4 niches; 9-byte lymphatic fleet immunity."
-    },
-    {
-        .module_id = "driver_can",
-        .chapter_ref = "ch16_embodied_physical_mechanisms.md",
-        .chapter_title = "Chapter 16: Embodied Hardware Interfaces, Neuro-Manifold SIMD & Advanced Contact Mechanics",
-        .philosophy_why = "Deterministic preemption in physical hardware buses ensures emergency halts and impedance control never stall behind telemetry.",
-        .book_excerpt = "SocketCAN / CAN-FD driver bridges FLOW directly to MIT protocol actuators; SMT priority arbitration proves emergency WCET under 300us."
-    },
-    {
-        .module_id = "driver_imu",
-        .chapter_ref = "ch16_embodied_physical_mechanisms.md",
-        .chapter_title = "Chapter 16: Embodied Hardware Interfaces, Neuro-Manifold SIMD & Advanced Contact Mechanics",
-        .philosophy_why = "Zero-saturation geometric bounds on sensor streams provide formal guarantees for biped balance and attitude estimation.",
-        .book_excerpt = "6-DOF / 9-DOF IMU streaming driver with complementary filter formally proven via SMT to eliminate numerical divergence and saturation."
+        .module_id = "flow_embodied_mz",
+        .chapter_ref = "ch09_embodied_10khz_reflex.md",
+        .chapter_title = "Chapter 9: 10kHz Embodied Reflex & Non-Smooth Contact Mechanics (Moreau Cone, Friction Cone & ZMP)",
+        .philosophy_why = "The ultimate judgment of software engineering lies not in RAM or registers, but in the microsecond when a robot arm contacts the physical universe.",
+        .book_excerpt = "The ultimate judgment of software engineering lies not in RAM or registers, but in the microsecond when a robot arm contacts the physical universe."
     },
     {
         .module_id = "embodied_physics_scenarios",
-        .chapter_ref = "ch16_embodied_physical_mechanisms.md",
-        .chapter_title = "Chapter 16: Embodied Hardware Interfaces, Neuro-Manifold SIMD & Advanced Contact Mechanics",
-        .philosophy_why = "Real-world contact is non-smooth; Coulomb friction cones, impact shocks, and dual-arm co-manipulation must be enclosed in invariant manifolds.",
-        .book_excerpt = "Coulomb friction cone anti-slip, Moreau critical damping touchdown absorption, and dual-arm co-manipulation formally verified by SMT for zero slip, zero gear shear, and zero yield break."
-    }
-
+        .chapter_ref = "ch09_embodied_10khz_reflex.md",
+        .chapter_title = "Chapter 9: 10kHz Embodied Reflex & Non-Smooth Contact Mechanics (Moreau Cone, Friction Cone & ZMP)",
+        .philosophy_why = "The ultimate judgment of software engineering lies not in RAM or registers, but in the microsecond when a robot arm contacts the physical universe.",
+        .book_excerpt = "The ultimate judgment of software engineering lies not in RAM or registers, but in the microsecond when a robot arm contacts the physical universe."
+    },
+    {
+        .module_id = "primitive",
+        .chapter_ref = "ch10_hardware_primitive_drivers.md",
+        .chapter_title = "Chapter 10: Hardware Primitive Drivers (SocketCAN/CAN-FD 3-Function ABI & SMT Preemption)",
+        .philosophy_why = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks.",
+        .book_excerpt = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks."
+    },
+    {
+        .module_id = "abi",
+        .chapter_ref = "ch10_hardware_primitive_drivers.md",
+        .chapter_title = "Chapter 10: Hardware Primitive Drivers (SocketCAN/CAN-FD 3-Function ABI & SMT Preemption)",
+        .philosophy_why = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks.",
+        .book_excerpt = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks."
+    },
+    {
+        .module_id = "registry",
+        .chapter_ref = "ch10_hardware_primitive_drivers.md",
+        .chapter_title = "Chapter 10: Hardware Primitive Drivers (SocketCAN/CAN-FD 3-Function ABI & SMT Preemption)",
+        .philosophy_why = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks.",
+        .book_excerpt = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks."
+    },
+    {
+        .module_id = "security",
+        .chapter_ref = "ch10_hardware_primitive_drivers.md",
+        .chapter_title = "Chapter 10: Hardware Primitive Drivers (SocketCAN/CAN-FD 3-Function ABI & SMT Preemption)",
+        .philosophy_why = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks.",
+        .book_excerpt = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks."
+    },
+    {
+        .module_id = "matching",
+        .chapter_ref = "ch10_hardware_primitive_drivers.md",
+        .chapter_title = "Chapter 10: Hardware Primitive Drivers (SocketCAN/CAN-FD 3-Function ABI & SMT Preemption)",
+        .philosophy_why = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks.",
+        .book_excerpt = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks."
+    },
+    {
+        .module_id = "cxl_fabric",
+        .chapter_ref = "ch10_hardware_primitive_drivers.md",
+        .chapter_title = "Chapter 10: Hardware Primitive Drivers (SocketCAN/CAN-FD 3-Function ABI & SMT Preemption)",
+        .philosophy_why = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks.",
+        .book_excerpt = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks."
+    },
+    {
+        .module_id = "driver_can",
+        .chapter_ref = "ch10_hardware_primitive_drivers.md",
+        .chapter_title = "Chapter 10: Hardware Primitive Drivers (SocketCAN/CAN-FD 3-Function ABI & SMT Preemption)",
+        .philosophy_why = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks.",
+        .book_excerpt = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks."
+    },
+    {
+        .module_id = "driver_imu",
+        .chapter_ref = "ch10_hardware_primitive_drivers.md",
+        .chapter_title = "Chapter 10: Hardware Primitive Drivers (SocketCAN/CAN-FD 3-Function ABI & SMT Preemption)",
+        .philosophy_why = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks.",
+        .book_excerpt = "Plugins are not bloated compiler extensions, but sensory organs and muscles. Occam's razor purges 24 callbacks, retaining 3 minimalist primitive driver hooks."
+    },
+    {
+        .module_id = "jit",
+        .chapter_ref = "ch11_jit_and_geometric_morphing.md",
+        .chapter_title = "Chapter 11: JIT Emission & Geometric Morphing (AoS to SoA Remapping & Survival Mode)",
+        .philosophy_why = "Code is not carved in stone, but clay morphing in memory. When RAM collapses, the system executes microsecond geometric morphing to escape the OS OOM Killer.",
+        .book_excerpt = "Code is not carved in stone, but clay morphing in memory. When RAM collapses, the system executes microsecond geometric morphing to escape the OS OOM Killer."
+    },
+    {
+        .module_id = "adaptive",
+        .chapter_ref = "ch11_jit_and_geometric_morphing.md",
+        .chapter_title = "Chapter 11: JIT Emission & Geometric Morphing (AoS to SoA Remapping & Survival Mode)",
+        .philosophy_why = "Code is not carved in stone, but clay morphing in memory. When RAM collapses, the system executes microsecond geometric morphing to escape the OS OOM Killer.",
+        .book_excerpt = "Code is not carved in stone, but clay morphing in memory. When RAM collapses, the system executes microsecond geometric morphing to escape the OS OOM Killer."
+    },
+    {
+        .module_id = "backend",
+        .chapter_ref = "ch11_jit_and_geometric_morphing.md",
+        .chapter_title = "Chapter 11: JIT Emission & Geometric Morphing (AoS to SoA Remapping & Survival Mode)",
+        .philosophy_why = "Code is not carved in stone, but clay morphing in memory. When RAM collapses, the system executes microsecond geometric morphing to escape the OS OOM Killer.",
+        .book_excerpt = "Code is not carved in stone, but clay morphing in memory. When RAM collapses, the system executes microsecond geometric morphing to escape the OS OOM Killer."
+    },
+    {
+        .module_id = "token_ring",
+        .chapter_ref = "ch12_wavefront_cacheline_topology.md",
+        .chapter_title = "Chapter 12: Wavefront Concurrency Ring & alignas(64) Cacheline Topology (Single-Cacheline Atomic Phase Swap)",
+        .philosophy_why = "In multi-core concurrency, cross-cacheline tearing is original sin. FLOW constrains wavefront slots to single 64B cachelines with zero spinlock synchronization.",
+        .book_excerpt = "In multi-core concurrency, cross-cacheline tearing is original sin. FLOW constrains wavefront slots to single 64B cachelines with zero spinlock synchronization."
+    },
+    {
+        .module_id = "wavefront",
+        .chapter_ref = "ch12_wavefront_cacheline_topology.md",
+        .chapter_title = "Chapter 12: Wavefront Concurrency Ring & alignas(64) Cacheline Topology (Single-Cacheline Atomic Phase Swap)",
+        .philosophy_why = "In multi-core concurrency, cross-cacheline tearing is original sin. FLOW constrains wavefront slots to single 64B cachelines with zero spinlock synchronization.",
+        .book_excerpt = "In multi-core concurrency, cross-cacheline tearing is original sin. FLOW constrains wavefront slots to single 64B cachelines with zero spinlock synchronization."
+    },
+    {
+        .module_id = "reload",
+        .chapter_ref = "ch13_qsbr_lockfree_hotswap.md",
+        .chapter_title = "Chapter 13: QSBR Lock-Free Hot-Swap (Sub-Microsecond Generational Migration)",
+        .philosophy_why = "In servers processing millions of requests/sec, acquiring even one RWLock triggers catastrophic cache-line bouncing. FLOW QSBR achieves zero atomic writes on read paths and sub-microsecond migration.",
+        .book_excerpt = "In servers processing millions of requests/sec, acquiring even one RWLock triggers catastrophic cache-line bouncing. FLOW QSBR achieves zero atomic writes on read paths and sub-microsecond migration."
+    },
+    {
+        .module_id = "flowy_fvec",
+        .chapter_ref = "ch14_fvec_universal_lockfile.md",
+        .chapter_title = "Chapter 14: Universal .fvec & Lockfiles (Architecture Weights, Zero-Cold-Start & Antibodies)",
+        .philosophy_why = "The brain infers in real time, while .fvec stores long-term architecture weights. It serves as a Universal Lockfile with SMT signatures and an immune antibody repository.",
+        .book_excerpt = "The brain infers in real time, while .fvec stores long-term architecture weights. It serves as a Universal Lockfile with SMT signatures and an immune antibody repository."
+    },
+    {
+        .module_id = "fvec",
+        .chapter_ref = "ch14_fvec_universal_lockfile.md",
+        .chapter_title = "Chapter 14: Universal .fvec & Lockfiles (Architecture Weights, Zero-Cold-Start & Antibodies)",
+        .philosophy_why = "The brain infers in real time, while .fvec stores long-term architecture weights. It serves as a Universal Lockfile with SMT signatures and an immune antibody repository.",
+        .book_excerpt = "The brain infers in real time, while .fvec stores long-term architecture weights. It serves as a Universal Lockfile with SMT signatures and an immune antibody repository."
+    },
+    {
+        .module_id = "vault",
+        .chapter_ref = "ch14_fvec_universal_lockfile.md",
+        .chapter_title = "Chapter 14: Universal .fvec & Lockfiles (Architecture Weights, Zero-Cold-Start & Antibodies)",
+        .philosophy_why = "The brain infers in real time, while .fvec stores long-term architecture weights. It serves as a Universal Lockfile with SMT signatures and an immune antibody repository.",
+        .book_excerpt = "The brain infers in real time, while .fvec stores long-term architecture weights. It serves as a Universal Lockfile with SMT signatures and an immune antibody repository."
+    },
+    {
+        .module_id = "flowy",
+        .chapter_ref = "ch15_deterministic_flowy_reasoner.md",
+        .chapter_title = "Chapter 15: Deterministic Flowy Reasoner (0% Hallucination Introspection & Decoupling)",
+        .philosophy_why = "We do not need a hallucinating probabilistic chatbot to explain system architecture. FLOW built Flowy: a 100% deterministic, zero-hallucination causal codebase reasoner in pure C.",
+        .book_excerpt = "We do not need a hallucinating probabilistic chatbot to explain system architecture. FLOW built Flowy: a 100% deterministic, zero-hallucination causal codebase reasoner in pure C."
+    },
+    {
+        .module_id = "flowy_cli",
+        .chapter_ref = "ch15_deterministic_flowy_reasoner.md",
+        .chapter_title = "Chapter 15: Deterministic Flowy Reasoner (0% Hallucination Introspection & Decoupling)",
+        .philosophy_why = "We do not need a hallucinating probabilistic chatbot to explain system architecture. FLOW built Flowy: a 100% deterministic, zero-hallucination causal codebase reasoner in pure C.",
+        .book_excerpt = "We do not need a hallucinating probabilistic chatbot to explain system architecture. FLOW built Flowy: a 100% deterministic, zero-hallucination causal codebase reasoner in pure C."
+    },
+    {
+        .module_id = "audit",
+        .chapter_ref = "ch15_deterministic_flowy_reasoner.md",
+        .chapter_title = "Chapter 15: Deterministic Flowy Reasoner (0% Hallucination Introspection & Decoupling)",
+        .philosophy_why = "We do not need a hallucinating probabilistic chatbot to explain system architecture. FLOW built Flowy: a 100% deterministic, zero-hallucination causal codebase reasoner in pure C.",
+        .book_excerpt = "We do not need a hallucinating probabilistic chatbot to explain system architecture. FLOW built Flowy: a 100% deterministic, zero-hallucination causal codebase reasoner in pure C."
+    },
+    {
+        .module_id = "benchmark",
+        .chapter_ref = "ch16_level5_crucible_and_benchmarks.md",
+        .chapter_title = "Chapter 16: Level 5 Crucible & Benchmarks (Kobayashi Maru & Production Replay)",
+        .philosophy_why = "In Kobayashi Maru double-bind crises where memory drops 99% amid 10,000x traffic surges, FLOW demonstrates Level-5 resilience via SMT veto, JIT shelter, and QSBR zero-downtime morphing.",
+        .book_excerpt = "In Kobayashi Maru double-bind crises where memory drops 99% amid 10,000x traffic surges, FLOW demonstrates Level-5 resilience via SMT veto, JIT shelter, and QSBR zero-downtime morphing."
+    },
+    {
+        .module_id = "gateway",
+        .chapter_ref = "ch16_level5_crucible_and_benchmarks.md",
+        .chapter_title = "Chapter 16: Level 5 Crucible & Benchmarks (Kobayashi Maru & Production Replay)",
+        .philosophy_why = "In Kobayashi Maru double-bind crises where memory drops 99% amid 10,000x traffic surges, FLOW demonstrates Level-5 resilience via SMT veto, JIT shelter, and QSBR zero-downtime morphing.",
+        .book_excerpt = "In Kobayashi Maru double-bind crises where memory drops 99% amid 10,000x traffic surges, FLOW demonstrates Level-5 resilience via SMT veto, JIT shelter, and QSBR zero-downtime morphing."
+    },
+    {
+        .module_id = "manifold_algebra",
+        .chapter_ref = "ch17_autopoiesis_spacetime_preplay.md",
+        .chapter_title = "Chapter 17: Manifold Algebra, Neuro-Bit Bridge, Spacetime Pre-Play & Swarm Autopoiesis",
+        .philosophy_why = "Constraint convergence is correlation. Statistical correlation is merely a shadow of physical geometric constraints projected onto observation dimensions.",
+        .book_excerpt = "Constraint convergence is correlation. Statistical correlation is merely a shadow of physical geometric constraints projected onto observation dimensions."
+    },
+    {
+        .module_id = "neuro_bridge",
+        .chapter_ref = "ch17_autopoiesis_spacetime_preplay.md",
+        .chapter_title = "Chapter 17: Manifold Algebra, Neuro-Bit Bridge, Spacetime Pre-Play & Swarm Autopoiesis",
+        .philosophy_why = "Constraint convergence is correlation. Statistical correlation is merely a shadow of physical geometric constraints projected onto observation dimensions.",
+        .book_excerpt = "Constraint convergence is correlation. Statistical correlation is merely a shadow of physical geometric constraints projected onto observation dimensions."
+    },
+    {
+        .module_id = "spacetime_preplay",
+        .chapter_ref = "ch17_autopoiesis_spacetime_preplay.md",
+        .chapter_title = "Chapter 17: Manifold Algebra, Neuro-Bit Bridge, Spacetime Pre-Play & Swarm Autopoiesis",
+        .philosophy_why = "Constraint convergence is correlation. Statistical correlation is merely a shadow of physical geometric constraints projected onto observation dimensions.",
+        .book_excerpt = "Constraint convergence is correlation. Statistical correlation is merely a shadow of physical geometric constraints projected onto observation dimensions."
+    },
+    {
+        .module_id = "swarm_autopoiesis",
+        .chapter_ref = "ch17_autopoiesis_spacetime_preplay.md",
+        .chapter_title = "Chapter 17: Manifold Algebra, Neuro-Bit Bridge, Spacetime Pre-Play & Swarm Autopoiesis",
+        .philosophy_why = "Constraint convergence is correlation. Statistical correlation is merely a shadow of physical geometric constraints projected onto observation dimensions.",
+        .book_excerpt = "Constraint convergence is correlation. Statistical correlation is merely a shadow of physical geometric constraints projected onto observation dimensions."
+    },
+    {
+        .module_id = "entropy_collapse",
+        .chapter_ref = "ch18_zero_trivia_developer_experience.md",
+        .chapter_title = "Chapter 18: Zero-Trivia Developer Experience & Structural Entropy Collapse (Declarative Compiler & Kolmogorov Limit)",
+        .philosophy_why = "Lines of code measure system structural entropy K(S). Developers do not need to memorize verbose flags; declare your intent and the compiler synthesizes everything.",
+        .book_excerpt = "Lines of code measure system structural entropy K(S). Developers do not need to memorize verbose flags; declare your intent and the compiler synthesizes everything."
+    },
+    {
+        .module_id = "zero_trivia",
+        .chapter_ref = "ch18_zero_trivia_developer_experience.md",
+        .chapter_title = "Chapter 18: Zero-Trivia Developer Experience & Structural Entropy Collapse (Declarative Compiler & Kolmogorov Limit)",
+        .philosophy_why = "Lines of code measure system structural entropy K(S). Developers do not need to memorize verbose flags; declare your intent and the compiler synthesizes everything.",
+        .book_excerpt = "Lines of code measure system structural entropy K(S). Developers do not need to memorize verbose flags; declare your intent and the compiler synthesizes everything."
+    },
 };
 
 static inline const FlowModuleBookBinding *flow_book_lookup_binding_lang(const char *module_id, FlowLanguage lang) {
     if (module_id == NULL) return NULL;
     const FlowModuleBookBinding *bindings = (lang == FLOW_LANG_EN) ? FLOW_MODULE_BOOK_BINDINGS_EN : FLOW_MODULE_BOOK_BINDINGS_ZH;
-    for (size_t i = 0; i < 45; ++i) {
+    for (size_t i = 0; i < FLOW_BOOK_MODULE_BINDING_COUNT; ++i) {
         if (strcmp(bindings[i].module_id, module_id) == 0) return &bindings[i];
     }
     return NULL;

@@ -40,29 +40,22 @@ int flow_friction_cone_init(FlowGraspFrictionCone *cone,
 int flow_friction_cone_step_reflex(FlowGraspFrictionCone *cone,
                                    double ext_accel_m_s2,
                                    double dt_sec) {
-    if (cone == NULL || dt_sec <= 0.0) return 0;
+    (void)dt_sec;
     cone->external_accel_m_s2 = ext_accel_m_s2;
 
     /* Total tangential load: gravity + dynamic inertial force */
     double effective_accel = fabs(FLOW_GRAVITY_CONST + ext_accel_m_s2);
     cone->current_tangential_force_n = cone->object_mass_kg * effective_accel;
 
-    /* 1kHz closed-loop impedance adaptation for normal force */
+    /* 1kHz closed-loop impedance adaptation for normal force with Moreau convex set projection */
     double required_fn = (cone->current_tangential_force_n * cone->dynamic_safety_factor) / cone->friction_coeff_mu;
+    cone->current_normal_force_n = fmin(cone->crush_force_limit_n, required_fn);
 
-    if (required_fn > cone->crush_force_limit_n) {
-        /* Grip force limit reached: clamp to protect fragile object */
-        cone->current_normal_force_n = cone->crush_force_limit_n;
-        /* If clamped normal force cannot support tangential load, slippage begins */
-        double max_fric = cone->friction_coeff_mu * cone->current_normal_force_n;
-        if (cone->current_tangential_force_n > max_fric) {
-            cone->is_slipping = true;
-        }
-    } else {
-        cone->current_normal_force_n = required_fn;
-        cone->is_slipping = false;
-        cone->is_crushed = false;
-    }
+    /* Geometric Coulomb slip & crush indicators (branch-free) */
+    double max_fric = cone->friction_coeff_mu * cone->current_normal_force_n;
+    cone->is_slipping = (cone->current_tangential_force_n > max_fric);
+    cone->is_crushed = (cone->current_normal_force_n > cone->crush_force_limit_n);
+
     return 1;
 }
 

@@ -40,9 +40,30 @@ static int resolve_and_load_plugin(const char *mod_name) {
     return 0;
 }
 
+static void flowc_print_usage(FILE *out) {
+    fprintf(out, "FLOW Modern Declarative Compiler (flowc) v2.5.0\n");
+    fprintf(out, "Usage: flowc <input.flow> [-o <output.c>] [options]\n\n");
+    fprintf(out, "Core Options (Zero Trivia):\n");
+    fprintf(out, "  -o <output.c>            Target C source path (default: <input>.c)\n");
+    fprintf(out, "  --apply-fvec <file.fvec> Apply pre-baked SMT-certified architecture weights\n");
+    fprintf(out, "  --profile-out <file>     Export crystallized plan as .fvec lockfile or profile\n\n");
+    fprintf(out, "Advanced Tuning & Target Options:\n");
+    fprintf(out, "  --search                 Enable BMF combinatorial search\n");
+    fprintf(out, "  --iterations <N>         Search iterations (default: 250)\n");
+    fprintf(out, "  --seed <N>               Deterministic PRNG seed\n");
+    fprintf(out, "  --component <id>         Manually pin component implementation\n");
+    fprintf(out, "  --target-rust <file.rs>  Emit Rust FFI adapter\n");
+    fprintf(out, "  --target-python <file.py> Emit Python ctypes adapter\n");
+    fprintf(out, "  --target-c-header <f.h>  Emit C interface header\n");
+    fprintf(out, "  --target-llvm-ir <f.ll>  Emit LLVM IR\n");
+    fprintf(out, "  --target-mlir <f.mlir>   Emit MLIR\n");
+}
+
 int flowc_main(int argc, char **argv) {
     const char *input_path = NULL;
     const char *output_path = NULL;
+    char auto_output_buf[512] = {0};
+    char auto_fvec_path[512] = {0};
     FILE *input;
     FILE *output;
     FlowSpec spec;
@@ -72,9 +93,14 @@ int flowc_main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    if (argc < 3) {
-        fprintf(stderr, "usage: flowc <input.flow> -o <output.c> [--search] [--iterations <N>] [--seed <N>] [--benchmark] [--reload-adapter] [--profile <file>] [--profile-out <file>] [--component <id>] [--apply-fvec <file.fvec>] [--workload-bytes <N>] [--target-c-header <file.h>] [--target-rust <file.rs>] [--target-python <file.py>] [--target-mlir <file.mlir>] [--target-llvm-ir <file.ll>]\n");
+    if (argc < 2) {
+        flowc_print_usage(stderr);
         return EXIT_FAILURE;
+    }
+
+    if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "help") == 0) {
+        flowc_print_usage(stdout);
+        return EXIT_SUCCESS;
     }
 
     input_path = argv[1];
@@ -115,15 +141,47 @@ int flowc_main(int argc, char **argv) {
             iterations = (size_t)strtoul(argv[++arg], NULL, 10);
         } else if (strcmp(argv[arg], "--seed") == 0 && arg + 1 < argc) {
             seed = (uint32_t)strtoul(argv[++arg], NULL, 10);
+        } else if (strcmp(argv[arg], "-h") == 0 || strcmp(argv[arg], "--help") == 0) {
+            flowc_print_usage(stdout);
+            return EXIT_SUCCESS;
         } else {
             fprintf(stderr, "flowc: unknown option: %s\n", argv[arg]);
             return EXIT_FAILURE;
         }
     }
 
+    /* Zero-trivia default output path: <input_base>.c */
     if (!output_path) {
-        fprintf(stderr, "flowc: -o <output.c> is required\n");
-        return EXIT_FAILURE;
+        const char *dot = strrchr(input_path, '.');
+        if (dot != NULL && strcmp(dot, ".flow") == 0) {
+            size_t base_len = (size_t)(dot - input_path);
+            if (base_len + 3 < sizeof(auto_output_buf)) {
+                memcpy(auto_output_buf, input_path, base_len);
+                strcpy(auto_output_buf + base_len, ".c");
+                output_path = auto_output_buf;
+            }
+        }
+        if (!output_path) {
+            snprintf(auto_output_buf, sizeof(auto_output_buf), "%s.c", input_path);
+            output_path = auto_output_buf;
+        }
+    }
+
+    /* Auto-adopt companion .fvec if exists and not explicitly overridden */
+    if (apply_fvec_path == NULL) {
+        const char *dot = strrchr(input_path, '.');
+        if (dot != NULL && strcmp(dot, ".flow") == 0) {
+            size_t base_len = (size_t)(dot - input_path);
+            if (base_len + 6 < sizeof(auto_fvec_path)) {
+                memcpy(auto_fvec_path, input_path, base_len);
+                strcpy(auto_fvec_path + base_len, ".fvec");
+                FILE *fvec_test = fopen(auto_fvec_path, "rb");
+                if (fvec_test != NULL) {
+                    fclose(fvec_test);
+                    apply_fvec_path = auto_fvec_path;
+                }
+            }
+        }
     }
 
     input = fopen(input_path, "r");

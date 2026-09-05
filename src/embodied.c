@@ -92,9 +92,8 @@ int flow_physics_simulate_step(FlowPhysicsEngine *engine, const double *applied_
         double inertia = 0.25; /* Approximate joint rotational inertia kg*m^2 */
         double accel = (applied_torques[j] - 0.05 * s->joint_velocities[j]) / inertia;
 
-        if (fabs(accel) > engine->max_angular_accel) {
-            accel = (accel > 0) ? engine->max_angular_accel : -engine->max_angular_accel;
-        }
+        /* Moreau Convex Acceleration Projection: Pi_C(accel) */
+        accel = fmin(engine->max_angular_accel, fmax(-engine->max_angular_accel, accel));
 
         s->joint_velocities[j] += accel * dt;
         s->joint_angles[j] += s->joint_velocities[j] * dt;
@@ -170,17 +169,12 @@ int flow_dual_rate_spinal_tick(FlowDualRateController *ctrl,
                               const double *current_vels,
                               double *output_torques,
                               double dt) {
-    if (ctrl == NULL || target_angles == NULL || current_angles == NULL ||
-        current_vels == NULL || output_torques == NULL) return 0;
-    if (dt <= 0.0) dt = 0.001;
-
     for (size_t j = 0; j < FLOW_MAX_JOINTS; ++j) {
         double error = target_angles[j] - current_angles[j];
         ctrl->spinal.integral_error[j] += error * dt;
 
-        /* Anti-windup clamping */
-        if (ctrl->spinal.integral_error[j] > 10.0) ctrl->spinal.integral_error[j] = 10.0;
-        if (ctrl->spinal.integral_error[j] < -10.0) ctrl->spinal.integral_error[j] = -10.0;
+        /* Moreau Anti-Windup Convex Projection: Pi_C(err_int) on [-10, 10] */
+        ctrl->spinal.integral_error[j] = fmin(10.0, fmax(-10.0, ctrl->spinal.integral_error[j]));
 
         double d_error = (error - ctrl->spinal.prev_error[j]) / dt;
         ctrl->spinal.prev_error[j] = error;

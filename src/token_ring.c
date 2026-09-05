@@ -480,6 +480,7 @@ int flow_wavefront_ring_init(FlowWavefrontRing *ring,
         ring->slots[i].energy = 50.0;
         ring->slots[i].in_flight = false;
         ring->slots[i].slot_genome = 0;
+        flow_bmf_canvas_init(&ring->slots[i].bmf_canvas, (uint32_t)i, ~0ULL, ~0ULL, 0);
     }
 
     if (ir) {
@@ -624,9 +625,10 @@ FlowSMTResult flow_wavefront_verify_temporal_safety_smt(const FlowWavefrontRing 
     /* Theorem 2: 64-Byte Cache Line Confinement & Tear-Free Phase Shift */
     size_t sz = sizeof(FlowBmf1BitCanvas);
     size_t al = _Alignof(FlowBmf1BitCanvas);
-    uint64_t tear_violation = (sz != 64 || al != 64) ? 1 : 0;
+    size_t slot_al = _Alignof(FlowWavefrontSlot);
+    uint64_t tear_violation = (sz != 64 || al != 64 || slot_al < 64) ? 1 : 0;
     FLOW_SMT_BOX_ADD_RULE(builder, "64b_tear_free_confinement", tear_violation, 0, 0,
-                          FLOW_BOX_THEOREM_BUFFER_BOUNDS, "FlowBmf1BitCanvas deviates from 64-byte single cache line");
+                          FLOW_BOX_THEOREM_BUFFER_BOUNDS, "FlowBmf1BitCanvas or FlowWavefrontSlot deviates from 64-byte single cache line alignment");
 
     /* Theorem 3: Bounded Evacuation Horizon (Wavefront cycle guarantees prior reader evacuation) */
     uint64_t horizon_unbounded = (ring && ring->slot_count > FLOW_WAVEFRONT_MAX_SLOTS) ? 1 : 0;

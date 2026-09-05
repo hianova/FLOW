@@ -58,7 +58,6 @@ int flow_speculative_jit_init(FlowSpeculativeJIT *sjit,
 }
 
 int flow_speculative_jit_evaluate(FlowSpeculativeJIT *sjit, double dt_sec) {
-    if (sjit == NULL || sjit->jet == NULL) return 0;
     FlowJet *jet = sjit->jet;
     uint32_t d = sjit->monitored_dim;
     sjit->total_lookahead_evals++;
@@ -75,11 +74,9 @@ int flow_speculative_jit_evaluate(FlowSpeculativeJIT *sjit, double dt_sec) {
 
     /* Anticipate Moreau boundary crossing: current < threshold, future >= threshold */
     if (q < threshold && q_pred >= threshold && !sjit->is_compilation_dispatched) {
-        if (p > 1e-9) {
-            sjit->predicted_crossing_time_ns = ((threshold - q) / p) * 1e9;
-        } else {
-            sjit->predicted_crossing_time_ns = sjit->lookahead_time_ns * 0.5;
-        }
+        sjit->predicted_crossing_time_ns = (p > 1e-9)
+                                           ? (((threshold - q) / p) * 1e9)
+                                           : (sjit->lookahead_time_ns * 0.5);
 
         /* Dispatch non-blocking asynchronous compilation to background workers */
         if (sjit->jit_pool != NULL) {

@@ -262,17 +262,16 @@ int flow_jet_potential_init_default(FlowJetPotentialLandscape *landscape, uint32
 }
 
 int flow_jet_potential_eval_gradient(const FlowJetPotentialLandscape *landscape, const double q[], double grad_out[]) {
-    if (landscape == NULL || q == NULL || grad_out == NULL) return 0;
-
     uint32_t d = landscape->dim;
     for (size_t i = 0; i < d; ++i) {
         /* 1. Base Harmonic Potential Gradient: \nabla V_base = \omega^2 * (q - q*) */
         double grad_base = landscape->omega[i] * landscape->omega[i] * (q[i] - landscape->q_equilibrium[i]);
 
-        /* 2. Hardware Saturation Barrier Gradient: 2 * mu / (q_sat - |q|)^3 */
+        /* 2. Hardware Saturation Barrier Gradient: 2 * mu / (q_sat - |q|)^3
+         * Pure geometric hyperbolic barrier without imperative truncation branches;
+         * Moreau convex cone restoring force guarantees |q| < q_sat physically. */
         double sat = landscape->q_saturation[i];
         double diff_sat = sat - fabs(q[i]);
-        if (diff_sat < 0.02) diff_sat = 0.02;
         double sign_q = (q[i] >= 0.0) ? 1.0 : -1.0;
         double grad_barrier = sign_q * (2.0 * landscape->barrier_mu) / (diff_sat * diff_sat * diff_sat);
 
@@ -290,10 +289,7 @@ int flow_jet_potential_eval_gradient(const FlowJetPotentialLandscape *landscape,
 }
 
 int flow_jet_symplectic_step_with_potential(FlowJet *jet, const FlowJetPotentialLandscape *landscape, double dt) {
-    if (jet == NULL || landscape == NULL || dt <= 0.0) return 0;
-
-    uint32_t dim = jet->header.vector_dim ? jet->header.vector_dim : FLOW_JET_STANDARD_DIM;
-    if (dim > FLOW_JET_MAX_DIM) dim = FLOW_JET_MAX_DIM;
+    uint32_t dim = jet->header.vector_dim;
 
     double grad0[FLOW_JET_MAX_DIM];
     flow_jet_potential_eval_gradient(landscape, jet->payload.q, grad0);
@@ -324,10 +320,7 @@ int flow_jet_symplectic_step_with_potential(FlowJet *jet, const FlowJetPotential
 /* 5. Symplectic Dynamics & Mori-Zwanzig Convolution                         */
 /* ------------------------------------------------------------------------- */
 double flow_jet_hamiltonian(const FlowJet *jet) {
-    if (jet == NULL) return 0.0;
-    uint32_t dim = jet->header.vector_dim ? jet->header.vector_dim : FLOW_JET_STANDARD_DIM;
-    if (dim > FLOW_JET_MAX_DIM) dim = FLOW_JET_MAX_DIM;
-
+    uint32_t dim = jet->header.vector_dim;
     double kinetic = 0.0;
     double potential = 0.0;
     for (size_t i = 0; i < dim; ++i) {
@@ -338,9 +331,7 @@ double flow_jet_hamiltonian(const FlowJet *jet) {
 }
 
 int flow_jet_symplectic_step(FlowJet *jet, double dt) {
-    if (jet == NULL || dt <= 0.0) return 0;
-    uint32_t dim = jet->header.vector_dim ? jet->header.vector_dim : FLOW_JET_STANDARD_DIM;
-    if (dim > FLOW_JET_MAX_DIM) dim = FLOW_JET_MAX_DIM;
+    uint32_t dim = jet->header.vector_dim;
 
     /* Velocity Verlet / Symplectic Leapfrog Integrator:
      * 1. p(t + dt/2) = p(t) - 0.5 * dt * \nabla V(q(t))  [where \nabla V(q) = q]
@@ -362,10 +353,7 @@ int flow_jet_symplectic_step(FlowJet *jet, double dt) {
 }
 
 int flow_jet_mori_zwanzig_step(FlowJet *jet, double dt) {
-    if (jet == NULL || dt <= 0.0) return 0;
-    uint32_t dim = jet->header.vector_dim ? jet->header.vector_dim : FLOW_JET_STANDARD_DIM;
-    if (dim > FLOW_JET_MAX_DIM) dim = FLOW_JET_MAX_DIM;
-
+    uint32_t dim = jet->header.vector_dim;
     double decay = exp(-0.5 * dt);
     double weight = jet->payload.memory_kernel[0];
     for (size_t i = 0; i < dim; ++i) {

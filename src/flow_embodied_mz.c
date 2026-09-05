@@ -49,12 +49,6 @@ int flow_embodied_mz_step_10khz(FlowMoriZwanzigImpedanceController *ctrl,
                                 const double target_v[],
                                 double torques_out[],
                                 double dt) {
-    if (ctrl == NULL || current_q == NULL || current_v == NULL ||
-        target_q == NULL || target_v == NULL || torques_out == NULL) {
-        return 0;
-    }
-    if (dt <= 0.0) dt = 0.0001; /* Default 10kHz step = 100 microseconds */
-
     size_t J = ctrl->joint_count;
     size_t T = ctrl->tap_count;
 
@@ -81,24 +75,15 @@ int flow_embodied_mz_step_10khz(FlowMoriZwanzigImpedanceController *ctrl,
         /* 3. Combined torque with non-Markovian viscoelastic absorption */
         double tau_net = tau_pd - tau_mz;
 
-        /* Torque clamping to motor physical limit */
+        /* Moreau Convex Set Projection: Pi_C(tau) on C = [-limit, +limit] (branch-free) */
         double limit = ctrl->max_torque_limit[j];
-        if (tau_net > limit) tau_net = limit;
-        if (tau_net < -limit) tau_net = -limit;
+        tau_net = fmin(limit, fmax(-limit, tau_net));
 
         torques_out[j] = tau_net;
 
-        /* Telemetry */
-        double abs_tau = fabs(tau_net);
-        if (abs_tau > ctrl->peak_contact_torque) {
-            ctrl->peak_contact_torque = abs_tau;
-        }
-
-        /* Dissipated shock power: P = tau_mz * v */
-        double dissipated_power = tau_mz * current_v[j];
-        if (dissipated_power > 0.0) {
-            ctrl->dissipated_energy_joules += dissipated_power * dt;
-        }
+        /* Branchless Telemetry & Dissipated Energy */
+        ctrl->peak_contact_torque = fmax(ctrl->peak_contact_torque, fabs(tau_net));
+        ctrl->dissipated_energy_joules += fmax(0.0, tau_mz * current_v[j]) * dt;
     }
 
     ctrl->history_head = (ctrl->history_head + 1) % T;

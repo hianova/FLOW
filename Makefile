@@ -152,7 +152,8 @@ TEST_NAMES := $(patsubst $(BUILD_DIR)/%,%,$(TEST_BINARIES))
 $(TEST_NAMES): %: $(BUILD_DIR)/%
 	@$<
 
-level5-contest: flowy-level5-crucible
+level5-contest: $(BUILD_DIR)/flowy-level5-crucible
+	$(BUILD_DIR)/flowy-level5-crucible
 
 audit-mechanisms: $(FLOWY)
 	$(FLOWY) audit-mechanisms
