@@ -30,6 +30,6 @@
 # 第六部：靈魂記憶、自創生大腦與零摩擦體驗 (Soul, Autopoiesis & Zero-Trivia Experience)
 - [14. 大一統 .fvec 與 Universal Lockfile (架構權重庫、零秒冷啟動與抗體昇華)](ch14_fvec_universal_lockfile.md)
 - [15. 決定論因果推論大腦 (0% 幻覺的架構自省、神經遙測熱點與職責分離)](ch15_deterministic_flowy_reasoner.md)
-- [16. Level 5 絕對死局壓測與效能基準 (並發風暴與 OOM 雙重束縛下的生存實錄)](ch16_level5_crucible_and_benchmarks.md)
+- [16. 四大前沿支柱極限基準測試與控制理論防禦 (網關、具身、撮合、CXL 與自適應滯後控制)](ch16_frontier_pillars_and_control_defenses.md)
 - [17. 活體自創生與時空光錐反事實預演 (群體自創生、神經-符號橋與時空光錐黑天鵝避險)](ch17_autopoiesis_spacetime_preplay.md)
 - [18. 零摩擦人機介面與工程水分擠乾 (Zero-Trivia CLI、宣告式自動坍縮與柯爾莫哥洛夫下限)](ch18_zero_trivia_developer_experience.md)

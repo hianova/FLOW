@@ -72,7 +72,7 @@ static const struct { FlowNodeType type; const char *name, *mod; int core; uint3
     [N_DOC_CH08]     = {FLOW_NODE_DOC_CHAPTER, "ch08_hardware_primitive_drivers", "book", 0, 4},
     [N_DOC_CH09]     = {FLOW_NODE_DOC_CHAPTER, "ch09_fvec_universal_lockfile", "book", 0, 4},
     [N_DOC_CH10]     = {FLOW_NODE_DOC_CHAPTER, "ch10_deterministic_flowy_reasoner", "book", 0, 4},
-    [N_DOC_CH11]     = {FLOW_NODE_DOC_CHAPTER, "ch11_level5_crucible_and_benchmarks", "book", 0, 4}
+    [N_DOC_CH11]     = {FLOW_NODE_DOC_CHAPTER, "ch16_frontier_pillars_and_control_defenses", "book", 0, 4}
 };
 
 static const struct { uint8_t from, to, type; const char *label; } TOPO_EDGES[] = {

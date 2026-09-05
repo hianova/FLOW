@@ -39,8 +39,8 @@ FLOW 活體架構 (Living Autopoietic System):
                                         │ (降維為 Polyhedral / BitSpace)
                                         ▼
                  ┌──────────────────────────────────────────────┐
-                 │       1-Bit 混沌退火引擎 (FlowBitSpace)        │
-                 │   - 12.96 ns/op 恆定時間變異                   │
+                 │   Presburger 多面體合成與坐標畫布 (FlowBitSpace)│
+                 │   - <50 ns/op 仿射幾何解析合成               │
                  │   - 3-Tier Mask Canvas (硬安全/軟偏好/PMU)     │
                  └──────┬────────────────────────────────┬──────┘
                         │                                │
@@ -52,13 +52,13 @@ FLOW 活體架構 (Living Autopoietic System):
 │  - 硬約束否決 (4 Invariants Verified)    │   │  - Epoch Watchdog 隔離與虛擬記憶體重映射   │
 └──────────────────────────────────────────┘   └──────────────────────────────────────────┘
                         │                                ▲
-                        └────────► [Flowy 自我意識] ──────┘
-                                  (決定論 Codebase Reasoner)
+                        └──────► [Flowy 決定論因果大腦] ──┘
+                                (純 C 100% 無幻覺 Reasoner)
 ```
 
-1. **意圖純粹性（Intent Purity）**：開發者在 `.flow` 中只宣告「我們需要什麼（What & Constraints）」，例如「確定性、記憶體 < 64MB、延遲優先」，絕不撰寫「如何做（How）」。實作邏輯是引擎在解空間中搜尋出的動態坍縮態。
-2. **1-Bit 狀態脊椎與幾何投影（1-Bit State Spine & Geometric Projection）**：整個架構的候選策略與維度被編碼為緊湊的二進位基因組（`FlowGenome`），透過多面體凸集（Polyhedral Polytope）精確投影至超立方體，實現 $O(1)$ 恆定時間（12.96 ns）的超維解空間探索。
-3. **數學形式化保證（Mathematical Formal Guarantee）**：任何由混沌退火產生的實作，必須在發射前通過純 C 形式化驗證引擎（`src/smt.c`）的 SMT Bit-Blasting 證明，確保緩衝區邊界、記憶體配額、分片隔離與確定性定理 100% 成立。
+1. **意圖純粹性（Intent Purity）**：開發者在 `.flow` 中只宣告「我們需要什麼（What & Constraints）」，例如「確定性、記憶體 < 64MB、延遲優先」，絕不撰寫「如何做（How）」。實作邏輯是引擎在幾何空間中解析出的動態最優態。
+2. **多面體解析與幾何投影（Polyhedral Synthesis & Geometric Projection）**：系統狀態由 Presburger 仿射不等式約束多面體嚴格界定，透過多面體凸集（Polyhedral Polytope）精確投影，消除隨機盲猜，實現單週期 <50ns 的確定性代數求解。
+3. **數學形式化保證（Mathematical Formal Guarantee）**：任何由多面體模型合成出的實作，必須在發射前通過純 C 形式化驗證引擎（`src/smt.c`）的 SMT Bit-Blasting 證明，確保緩衝區邊界、記憶體配額、分片隔離與確定性定理 100% 成立。
 4. **零停機動態質變（Zero-Downtime Metamorphosis）**：運行期核心採用靜默狀態基回收機制（QSBR）與虛擬記憶體頁面重映射（`mremap` / Zero-TLB-Shootdown），在微秒級時間內完成 AoS（結構陣列）到 SoA（陣列結構）的即時幾何變形，達成無損生存。
 
 ---
@@ -68,7 +68,7 @@ FLOW 活體架構 (Living Autopoietic System):
 本書並非一般泛泛而談的概念指南，而是一本**「代碼級、數學級的活體架構審計全書」**。每一章均對應 FLOW 開源純 C 核心碼庫（`src/*.c`, `src/*.h`）的具體實作，並涵蓋：
 - **第一性原理審計**：解構為什麼傳統做法會失效，FLOW 如何用數學約束取代經驗法則。
 - **資料結構與核心演算法解析**：逐行分析 `FlowBitSpace`、`FlowReloadReader`、`FlowSpinalReflexUnit` 等核心 C 結構。
-- **數學證明與公式推導**：涵蓋玻爾茲曼分布、多面體正交投影、奈奎斯特延遲補償、ZMP 零力矩點穩定判據等。
-- **實戰測試與基準數據**：直接驗證包括 Level 5 Kobayashi Maru 死局在內的極端壓測。
+- **數學證明與公式推導**：涵蓋保辛幾何、多面體正交投影、奈奎斯特延遲補償、ZMP 零力矩點穩定判據等。
+- **實戰測試與基準數據**：直接驗證包括四大前沿支柱（網關、具身、撮合、CXL）與控制防禦在內的極端壓測。
 
 歡迎進入意圖驅動的活體世界。

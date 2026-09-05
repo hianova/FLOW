@@ -106,10 +106,10 @@ static const FlowBookChapterDoc FLOW_BOOK_CHAPTERS_ZH[FLOW_BOOK_CHAPTER_COUNT] =
         .book_excerpt = "Flowy 嚴格遵循大腦 (flowy.c)、審計設施 (audit.c) 與前端表現層 (flowy_cli.c) 三層分離。即時解析決策因果 (flowy why)、神經遙測熱點 (flowy bottleneck) 與反事實模擬。"
     },
     {
-        .chapter_ref = "ch16_level5_crucible_and_benchmarks.md",
-        .chapter_title = "第十六章：Level 5 絕對死局壓測與效能基準 (並發風暴與 OOM 雙重束縛下的生存實錄)",
-        .philosophy_why = "在科林丸號 (Kobayashi Maru) 測試中，學員面臨註定毀滅的死局。FLOW 打造了 Level 5 絕對死局壓測：當記憶體暴跌 99%、連線暴增 10,000 倍時，系統在死局中自我蛻變求生。",
-        .book_excerpt = "Level-5 熔爐壓測驗證了系統在雙重束縛下的 5 階段自癒過程，維持 0 封包丟失與 0 崩潰；QSBR 讀取吞吐達到 390M ops/s，通用鎖定檔套用耗時縮短至 37 微秒。"
+        .chapter_ref = "ch16_frontier_pillars_and_control_defenses.md",
+        .chapter_title = "第十六章：四大前沿支柱極限基準測試與控制理論防禦 (網關、具身、撮合、CXL 與自適應滯後控制)",
+        .philosophy_why = "工程的成熟度，始於將戲劇化的擬人想像褪去，回歸古典控制理論與可量測的物理不變量。我們用嚴格的施密特滯後環、AST 複雜度配額邊界與四大前沿支柱百萬級真實壓測，證明系統的數學剛性。",
+        .book_excerpt = "四大前沿支柱基準測試在真實工業級負載下完成了百萬次 WAF 形式化檢驗 (308ns)、10kHz 脊髓反射迴路 (0.14us)、微秒級撮合 (3.1us) 與 CXL 跨層搬遷 (18us)；施密特滯後環與 SMT 5us 看門狗杜絕了臨界抖動與超時阻塞。"
     },
     {
         .chapter_ref = "ch17_autopoiesis_spacetime_preplay.md",
@@ -217,10 +217,10 @@ static const FlowBookChapterDoc FLOW_BOOK_CHAPTERS_EN[FLOW_BOOK_CHAPTER_COUNT] =
         .book_excerpt = "Flowy decouples Brain (flowy.c), Audit Logger (audit.c), and CLI Presentation (flowy_cli.c). It provides deterministic causal explanations (flowy why), telemetry diagnosis, and what-if simulation."
     },
     {
-        .chapter_ref = "ch16_level5_crucible_and_benchmarks.md",
-        .chapter_title = "Chapter 16: Level 5 Crucible & Benchmarks (Kobayashi Maru & Production Replay)",
-        .philosophy_why = "In Kobayashi Maru double-bind crises where memory drops 99% amid 10,000x traffic surges, FLOW demonstrates Level-5 resilience via SMT veto, JIT shelter, and QSBR zero-downtime morphing.",
-        .book_excerpt = "The Level-5 crucible validates 5-stage autonomous self-healing with 0 dropped requests and 0 panics. QSBR achieves >390M ops/s read throughput and 37us instant cold-start application."
+        .chapter_ref = "ch16_frontier_pillars_and_control_defenses.md",
+        .chapter_title = "Chapter 16: Four Frontier Pillars Comprehensive Benchmark & Control Theory Defenses",
+        .philosophy_why = "Engineering maturity begins by stripping away dramatic personification, returning to classical control theory and measurable physical invariants. We prove absolute mathematical rigidity through Schmitt triggers, AST bounds, and million-op real-world stress tests.",
+        .book_excerpt = "The Four Frontier Pillars benchmark validates real-world industrial throughput across million-op SMT WAF checks (308ns), 10kHz spinal reflex loops (0.14us), sub-microsecond LOB matching (3.1us), and CXL memory tiering (18us), backed by Schmitt hysteresis and SMT 5us watchdog fallbacks."
     },
     {
         .chapter_ref = "ch17_autopoiesis_spacetime_preplay.md",
@@ -564,17 +564,17 @@ static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_ZH[FLOW_BOOK_MODULE
     },
     {
         .module_id = "benchmark",
-        .chapter_ref = "ch16_level5_crucible_and_benchmarks.md",
-        .chapter_title = "第十六章：Level 5 絕對死局壓測與效能基準",
-        .philosophy_why = "科林丸號極限壓測、雙重束縛 5 階段自癒與生產級基準。",
-        .book_excerpt = "科林丸號極限壓測、雙重束縛 5 階段自癒與生產級基準。"
+        .chapter_ref = "ch16_frontier_pillars_and_control_defenses.md",
+        .chapter_title = "第十六章：四大前沿支柱極限基準測試與控制理論防禦",
+        .philosophy_why = "四大前沿支柱極限壓測、施密特滯後防抖與生產級真實基準。",
+        .book_excerpt = "四大前沿支柱極限壓測、施密特滯後防抖與生產級真實基準。"
     },
     {
         .module_id = "gateway",
-        .chapter_ref = "ch16_level5_crucible_and_benchmarks.md",
-        .chapter_title = "第十六章：Level 5 絕對死局壓測與效能基準",
-        .philosophy_why = "自癒邊緣網關、零拷貝請求分發與並發風暴吸收。",
-        .book_excerpt = "自癒邊緣網關、零拷貝請求分發與並發風暴吸收。"
+        .chapter_ref = "ch16_frontier_pillars_and_control_defenses.md",
+        .chapter_title = "第十六章：四大前沿支柱極限基準測試與控制理論防禦",
+        .philosophy_why = "自進化邊緣網關、百萬次 WAF 形式化檢驗與並發風暴吸收。",
+        .book_excerpt = "自進化邊緣網關、百萬次 WAF 形式化檢驗與並發風暴吸收。"
     },
     {
         .module_id = "manifold_algebra",
@@ -938,17 +938,17 @@ static const FlowModuleBookBinding FLOW_MODULE_BOOK_BINDINGS_EN[FLOW_BOOK_MODULE
     },
     {
         .module_id = "benchmark",
-        .chapter_ref = "ch16_level5_crucible_and_benchmarks.md",
-        .chapter_title = "Chapter 16: Level 5 Crucible & Benchmarks (Kobayashi Maru & Production Replay)",
-        .philosophy_why = "In Kobayashi Maru double-bind crises where memory drops 99% amid 10,000x traffic surges, FLOW demonstrates Level-5 resilience via SMT veto, JIT shelter, and QSBR zero-downtime morphing.",
-        .book_excerpt = "In Kobayashi Maru double-bind crises where memory drops 99% amid 10,000x traffic surges, FLOW demonstrates Level-5 resilience via SMT veto, JIT shelter, and QSBR zero-downtime morphing."
+        .chapter_ref = "ch16_frontier_pillars_and_control_defenses.md",
+        .chapter_title = "Chapter 16: Four Frontier Pillars Benchmark & Control Theory Defenses",
+        .philosophy_why = "Four Frontier Pillars stress testing, Schmitt trigger hysteresis anti-flapping, and production-grade real benchmarks.",
+        .book_excerpt = "Four Frontier Pillars stress testing, Schmitt trigger hysteresis anti-flapping, and production-grade real benchmarks."
     },
     {
         .module_id = "gateway",
-        .chapter_ref = "ch16_level5_crucible_and_benchmarks.md",
-        .chapter_title = "Chapter 16: Level 5 Crucible & Benchmarks (Kobayashi Maru & Production Replay)",
-        .philosophy_why = "In Kobayashi Maru double-bind crises where memory drops 99% amid 10,000x traffic surges, FLOW demonstrates Level-5 resilience via SMT veto, JIT shelter, and QSBR zero-downtime morphing.",
-        .book_excerpt = "In Kobayashi Maru double-bind crises where memory drops 99% amid 10,000x traffic surges, FLOW demonstrates Level-5 resilience via SMT veto, JIT shelter, and QSBR zero-downtime morphing."
+        .chapter_ref = "ch16_frontier_pillars_and_control_defenses.md",
+        .chapter_title = "Chapter 16: Four Frontier Pillars Benchmark & Control Theory Defenses",
+        .philosophy_why = "Self-evolving edge gateway, million-op SMT WAF formal checks, and high-concurrency surge absorption.",
+        .book_excerpt = "Self-evolving edge gateway, million-op SMT WAF formal checks, and high-concurrency surge absorption."
     },
     {
         .module_id = "manifold_algebra",

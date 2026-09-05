@@ -5,6 +5,8 @@
 #include "gateway.h"
 #include "smt.h"
 #include "flowy.h"
+#include "jit.h"
+#include "adaptive.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -231,6 +233,48 @@ int main(void) {
         FLOW_ASSERT_EQ(doc_ir.input_max_count, 5000);
 
         printf("  ✓ Stage 5 Passed: Markdown prose with embedded ```flow code block compiled directly.\n\n");
+    }
+
+    /* ========================================================================= */
+    /* STAGE 6: Classical Adaptive Control, Hysteresis & SMT Watchdog Invariants */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(6, "Classical Adaptive Control: JIT Quota Sizing, Schmitt Hysteresis & SMT Watchdog");
+    {
+        /* 6a. AST Complexity Driven JIT Memory Sizing */
+        SemanticIR ir11;
+        memset(&ir11, 0, sizeof(ir11));
+        ir11.flow_node_count = 11;
+        int jit_ram_11 = flow_jit_calculate_min_memory_mb(&ir11);
+        FLOW_ASSERT_EQ(jit_ram_11, 100);
+
+        /* 6b. Schmitt Trigger Anti-Flapping Hysteresis */
+        FlowSchmittTrigger st;
+        flow_schmitt_trigger_init(&st, 100.0, 500000000ULL);
+        FLOW_ASSERT_EQ((int)st.drop_threshold, 80);
+        FLOW_ASSERT_EQ((int)st.recovery_threshold, 150);
+
+        /* Drop to 16MB */
+        int changed = 0;
+        flow_schmitt_trigger_update(&st, 16.0, 1000ULL, &changed);
+        FLOW_ASSERT_EQ(st.current_state, 1);
+        FLOW_ASSERT_EQ(changed, 1);
+
+        /* Reject flapping around 95MB <-> 105MB (must NOT flap back) */
+        flow_schmitt_trigger_update(&st, 95.0, 2000ULL, &changed);
+        FLOW_ASSERT_EQ(st.current_state, 1);
+        FLOW_ASSERT_EQ(changed, 0);
+        flow_schmitt_trigger_update(&st, 105.0, 3000ULL, &changed);
+        FLOW_ASSERT_EQ(st.current_state, 1);
+        FLOW_ASSERT_EQ(changed, 0);
+
+        /* 6c. SMT Watchdog Conservative Polytope Fallback (<10us budget) */
+        FlowSMTProofAttestation watchdog_proof;
+        Component dummy_comp = { .id = "test_comp" };
+        int smt_ok = flow_smt_verify_with_budget(&ir11, &dummy_comp, NULL, NULL, 5, &watchdog_proof);
+        FLOW_ASSERT_TRUE(smt_ok == 1);
+        FLOW_ASSERT_TRUE(strstr(watchdog_proof.proof_summary, "Conservative Polytope Interval Bounding Box") != NULL);
+
+        printf("  ✓ Stage 6 Passed: JIT sizing (100MB), Schmitt hysteresis (anti-flapping), and SMT 5us watchdog verified.\n\n");
     }
 
     FLOW_TEST_SUITE_END();

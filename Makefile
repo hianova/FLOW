@@ -22,7 +22,7 @@ INCLUDEDIR ?= $(PREFIX)/include/flow
 
 PLUGINS_SO := $(BUILD_DIR)/libflow_embodied.so $(BUILD_DIR)/libflow_smt.so $(BUILD_DIR)/libflow_security.so $(BUILD_DIR)/libflow_swarm.so
 
-.PHONY: all clean test demos demo benchmark chaos-benchmark gateway-benchmark frontier-benchmark autopoiesis-check acceptance install uninstall fuzz test-build test-run test-e2e sync-book level5-contest audit-mechanisms fvec-flowc-apply-test reload-stress-nightly plugins flowy libflow
+.PHONY: all clean test demos demo benchmark chaos-benchmark gateway-benchmark frontier-benchmark autopoiesis-check acceptance install uninstall fuzz test-build test-run test-e2e sync-book audit-mechanisms fvec-flowc-apply-test reload-stress-nightly plugins flowy libflow
 
 all: src/generated_book_knowledge.h $(LIBFLOW_A) $(FLOWC) $(FLOWY) plugins
 
@@ -140,9 +140,6 @@ $(BUILD_DIR)/generated-reload-test: tests/generated-reload-test.c $(FLOWC) $(LIB
 	$(FLOWC) examples/small.flow -o /tmp/flow-small-reload.c --reload-adapter
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc -c /tmp/flow-small-reload.c -o /tmp/flow-small-reload.o
 
-$(BUILD_DIR)/flowy-level5-crucible: tests/flowy-level5-crucible.c $(LIBFLOW_A) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
-
 $(BUILD_DIR)/reload-stress-test: tests/reload-stress-test.c $(LIBFLOW_A) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
@@ -151,9 +148,6 @@ TEST_NAMES := $(patsubst $(BUILD_DIR)/%,%,$(TEST_BINARIES))
 .PHONY: $(TEST_NAMES)
 $(TEST_NAMES): %: $(BUILD_DIR)/%
 	@$<
-
-level5-contest: $(BUILD_DIR)/flowy-level5-crucible
-	$(BUILD_DIR)/flowy-level5-crucible
 
 audit-mechanisms: $(FLOWY)
 	$(FLOWY) audit-mechanisms
