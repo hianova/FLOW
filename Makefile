@@ -22,7 +22,7 @@ INCLUDEDIR ?= $(PREFIX)/include/flow
 
 PLUGINS_SO := $(BUILD_DIR)/libflow_embodied.so $(BUILD_DIR)/libflow_smt.so $(BUILD_DIR)/libflow_security.so $(BUILD_DIR)/libflow_swarm.so
 
-.PHONY: all clean test demos demo benchmark chaos-benchmark gateway-benchmark frontier-benchmark autopoiesis-check acceptance install uninstall fuzz test-build test-run test-e2e sync-book audit-mechanisms fvec-flowc-apply-test reload-stress-nightly plugins flowy libflow
+.PHONY: all clean test demos demo benchmark chaos-benchmark gateway-benchmark frontier-benchmark audit-book autopoiesis-check acceptance install uninstall fuzz test-build test-run test-e2e sync-book audit-mechanisms fvec-flowc-apply-test reload-stress-nightly plugins flowy libflow
 
 all: src/generated_book_knowledge.h $(LIBFLOW_A) $(FLOWC) $(FLOWY) plugins
 
@@ -106,6 +106,10 @@ gateway-benchmark: tests/gateway-autonomous-benchmark.c $(LIBFLOW_A) | $(BUILD_D
 frontier-benchmark: tests/frontier-4pillars-benchmark.c $(LIBFLOW_A) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $(BUILD_DIR)/frontier-4pillars-benchmark $(LDLIBS)
 	$(BUILD_DIR)/frontier-4pillars-benchmark
+
+audit-book: tests/audit-flow-book-all.c $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $(BUILD_DIR)/audit-flow-book-all $(LDLIBS)
+	$(BUILD_DIR)/audit-flow-book-all
 
 # ==============================================================================
 # Two-Stage Native Makefile Test Pipeline (Native Hermetic Barrier)
