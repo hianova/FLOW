@@ -146,13 +146,6 @@ $(BUILD_DIR)/flowy-level5-crucible: tests/flowy-level5-crucible.c $(LIBFLOW_A) |
 $(BUILD_DIR)/reload-stress-test: tests/reload-stress-test.c $(LIBFLOW_A) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
-# Fallback pattern rules for archived micro-tests
-$(BUILD_DIR)/%-test: tests/%-test.c $(LIBFLOW_A) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
-
-$(BUILD_DIR)/%-test: tests/archive/%-test.c $(LIBFLOW_A) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
-
 # Backward-compatible convenience shortcuts to build & execute any domain test
 TEST_NAMES := $(patsubst $(BUILD_DIR)/%,%,$(TEST_BINARIES))
 .PHONY: $(TEST_NAMES)
