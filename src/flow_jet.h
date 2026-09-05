@@ -36,9 +36,18 @@ extern "C" {
  * ============================================================================
  */
 
+#define FLOW_JET_STANDARD_DIM 16
 #define FLOW_JET_DIM 16
+#define FLOW_JET_MAX_DIM 64
+
+#define FLOW_JET_STANDARD_KOOPMAN_DIM 8
 #define FLOW_JET_KOOPMAN_DIM 8
+#define FLOW_JET_MAX_KOOPMAN_DIM 16
+
+#define FLOW_JET_STANDARD_TAPS 8
 #define FLOW_JET_MEMORY_KERNEL_TAPS 8
+#define FLOW_JET_MAX_TAPS 16
+
 #define FLOW_FJET_MAGIC "FJET_V1"
 #define FLOW_FJET_HEADER_SIZE 1024
 #define FLOW_FJET_DEFAULT_DIR ".flow/jets"
@@ -58,11 +67,14 @@ typedef struct {
     char smt_signature[64];        /* e.g., "SYMPLECTIC_UNSAT:KOOPMAN_UNSAT" */
     double hamiltonian_energy;     /* Total phase-space energy H(q, p) */
     uint64_t created_at_unix;      /* Epoch timestamp */
-    uint32_t vector_dim;           /* Always 16 */
+    uint32_t vector_dim;           /* Active coordinate dimensions (1..64, default 16) */
     uint32_t payload_size;         /* Size of payload bytes */
     uint32_t confidence_score;     /* Hebbian learning weight */
     uint64_t last_reinforced_unix; /* Timestamp of last activation */
     uint8_t is_auto_promoted;      /* 1 if evolved online */
+    uint8_t koopman_dim;           /* Active Koopman observables (1..16, default 8) */
+    uint8_t memory_taps;           /* Active memory taps (1..16, default 8) */
+    uint8_t reserved_flags;        /* Reserved alignment */
     char content_hash[32];         /* 16-hex content hash string */
     char filepath[256];            /* Filepath when loaded from disk */
 } FlowJetHeader;
@@ -71,11 +83,11 @@ typedef struct {
 /* 2. Jet Binary Payload (Phase Space Coordinates & Operators)               */
 /* ------------------------------------------------------------------------- */
 typedef struct {
-    double q[FLOW_JET_DIM];                     /* Generalized coordinates (128 bytes) */
-    double p[FLOW_JET_DIM];                     /* Conjugate momentum / velocity \dot{q} (128 bytes) */
-    double a[FLOW_JET_DIM];                     /* Geodesic acceleration \ddot{q} (128 bytes) */
-    double memory_kernel[FLOW_JET_MEMORY_KERNEL_TAPS]; /* Mori-Zwanzig decay taps (64 bytes) */
-    double koopman_matrix[FLOW_JET_KOOPMAN_DIM][FLOW_JET_KOOPMAN_DIM]; /* Koopman transfer matrix (512 bytes) */
+    double q[FLOW_JET_MAX_DIM];                     /* Generalized coordinates (512 bytes) */
+    double p[FLOW_JET_MAX_DIM];                     /* Conjugate momentum / velocity \dot{q} (512 bytes) */
+    double a[FLOW_JET_MAX_DIM];                     /* Geodesic acceleration \ddot{q} (512 bytes) */
+    double memory_kernel[FLOW_JET_MAX_TAPS];        /* Mori-Zwanzig decay taps (128 bytes) */
+    double koopman_matrix[FLOW_JET_MAX_KOOPMAN_DIM][FLOW_JET_MAX_KOOPMAN_DIM]; /* Koopman transfer matrix (2048 bytes) */
     uint64_t pure_genome;                       /* 64-bit physical architecture genome (8 bytes) */
     uint64_t hard_composite_mask;               /* 64-bit constraint mask (8 bytes) */
     uint64_t soft_composite_bias;               /* 64-bit Boltzmann probability bias (8 bytes) */
@@ -90,16 +102,55 @@ typedef struct {
 typedef struct FlowJet {
     FlowJetHeader header;
     FlowJetPayload payload;
-    double memory_integral[FLOW_JET_DIM];       /* \int_0^t K(t-s) p(s) ds */
+    double memory_integral[FLOW_JET_MAX_DIM];   /* \int_0^t K(t-s) p(s) ds */
     uint64_t last_update_ns;
 } FlowJet;
 
 /* ------------------------------------------------------------------------- */
-/* 4. Core Phase Space & Symplectic APIs                                     */
+/* 4. Online Streaming Extended Dynamic Mode Decomposition (Streaming EDMD) */
+/* ------------------------------------------------------------------------- */
+typedef struct {
+    double P[FLOW_JET_MAX_KOOPMAN_DIM][FLOW_JET_MAX_KOOPMAN_DIM]; /* Inverse covariance matrix P */
+    double A[FLOW_JET_MAX_KOOPMAN_DIM][FLOW_JET_MAX_KOOPMAN_DIM]; /* Discrete transfer operator A = exp(K*dt) */
+    double K[FLOW_JET_MAX_KOOPMAN_DIM][FLOW_JET_MAX_KOOPMAN_DIM]; /* Continuous generator K */
+    double forgetting_factor;                                     /* RLS forgetting factor \lambda (0.95 ~ 0.999) */
+    uint32_t dim;                                                 /* Active Koopman dimension */
+    uint64_t update_count;                                        /* Total streaming snapshot pairs processed */
+} FlowJetStreamingEDMD;
+
+int flow_jet_edmd_init(FlowJetStreamingEDMD *edmd, uint32_t dim, double forgetting_factor);
+int flow_jet_edmd_update(FlowJetStreamingEDMD *edmd, const double x_curr[], const double x_next[], double dt);
+int flow_jet_apply_learned_koopman(FlowJet *jet, const FlowJetStreamingEDMD *edmd);
+int flow_jet_stream_learn_step(FlowJet *jet, FlowJetStreamingEDMD *edmd, const double pmu_obs[], double dt);
+
+/* ------------------------------------------------------------------------- */
+/* 5. PMU Hardware Telemetry & Nonlinear Potential Landscape                 */
+/* ------------------------------------------------------------------------- */
+typedef struct {
+    uint32_t dim;
+    double q_equilibrium[FLOW_JET_MAX_DIM]; /* Nominal baseline equilibrium coordinates q* */
+    double omega[FLOW_JET_MAX_DIM];         /* Harmonic frequency / stiffness */
+    double q_saturation[FLOW_JET_MAX_DIM];  /* Physical hardware capacity barrier thresholds */
+    double barrier_mu;                      /* Hyperbolic barrier strength parameter */
+    double moreau_low[FLOW_JET_MAX_DIM];    /* Moreau convex set lower boundary */
+    double moreau_high[FLOW_JET_MAX_DIM];   /* Moreau convex set upper boundary */
+    double moreau_kappa;                    /* Non-smooth normal cone restoring force scale */
+} FlowJetPotentialLandscape;
+
+int flow_jet_potential_init_default(FlowJetPotentialLandscape *landscape, uint32_t dim);
+int flow_jet_potential_eval_gradient(const FlowJetPotentialLandscape *landscape, const double q[], double grad_out[]);
+int flow_jet_symplectic_step_with_potential(FlowJet *jet, const FlowJetPotentialLandscape *landscape, double dt);
+
+/* ------------------------------------------------------------------------- */
+/* 6. Core Phase Space & Symplectic APIs                                     */
 /* ------------------------------------------------------------------------- */
 
-/* Initialize a Jet with default resting momentum and canonical Koopman generator */
+/* Initialize a Jet with default 16-D coordinates and canonical Koopman generator */
 int flow_jet_init(FlowJet *jet, const char *id, const char *name);
+
+/* Initialize a Jet with extended/flexible dimensions up to 64 */
+int flow_jet_init_extended(FlowJet *jet, const char *id, const char *name,
+                           uint32_t dim, uint32_t koopman_dim, uint32_t taps);
 
 /* Calculate total Hamiltonian energy: H(q, p) = 0.5 * |p|^2 + V(q) */
 double flow_jet_hamiltonian(const FlowJet *jet);
@@ -108,7 +159,7 @@ double flow_jet_hamiltonian(const FlowJet *jet);
 int flow_jet_symplectic_step(FlowJet *jet, double dt);
 
 /* Koopman linear observable prediction: g_{t+dt} = exp(K * dt) * g_t */
-int flow_jet_koopman_predict(const FlowJet *jet, double dt, double observable_out[FLOW_JET_KOOPMAN_DIM]);
+int flow_jet_koopman_predict(const FlowJet *jet, double dt, double *observable_out);
 
 /* Mori-Zwanzig memory convolution update */
 int flow_jet_mori_zwanzig_step(FlowJet *jet, double dt);
@@ -117,7 +168,7 @@ int flow_jet_mori_zwanzig_step(FlowJet *jet, double dt);
 double flow_jet_phase_distance(const FlowJet *a, const FlowJet *b);
 
 /* ------------------------------------------------------------------------- */
-/* 5. Serialization & Conversion APIs                                        */
+/* 7. Serialization & Conversion APIs                                        */
 /* ------------------------------------------------------------------------- */
 
 uint32_t flow_jet_crc32(const void *data, size_t length);
@@ -130,7 +181,7 @@ int flow_jet_from_fvec(const FlowVecHeader *hdr, const FlowVecPayload *payload, 
 int flow_jet_to_fvec(const FlowJet *jet, FlowVecHeader *hdr_out, FlowVecPayload *payload_out);
 
 /* ------------------------------------------------------------------------- */
-/* 6. Formal SMT Verification of Symplectic Safety & Koopman Stability       */
+/* 8. Formal SMT Verification of Symplectic Safety & Koopman Stability       */
 /* ------------------------------------------------------------------------- */
 FlowSMTResult flow_jet_verify_symplectic_soundness_smt(const FlowJet *jet,
                                                        FlowSMTProofAttestation *proof_out);

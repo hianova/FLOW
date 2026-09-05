@@ -34,6 +34,14 @@ void flowy_print_counterfactual_report(const FlowCounterfactualReport *report, F
 void flowy_print_remediation_proposal(const FlowRemediationProposal *proposal, FILE *out);
 void flowy_print_autopilot_incident(const FlowAutopilotIncident *incident, FILE *out);
 
+/* Jet Bundle Inspection & Phase Portrait Rendering */
+struct FlowJet;
+struct FlowJetPotentialLandscape;
+void flowy_print_jet_inspection(const struct FlowJet *jet, FILE *out);
+void flowy_render_phase_portrait(const struct FlowJet *jet, uint32_t dim_x, uint32_t dim_y, int steps, double dt, FILE *out);
+int flowy_jet_simulate_run(const struct FlowJet *jet, int steps, double dt, FILE *out);
+int flowy_jet_learn_demo(struct FlowJet *jet, int sample_count, FILE *out);
+
 /* Interactive REPL Loop */
 int flowy_interactive_loop(FlowOrchestrator *orch, FILE *in, FILE *out);
 

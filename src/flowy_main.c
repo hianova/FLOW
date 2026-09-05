@@ -1,10 +1,12 @@
 #include "flowy.h"
+#include "flowy_cli.h"
 #include "topology.h"
 #include "registry.h"
 #include "benchmark.h"
 #include "orchestrator.h"
 #include "generated_book_knowledge.h"
 #include "flowy_fvec.h"
+#include "flow_jet.h"
 #include "backend.h"
 
 #include <stdio.h>
@@ -165,6 +167,11 @@ static void flowy_print_usage(FILE *out) {
     fprintf(out, "      remediate [flags]    Crisis defense & gene bank remediation\n");
     fprintf(out, "      hub [search|pull...] Ecosystem community gene hub\n");
     fprintf(out, "      gc [--max-age <s>]   LRU eviction of senescent auto-models\n\n");
+    fprintf(out, "  jet <subcommand>         Phase Space Jet Bundles (.fjet) & Koopman physics\n");
+    fprintf(out, "      inspect <file.fjet>  Inspect phase coordinates, spectrum & SMT proof\n");
+    fprintf(out, "      sim <file.fjet>      Symplectic orbit leapfrog simulation\n");
+    fprintf(out, "      phase-portrait <f>   ASCII terminal phase space (q, p) trajectory plot\n");
+    fprintf(out, "      learn <file.fjet>    Online Streaming EDMD assimilation & stability proof\n\n");
     fprintf(out, "  test [suite]             Execute consolidated domain test suites\n");
     fprintf(out, "      brain                BMF, BitSpace, SMT Theorems, Topology, Homology\n");
     fprintf(out, "      body                 NUMA, SIMD, Telemetry, Drivers, Bus, CXL\n");
@@ -175,11 +182,10 @@ static void flowy_print_usage(FILE *out) {
     fprintf(out, "Legacy Shortcuts (Direct Execution):\n");
     fprintf(out, "  flowy [absorb|anneal|landscape|refactor|morph|what-if|remediate|autopilot|daemon]\n");
     fprintf(out, "  flowy [why|timeline|bottleneck|audit|audit-mechanisms|doc|book|ask]\n");
-    fprintf(out, "  flowy [rag|vault|antibody|query|hub]\n\n");
+    fprintf(out, "  flowy [rag|vault|antibody|query|hub|jet]\n\n");
     fprintf(out, "Global Options:\n");
     fprintf(out, "  -h, --help, help         Show this help message\n");
-    fprintf(out, "  -v, --version, version   Display version information\n");
-    fprintf(out, "  -l, --lang <zh|en>       Set UI rendering language\n");
+    fprintf(out, "  -v, --version, version   Show FLOW version & runtime telemetry\n\n");
 }
 
 static void flowy_print_topo_usage(FILE *out) {
@@ -223,6 +229,15 @@ static void flowy_print_fvec_usage(FILE *out) {
     fprintf(out, "  remediate [--ram <pct>]  Autonomous crisis defense & gene remediation\n");
     fprintf(out, "  hub [search|pull|push]   Community ecosystem gene vault repository\n");
     fprintf(out, "  gc [--max-age <sec>]     Evict senescent auto-models\n");
+}
+
+static void flowy_print_jet_usage(FILE *out) {
+    fprintf(out, "Usage: flowy jet <subcommand> [options...]\n\n");
+    fprintf(out, "Subcommands:\n");
+    fprintf(out, "  inspect <file.fjet>                  Display phase coordinates, spectrum & SMT proof\n");
+    fprintf(out, "  sim <file.fjet> [--steps N] [--dt D] Symplectic orbit leapfrog simulation\n");
+    fprintf(out, "  phase-portrait <file.fjet> [options] ASCII terminal phase space (q, p) trajectory plot\n");
+    fprintf(out, "  learn <file.fjet> [--samples N]      Online Streaming EDMD assimilation & stability proof\n");
 }
 
 static void flowy_print_test_usage(FILE *out) {
@@ -377,6 +392,14 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[2], "antibody") == 0) {
             argc--;
             argv++;
+        }
+    }
+
+    /* 7. Hierarchical jet Namespace sub-routing */
+    if (strcmp(argv[1], "jet") == 0 && argc >= 3) {
+        if (strcmp(argv[2], "-h") == 0 || strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "help") == 0) {
+            flowy_print_jet_usage(stdout);
+            return EXIT_SUCCESS;
         }
     }
 
@@ -769,6 +792,100 @@ int main(int argc, char **argv) {
 
         fprintf(stderr, "Unknown fvec action: %s\n", action);
         fprintf(stderr, "usage: flowy fvec [list|inspect <file>|export <id> <file>|query <prompt>|remediate|seed|gc]\n");
+        return EXIT_FAILURE;
+    }
+
+    /* 24b. Phase Space Jet Bundles (.fjet) & Koopman Physics (flowy jet) */
+    if (strcmp(argv[1], "jet") == 0 || strcmp(argv[1], "--jet") == 0) {
+        if (argc < 3 || strcmp(argv[2], "-h") == 0 || strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "help") == 0) {
+            flowy_print_jet_usage(stdout);
+            return (argc < 3) ? EXIT_FAILURE : EXIT_SUCCESS;
+        }
+
+        const char *action = argv[2];
+        int arg_offset = 3;
+
+        /* Subcommand: flowy jet inspect <file.fjet> */
+        if (strcmp(action, "inspect") == 0 || strcmp(action, "show") == 0) {
+            if (arg_offset >= argc) {
+                fprintf(stderr, "usage: flowy jet inspect <file.fjet>\n");
+                return EXIT_FAILURE;
+            }
+            FlowJet jet;
+            if (!flow_jet_read_file(argv[arg_offset], &jet)) {
+                fprintf(stderr, "flowy jet: failed to load or verify '%s'\n", argv[arg_offset]);
+                return EXIT_FAILURE;
+            }
+            flowy_print_jet_inspection(&jet, stdout);
+            return EXIT_SUCCESS;
+        }
+
+        /* Subcommand: flowy jet sim <file.fjet> [--steps N] [--dt D] */
+        if (strcmp(action, "sim") == 0 || strcmp(action, "simulate") == 0) {
+            if (arg_offset >= argc) {
+                fprintf(stderr, "usage: flowy jet sim <file.fjet> [--steps N] [--dt D]\n");
+                return EXIT_FAILURE;
+            }
+            const char *filepath = argv[arg_offset++];
+            int steps = 20;
+            double dt = 0.01;
+            for (int i = arg_offset; i < argc; ++i) {
+                if (strcmp(argv[i], "--steps") == 0 && i + 1 < argc) steps = atoi(argv[++i]);
+                else if (strcmp(argv[i], "--dt") == 0 && i + 1 < argc) dt = atof(argv[++i]);
+            }
+            FlowJet jet;
+            if (!flow_jet_read_file(filepath, &jet)) {
+                fprintf(stderr, "flowy jet: failed to load or verify '%s'\n", filepath);
+                return EXIT_FAILURE;
+            }
+            flowy_jet_simulate_run(&jet, steps, dt, stdout);
+            return EXIT_SUCCESS;
+        }
+
+        /* Subcommand: flowy jet phase-portrait <file.fjet> [--steps N] [--dt D] */
+        if (strcmp(action, "phase-portrait") == 0 || strcmp(action, "portrait") == 0) {
+            if (arg_offset >= argc) {
+                fprintf(stderr, "usage: flowy jet phase-portrait <file.fjet> [--steps N] [--dt D]\n");
+                return EXIT_FAILURE;
+            }
+            const char *filepath = argv[arg_offset++];
+            int steps = 60;
+            double dt = 0.02;
+            for (int i = arg_offset; i < argc; ++i) {
+                if (strcmp(argv[i], "--steps") == 0 && i + 1 < argc) steps = atoi(argv[++i]);
+                else if (strcmp(argv[i], "--dt") == 0 && i + 1 < argc) dt = atof(argv[++i]);
+            }
+            FlowJet jet;
+            if (!flow_jet_read_file(filepath, &jet)) {
+                fprintf(stderr, "flowy jet: failed to load or verify '%s'\n", filepath);
+                return EXIT_FAILURE;
+            }
+            flowy_render_phase_portrait(&jet, 0, 0, steps, dt, stdout);
+            return EXIT_SUCCESS;
+        }
+
+        /* Subcommand: flowy jet learn <file.fjet> [--samples N] */
+        if (strcmp(action, "learn") == 0 || strcmp(action, "edmd") == 0) {
+            if (arg_offset >= argc) {
+                fprintf(stderr, "usage: flowy jet learn <file.fjet> [--samples N]\n");
+                return EXIT_FAILURE;
+            }
+            const char *filepath = argv[arg_offset++];
+            int samples = 50;
+            for (int i = arg_offset; i < argc; ++i) {
+                if (strcmp(argv[i], "--samples") == 0 && i + 1 < argc) samples = atoi(argv[++i]);
+            }
+            FlowJet jet;
+            if (!flow_jet_read_file(filepath, &jet)) {
+                fprintf(stderr, "flowy jet: failed to load or verify '%s'\n", filepath);
+                return EXIT_FAILURE;
+            }
+            flowy_jet_learn_demo(&jet, samples, stdout);
+            return EXIT_SUCCESS;
+        }
+
+        fprintf(stderr, "Unknown jet action: %s\n", action);
+        flowy_print_jet_usage(stderr);
         return EXIT_FAILURE;
     }
 

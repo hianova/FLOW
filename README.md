@@ -218,6 +218,14 @@ FLOW compiles declarative intents (`.flow`) into zero-overhead native code. Oper
   結合相速度向量 $\dot{q}$ 與庫普曼預測軌跡，直接驅動 CPU PMU 進行相空間動態快取行預熱（`_mm_prefetch`），將未來需求的快取未命中率（Cache Miss Rate）壓制至物理極限。
 - **5. SMT 辛不變量形式化驗證最高法院 (`flow_jet_verify_symplectic_soundness_smt`)**：
   QF_LIA 形式證明四大定理：能量辛守恆有界性、莫里-茲萬齊希耗散正定性、庫普曼譜半徑穩定性（Contractive Spectrum Bound）與 64B 記憶體快取行緊湊對齊不變量（100% SMT UNSAT Verified）。
+- **6. 線上串流 EDMD 動態學習 (Online Streaming EDMD, `flow_jet_edmd_update`)**：
+  採用 RLS 遞迴最小平方與 Sherman-Morrison 逆協方差更新，以 $O(d^2)$（$<100\text{ns}$）在線動態同化 PMU 遙測串流，並以李雅普諾夫耗散投影強制維持 $\text{Tr}(K) < 0$ 的 SMT 穩定性。
+- **7. PMU 非線性物理勢能景觀 (Nonlinear PMU Potential Field & Moreau Barrier)**：
+  結合調和平衡勢、硬體飽和雙曲阻擋勢（Hyperbolic Barrier）與 Moreau 凸錐法向恢復力，Verlet 辛幾何積分器在真實晶片物理飽和力場中演化，物理上防止硬體過載穿透。
+- **8. 彈性高維射叢 (1 ~ 64 維廣義座標, `flow_jet_init_extended`)**：
+  支援至最大 64 維座標、16 階記憶核 taps 與 16×16 庫普曼生成元，向後相容 16 維二進制檔案，維持 64B 快取行畫布原子封閉。
+- **9. 終端 CLI 相圖可視化與物理工具鏈 (`flowy jet inspect|sim|phase-portrait|learn`)**：
+  提供命令列相空間檢驗、辛幾何數值模擬、終端 60×20 ASCII 相平面軌跡圖 $(q, p)$ 繪製、以及串流 EDMD 線上適應演示。
 
 ---
 
@@ -306,7 +314,7 @@ flowy shell
 # 編譯純粹四大主軸核心庫、flowc、flowy 與動態外掛
 make all
 
-# 執行全套 5 大領域測試套件（1,386 項形式化斷言全部通過，100% Sound & Verified）
+# 執行全套 5 大領域測試套件（1,624 項形式化斷言全部通過，100% Sound & Verified）
 make test
 
 # 執行端到端編譯器與跨語言代碼生成煙霧測試

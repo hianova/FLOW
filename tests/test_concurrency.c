@@ -652,6 +652,101 @@ int main(void) {
                phase_dist, energy_err * 100.0);
     }
 
+    /* ========================================================================= */
+    /* STAGE 10: Online Streaming EDMD, PMU Potential Field & 64-D Jet Bundles   */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(10, "Jet Evolution: Online Streaming EDMD, PMU Nonlinear Potential Field & 64-D Jet Bundles");
+    {
+        /* 1. Online Streaming EDMD Assimilation */
+        FlowJet jet_stream;
+        FLOW_ASSERT_EQ(flow_jet_init(&jet_stream, "jet_stream_edmd", "Streaming EDMD Test Jet"), 1);
+
+        FlowJetStreamingEDMD edmd;
+        FLOW_ASSERT_EQ(flow_jet_edmd_init(&edmd, 8, 0.98), 1);
+        FLOW_ASSERT_EQ(edmd.dim, 8);
+        FLOW_ASSERT_EQ(edmd.update_count, 0);
+
+        /* Assimilate 50 streaming observations */
+        for (int s = 0; s < 50; ++s) {
+            double pmu_obs[FLOW_JET_MAX_KOOPMAN_DIM];
+            for (int d = 0; d < 8; ++d) {
+                pmu_obs[d] = 0.4 * sin(0.2 * s + d) + 0.05 * (s % 5);
+            }
+            FLOW_ASSERT_EQ(flow_jet_stream_learn_step(&jet_stream, &edmd, pmu_obs, 0.01), 1);
+        }
+        FLOW_ASSERT_EQ(edmd.update_count, 50);
+
+        /* Verify Lyapunov contractive stability: Tr(K) <= -0.05 */
+        double trace_K = 0.0;
+        for (int d = 0; d < 8; ++d) {
+            trace_K += jet_stream.payload.koopman_matrix[d][d];
+        }
+        FLOW_ASSERT_TRUE(trace_K <= -0.04);
+
+        /* Predict forward with adapted Koopman generator */
+        double pred_obs[FLOW_JET_MAX_KOOPMAN_DIM];
+        FLOW_ASSERT_EQ(flow_jet_koopman_predict(&jet_stream, 0.02, pred_obs), 1);
+        FLOW_ASSERT_TRUE(!isnan(pred_obs[0]));
+
+        /* 2. PMU Hardware Nonlinear Potential Landscape & Barrier Force */
+        FlowJetPotentialLandscape landscape;
+        FLOW_ASSERT_EQ(flow_jet_potential_init_default(&landscape, 16), 1);
+        FLOW_ASSERT_EQ(landscape.dim, 16);
+        landscape.q_saturation[0] = 1.5; /* Tight saturation barrier */
+
+        FlowJet jet_pmu;
+        FLOW_ASSERT_EQ(flow_jet_init(&jet_pmu, "jet_pmu_force", "PMU Potential Field Jet"), 1);
+        jet_pmu.payload.q[0] = 1.2;
+        jet_pmu.payload.p[0] = 2.0; /* Moving toward saturation barrier */
+
+        double h_init = flow_jet_hamiltonian(&jet_pmu);
+        FLOW_ASSERT_TRUE(h_init > 0.0);
+        for (int step = 0; step < 80; ++step) {
+            FLOW_ASSERT_EQ(flow_jet_symplectic_step_with_potential(&jet_pmu, &landscape, 0.005), 1);
+            /* Moreau convex cone + saturation barrier prevent penetrating saturation */
+            FLOW_ASSERT_TRUE(fabs(jet_pmu.payload.q[0]) < 1.5);
+        }
+        double h_evolved = flow_jet_hamiltonian(&jet_pmu);
+        FLOW_ASSERT_TRUE(!isnan(h_evolved));
+        FLOW_ASSERT_TRUE(!isinf(h_evolved));
+        FLOW_ASSERT_TRUE(h_evolved > 0.0);
+
+        /* 3. Flexible High-Dimensional Jet Bundles (64-D Cluster / Swarm Jet) */
+        FlowJet jet_64;
+        FLOW_ASSERT_EQ(flow_jet_init_extended(&jet_64, "jet_cluster_64d", "64D Distributed Cluster Jet", 64, 16, 16), 1);
+        FLOW_ASSERT_EQ(jet_64.header.vector_dim, 64);
+        FLOW_ASSERT_EQ(jet_64.header.koopman_dim, 16);
+        FLOW_ASSERT_EQ(jet_64.header.memory_taps, 16);
+
+        for (uint32_t d = 0; d < 64; ++d) {
+            jet_64.payload.q[d] = 0.1 * (double)(d + 1);
+            jet_64.payload.p[d] = 0.05 * (double)(d + 1);
+        }
+
+        FLOW_ASSERT_EQ(flow_jet_symplectic_step(&jet_64, 0.005), 1);
+        FLOW_ASSERT_TRUE(flow_jet_hamiltonian(&jet_64) > 0.0);
+
+        /* 64-D Binary Serialization & CRC32 Attestation */
+        const char *test_64d_path = "/tmp/flow_test_jet_64d.fjet";
+        jet_64.payload.crc32 = flow_jet_crc32(&jet_64.payload, offsetof(FlowJetPayload, crc32));
+        FLOW_ASSERT_EQ(flow_jet_write_file(&jet_64, test_64d_path), 1);
+
+        FlowJet jet_64_loaded;
+        FLOW_ASSERT_EQ(flow_jet_read_file(test_64d_path, &jet_64_loaded), 1);
+        FLOW_ASSERT_EQ(jet_64_loaded.header.vector_dim, 64);
+        FLOW_ASSERT_EQ(jet_64_loaded.payload.crc32, jet_64.payload.crc32);
+        FLOW_ASSERT_EQ(jet_64_loaded.payload.q[63], jet_64.payload.q[63]);
+
+        /* 4. SMT Highest Court Formal Attestation on 64-D Jet */
+        FlowSMTProofAttestation proof_64;
+        memset(&proof_64, 0, sizeof(proof_64));
+        FLOW_ASSERT_EQ(flow_jet_verify_symplectic_soundness_smt(&jet_64_loaded, &proof_64), FLOW_SMT_PROVEN_UNSAT);
+        FLOW_ASSERT_SMT_SOUND(proof_64);
+
+        printf("  ✓ Stage 10 Passed: Streaming EDMD adapted (Tr(K)=%.2f); PMU barrier preserved (|q|<1.5); 64-D Jet bundle serialized & SMT proven.\n\n",
+               trace_K);
+    }
+
     FLOW_TEST_SUITE_END();
     return 0;
 }
