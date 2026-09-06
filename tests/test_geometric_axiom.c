@@ -1,5 +1,6 @@
 #include "flow_test_kit.h"
 #include "geometric_axiom.h"
+#include "flow_jet.h"
 
 #include <stdio.h>
 #include <stdlib.h>

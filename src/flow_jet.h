@@ -6,6 +6,7 @@
 #include "bitmanifold.h"
 #include "flowy_fvec.h"
 #include "smt.h"
+#include "geometric_axiom.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -80,38 +81,33 @@ typedef struct {
 } FlowJetHeader;
 
 /* ------------------------------------------------------------------------- */
-/* 2a. Thermodynamic Contact Geometry & Thermal Diffusion State              */
-/* ------------------------------------------------------------------------- */
-typedef struct FlowThermalState {
-    double temp_c;            /* Current die / junction temperature (°C) */
-    double temp_ambient_c;    /* Ambient chassis temperature (°C, default 50.0) */
-    double dtemp_dt;          /* Thermal rate of change (°C/s) */
-    double r_thermal;         /* Thermal resistance (°C/W, default 6.0) */
-    double c_thermal;         /* Thermal capacitance (J/°C, default 0.05) */
-    double temp_throttle_c;   /* Hardware throttling trip point (default 95.0°C) */
-    double temp_target_c;     /* Proactive cooling target ceiling (default 85.0°C) */
-    double active_power_w;    /* Estimated / measured power consumption (W) */
-    uint64_t throttle_events; /* Count of thermal throttling events detected */
-    uint8_t is_throttled;     /* 1 if hardware throttled down to base clock */
-    uint8_t reserved[7];      /* 64-bit alignment padding */
-} FlowThermalState;
-
-/* ------------------------------------------------------------------------- */
-/* 2b. Jet Binary Payload (Phase Space Coordinates & Operators)               */
+/* 2. Consolidated Jet Binary Payload (Unified Section + Operators)          */
 /* ------------------------------------------------------------------------- */
 typedef struct {
-    double q[FLOW_JET_MAX_DIM];                     /* Generalized coordinates (512 bytes) */
-    double p[FLOW_JET_MAX_DIM];                     /* Conjugate momentum / velocity \dot{q} (512 bytes) */
-    double a[FLOW_JET_MAX_DIM];                     /* Geodesic acceleration \ddot{q} (512 bytes) */
-    double s;                                       /* Contact action / thermodynamic dissipation coordinate (8 bytes) */
-    FlowThermalState thermal;                       /* Thermodynamic diffusion & DVFS throttling state */
+    union {
+        FlowUnifiedSection section;                     /* Consolidated Unified Manifold Section */
+        struct {
+            double q[FLOW_JET_MAX_DIM];                 /* Generalized coordinates (512 bytes) */
+            double p[FLOW_JET_MAX_DIM];                 /* Conjugate momentum / velocity \dot{q} (512 bytes) */
+            double a[FLOW_JET_MAX_DIM];                 /* Geodesic acceleration \ddot{q} (512 bytes) */
+            double s;                                   /* Contact action / thermodynamic dissipation coordinate (8 bytes) */
+            double transversality_margin;               /* Direct distance margin to forbidden submanifolds */
+            int64_t lattice_idx[FLOW_AXIOM_LATTICE_DIM];/* Lattice multi-index */
+            uint32_t optimal_tile_size;                 /* T* provably maximizing L1/L2 data reuse */
+            uint32_t optimal_simd_width;                /* V* provably hazard-free vector width */
+            uint64_t total_lattice_points;              /* Exact integer cardinality |D| */
+            uint64_t bmf_subspace_mask;                 /* 64-bit coordinate subspace mask */
+            FlowBmf1BitCanvas staged_canvas;            /* 64-byte single cache-line switchboard canvas */
+            double curvature_spectrum[FLOW_AXIOM_DIM];  /* Principal metric curvatures */
+            FlowThermalState thermal;                   /* Thermodynamic diffusion & DVFS throttling state */
+            FlowSMTProofAttestation proof;              /* 4-theorem zero-defect formal status */
+        };
+    };
     double memory_kernel[FLOW_JET_MAX_TAPS];        /* Mori-Zwanzig decay taps (128 bytes) */
     double koopman_matrix[FLOW_JET_MAX_KOOPMAN_DIM][FLOW_JET_MAX_KOOPMAN_DIM]; /* Koopman transfer matrix (2048 bytes) */
     uint64_t pure_genome;                       /* 64-bit physical architecture genome (8 bytes) */
     uint64_t hard_composite_mask;               /* 64-bit constraint mask (8 bytes) */
     uint64_t soft_composite_bias;               /* 64-bit Boltzmann probability bias (8 bytes) */
-    FlowBmf1BitCanvas staged_canvas;            /* 64-byte single cache-line switchboard canvas */
-    FlowSMTProofAttestation proof;              /* 4-theorem zero-defect formal status */
     uint32_t crc32;                             /* Checksum (4 bytes) */
 } FlowJetPayload;
 

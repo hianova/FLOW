@@ -1,5 +1,5 @@
 #include "geometric_axiom.h"
-#include "flow_smt_dsl.h"
+#include "flow_jet.h"
 
 #include <math.h>
 #include <string.h>
@@ -15,10 +15,10 @@ int flow_axiom_init(FlowUnifiedSection *sec, const char *intent) {
 
     /* Initialize base continuous coordinates q and resting momentum p */
     for (size_t i = 0; i < FLOW_AXIOM_DIM; ++i) {
-        sec->q[i] = 1.0 + 0.1 * (double)(i % 4);
+        sec->q[i] = 0.0;
         sec->p[i] = 0.0;
-        sec->a[i] = -sec->q[i];
-        sec->curvature_spectrum[i] = 1.0 + 0.05 * (double)(i % 4);
+        sec->a[i] = 0.0;
+        sec->curvature_spectrum[i] = 1.0;
     }
 
     /* Contact Action & Thermal Diffusion Baseline */
@@ -242,40 +242,41 @@ FlowSMTResult flow_axiom_verify_smt(const FlowUnifiedSection *sec,
                                     FlowSMTProofAttestation *proof_out) {
     if (sec == NULL) return FLOW_SMT_UNKNOWN;
 
-    FLOW_SMT_BOX_BUILDER_DECL(builder);
-
     /* Theorem 1: Transversality Non-Intersection (margin > 0) */
-    uint64_t trans_violation = (sec->transversality_margin > 0.0 && sec->is_transversal) ? 0 : 1;
-    FLOW_SMT_BOX_ADD_RULE(builder, "axiom_transversality", trans_violation, 0, 0,
-                          FLOW_BOX_THEOREM_BUFFER_BOUNDS, "Manifold section intersects forbidden boundary");
+    bool trans_ok = (sec->transversality_margin > 0.0 && sec->is_transversal);
 
     /* Theorem 2: Lattice Compactness & Tile Legality (T* > 0 and V* <= T*) */
-    uint64_t tile_violation = (sec->optimal_tile_size == 0 || sec->optimal_simd_width == 0 ||
-                               sec->optimal_simd_width > sec->optimal_tile_size) ? 1 : 0;
-    FLOW_SMT_BOX_ADD_RULE(builder, "axiom_tile_legality", tile_violation, 0, 0,
-                          FLOW_BOX_THEOREM_MEMORY_QUOTA, "Lattice tile size or SIMD width violates capacity quota");
+    bool tile_ok = (sec->optimal_tile_size > 0 && sec->optimal_simd_width > 0 &&
+                    sec->optimal_simd_width <= sec->optimal_tile_size);
 
     /* Theorem 3: Curvature Positive-Definiteness (All lambda_i > 0) */
-    uint64_t curvature_violation = 0;
+    bool curvature_ok = true;
     for (size_t i = 0; i < FLOW_AXIOM_DIM; ++i) {
         if (sec->curvature_spectrum[i] <= 0.0 || isnan(sec->curvature_spectrum[i])) {
-            curvature_violation = 1;
+            curvature_ok = false;
             break;
         }
     }
-    FLOW_SMT_BOX_ADD_RULE(builder, "axiom_curvature_positivity", curvature_violation, 0, 0,
-                          FLOW_BOX_THEOREM_SHARD_ISOLATION, "Curvature tensor has non-positive eigenvalue");
 
     /* Theorem 4: Single Cache-Line BMF Confinement (alignas(64) & sizeof == 64) */
-    uint64_t bmf_violation = (sizeof(FlowBmf1BitCanvas) != 64) ? 1 : 0;
-    FLOW_SMT_BOX_ADD_RULE(builder, "axiom_bmf_confinement", bmf_violation, 0, 0,
-                          FLOW_BOX_THEOREM_DETERMINISM, "BMF canvas deviates from 64-byte hardware cacheline");
+    bool bmf_ok = (sizeof(FlowBmf1BitCanvas) == 64);
 
-    FlowSMTResult res = FLOW_SMT_BOX_VERIFY(builder, "geometric_axiom_soundness", proof_out);
-    if (res == FLOW_SMT_PROVEN_UNSAT && proof_out != NULL) {
-        snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                 "AXIOM ZERO-DEFECT UNSAT: margin=%.3f, T*=%u, V*=%u, BMF_64B=YES",
-                 sec->transversality_margin, sec->optimal_tile_size, sec->optimal_simd_width);
+    if (proof_out != NULL) {
+        proof_out->buffer_bounds_safety = trans_ok ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+        proof_out->memory_quota_bound = tile_ok ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+        proof_out->shard_non_aliasing = curvature_ok ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+        proof_out->determinism_invariant = bmf_ok ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+
+        if (trans_ok && tile_ok && curvature_ok && bmf_ok) {
+            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
+                     "AXIOM ZERO-DEFECT UNSAT: margin=%.3f, T*=%u, V*=%u, BMF_64B=YES",
+                     sec->transversality_margin, sec->optimal_tile_size, sec->optimal_simd_width);
+        } else {
+            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
+                     "AXIOM VIOLATION SAT: trans=%d, tile=%d, curv=%d, bmf=%d",
+                     trans_ok, tile_ok, curvature_ok, bmf_ok);
+        }
     }
-    return res;
+
+    return (trans_ok && tile_ok && curvature_ok && bmf_ok) ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
 }

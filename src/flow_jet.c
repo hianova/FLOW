@@ -1,5 +1,5 @@
 #include "flow_jet.h"
-#include "flow_smt_dsl.h"
+#include "geometric_axiom.h"
 #include "flow_str.h"
 
 #include <stdio.h>
@@ -56,6 +56,9 @@ int flow_jet_init_extended(FlowJet *jet, const char *id, const char *name,
     jet->header.payload_size = sizeof(FlowJetPayload);
     jet->header.confidence_score = 100;
     jet->header.last_reinforced_unix = jet->header.created_at_unix;
+
+    /* Initialize Unified Geometric Axiom Section */
+    flow_axiom_init(&jet->payload.section, jet->header.trigger_intent);
 
     /* Initialize Mori-Zwanzig Memory Kernel with Exponential Decay Taps: K_i = exp(-0.4 * i) */
     for (size_t i = 0; i < eff_taps; ++i) {
@@ -693,26 +696,21 @@ FlowSMTResult flow_jet_verify_symplectic_soundness_smt(const FlowJet *jet,
                                                        FlowSMTProofAttestation *proof_out) {
     if (jet == NULL) return FLOW_SMT_UNKNOWN;
 
-    FLOW_SMT_BOX_BUILDER_DECL(builder);
-
     /* Theorem 1: Hamiltonian Energy Boundedness (E < 1.0e6) */
     double H = flow_jet_hamiltonian(jet);
-    uint64_t energy_violation = (H < 0.0 || H > 1.0e6 || isnan(H)) ? 1 : 0;
-    FLOW_SMT_BOX_ADD_RULE(builder, "hamiltonian_boundedness", energy_violation, 0, 0,
-                          FLOW_BOX_THEOREM_BUFFER_BOUNDS, "Hamiltonian phase-space energy diverged or non-conservative");
+    bool energy_ok = !(H < 0.0 || H > 1.0e6 || isnan(H));
 
     /* Theorem 2: Mori-Zwanzig Dissipation Positivity (All active taps K_i >= 0) */
     uint32_t eff_taps = jet->header.memory_taps ? jet->header.memory_taps : FLOW_JET_STANDARD_TAPS;
     if (eff_taps > FLOW_JET_MAX_TAPS) eff_taps = FLOW_JET_MAX_TAPS;
 
-    uint64_t memory_violation = 0;
+    bool memory_ok = true;
     for (size_t i = 0; i < eff_taps; ++i) {
         if (jet->payload.memory_kernel[i] < 0.0 || isnan(jet->payload.memory_kernel[i])) {
-            memory_violation++;
+            memory_ok = false;
+            break;
         }
     }
-    FLOW_SMT_BOX_ADD_RULE(builder, "mori_zwanzig_positivity", memory_violation, 0, 0,
-                          FLOW_BOX_THEOREM_MEMORY_QUOTA, "Mori-Zwanzig memory kernel contains negative non-physical taps");
 
     /* Theorem 3: Koopman Spectral Stability (Tr(K) <= 0 contractive generator) */
     uint32_t eff_kdim = jet->header.koopman_dim ? jet->header.koopman_dim : FLOW_JET_STANDARD_KOOPMAN_DIM;
@@ -722,20 +720,27 @@ FlowSMTResult flow_jet_verify_symplectic_soundness_smt(const FlowJet *jet,
     for (size_t i = 0; i < eff_kdim; ++i) {
         trace_K += jet->payload.koopman_matrix[i][i];
     }
-    uint64_t koopman_violation = (trace_K > 0.0 || isnan(trace_K)) ? 1 : 0;
-    FLOW_SMT_BOX_ADD_RULE(builder, "koopman_spectral_stability", koopman_violation, 0, 0,
-                          FLOW_BOX_THEOREM_SHARD_ISOLATION, "Koopman generator trace is positive (expansive instability)");
+    bool koopman_ok = !(trace_K > 0.0 || isnan(trace_K));
 
     /* Theorem 4: Single Cache-Line Confinement (64-byte aligned switchboard) */
-    uint64_t alignment_violation = (sizeof(FlowBmf1BitCanvas) != 64) ? 1 : 0;
-    FLOW_SMT_BOX_ADD_RULE(builder, "cache_line_confinement", alignment_violation, 0, 0,
-                          FLOW_BOX_THEOREM_DETERMINISM, "FlowBmf1BitCanvas deviates from 64-byte cache-line alignment");
+    bool alignment_ok = (sizeof(FlowBmf1BitCanvas) == 64);
 
-    FlowSMTResult res = FLOW_SMT_BOX_VERIFY(builder, "jet_symplectic_soundness", proof_out);
-    if (res == FLOW_SMT_PROVEN_UNSAT && proof_out != NULL) {
-        snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                 "SMT JET SOUND: H=%.4f, Tr(K)=%.2f, MZ_taps=%d, 64B_Confinement=YES (Zero-Defect)",
-                 H, trace_K, (int)eff_taps);
+    if (proof_out != NULL) {
+        proof_out->buffer_bounds_safety = energy_ok ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+        proof_out->memory_quota_bound = memory_ok ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+        proof_out->shard_non_aliasing = koopman_ok ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+        proof_out->determinism_invariant = alignment_ok ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+
+        if (energy_ok && memory_ok && koopman_ok && alignment_ok) {
+            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
+                     "SMT JET SOUND: H=%.4f, Tr(K)=%.2f, MZ_taps=%d, 64B_Confinement=YES (Zero-Defect)",
+                     H, trace_K, (int)eff_taps);
+        } else {
+            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
+                     "SMT JET VIOLATION: E=%d, MZ=%d, K=%d, BMF=%d",
+                     energy_ok, memory_ok, koopman_ok, alignment_ok);
+        }
     }
-    return res;
+
+    return (energy_ok && memory_ok && koopman_ok && alignment_ok) ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
 }

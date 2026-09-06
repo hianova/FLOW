@@ -2,7 +2,6 @@
 #define FLOW_GEOMETRIC_AXIOM_H
 
 #include "flow.h"
-#include "flow_jet.h"
 #include "polyhedral.h"
 #include "bitspace.h"
 #include "bitmanifold.h"
@@ -15,6 +14,25 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+typedef struct FlowJet FlowJet;
+
+/* ------------------------------------------------------------------------- */
+/* Thermodynamic Contact Geometry & Thermal Diffusion State                  */
+/* ------------------------------------------------------------------------- */
+typedef struct FlowThermalState {
+    double temp_c;            /* Current die / junction temperature (°C) */
+    double temp_ambient_c;    /* Ambient chassis temperature (°C, default 50.0) */
+    double dtemp_dt;          /* Thermal rate of change (°C/s) */
+    double r_thermal;         /* Thermal resistance (°C/W, default 6.0) */
+    double c_thermal;         /* Thermal capacitance (J/°C, default 0.05) */
+    double temp_throttle_c;   /* Hardware throttling trip point (default 95.0°C) */
+    double temp_target_c;     /* Proactive cooling target ceiling (default 85.0°C) */
+    double active_power_w;    /* Estimated / measured power consumption (W) */
+    uint64_t throttle_events; /* Count of thermal throttling events detected */
+    uint8_t is_throttled;     /* 1 if hardware throttled down to base clock */
+    uint8_t reserved[7];      /* 64-bit alignment padding */
+} FlowThermalState;
 
 /*
  * ============================================================================
@@ -31,17 +49,17 @@ extern "C" {
  * ============================================================================
  */
 
-#define FLOW_AXIOM_DIM 16
+#define FLOW_AXIOM_DIM 64
 #define FLOW_AXIOM_LATTICE_DIM 4
 
 typedef struct __attribute__((aligned(64))) {
-    /* 1. Base manifold continuous coordinates q in R^16 (128 bytes) */
+    /* 1. Base manifold continuous coordinates q in R^64 (512 bytes) */
     double q[FLOW_AXIOM_DIM];
 
-    /* 2. Cotangent fiber momentum p = \dot{q} in R^16 (128 bytes) */
+    /* 2. Cotangent fiber momentum p = \dot{q} in R^64 (512 bytes) */
     double p[FLOW_AXIOM_DIM];
 
-    /* 3. Geodesic acceleration a = \ddot{q} in R^16 (128 bytes) */
+    /* 3. Geodesic acceleration a = \ddot{q} in R^64 (512 bytes) */
     double a[FLOW_AXIOM_DIM];
 
     /* 4. Contact action / thermodynamic dissipation coordinate s in R (8 bytes) */
@@ -63,10 +81,10 @@ typedef struct __attribute__((aligned(64))) {
     uint64_t bmf_subspace_mask;
     FlowBmf1BitCanvas bmf_canvas;
 
-    /* 9. Principal Curvature Spectrum / Hessian Eigenvalues (128 bytes) */
+    /* 9. Principal Curvature Spectrum / Hessian Eigenvalues (512 bytes) */
     double curvature_spectrum[FLOW_AXIOM_DIM];
 
-    /* 10. Thermal Diffusion Junction State (72 bytes) */
+    /* 10. Thermal Diffusion Junction State (80 bytes) */
     FlowThermalState thermal;
 
     /* 11. Unified SMT Proof Attestation (272 bytes) */
@@ -76,7 +94,7 @@ typedef struct __attribute__((aligned(64))) {
     uint32_t crc32;
     uint8_t is_transversal;   /* 1 if section does not intersect forbidden manifold */
     uint8_t is_compact;       /* 1 if lattice domain is compact */
-    uint8_t reserved[18];     /* Aligned to 64-byte boundary */
+    uint8_t reserved[26];     /* Aligned to 64-byte boundary */
 } FlowUnifiedSection;
 
 /* ------------------------------------------------------------------------- */
