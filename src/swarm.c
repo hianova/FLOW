@@ -618,3 +618,112 @@ FlowSMTResult flow_hetero_mesh_verify_smt(const FlowHeteroMesh *mesh,
     return res;
 }
 
+#include <time.h>
+
+/* ------------------------------------------------------------------------- */
+/* 64-Node Lock-Free Zero-Copy Circular Descriptor Ring Mesh Implementation  */
+/* ------------------------------------------------------------------------- */
+
+int flow_swarm_ring_mesh_init(FlowSwarmRingMesh *mesh) {
+    if (mesh == NULL) return 0;
+    memset(mesh, 0, sizeof(*mesh));
+    for (size_t i = 0; i < FLOW_HETERO_RING_MAX_NODES; ++i) {
+        atomic_init(&mesh->slots[i].seq, 0);
+    }
+    return 1;
+}
+
+int flow_swarm_ring_publish(FlowSwarmRingMesh *mesh,
+                            uint8_t node_id,
+                            FlowSwarmRole role,
+                            uint16_t backpressure,
+                            uint16_t latency_p99_us,
+                            uint16_t contract_crc16,
+                            uint32_t capacity_qps,
+                            const double q[16]) {
+    if (mesh == NULL || node_id >= FLOW_HETERO_RING_MAX_NODES) return 0;
+    FlowSwarmRingSlot *slot = &mesh->slots[node_id];
+
+    /* Monotonic seqlock sequence: odd = writing in progress */
+    uint64_t prev_seq = atomic_load_explicit(&slot->seq, memory_order_relaxed);
+    atomic_store_explicit(&slot->seq, prev_seq + 1, memory_order_release);
+
+    slot->node_id = node_id;
+    slot->role = (uint8_t)role;
+    slot->backpressure_permille = backpressure;
+    slot->latency_p99_us = latency_p99_us;
+    slot->contract_crc16 = contract_crc16;
+    slot->capacity_qps = capacity_qps;
+
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    slot->timestamp_ns = (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+
+    if (q) {
+        for (size_t i = 0; i < 16; ++i) {
+            slot->q_snapshot[i] = q[i];
+        }
+    }
+
+    /* Even sequence = write complete */
+    atomic_store_explicit(&slot->seq, prev_seq + 2, memory_order_release);
+
+    if (node_id >= mesh->active_node_count) {
+        mesh->active_node_count = node_id + 1;
+    }
+    mesh->total_ring_updates++;
+    return 1;
+}
+
+int flow_swarm_ring_sample(const FlowSwarmRingMesh *mesh,
+                           uint8_t node_id,
+                           FlowSwarmRingSlot *slot_out) {
+    if (mesh == NULL || slot_out == NULL || node_id >= FLOW_HETERO_RING_MAX_NODES) return 0;
+    const FlowSwarmRingSlot *slot = &mesh->slots[node_id];
+
+    /* Seqlock read loop: ensures atomic, consistent snapshot without torn reads */
+    for (int retry = 0; retry < 16; ++retry) {
+        uint64_t s1 = atomic_load_explicit(&slot->seq, memory_order_acquire);
+        if (s1 == 0 || (s1 & 1)) continue; /* Uninitialized or mid-write */
+
+        *slot_out = *slot;
+
+        uint64_t s2 = atomic_load_explicit(&slot->seq, memory_order_acquire);
+        if (s1 == s2) {
+            ((FlowSwarmRingMesh *)mesh)->total_ring_samples++;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int flow_swarm_ring_route_lowest_energy(const FlowSwarmRingMesh *mesh,
+                                        FlowSwarmRole target_role,
+                                        uint8_t *selected_node_out) {
+    if (mesh == NULL || selected_node_out == NULL) return 0;
+
+    double lowest_energy = 1e12;
+    int found_id = -1;
+
+    size_t scan_limit = mesh->active_node_count > 0 ? mesh->active_node_count : FLOW_HETERO_RING_MAX_NODES;
+    for (size_t i = 0; i < scan_limit; ++i) {
+        const FlowSwarmRingSlot *slot = &mesh->slots[i];
+        uint64_t s = atomic_load_explicit(&slot->seq, memory_order_acquire);
+        if (s == 0) continue; /* Inactive slot */
+        if (slot->role != (uint8_t)target_role) continue;
+
+        /* Energy: backpressure + latency penalty */
+        double energy = (double)slot->backpressure_permille * 1.0 + (double)slot->latency_p99_us * 0.5;
+        if (energy < lowest_energy) {
+            lowest_energy = energy;
+            found_id = (int)slot->node_id;
+        }
+    }
+
+    if (found_id >= 0) {
+        *selected_node_out = (uint8_t)found_id;
+        return 1;
+    }
+    return 0;
+}
+

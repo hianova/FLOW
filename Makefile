@@ -121,7 +121,9 @@ TEST_BINARIES := \
 	$(BUILD_DIR)/test-body \
 	$(BUILD_DIR)/test-concurrency \
 	$(BUILD_DIR)/test-fvec-swarm \
-	$(BUILD_DIR)/test-system
+	$(BUILD_DIR)/test-system \
+	$(BUILD_DIR)/test-refactored-core \
+	$(BUILD_DIR)/poc-stress-boundaries
 
 $(BUILD_DIR)/test-brain: tests/test_brain.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
@@ -136,6 +138,12 @@ $(BUILD_DIR)/test-fvec-swarm: tests/test_fvec_swarm.c $(FLOWC) $(FLOWY) plugins 
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
 $(BUILD_DIR)/test-system: tests/test_system.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
+
+$(BUILD_DIR)/test-refactored-core: tests/test_refactored_core.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
+
+$(BUILD_DIR)/poc-stress-boundaries: tests/poc_stress_boundaries.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
 $(BUILD_DIR)/generated-reload-test: tests/generated-reload-test.c $(FLOWC) $(LIBFLOW_A) | $(BUILD_DIR)
@@ -192,8 +200,12 @@ test-run: $(TEST_BINARIES) fvec-flowc-apply-test
 	@$(BUILD_DIR)/test-concurrency
 	@echo "=== [4/5] Fvec & Swarm: Architectural Memory, Swarm Federation, Neuro-Bridge & Pre-Play ==="
 	@$(BUILD_DIR)/test-fvec-swarm
-	@echo "=== [5/5] System: Compiler Pipeline, Plugin ABI, Edge Gateway, Finance & Doc-as-Intent ==="
+	@echo "=== [5/7] System: Compiler Pipeline, Plugin ABI, Edge Gateway, Finance & Doc-as-Intent ==="
 	@$(BUILD_DIR)/test-system
+	@echo "=== [6/7] Refactored Core: Thermal Contact-Jet, Quadratic Polyhedral & 64-Node Mesh ==="
+	@$(BUILD_DIR)/test-refactored-core
+	@echo "=== [7/7] PoC Boundaries: Non-linear, 64-Swarm, Silicon Thermal Wall Stress Tests ==="
+	@$(BUILD_DIR)/poc-stress-boundaries
 
 # Phase 3: End-to-End Compiler CLI & Invariant Smoke Tests
 test-e2e: $(FLOWC) $(FLOWY) plugins

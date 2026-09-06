@@ -96,6 +96,19 @@ typedef struct {
         } \
     } while (0)
 
+#define FLOW_ASSERT_FLOAT_EQ(a, b, eps) \
+    do { \
+        _flow_test_state.total_tests++; \
+        double _diff = fabs((double)(a) - (double)(b)); \
+        if (_diff > (double)(eps)) { \
+            _flow_test_state.failed_tests++; \
+            fprintf(stderr, "❌ ASSERT_FLOAT_EQ FAILED [%s:%d]: |%s - %s| = %f > %f\n", \
+                    __FILE__, __LINE__, #a, #b, _diff, (double)(eps)); \
+        } else { \
+            _flow_test_state.passed_tests++; \
+        } \
+    } while (0)
+
 #define FLOW_ASSERT_STR_EQ(a, b) \
     do { \
         _flow_test_state.total_tests++; \

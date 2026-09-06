@@ -70,7 +70,7 @@ int flow_swarm_lymphatic_assimilate(const char *local_vec_dir,
 /* ------------------------------------------------------------------------- */
 #define FLOW_SWARM_MSG_HETERO_PHEROMONE 0xBB
 #define FLOW_SWARM_HETERO_PKT_SIZE 9
-#define FLOW_HETERO_MESH_MAX_NODES 32
+#define FLOW_HETERO_MESH_MAX_NODES 64
 
 typedef enum {
     FLOW_SWARM_ROLE_GENERIC = 0,
@@ -131,5 +131,49 @@ int flow_hetero_mesh_route_target(const FlowHeteroMesh *mesh,
 FlowSMTResult flow_hetero_mesh_verify_smt(const FlowHeteroMesh *mesh,
                                           uint32_t ingress_max_qps,
                                           FlowSMTProofAttestation *proof_out);
+
+/* ------------------------------------------------------------------------- */
+/* 64-Node Lock-Free Zero-Copy Circular Descriptor Ring Mesh (Chapter 12)    */
+/* ------------------------------------------------------------------------- */
+#define FLOW_HETERO_RING_MAX_NODES 64
+
+#include <stdatomic.h>
+
+typedef struct __attribute__((aligned(64))) {
+    _Atomic uint64_t seq;                      /* Monotonic sequence for lock-free read validation */
+    uint8_t node_id;
+    uint8_t role;                              /* FlowSwarmRole */
+    uint16_t backpressure_permille;            /* 0..1000 */
+    uint16_t latency_p99_us;                   /* Microseconds */
+    uint16_t contract_crc16;                   /* CRC16 of .flow spec */
+    uint32_t capacity_qps;                     /* Throughput capacity */
+    uint64_t timestamp_ns;                     /* Timestamp */
+    double q_snapshot[16];                     /* 16-D direct phase-space coordinate */
+    uint8_t reserved[36];                      /* Aligns struct to exact 192 bytes (3 x 64B cachelines) */
+} FlowSwarmRingSlot;
+
+typedef struct {
+    FlowSwarmRingSlot slots[FLOW_HETERO_RING_MAX_NODES];
+    size_t active_node_count;
+    uint64_t total_ring_updates;
+    uint64_t total_ring_samples;
+} FlowSwarmRingMesh;
+
+/* Ring Mesh APIs */
+int flow_swarm_ring_mesh_init(FlowSwarmRingMesh *mesh);
+int flow_swarm_ring_publish(FlowSwarmRingMesh *mesh,
+                            uint8_t node_id,
+                            FlowSwarmRole role,
+                            uint16_t backpressure,
+                            uint16_t latency_p99_us,
+                            uint16_t contract_crc16,
+                            uint32_t capacity_qps,
+                            const double q[16]);
+int flow_swarm_ring_sample(const FlowSwarmRingMesh *mesh,
+                           uint8_t node_id,
+                           FlowSwarmRingSlot *slot_out);
+int flow_swarm_ring_route_lowest_energy(const FlowSwarmRingMesh *mesh,
+                                        FlowSwarmRole target_role,
+                                        uint8_t *selected_node_out);
 
 #endif

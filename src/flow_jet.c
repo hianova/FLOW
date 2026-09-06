@@ -86,7 +86,9 @@ int flow_jet_init_extended(FlowJet *jet, const char *id, const char *name,
     jet->payload.proof.memory_quota_bound = FLOW_SMT_PROVEN_UNSAT;
     jet->payload.proof.shard_non_aliasing = FLOW_SMT_PROVEN_UNSAT;
     jet->payload.proof.determinism_invariant = FLOW_SMT_PROVEN_UNSAT;
-    strncpy(jet->payload.proof.proof_summary, "JET_BUNDLE_INITIAL_UNSAT", sizeof(jet->payload.proof.proof_summary) - 1);
+    /* Initialize Contact Action & Thermal State */
+    jet->payload.s = 0.0;
+    flow_jet_thermal_init_default(&jet->payload.thermal);
 
     jet->header.hamiltonian_energy = flow_jet_hamiltonian(jet);
     return 1;
@@ -349,6 +351,95 @@ int flow_jet_symplectic_step(FlowJet *jet, double dt) {
     flow_jet_mori_zwanzig_step(jet, dt);
 
     jet->header.hamiltonian_energy = flow_jet_hamiltonian(jet);
+    return 1;
+}
+
+/* ------------------------------------------------------------------------- */
+/* 5b. Contact Geometry & Thermodynamic Dissipation Implementation            */
+/* ------------------------------------------------------------------------- */
+
+void flow_jet_thermal_init_default(FlowThermalState *th) {
+    if (!th) return;
+    memset(th, 0, sizeof(*th));
+    th->temp_c = 45.0;
+    th->temp_ambient_c = 50.0;
+    th->dtemp_dt = 0.0;
+    th->r_thermal = 6.0;        /* 6.0 °C / W thermal resistance */
+    th->c_thermal = 0.05;       /* 0.05 J / °C silicon heat capacity */
+    th->temp_throttle_c = 95.0; /* 95.0 °C Hardware Throttling threshold */
+    th->temp_target_c = 85.0;   /* 85.0 °C Proactive ceiling */
+    th->active_power_w = 5.0;   /* 5.0 W baseline active power */
+    th->throttle_events = 0;
+    th->is_throttled = 0;
+}
+
+int flow_jet_thermal_step(FlowJet *jet, double p_active_watts, double dt_sec) {
+    if (!jet || dt_sec <= 0.0) return 0;
+    FlowThermalState *th = &jet->payload.thermal;
+    if (th->c_thermal <= 0.0) {
+        flow_jet_thermal_init_default(th);
+    }
+    if (p_active_watts >= 0.0) {
+        th->active_power_w = p_active_watts;
+    }
+
+    /* Heat dissipation: q_diss = (T - T_amb) / R_th */
+    double q_diss = (th->temp_c - th->temp_ambient_c) / th->r_thermal;
+    double net_power = th->active_power_w - q_diss;
+    th->dtemp_dt = net_power / th->c_thermal;
+
+    /* Euler integration of junction temperature */
+    th->temp_c += th->dtemp_dt * dt_sec;
+
+    /* Update Contact action S (integral of dissipated energy) */
+    jet->payload.s += th->active_power_w * dt_sec;
+
+    /* Check Hardware Throttling condition */
+    if (th->temp_c >= th->temp_throttle_c) {
+        if (!th->is_throttled) {
+            th->throttle_events++;
+            th->is_throttled = 1;
+        }
+    } else if (th->temp_c < th->temp_target_c) {
+        th->is_throttled = 0;
+    }
+
+    return 1;
+}
+
+double flow_jet_thermal_predict_horizon(const FlowJet *jet, double horizon_sec) {
+    if (!jet) return 50.0;
+    const FlowThermalState *th = &jet->payload.thermal;
+    if (th->c_thermal <= 0.0) return 50.0;
+    return th->temp_c + th->dtemp_dt * horizon_sec;
+}
+
+double flow_jet_thermal_prune_factor(const FlowJet *jet, double horizon_sec) {
+    if (!jet) return 1.0;
+    double t_pred = flow_jet_thermal_predict_horizon(jet, horizon_sec);
+    const FlowThermalState *th = &jet->payload.thermal;
+    double t_ceil = (th->temp_target_c > 0.0) ? th->temp_target_c : 85.0;
+    double t_trip = (th->temp_throttle_c > t_ceil) ? th->temp_throttle_c : 95.0;
+
+    if (t_pred <= t_ceil) {
+        return 1.0; /* Full throttle: 100% capacity */
+    }
+    /* Linear degradation from 1.0 at t_ceil down to 0.42 at t_trip */
+    double ratio = (t_pred - t_ceil) / (t_trip - t_ceil);
+    if (ratio > 1.0) ratio = 1.0;
+    double factor = 1.0 - 0.58 * ratio;
+    if (factor < 0.2) factor = 0.2;
+    return factor;
+}
+
+int flow_jet_contact_step(FlowJet *jet, double dt, double p_active_watts) {
+    if (!jet) return 0;
+    /* 1. Symplectic coordinate step */
+    int rc = flow_jet_symplectic_step(jet, dt);
+    if (!rc) return 0;
+
+    /* 2. Thermodynamic dissipation step */
+    flow_jet_thermal_step(jet, p_active_watts, dt);
     return 1;
 }
 

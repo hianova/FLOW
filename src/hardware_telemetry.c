@@ -110,3 +110,30 @@ double flow_hardware_lyapunov_metric(const FlowPhysicalProbe *probe, double cons
     double energy_penalty = probe->dissipated_energy_uj / 1000.0;
     return constraint_energy + 0.1 * cycle_penalty + 0.05 * energy_penalty;
 }
+
+#include "flow_jet.h"
+
+void flow_hardware_probe_update_thermal(const FlowPhysicalProbe *probe, FlowThermalState *thermal, double dt_sec) {
+    if (!probe || !thermal) return;
+    if (thermal->c_thermal <= 0.0) {
+        flow_jet_thermal_init_default(thermal);
+    }
+    double watts = probe->physical_power_watts > 0.0 ? probe->physical_power_watts : 5.0;
+    thermal->active_power_w = watts;
+
+    if (dt_sec > 0.0) {
+        double q_diss = (thermal->temp_c - thermal->temp_ambient_c) / thermal->r_thermal;
+        double net_power = thermal->active_power_w - q_diss;
+        thermal->dtemp_dt = net_power / thermal->c_thermal;
+        thermal->temp_c += thermal->dtemp_dt * dt_sec;
+
+        if (thermal->temp_c >= thermal->temp_throttle_c) {
+            if (!thermal->is_throttled) {
+                thermal->throttle_events++;
+                thermal->is_throttled = 1;
+            }
+        } else if (thermal->temp_c < thermal->temp_target_c) {
+            thermal->is_throttled = 0;
+        }
+    }
+}

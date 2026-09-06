@@ -80,12 +80,31 @@ typedef struct {
 } FlowJetHeader;
 
 /* ------------------------------------------------------------------------- */
-/* 2. Jet Binary Payload (Phase Space Coordinates & Operators)               */
+/* 2a. Thermodynamic Contact Geometry & Thermal Diffusion State              */
+/* ------------------------------------------------------------------------- */
+typedef struct FlowThermalState {
+    double temp_c;            /* Current die / junction temperature (°C) */
+    double temp_ambient_c;    /* Ambient chassis temperature (°C, default 50.0) */
+    double dtemp_dt;          /* Thermal rate of change (°C/s) */
+    double r_thermal;         /* Thermal resistance (°C/W, default 6.0) */
+    double c_thermal;         /* Thermal capacitance (J/°C, default 0.05) */
+    double temp_throttle_c;   /* Hardware throttling trip point (default 95.0°C) */
+    double temp_target_c;     /* Proactive cooling target ceiling (default 85.0°C) */
+    double active_power_w;    /* Estimated / measured power consumption (W) */
+    uint64_t throttle_events; /* Count of thermal throttling events detected */
+    uint8_t is_throttled;     /* 1 if hardware throttled down to base clock */
+    uint8_t reserved[7];      /* 64-bit alignment padding */
+} FlowThermalState;
+
+/* ------------------------------------------------------------------------- */
+/* 2b. Jet Binary Payload (Phase Space Coordinates & Operators)               */
 /* ------------------------------------------------------------------------- */
 typedef struct {
     double q[FLOW_JET_MAX_DIM];                     /* Generalized coordinates (512 bytes) */
     double p[FLOW_JET_MAX_DIM];                     /* Conjugate momentum / velocity \dot{q} (512 bytes) */
     double a[FLOW_JET_MAX_DIM];                     /* Geodesic acceleration \ddot{q} (512 bytes) */
+    double s;                                       /* Contact action / thermodynamic dissipation coordinate (8 bytes) */
+    FlowThermalState thermal;                       /* Thermodynamic diffusion & DVFS throttling state */
     double memory_kernel[FLOW_JET_MAX_TAPS];        /* Mori-Zwanzig decay taps (128 bytes) */
     double koopman_matrix[FLOW_JET_MAX_KOOPMAN_DIM][FLOW_JET_MAX_KOOPMAN_DIM]; /* Koopman transfer matrix (2048 bytes) */
     uint64_t pure_genome;                       /* 64-bit physical architecture genome (8 bytes) */
@@ -157,6 +176,15 @@ double flow_jet_hamiltonian(const FlowJet *jet);
 
 /* Symplectic Leapfrog / Velocity Verlet step preserving symplectic form dq \wedge dp */
 int flow_jet_symplectic_step(FlowJet *jet, double dt);
+
+/* ------------------------------------------------------------------------- */
+/* 6b. Contact Geometry & Thermodynamic Dissipation APIs                     */
+/* ------------------------------------------------------------------------- */
+void flow_jet_thermal_init_default(FlowThermalState *th);
+int flow_jet_thermal_step(FlowJet *jet, double p_active_watts, double dt_sec);
+double flow_jet_thermal_predict_horizon(const FlowJet *jet, double horizon_sec);
+double flow_jet_thermal_prune_factor(const FlowJet *jet, double horizon_sec);
+int flow_jet_contact_step(FlowJet *jet, double dt, double p_active_watts);
 
 /* Koopman linear observable prediction: g_{t+dt} = exp(K * dt) * g_t */
 int flow_jet_koopman_predict(const FlowJet *jet, double dt, double *observable_out);

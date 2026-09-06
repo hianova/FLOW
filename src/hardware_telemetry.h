@@ -67,6 +67,11 @@ void flow_hardware_probe_stop(FlowPhysicalProbe *probe);
  */
 double flow_hardware_lyapunov_metric(const FlowPhysicalProbe *probe, double constraint_energy);
 
+struct FlowThermalState;
+
+/* Update living FlowThermalState with probe's measured active power and advance thermal diffusion */
+void flow_hardware_probe_update_thermal(const FlowPhysicalProbe *probe, struct FlowThermalState *thermal, double dt_sec);
+
 #ifdef __cplusplus
 }
 #endif
