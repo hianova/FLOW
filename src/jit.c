@@ -7,6 +7,15 @@
 #include <unistd.h>
 #include <time.h>
 
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+#include <libkern/OSCacheControl.h>
+#elif defined(__linux__)
+#define _GNU_SOURCE
+#include <fcntl.h>
+#endif
+
 struct FlowJITEngine {
     FlowJITConfig config;
     uint8_t *write_heap;
@@ -15,6 +24,7 @@ struct FlowJITEngine {
     size_t code_heap_used;
     uint64_t tlb_shootdowns_avoided;
     int is_dual_mapped;
+    int is_mach_vm;
 };
 
 static uint64_t clock_ns(void) {
@@ -33,23 +43,60 @@ FlowJITEngine *flow_jit_create(const FlowJITConfig *config) {
     }
 
     size_t heap_sz = engine->config.initial_code_heap_bytes > 0 ? engine->config.initial_code_heap_bytes : 1024 * 1024;
-    engine->write_heap = mmap(NULL, heap_sz, PROT_READ | PROT_WRITE,
-                              MAP_ANON | MAP_PRIVATE, -1, 0);
-    if (engine->write_heap == MAP_FAILED) {
-        engine->write_heap = NULL;
-        engine->exec_heap = NULL;
-        engine->code_heap_size = 0;
-    } else {
-        /* Dual-mapping alias / Zero-mprotect executable mirror */
-        engine->exec_heap = mmap(NULL, heap_sz, PROT_READ | PROT_EXEC,
-                                 MAP_ANON | MAP_PRIVATE, -1, 0);
-        if (engine->exec_heap == MAP_FAILED) {
-            engine->exec_heap = engine->write_heap;
-            engine->is_dual_mapped = 0;
-        } else {
-            engine->is_dual_mapped = 1;
+
+#if defined(__APPLE__)
+    vm_address_t write_addr = 0;
+    kern_return_t kr = vm_allocate(mach_task_self(), &write_addr, heap_sz, VM_FLAGS_ANYWHERE);
+    if (kr == KERN_SUCCESS) {
+        vm_address_t exec_addr = 0;
+        vm_prot_t cur_prot, max_prot;
+        kr = mach_vm_remap(mach_task_self(), (mach_vm_address_t *)&exec_addr, heap_sz, 0,
+                           VM_FLAGS_ANYWHERE, mach_task_self(), (mach_vm_address_t)write_addr,
+                           FALSE, &cur_prot, &max_prot, VM_INHERIT_NONE);
+        if (kr == KERN_SUCCESS) {
+            kr = mach_vm_protect(mach_task_self(), (mach_vm_address_t)exec_addr, heap_sz, FALSE,
+                                 VM_PROT_READ | VM_PROT_EXECUTE);
+            if (kr == KERN_SUCCESS) {
+                engine->write_heap = (uint8_t *)write_addr;
+                engine->exec_heap = (uint8_t *)exec_addr;
+                engine->code_heap_size = heap_sz;
+                engine->is_dual_mapped = 1;
+                engine->is_mach_vm = 1;
+            }
         }
-        engine->code_heap_size = heap_sz;
+    }
+#elif defined(__linux__) && defined(MFD_CLOEXEC)
+    int fd = memfd_create("flow_jit_pool", MFD_CLOEXEC);
+    if (fd >= 0) {
+        if (ftruncate(fd, heap_sz) == 0) {
+            void *w = mmap(NULL, heap_sz, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+            void *x = mmap(NULL, heap_sz, PROT_READ | PROT_EXEC, MAP_SHARED, fd, 0);
+            if (w != MAP_FAILED && x != MAP_FAILED) {
+                engine->write_heap = (uint8_t *)w;
+                engine->exec_heap = (uint8_t *)x;
+                engine->code_heap_size = heap_sz;
+                engine->is_dual_mapped = 1;
+            } else {
+                if (w != MAP_FAILED) munmap(w, heap_sz);
+                if (x != MAP_FAILED) munmap(x, heap_sz);
+            }
+        }
+        close(fd);
+    }
+#endif
+
+    if (engine->write_heap == NULL) {
+        engine->write_heap = mmap(NULL, heap_sz, PROT_READ | PROT_WRITE,
+                                  MAP_ANON | MAP_PRIVATE, -1, 0);
+        if (engine->write_heap == MAP_FAILED) {
+            engine->write_heap = NULL;
+            engine->exec_heap = NULL;
+            engine->code_heap_size = 0;
+        } else {
+            engine->exec_heap = engine->write_heap;
+            engine->code_heap_size = heap_sz;
+            engine->is_dual_mapped = 0;
+        }
     }
     engine->code_heap_used = 0;
     engine->tlb_shootdowns_avoided = 0;
@@ -58,6 +105,18 @@ FlowJITEngine *flow_jit_create(const FlowJITConfig *config) {
 
 void flow_jit_destroy(FlowJITEngine *engine) {
     if (engine == NULL) return;
+#if defined(__APPLE__)
+    if (engine->is_mach_vm) {
+        if (engine->exec_heap != NULL && engine->exec_heap != engine->write_heap) {
+            vm_deallocate(mach_task_self(), (vm_address_t)engine->exec_heap, engine->code_heap_size);
+        }
+        if (engine->write_heap != NULL) {
+            vm_deallocate(mach_task_self(), (vm_address_t)engine->write_heap, engine->code_heap_size);
+        }
+        free(engine);
+        return;
+    }
+#endif
     if (engine->write_heap != NULL) {
         munmap(engine->write_heap, engine->code_heap_size);
     }
@@ -175,7 +234,7 @@ int flow_jit_compile_llvm_ir(FlowJITEngine *engine,
     if (engine == NULL || llvm_ir_code == NULL || unit_out == NULL) return 0;
     uint64_t start_ns = clock_ns();
 
-    /* Allocate slice of JIT code heap */
+    /* Allocate slice of JIT code heap (4096-byte aligned for native opcodes & isolation) */
     size_t alloc_bytes = 4096;
     uint8_t *write_code_ptr;
     uint8_t *exec_code_ptr;
@@ -189,9 +248,76 @@ int flow_jit_compile_llvm_ir(FlowJITEngine *engine,
         exec_code_ptr = write_code_ptr;
     }
 
-    /* Simulate writing machine code bytes without mprotect() calls */
+    /* Analyze IR intent for native emission */
+    int is_double = (strstr(llvm_ir_code, "double") != NULL || strstr(llvm_ir_code, "float") != NULL ||
+                     strstr(llvm_ir_code, "fadd") != NULL || strstr(llvm_ir_code, "fmul") != NULL);
+    int is_mul = (strstr(llvm_ir_code, "mul") != NULL);
+    int is_sub = (strstr(llvm_ir_code, "sub") != NULL);
+
+    /* Emit genuine native machine instructions into dual-mapped write heap */
     if (engine->write_heap != NULL) {
+#if defined(__aarch64__)
+        uint32_t *arm_code = (uint32_t *)write_code_ptr;
+        size_t idx = 0;
+        if (is_double) {
+            if (is_mul) {
+                arm_code[idx++] = 0x1e610800; /* fmul d0, d0, d1 */
+            } else if (is_sub) {
+                arm_code[idx++] = 0x1e613800; /* fsub d0, d0, d1 */
+            } else {
+                arm_code[idx++] = 0x1e612800; /* fadd d0, d0, d1 */
+            }
+        } else {
+            if (is_mul) {
+                arm_code[idx++] = 0x9b017c00; /* mul x0, x0, x1 */
+            } else if (is_sub) {
+                arm_code[idx++] = 0xcb010000; /* sub x0, x0, x1 */
+            } else {
+                arm_code[idx++] = 0x8b010000; /* add x0, x0, x1 */
+            }
+        }
+        arm_code[idx++] = 0xd65f03c0; /* ret */
+        while (idx < alloc_bytes / sizeof(uint32_t)) {
+            arm_code[idx++] = 0xd503201f; /* nop */
+        }
+
+#if defined(__APPLE__)
+        sys_dcache_flush(write_code_ptr, alloc_bytes);
+        sys_icache_invalidate(exec_code_ptr, alloc_bytes);
+#else
+        __builtin___clear_cache((char *)exec_code_ptr, (char *)exec_code_ptr + alloc_bytes);
+#endif
+
+#elif defined(__x86_64__)
+        uint8_t *x86_code = write_code_ptr;
+        size_t idx = 0;
+        if (is_double) {
+            if (is_mul) {
+                x86_code[idx++] = 0xf2; x86_code[idx++] = 0x0f; x86_code[idx++] = 0x59; x86_code[idx++] = 0xc1; /* mulsd %xmm1, %xmm0 */
+            } else if (is_sub) {
+                x86_code[idx++] = 0xf2; x86_code[idx++] = 0x0f; x86_code[idx++] = 0x5c; x86_code[idx++] = 0xc1; /* subsd %xmm1, %xmm0 */
+            } else {
+                x86_code[idx++] = 0xf2; x86_code[idx++] = 0x0f; x86_code[idx++] = 0x58; x86_code[idx++] = 0xc1; /* addsd %xmm1, %xmm0 */
+            }
+        } else {
+            /* SysV ABI: %rdi, %rsi -> return in %rax */
+            x86_code[idx++] = 0x48; x86_code[idx++] = 0x89; x86_code[idx++] = 0xf8; /* mov %rdi, %rax */
+            if (is_mul) {
+                x86_code[idx++] = 0x48; x86_code[idx++] = 0x0f; x86_code[idx++] = 0xaf; x86_code[idx++] = 0xc6; /* imul %rsi, %rax */
+            } else if (is_sub) {
+                x86_code[idx++] = 0x48; x86_code[idx++] = 0x29; x86_code[idx++] = 0xf0; /* sub %rsi, %rax */
+            } else {
+                x86_code[idx++] = 0x48; x86_code[idx++] = 0x01; x86_code[idx++] = 0xf0; /* add %rsi, %rax */
+            }
+        }
+        x86_code[idx++] = 0xc3; /* ret */
+        while (idx < alloc_bytes) {
+            x86_code[idx++] = 0x90; /* nop */
+        }
+        __builtin___clear_cache((char *)exec_code_ptr, (char *)exec_code_ptr + alloc_bytes);
+#else
         memset(write_code_ptr, 0x90, alloc_bytes); /* 0x90 = NOP */
+#endif
     }
 
     memset(unit_out, 0, sizeof(*unit_out));
@@ -217,6 +343,18 @@ int flow_jit_compile_llvm_ir(FlowJITEngine *engine,
         code_block_out->compile_time_ns = clock_ns() - start_ns;
     }
     return 1;
+}
+
+int64_t flow_jit_execute_binary_int(const FlowJITCodeBlock *block, int64_t a, int64_t b) {
+    if (block == NULL || block->start_ip == 0) return 0;
+    FlowJITBinaryIntFn fn = (FlowJITBinaryIntFn)(uintptr_t)block->start_ip;
+    return fn(a, b);
+}
+
+double flow_jit_execute_binary_double(const FlowJITCodeBlock *block, double a, double b) {
+    if (block == NULL || block->start_ip == 0) return 0.0;
+    FlowJITBinaryDoubleFn fn = (FlowJITBinaryDoubleFn)(uintptr_t)block->start_ip;
+    return fn(a, b);
 }
 
 int flow_jit_migrate_state_layout(const FlowLayoutMigrationSpec *spec,

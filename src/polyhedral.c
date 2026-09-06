@@ -1,5 +1,6 @@
 #include "flow_smt_dsl.h"
 #include "polyhedral.h"
+#include "flow_jet.h"
 #include <string.h>
 #include <math.h>
 
@@ -138,4 +139,30 @@ FlowSMTResult flow_polyhedral_verify_smt(const FlowPolyhedron *poly,
                  sched->optimal_tile_size, sched->optimal_simd_width);
     }
     return res;
+}
+
+int flow_polyhedral_synthesize_jet_potential(size_t capacity,
+                                            size_t threads,
+                                            FlowJetPotentialLandscape *landscape_out) {
+    if (landscape_out == NULL) return 0;
+    size_t cap = capacity > 0 ? capacity : 64;
+    size_t th = threads > 0 ? threads : 1;
+
+    flow_jet_potential_init_default(landscape_out, FLOW_JET_STANDARD_DIM);
+
+    double omega_base = sqrt((double)cap) / 16.0;
+    if (omega_base < 0.1) omega_base = 0.1;
+
+    double cap_d = (double)cap;
+    landscape_out->barrier_mu = 1.0 / (cap_d * (double)th);
+    landscape_out->moreau_kappa = 4.0;
+
+    for (size_t i = 0; i < landscape_out->dim; ++i) {
+        landscape_out->omega[i] = omega_base * (1.0 + 0.05 * (double)(i % 4));
+        landscape_out->q_saturation[i] = 1.25 * cap_d;
+        landscape_out->q_equilibrium[i] = 0.5 * cap_d;
+        landscape_out->moreau_low[i] = 0.0;
+        landscape_out->moreau_high[i] = cap_d;
+    }
+    return 1;
 }

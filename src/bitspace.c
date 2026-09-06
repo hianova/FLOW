@@ -1169,6 +1169,15 @@ int flow_plan_to_artifact(const FlowPlan *plan, const SemanticIR *ir, uint32_t s
              "schema_hash=%llu genome=0x%016llx energy=%.4f",
              (unsigned long long)art->plan_schema_hash, (unsigned long long)art->genome,
              art->metrics.energy);
+
+    /* Synthesize Symplectic Potential Landscape Parameters from Polyhedral Bounds */
+    size_t cap = plan->eval.capacity > 0 ? plan->eval.capacity : (ir && ir->input_max_count > 0 ? ir->input_max_count : 64);
+    double cap_d = (double)cap;
+    art->jet_omega = sqrt(cap_d) / 16.0;
+    if (art->jet_omega < 0.1) art->jet_omega = 0.1;
+    art->jet_barrier_mu = 1.0 / cap_d;
+    art->jet_q_saturation = 1.25 * cap_d;
+
     return 1;
 }
 
@@ -1228,6 +1237,9 @@ int flow_plan_artifact_save(FILE *output, const FlowPlanArtifact *art) {
     fprintf(output, "metric.benchmark_ns=%llu\n", (unsigned long long)art->metrics.benchmark_ns);
     fprintf(output, "verification_status=%s\n", art->verification_status);
     fprintf(output, "attestation=%s\n", art->attestation_msg);
+    fprintf(output, "jet.omega=%.6f\n", art->jet_omega);
+    fprintf(output, "jet.barrier_mu=%.8f\n", art->jet_barrier_mu);
+    fprintf(output, "jet.q_saturation=%.6f\n", art->jet_q_saturation);
     return ferror(output) == 0;
 }
 
@@ -1325,6 +1337,9 @@ int flow_plan_artifact_load(FILE *input, FlowPlanArtifact *art) {
         else if (strcmp(key, "metric.benchmark_ns") == 0) art->metrics.benchmark_ns = strtoull(val, NULL, 10);
         else if (strcmp(key, "verification_status") == 0) strncpy(art->verification_status, val, sizeof(art->verification_status) - 1);
         else if (strcmp(key, "attestation") == 0) strncpy(art->attestation_msg, val, sizeof(art->attestation_msg) - 1);
+        else if (strcmp(key, "jet.omega") == 0) art->jet_omega = strtod(val, NULL);
+        else if (strcmp(key, "jet.barrier_mu") == 0) art->jet_barrier_mu = strtod(val, NULL);
+        else if (strcmp(key, "jet.q_saturation") == 0) art->jet_q_saturation = strtod(val, NULL);
     }
     return 1;
 }

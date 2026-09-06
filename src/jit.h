@@ -47,6 +47,14 @@ int flow_jit_compile_llvm_ir(FlowJITEngine *engine,
                              FlowUnit *unit_out,
                              FlowJITCodeBlock *code_block_out);
 
+/* Native function pointer typedefs for JIT-executed kernels */
+typedef int64_t (*FlowJITBinaryIntFn)(int64_t a, int64_t b);
+typedef double (*FlowJITBinaryDoubleFn)(double a, double b);
+
+/* Execute compiled JIT native machine code */
+int64_t flow_jit_execute_binary_int(const FlowJITCodeBlock *block, int64_t a, int64_t b);
+double flow_jit_execute_binary_double(const FlowJITCodeBlock *block, double a, double b);
+
 /* Dynamically derive the physical compiler working-set RAM threshold (MB) */
 int flow_jit_calculate_min_memory_mb(const SemanticIR *ir);
 

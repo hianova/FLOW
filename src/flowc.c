@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <math.h>
 
 static int resolve_and_load_plugin(const char *mod_name) {
     if (mod_name == NULL || mod_name[0] == '\0') return 0;
@@ -120,6 +121,7 @@ int flowc_main(int argc, char **argv) {
                     strcmp(argv[arg], "--lock") == 0 ||
                     strcmp(argv[arg], "--flowplan") == 0) && arg + 1 < argc) {
             profile_out = argv[++arg];
+            use_search = 1;
         } else if (strcmp(argv[arg], "--component") == 0 && arg + 1 < argc) {
             component_override = argv[++arg];
         } else if ((strcmp(argv[arg], "--apply-fvec") == 0 ||
@@ -508,6 +510,15 @@ int flowc_main(int argc, char **argv) {
     printf("  verifier: status=%s capacity=%zu estimated_bytes=%zu (%s)\n",
            verification_status_name(verification.status), verification.capacity,
            verification.estimated_bytes, verification.message);
+    {
+        size_t cap = ir.input_max_count > 0 ? ir.input_max_count : (verification.capacity > 0 ? verification.capacity : 64);
+        double omega_base = sqrt((double)cap) / 16.0;
+        if (omega_base < 0.1) omega_base = 0.1;
+        double mu = 1.0 / (double)cap;
+        double q_sat = 1.25 * (double)cap;
+        printf("  symplectic: omega=%.3f mu=%.6f q_sat=%.1f (polyhedral shaped)\n",
+               omega_base, mu, q_sat);
+    }
     if (use_search) {
         uint64_t schema_hash = flow_bitspace_compute_schema_hash(&ir, component, &search.dimension_set);
         printf("  C search: mode=%s iterations=%zu seed=%u schema_hash=%llu genome=%llu energy=%.6f benchmark_ns=%llu capacity=%.0f threads=%.0f shards=%.0f tuning_buffer=%zu tuning_initial=%zu tuning_growth=%u tuning_batch=%zu tuning_arena=%zu\n",

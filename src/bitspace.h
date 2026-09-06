@@ -209,6 +209,10 @@ typedef struct FlowPlanArtifact {
     FlowEvaluation metrics;
     char verification_status[32];
     char attestation_msg[128];
+    /* Compiler-Guided Symplectic Shaping Parameters */
+    double jet_omega;
+    double jet_barrier_mu;
+    double jet_q_saturation;
 } FlowPlanArtifact;
 
 /* Hash computation */

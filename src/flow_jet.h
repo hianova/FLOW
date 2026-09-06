@@ -126,7 +126,7 @@ int flow_jet_stream_learn_step(FlowJet *jet, FlowJetStreamingEDMD *edmd, const d
 /* ------------------------------------------------------------------------- */
 /* 5. PMU Hardware Telemetry & Nonlinear Potential Landscape                 */
 /* ------------------------------------------------------------------------- */
-typedef struct {
+typedef struct FlowJetPotentialLandscape {
     uint32_t dim;
     double q_equilibrium[FLOW_JET_MAX_DIM]; /* Nominal baseline equilibrium coordinates q* */
     double omega[FLOW_JET_MAX_DIM];         /* Harmonic frequency / stiffness */

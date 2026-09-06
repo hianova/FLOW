@@ -69,6 +69,13 @@ FlowSMTResult flow_polyhedral_verify_smt(const FlowPolyhedron *poly,
                                         const FlowPolyhedralSchedule *sched,
                                         FlowSMTProofAttestation *proof_out);
 
+struct FlowJetPotentialLandscape;
+
+/* Compiler-Guided Symplectic Shaping: Synthesize .fjet potential landscape from polyhedral bounds */
+int flow_polyhedral_synthesize_jet_potential(size_t capacity,
+                                            size_t threads,
+                                            struct FlowJetPotentialLandscape *landscape_out);
+
 #ifdef __cplusplus
 }
 #endif
