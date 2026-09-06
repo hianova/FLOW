@@ -9,7 +9,7 @@
 
 typedef struct FlowJITEngine FlowJITEngine;
 
-typedef struct {
+typedef struct FlowJITCodeBlock {
     uintptr_t start_ip;
     uintptr_t end_ip;
     size_t code_bytes;
@@ -37,6 +37,7 @@ typedef struct {
 FlowJITEngine *flow_jit_create(const FlowJITConfig *config);
 void flow_jit_destroy(FlowJITEngine *engine);
 int flow_jit_get_pool_stats(const FlowJITEngine *engine, FlowJITPoolStats *stats_out);
+int flow_jit_verify_wx_invariants(const FlowJITEngine *engine, char *message, size_t message_size);
 
 /* In-Memory Zero-I/O Compilation from LLVM IR text into executable FlowUnit */
 int flow_jit_compile_llvm_ir(FlowJITEngine *engine,
@@ -50,7 +51,7 @@ int flow_jit_compile_llvm_ir(FlowJITEngine *engine,
 int flow_jit_calculate_min_memory_mb(const SemanticIR *ir);
 
 /* Dynamic JIT State Migration Routine Generators */
-typedef struct {
+typedef struct FlowLayoutMigrationSpec {
     size_t item_count;
     size_t field_count;
     size_t field_sizes[8];

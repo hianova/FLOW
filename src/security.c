@@ -1,5 +1,8 @@
 #include "security.h"
 #include "registry.h"
+#include "flow_jet.h"
+#include "flow_jet_dead_reckon.h"
+#include "jit.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -25,6 +28,7 @@ const char *flow_security_outcome_name(FlowSecurityOutcome outcome) {
         case FLOW_SECURITY_TIMEOUT: return "timeout";
         case FLOW_SECURITY_DIVERGENCE: return "divergence";
         case FLOW_SECURITY_INCOMPLETE: return "incomplete";
+        case FLOW_SECURITY_PHYSICAL_BREACH: return "physical_breach";
         default: return "unknown";
     }
 }
@@ -222,6 +226,462 @@ FlowSecurityOutcome flow_security_check_resource_quota_gate(
     return FLOW_SECURITY_PASS;
 }
 
+FlowSecurityOutcome flow_security_check_physical_barrier_gate(
+    const FlowCompositionSpec *spec, char *message, size_t message_size) {
+    if (spec == NULL) {
+        if (message && message_size) snprintf(message, message_size, "null spec");
+        return FLOW_SECURITY_CONTRACT_VIOLATION;
+    }
+    if (spec->jet != NULL) {
+        const FlowJet *jet = spec->jet;
+        uint32_t dim = jet->header.vector_dim ? jet->header.vector_dim : FLOW_JET_STANDARD_DIM;
+        if (dim > FLOW_JET_MAX_DIM) dim = FLOW_JET_MAX_DIM;
+
+        /* 1. Sensor & Coordinate Integrity: Check for NaN or Inf in phase space */
+        for (size_t i = 0; i < dim; ++i) {
+            if (isnan(jet->payload.q[i]) || isinf(jet->payload.q[i])) {
+                if (message && message_size) {
+                    snprintf(message, message_size,
+                             "physical barrier breach: NaN or Inf coordinate q[%zu] detected", i);
+                }
+                return FLOW_SECURITY_PHYSICAL_BREACH;
+            }
+            if (isnan(jet->payload.p[i]) || isinf(jet->payload.p[i])) {
+                if (message && message_size) {
+                    snprintf(message, message_size,
+                             "physical barrier breach: NaN or Inf conjugate momentum p[%zu] detected", i);
+                }
+                return FLOW_SECURITY_PHYSICAL_BREACH;
+            }
+            if (isnan(jet->payload.a[i]) || isinf(jet->payload.a[i])) {
+                if (message && message_size) {
+                    snprintf(message, message_size,
+                             "physical barrier breach: NaN or Inf acceleration a[%zu] detected", i);
+                }
+                return FLOW_SECURITY_PHYSICAL_BREACH;
+            }
+        }
+
+        /* 2. Dynamic Velocity & Acceleration Barrier Bounds */
+        if (spec->max_velocity_bound > 0.0) {
+            for (size_t i = 0; i < dim; ++i) {
+                if (fabs(jet->payload.p[i]) > spec->max_velocity_bound) {
+                    if (message && message_size) {
+                        snprintf(message, message_size,
+                                 "physical barrier breach: velocity p[%zu]=%.3f exceeds limit %.3f",
+                                 i, jet->payload.p[i], spec->max_velocity_bound);
+                    }
+                    return FLOW_SECURITY_PHYSICAL_BREACH;
+                }
+            }
+        }
+
+        if (spec->max_acceleration_bound > 0.0) {
+            for (size_t i = 0; i < dim; ++i) {
+                if (fabs(jet->payload.a[i]) > spec->max_acceleration_bound) {
+                    if (message && message_size) {
+                        snprintf(message, message_size,
+                                 "physical barrier breach: acceleration a[%zu]=%.3f exceeds limit %.3f",
+                                 i, jet->payload.a[i], spec->max_acceleration_bound);
+                    }
+                    return FLOW_SECURITY_PHYSICAL_BREACH;
+                }
+            }
+        }
+
+        /* 3. Symplectic Hamiltonian Energy Drift Protection */
+        if (jet->header.hamiltonian_energy > 0.0) {
+            double current_h = flow_jet_hamiltonian(jet);
+            double h0 = jet->header.hamiltonian_energy;
+            double drift = fabs(current_h - h0) / h0;
+            double tol = spec->max_hamiltonian_drift_ratio > 0.0 ? spec->max_hamiltonian_drift_ratio : 0.05;
+            if (drift > tol) {
+                if (message && message_size) {
+                    snprintf(message, message_size,
+                             "physical barrier breach: Hamiltonian energy drift %.4f exceeds tolerance %.4f",
+                             drift, tol);
+                }
+                return FLOW_SECURITY_PHYSICAL_BREACH;
+            }
+        }
+    }
+    return FLOW_SECURITY_PASS;
+}
+
+FlowSecurityOutcome flow_security_check_jit_wx_gate(
+    const FlowJITCodeBlock *block, uintptr_t write_base, uintptr_t exec_base,
+    char *message, size_t message_size) {
+    if (write_base == 0 || exec_base == 0) {
+        if (message && message_size) snprintf(message, message_size, "unmapped jit memory base");
+        return FLOW_SECURITY_MEMORY_VIOLATION;
+    }
+    /* W^X Hard Invariant: Writable heap must not alias executable heap */
+    if (write_base == exec_base) {
+        if (message && message_size) {
+            snprintf(message, message_size,
+                     "W^X hard gate violation: page simultaneously writable and executable (0x%lx)",
+                     (unsigned long)write_base);
+        }
+        return FLOW_SECURITY_MEMORY_VIOLATION;
+    }
+    if (block != NULL) {
+        if (block->start_ip == 0 || block->code_bytes == 0) {
+            if (message && message_size) snprintf(message, message_size, "invalid empty jit code block");
+            return FLOW_SECURITY_MEMORY_VIOLATION;
+        }
+        if (block->start_ip < exec_base) {
+            if (message && message_size) {
+                snprintf(message, message_size,
+                         "jit code block pointer 0x%lx outside exec heap base 0x%lx",
+                         (unsigned long)block->start_ip, (unsigned long)exec_base);
+            }
+            return FLOW_SECURITY_MEMORY_VIOLATION;
+        }
+    }
+    return FLOW_SECURITY_PASS;
+}
+
+FlowSecurityOutcome flow_security_check_transposition_gate(
+    const FlowLayoutMigrationSpec *spec, size_t buffer_bytes,
+    char *message, size_t message_size) {
+    if (spec == NULL) {
+        if (message && message_size) snprintf(message, message_size, "null layout migration spec");
+        return FLOW_SECURITY_CONTRACT_VIOLATION;
+    }
+    if (spec->field_count == 0 || spec->field_count > 8) {
+        if (message && message_size) {
+            snprintf(message, message_size, "invalid field count %zu (must be 1..8)", spec->field_count);
+        }
+        return FLOW_SECURITY_CONTRACT_VIOLATION;
+    }
+
+    size_t struct_size = 0;
+    for (size_t f = 0; f < spec->field_count; ++f) {
+        size_t f_sz = spec->field_sizes[f];
+        if (f_sz == 0 || f_sz > 256) {
+            if (message && message_size) snprintf(message, message_size, "invalid field size %zu at index %zu", f_sz, f);
+            return FLOW_SECURITY_CONTRACT_VIOLATION;
+        }
+        /* Check field offset alignment */
+        if (struct_size % (f_sz > 8 ? 8 : f_sz) != 0) {
+            if (message && message_size) {
+                snprintf(message, message_size, "misaligned field offset %zu for field size %zu", struct_size, f_sz);
+            }
+            return FLOW_SECURITY_MEMORY_VIOLATION;
+        }
+        struct_size += f_sz;
+    }
+
+    /* Integer overflow protection during item_count * struct_size */
+    if (spec->item_count > 0 && struct_size > 0) {
+        if (spec->item_count > (SIZE_MAX / struct_size)) {
+            if (message && message_size) {
+                snprintf(message, message_size, "integer overflow in transposition item_count * struct_size");
+            }
+            return FLOW_SECURITY_MEMORY_VIOLATION;
+        }
+        size_t total_bytes = spec->item_count * struct_size;
+        if (buffer_bytes > 0 && total_bytes > buffer_bytes) {
+            if (message && message_size) {
+                snprintf(message, message_size, "transposition required bytes %zu exceeds buffer %zu",
+                         total_bytes, buffer_bytes);
+            }
+            return FLOW_SECURITY_RESOURCE_EXHAUSTION;
+        }
+    }
+    return FLOW_SECURITY_PASS;
+}
+
+/* ========================================================================= */
+/* Phase Space Attractor IDS Implementation                                  */
+/* ========================================================================= */
+int flow_jet_attractor_profile_init(FlowJetAttractorProfile *profile, uint32_t dim,
+                                   double r_q, double r_p, double max_trace) {
+    if (profile == NULL) return 0;
+    memset(profile, 0, sizeof(*profile));
+    profile->dim = (dim > 0 && dim <= FLOW_JET_ATTRACTOR_MAX_DIM) ? dim : 16;
+    profile->max_radius_q = r_q > 0.0 ? r_q : 5.0;
+    profile->max_radius_p = r_p > 0.0 ? r_p : 10.0;
+    profile->max_koopman_trace = max_trace;
+    return 1;
+}
+
+FlowSecurityOutcome flow_security_check_attractor_anomaly(
+    const FlowJet *jet, const FlowJetAttractorProfile *profile,
+    char *message, size_t message_size) {
+    if (jet == NULL || profile == NULL) {
+        if (message && message_size) snprintf(message, message_size, "null jet or profile");
+        return FLOW_SECURITY_CONTRACT_VIOLATION;
+    }
+
+    uint32_t dim = jet->header.vector_dim ? jet->header.vector_dim : 16;
+    if (dim > profile->dim) dim = profile->dim;
+    if (dim > FLOW_JET_ATTRACTOR_MAX_DIM) dim = FLOW_JET_ATTRACTOR_MAX_DIM;
+
+    double rq2 = profile->max_radius_q * profile->max_radius_q;
+    double rp2 = profile->max_radius_p * profile->max_radius_p;
+    if (rq2 <= 0.0) rq2 = 1.0;
+    if (rp2 <= 0.0) rp2 = 1.0;
+
+    double mahalanobis_sum = 0.0;
+    for (size_t i = 0; i < dim; ++i) {
+        double dq = jet->payload.q[i] - profile->q_center[i];
+        double dp = jet->payload.p[i] - profile->p_center[i];
+        mahalanobis_sum += (dq * dq) / rq2 + (dp * dp) / rp2;
+    }
+    double normalized_dist = mahalanobis_sum / (double)dim;
+    if (normalized_dist > 1.0) {
+        if (message && message_size) {
+            snprintf(message, message_size,
+                     "attractor breach: normalized phase distance %.3f exceeds limit 1.0",
+                     normalized_dist);
+        }
+        return FLOW_SECURITY_PHYSICAL_BREACH;
+    }
+
+    uint32_t kdim = jet->header.koopman_dim ? jet->header.koopman_dim : 8;
+    if (kdim > FLOW_JET_MAX_KOOPMAN_DIM) kdim = FLOW_JET_MAX_KOOPMAN_DIM;
+
+    double trace_K = 0.0;
+    for (size_t i = 0; i < kdim; ++i) {
+        trace_K += jet->payload.koopman_matrix[i][i];
+    }
+    if (trace_K > profile->max_koopman_trace) {
+        if (message && message_size) {
+            snprintf(message, message_size,
+                     "attractor instability: Koopman generator trace %.4f > %.4f (expanding Lyapunov phase flow)",
+                     trace_K, profile->max_koopman_trace);
+        }
+        return FLOW_SECURITY_PHYSICAL_BREACH;
+    }
+
+    return FLOW_SECURITY_PASS;
+}
+
+/* ========================================================================= */
+/* Differential Continuity Physical Proof Implementation                     */
+/* ========================================================================= */
+FlowSecurityOutcome flow_security_check_continuity_proof(
+    const FlowJet *prev_jet, const FlowJet *curr_jet,
+    double dt, double max_jerk, double noise_tolerance,
+    char *message, size_t message_size) {
+    if (prev_jet == NULL || curr_jet == NULL || dt <= 0.0) {
+        if (message && message_size) snprintf(message, message_size, "invalid arguments for continuity check");
+        return FLOW_SECURITY_CONTRACT_VIOLATION;
+    }
+
+    uint32_t dim = prev_jet->header.vector_dim ? prev_jet->header.vector_dim : 16;
+    if (curr_jet->header.vector_dim && curr_jet->header.vector_dim < dim) {
+        dim = curr_jet->header.vector_dim;
+    }
+    if (dim > FLOW_JET_MAX_DIM) dim = FLOW_JET_MAX_DIM;
+
+    double j_max = max_jerk > 0.0 ? max_jerk : 500.0;
+    double tol = noise_tolerance >= 0.0 ? noise_tolerance : 0.01;
+
+    for (size_t i = 0; i < dim; ++i) {
+        double q0 = prev_jet->payload.q[i];
+        double p0 = prev_jet->payload.p[i];
+        double a0 = prev_jet->payload.a[i];
+
+        double q1 = curr_jet->payload.q[i];
+        double p1 = curr_jet->payload.p[i];
+        double a1 = curr_jet->payload.a[i];
+
+        /* Acceleration jump (jerk limit) */
+        double delta_a = fabs(a1 - a0);
+        double max_delta_a = j_max * dt + tol;
+        if (delta_a > max_delta_a) {
+            if (message && message_size) {
+                snprintf(message, message_size,
+                         "continuity breach: dim %zu accel jump %.3f exceeds jerk bound %.3f (spoofed impulse)",
+                         i, delta_a, max_delta_a);
+            }
+            return FLOW_SECURITY_PHYSICAL_BREACH;
+        }
+
+        /* Velocity Taylor residual: p1 vs (p0 + a0 * dt) */
+        double p1_taylor = p0 + a0 * dt;
+        double delta_p = fabs(p1 - p1_taylor);
+        double max_delta_p = 0.5 * j_max * dt * dt + tol;
+        if (delta_p > max_delta_p) {
+            if (message && message_size) {
+                snprintf(message, message_size,
+                         "continuity breach: dim %zu velocity residual %.3f exceeds bound %.3f (spoofed velocity step)",
+                         i, delta_p, max_delta_p);
+            }
+            return FLOW_SECURITY_PHYSICAL_BREACH;
+        }
+
+        /* Position Taylor residual: q1 vs (q0 + p0 * dt + 0.5 * a0 * dt^2) */
+        double q1_taylor = q0 + p0 * dt + 0.5 * a0 * dt * dt;
+        double delta_q = fabs(q1 - q1_taylor);
+        double max_delta_q = (1.0 / 6.0) * j_max * dt * dt * dt + tol;
+        if (delta_q > max_delta_q) {
+            if (message && message_size) {
+                snprintf(message, message_size,
+                         "continuity breach: dim %zu position residual %.3f exceeds bound %.3f (spoofed position teleport)",
+                         i, delta_q, max_delta_q);
+            }
+            return FLOW_SECURITY_PHYSICAL_BREACH;
+        }
+    }
+
+    return FLOW_SECURITY_PASS;
+}
+
+/* ========================================================================= */
+/* Predictive MTD Resource Quota Extrapolation Implementation                */
+/* ========================================================================= */
+int flow_security_predict_resource_breach(
+    double current_usage, double consumption_rate, double consumption_accel,
+    double quota_limit, double time_horizon_s,
+    FlowPredictiveBreachReport *report) {
+    if (report == NULL) return 0;
+    memset(report, 0, sizeof(*report));
+    report->time_to_breach_s = -1.0;
+
+    if (current_usage >= quota_limit) {
+        report->will_breach = 1;
+        report->time_to_breach_s = 0.0;
+        report->projected_breach_velocity = consumption_rate;
+        return 1;
+    }
+
+    double delta_q = quota_limit - current_usage;
+    double v = consumption_rate;
+    double a = consumption_accel;
+    double t_breach = -1.0;
+
+    if (fabs(a) < 1.0e-9) {
+        if (v > 0.0) {
+            t_breach = delta_q / v;
+        }
+    } else {
+        double discr = v * v + 2.0 * a * delta_q;
+        if (discr >= 0.0) {
+            double sqrt_d = sqrt(discr);
+            double t1 = (-v + sqrt_d) / a;
+            double t2 = (-v - sqrt_d) / a;
+
+            if (t1 > 0.0 && t2 > 0.0) {
+                t_breach = (t1 < t2) ? t1 : t2;
+            } else if (t1 > 0.0) {
+                t_breach = t1;
+            } else if (t2 > 0.0) {
+                t_breach = t2;
+            }
+        }
+    }
+
+    if (t_breach > 0.0 && (time_horizon_s <= 0.0 || t_breach <= time_horizon_s)) {
+        report->will_breach = 1;
+        report->time_to_breach_s = t_breach;
+        report->projected_breach_velocity = v + a * t_breach;
+    }
+
+    return 1;
+}
+
+int flow_security_should_proactive_morph(
+    const FlowPredictiveBreachReport *report, double proactive_lead_time_s) {
+    if (report == NULL || !report->will_breach) return 0;
+    if (proactive_lead_time_s <= 0.0) return report->will_breach;
+    return (report->time_to_breach_s <= proactive_lead_time_s) ? 1 : 0;
+}
+
+/* ========================================================================= */
+/* Symplectic Byzantine Consensus Filter Implementation                      */
+/* ========================================================================= */
+int flow_jet_byzantine_filter_init(
+    FlowSymplecticByzantineFilter *filter,
+    double max_h_drift, double max_phase_dist) {
+    if (filter == NULL) return 0;
+    memset(filter, 0, sizeof(*filter));
+    filter->max_hamiltonian_drift_tolerance = max_h_drift > 0.0 ? max_h_drift : 0.05;
+    filter->max_phase_distance_tolerance = max_phase_dist > 0.0 ? max_phase_dist : 5.0;
+    return 1;
+}
+
+FlowSecurityOutcome flow_jet_byzantine_validate_packet(
+    FlowSymplecticByzantineFilter *filter,
+    const FlowJetDeadReckonPacket *packet,
+    const FlowJet *local_shadow_mirror,
+    char *message, size_t message_size) {
+    if (filter == NULL || packet == NULL) {
+        if (message && message_size) snprintf(message, message_size, "null filter or packet");
+        return FLOW_SECURITY_CONTRACT_VIOLATION;
+    }
+
+    /* 1. Packet CRC32 Checksum Validation */
+    uint32_t expected_crc = flow_jet_crc32(packet, offsetof(FlowJetDeadReckonPacket, crc32));
+    if (packet->crc32 != expected_crc) {
+        filter->byzantine_faults_detected++;
+        if (message && message_size) {
+            snprintf(message, message_size, "byzantine packet corrupted: crc 0x%08x != expected 0x%08x",
+                     packet->crc32, expected_crc);
+        }
+        return FLOW_SECURITY_PHYSICAL_BREACH;
+    }
+
+    uint32_t dim = packet->dim ? packet->dim : 16;
+    if (dim > FLOW_JET_MAX_DIM) dim = FLOW_JET_MAX_DIM;
+
+    /* 2. Sensor Integrity: NaN or Inf coordinates */
+    for (size_t i = 0; i < dim; ++i) {
+        if (isnan(packet->q[i]) || isinf(packet->q[i]) ||
+            isnan(packet->p[i]) || isinf(packet->p[i]) ||
+            isnan(packet->a[i]) || isinf(packet->a[i])) {
+            filter->byzantine_faults_detected++;
+            if (message && message_size) {
+                snprintf(message, message_size, "byzantine fault: node %u transmitted NaN/Inf coordinates",
+                         packet->node_id);
+            }
+            return FLOW_SECURITY_PHYSICAL_BREACH;
+        }
+    }
+
+    /* Reconstruct temporary remote Jet */
+    FlowJet remote_jet;
+    memset(&remote_jet, 0, sizeof(remote_jet));
+    remote_jet.header.vector_dim = dim;
+    for (size_t i = 0; i < dim; ++i) {
+        remote_jet.payload.q[i] = packet->q[i];
+        remote_jet.payload.p[i] = packet->p[i];
+        remote_jet.payload.a[i] = packet->a[i];
+    }
+    double remote_h = flow_jet_hamiltonian(&remote_jet);
+
+    if (local_shadow_mirror != NULL) {
+        double mirror_h = flow_jet_hamiltonian(local_shadow_mirror);
+        if (mirror_h > 0.0) {
+            double h_drift = fabs(remote_h - mirror_h) / mirror_h;
+            if (h_drift > filter->max_hamiltonian_drift_tolerance) {
+                filter->byzantine_faults_detected++;
+                if (message && message_size) {
+                    snprintf(message, message_size,
+                             "byzantine fault: node %u energy drift %.4f > tolerance %.4f",
+                             packet->node_id, h_drift, filter->max_hamiltonian_drift_tolerance);
+                }
+                return FLOW_SECURITY_PHYSICAL_BREACH;
+            }
+        }
+
+        double phase_dist = flow_jet_phase_distance(&remote_jet, local_shadow_mirror);
+        if (phase_dist > filter->max_phase_distance_tolerance) {
+            filter->byzantine_faults_detected++;
+            if (message && message_size) {
+                snprintf(message, message_size,
+                         "byzantine fault: node %u geodesic phase distance %.3f > tolerance %.3f",
+                         packet->node_id, phase_dist, filter->max_phase_distance_tolerance);
+            }
+            return FLOW_SECURITY_PHYSICAL_BREACH;
+        }
+    }
+
+    return FLOW_SECURITY_PASS;
+}
+
 FlowSecurityOutcome flow_security_check_composition_gate(
     const FlowCompositionSpec *spec, char *message, size_t message_size) {
     FlowSecurityOutcome outcome;
@@ -232,6 +692,8 @@ FlowSecurityOutcome flow_security_check_composition_gate(
     outcome = flow_security_check_ownership_gate(spec, message, message_size);
     if (outcome != FLOW_SECURITY_PASS) return outcome;
     outcome = flow_security_check_resource_quota_gate(spec, message, message_size);
+    if (outcome != FLOW_SECURITY_PASS) return outcome;
+    outcome = flow_security_check_physical_barrier_gate(spec, message, message_size);
     if (outcome != FLOW_SECURITY_PASS) return outcome;
     return FLOW_SECURITY_PASS;
 }

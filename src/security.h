@@ -8,6 +8,11 @@
 #include <stdint.h>
 #include <stdio.h>
 
+typedef struct FlowJet FlowJet;
+typedef struct FlowJITCodeBlock FlowJITCodeBlock;
+typedef struct FlowLayoutMigrationSpec FlowLayoutMigrationSpec;
+typedef struct FlowJetDeadReckonPacket FlowJetDeadReckonPacket;
+
 typedef enum {
     FLOW_SECURITY_PASS = 0,
     FLOW_SECURITY_CONTRACT_VIOLATION = 1,
@@ -15,7 +20,8 @@ typedef enum {
     FLOW_SECURITY_RESOURCE_EXHAUSTION = 3,
     FLOW_SECURITY_TIMEOUT = 4,
     FLOW_SECURITY_DIVERGENCE = 5,
-    FLOW_SECURITY_INCOMPLETE = 6
+    FLOW_SECURITY_INCOMPLETE = 6,
+    FLOW_SECURITY_PHYSICAL_BREACH = 7
 } FlowSecurityOutcome;
 
 typedef struct {
@@ -56,6 +62,10 @@ typedef struct {
     int read_only_ownership;
     size_t composed_component_count;
     size_t total_composed_bytes;
+    const FlowJet *jet;
+    double max_hamiltonian_drift_ratio;  /* e.g. 0.05 (5% drift tolerance) */
+    double max_velocity_bound;           /* Upper bound for |p_i| */
+    double max_acceleration_bound;       /* Upper bound for |a_i| */
 } FlowCompositionSpec;
 
 /* Low-level 1-bit chaotic mutation test runner */
@@ -67,7 +77,7 @@ const char *flow_security_outcome_name(FlowSecurityOutcome outcome);
 int flow_security_write_attestation(FILE *output, const char *component,
                                     const FlowSecurityReport *report);
 
-/* 5 Linker Hard-Gate checkers */
+/* 6 Linker Hard-Gate checkers */
 FlowSecurityOutcome flow_security_check_contract_gate(
     const FlowCompositionSpec *spec, char *message, size_t message_size);
 
@@ -80,8 +90,85 @@ FlowSecurityOutcome flow_security_check_ownership_gate(
 FlowSecurityOutcome flow_security_check_resource_quota_gate(
     const FlowCompositionSpec *spec, char *message, size_t message_size);
 
+FlowSecurityOutcome flow_security_check_physical_barrier_gate(
+    const FlowCompositionSpec *spec, char *message, size_t message_size);
+
 FlowSecurityOutcome flow_security_check_composition_gate(
     const FlowCompositionSpec *spec, char *message, size_t message_size);
+
+/* JIT & Memory Transposition Hard-Gate checkers */
+FlowSecurityOutcome flow_security_check_jit_wx_gate(
+    const FlowJITCodeBlock *block, uintptr_t write_base, uintptr_t exec_base,
+    char *message, size_t message_size);
+
+FlowSecurityOutcome flow_security_check_transposition_gate(
+    const FlowLayoutMigrationSpec *spec, size_t buffer_bytes,
+    char *message, size_t message_size);
+
+/* ========================================================================= */
+/* Phase Space Attractor IDS & Koopman Spectrum Anomaly Gate                 */
+/* ========================================================================= */
+#define FLOW_JET_ATTRACTOR_MAX_DIM 64
+
+typedef struct {
+    uint32_t dim;
+    double q_center[FLOW_JET_ATTRACTOR_MAX_DIM];
+    double p_center[FLOW_JET_ATTRACTOR_MAX_DIM];
+    double max_radius_q;
+    double max_radius_p;
+    double max_koopman_trace;
+} FlowJetAttractorProfile;
+
+int flow_jet_attractor_profile_init(FlowJetAttractorProfile *profile, uint32_t dim,
+                                   double r_q, double r_p, double max_trace);
+
+FlowSecurityOutcome flow_security_check_attractor_anomaly(
+    const FlowJet *jet, const FlowJetAttractorProfile *profile,
+    char *message, size_t message_size);
+
+/* ========================================================================= */
+/* Differential Continuity Physical Proof (C1/C2 Anti-Spoofing & Replay)    */
+/* ========================================================================= */
+FlowSecurityOutcome flow_security_check_continuity_proof(
+    const FlowJet *prev_jet, const FlowJet *curr_jet,
+    double dt, double max_jerk, double noise_tolerance,
+    char *message, size_t message_size);
+
+/* ========================================================================= */
+/* Predictive MTD & Second-Order Resource Quota Breach Extrapolation         */
+/* ========================================================================= */
+typedef struct {
+    double time_to_breach_s;
+    int will_breach;
+    double projected_breach_velocity;
+} FlowPredictiveBreachReport;
+
+int flow_security_predict_resource_breach(
+    double current_usage, double consumption_rate, double consumption_accel,
+    double quota_limit, double time_horizon_s,
+    FlowPredictiveBreachReport *report);
+
+int flow_security_should_proactive_morph(
+    const FlowPredictiveBreachReport *report, double proactive_lead_time_s);
+
+/* ========================================================================= */
+/* Symplectic Byzantine Consensus (Zero-RPC O(1) Hamiltonian & Geodesic)     */
+/* ========================================================================= */
+typedef struct {
+    uint32_t byzantine_faults_detected;
+    double max_hamiltonian_drift_tolerance;
+    double max_phase_distance_tolerance;
+} FlowSymplecticByzantineFilter;
+
+int flow_jet_byzantine_filter_init(
+    FlowSymplecticByzantineFilter *filter,
+    double max_h_drift, double max_phase_dist);
+
+FlowSecurityOutcome flow_jet_byzantine_validate_packet(
+    FlowSymplecticByzantineFilter *filter,
+    const FlowJetDeadReckonPacket *packet,
+    const FlowJet *local_shadow_mirror,
+    char *message, size_t message_size);
 
 /* Full compositional security audit with BMF probing */
 int flow_security_audit_composition(const FlowCompositionSpec *spec,

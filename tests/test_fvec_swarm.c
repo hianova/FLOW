@@ -9,6 +9,11 @@
 #include "bmf_microcode.h"
 #include "flow_jet.h"
 #include "flow_jet_dead_reckon.h"
+#include "flow_jet_lob.h"
+#include "flow_jet_impact.h"
+#include "flow_jet_geodesic.h"
+#include "matching.h"
+#include "flow_embodied_mz.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -465,6 +470,206 @@ int main(void) {
                sender.bandwidth_savings_ratio * 100.0,
                (unsigned long long)sender.packets_suppressed,
                (unsigned long long)sender.total_ticks);
+    }
+
+    /* ========================================================================= */
+    /* STAGE 11: fjet x Finance LOB: Phase-Space Liquidity Hydrodynamics         */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(11, "fjet x Finance LOB: Phase-Space Liquidity Hydrodynamics & Anti-Sniping Spread");
+    {
+        FlowLimitOrderBook book;
+        flow_orderbook_init(&book, 101);
+
+        /* Populate book with resting bids and asks */
+        FlowOrder bid1 = {.order_id = 1, .symbol_id = 101, .side = FLOW_ORDER_BUY, .type = FLOW_ORDER_LIMIT,
+                          .price = 10000, .quantity = 20, .filled_quantity = 0, .timestamp_ns = 1000, .is_active = 1};
+        FlowOrder bid2 = {.order_id = 2, .symbol_id = 101, .side = FLOW_ORDER_BUY, .type = FLOW_ORDER_LIMIT,
+                          .price = 10000, .quantity = 20, .filled_quantity = 0, .timestamp_ns = 1010, .is_active = 1};
+        FlowOrder ask1 = {.order_id = 3, .symbol_id = 101, .side = FLOW_ORDER_SELL, .type = FLOW_ORDER_LIMIT,
+                          .price = 10005, .quantity = 20, .filled_quantity = 0, .timestamp_ns = 1020, .is_active = 1};
+        FlowTrade trades[8];
+        size_t trade_c = 0;
+        FLOW_ASSERT_EQ(flow_orderbook_submit(&book, &bid1, trades, 8, &trade_c), 1);
+        FLOW_ASSERT_EQ(flow_orderbook_submit(&book, &bid2, trades, 8, &trade_c), 1);
+        FLOW_ASSERT_EQ(flow_orderbook_submit(&book, &ask1, trades, 8, &trade_c), 1);
+
+        FlowLOBHydrodynamics hydro;
+        FLOW_ASSERT_EQ(flow_lob_hydrodynamics_init(&hydro, 101, 30.0, 15.0), 1);
+        FLOW_ASSERT_EQ(hydro.symbol_id, 101U);
+
+        /* Initial tick: balanced state */
+        FLOW_ASSERT_EQ(flow_lob_hydrodynamics_update_from_book(&hydro, &book, 1000000ULL), 1);
+        FLOW_ASSERT_TRUE(hydro.mid_price > 10000.0 && hydro.mid_price < 10005.0);
+        FLOW_ASSERT_EQ(hydro.total_updates, 1ULL);
+
+        /* Fast forward time and simulate sharp price crash & depth starvation (e.g. market sell wave) */
+        flow_orderbook_cancel(&book, 1);
+        flow_orderbook_cancel(&book, 2);
+        FlowOrder low_bid = {.order_id = 4, .symbol_id = 101, .side = FLOW_ORDER_BUY, .type = FLOW_ORDER_LIMIT,
+                             .price = 9850, .quantity = 5, .filled_quantity = 0, .timestamp_ns = 1050000, .is_active = 1};
+        FLOW_ASSERT_EQ(flow_orderbook_submit(&book, &low_bid, trades, 8, &trade_c), 1);
+
+        /* Second tick: 50us later, sharp velocity surge */
+        FLOW_ASSERT_EQ(flow_lob_hydrodynamics_update_from_book(&hydro, &book, 1050000ULL), 1);
+        FLOW_ASSERT_TRUE(hydro.price_velocity < 0.0); /* Sharp downward drop */
+
+        /* Third tick: 10us later, another drop triggering negative acceleration */
+        flow_orderbook_cancel(&book, 4);
+        FlowOrder lower_bid = {.order_id = 5, .symbol_id = 101, .side = FLOW_ORDER_BUY, .type = FLOW_ORDER_LIMIT,
+                              .price = 9600, .quantity = 2, .filled_quantity = 0, .timestamp_ns = 1060000, .is_active = 1};
+        FLOW_ASSERT_EQ(flow_orderbook_submit(&book, &lower_bid, trades, 8, &trade_c), 1);
+        FLOW_ASSERT_EQ(flow_lob_hydrodynamics_update_from_book(&hydro, &book, 1060000ULL), 1);
+
+        /* Test liquidity collapse prediction */
+        FlowLOBCollapseAlert alert;
+        FLOW_ASSERT_EQ(flow_lob_hydrodynamics_predict_collapse(&hydro, &book, FLOW_ORDER_BUY, &alert), 1);
+        FLOW_ASSERT_TRUE(alert.is_collapse_imminent);
+        FLOW_ASSERT_TRUE(alert.time_to_collapse_us > 0.0);
+
+        /* Test adaptive dynamic spread calculation (should widen during acceleration surge) */
+        uint64_t base_spread = 5;
+        uint64_t widened_spread = 0;
+        FLOW_ASSERT_EQ(flow_lob_hydrodynamics_compute_adaptive_spread(&hydro, base_spread, &widened_spread), 1);
+        FLOW_ASSERT_TRUE(widened_spread > base_spread);
+        FLOW_ASSERT_TRUE(hydro.adaptive_spread_activations >= 1ULL);
+
+        /* SMT Formal Supreme Court Verification */
+        FlowSMTProofAttestation lob_proof;
+        memset(&lob_proof, 0, sizeof(lob_proof));
+        FLOW_ASSERT_EQ(flow_lob_hydrodynamics_verify_smt(&hydro, &lob_proof), FLOW_SMT_PROVEN_UNSAT);
+        FLOW_ASSERT_SMT_SOUND(lob_proof);
+
+        printf("  ✓ Stage 11 Passed: LOB Hydrodynamics Mid=%.2f, V=%.3f, A=%.3f; Adaptive Spread %llu -> %llu; SMT proven.\n\n",
+               hydro.mid_price, hydro.price_velocity, hydro.price_acceleration,
+               (unsigned long long)base_spread, (unsigned long long)widened_spread);
+    }
+
+    /* ========================================================================= */
+    /* STAGE 12: fjet x Robot Reflex: Non-Smooth Symplectic Impact Manifold      */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(12, "fjet x Robot Reflex: Non-Smooth Symplectic Impact Manifold & Passivity");
+    {
+        FlowMoriZwanzigImpedanceController mz_ctrl;
+        FLOW_ASSERT_EQ(flow_embodied_mz_init(&mz_ctrl, 6, NULL, 8), 1);
+
+        FlowSymplecticImpactManifold manifold;
+        FLOW_ASSERT_EQ(flow_symplectic_impact_init(&manifold, &mz_ctrl, 0.10, 0.0, 100.0), 1);
+        FLOW_ASSERT_EQ(manifold.total_impact_events, 0ULL);
+
+        FlowJet leg_jet;
+        FLOW_ASSERT_EQ(flow_jet_init(&leg_jet, "foot_link_1", "Robot Foot Contact Jet"), 1);
+
+        /* Initial state: all foot joints descending in free flight (height = 0.2m, downward velocity = -1.5m/s) */
+        for (size_t j = 0; j < 6; ++j) {
+            leg_jet.payload.q[j] = 0.20;
+            leg_jet.payload.p[j] = -1.5;
+        }
+        FLOW_ASSERT_FALSE(flow_symplectic_impact_is_in_contact(&manifold, &leg_jet));
+
+        double target_q[FLOW_MAX_JOINTS] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+        double target_v[FLOW_MAX_JOINTS] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+        double torques[FLOW_MAX_JOINTS] = {0.0};
+
+        /* Step 10kHz during free flight: should not register contact */
+        FLOW_ASSERT_EQ(flow_symplectic_impact_step_10khz(&manifold, &leg_jet, target_q, target_v, torques, 0.0001), 1);
+        FLOW_ASSERT_FALSE(manifold.is_contact_active);
+
+        /* Fast forward foot to ground collision (height = 0.0m, p = -2.5m/s) */
+        for (size_t j = 0; j < 6; ++j) {
+            leg_jet.payload.q[j] = 0.0;
+            leg_jet.payload.p[j] = -2.5;
+        }
+
+        /* Execute 10kHz impact step: momentum jump + Moreau projection */
+        FLOW_ASSERT_EQ(flow_symplectic_impact_step_10khz(&manifold, &leg_jet, target_q, target_v, torques, 0.0001), 1);
+        FLOW_ASSERT_TRUE(manifold.is_contact_active);
+        FLOW_ASSERT_EQ(manifold.total_impact_events, 6ULL);
+        FLOW_ASSERT_TRUE(leg_jet.payload.q[0] >= 0.0);     /* Non-penetration guarantee */
+        FLOW_ASSERT_TRUE(leg_jet.payload.p[0] > 0.0);      /* Restitution upward bounce */
+        FLOW_ASSERT_TRUE(manifold.peak_impact_impulse > 2.0);
+        FLOW_ASSERT_TRUE(manifold.total_dissipated_energy > 0.0);
+        FLOW_ASSERT_TRUE(manifold.passivity_maintained);
+
+        /* Check torque limits are respected */
+        for (size_t j = 0; j < 6; ++j) {
+            FLOW_ASSERT_TRUE(fabs(torques[j]) <= 100.0);
+        }
+
+        /* SMT Formal Supreme Court Verification */
+        FlowSMTProofAttestation impact_proof;
+        memset(&impact_proof, 0, sizeof(impact_proof));
+        FLOW_ASSERT_EQ(flow_symplectic_impact_verify_smt(&manifold, &leg_jet, &impact_proof), FLOW_SMT_PROVEN_UNSAT);
+        FLOW_ASSERT_SMT_SOUND(impact_proof);
+
+        printf("  ✓ Stage 12 Passed: Non-Smooth Symplectic Impact: Impulse=%.3f N*s, Dissipated=%.3f J, Passivity verified; SMT proven.\n\n",
+               manifold.peak_impact_impulse, manifold.total_dissipated_energy);
+    }
+
+    /* ========================================================================= */
+    /* STAGE 13: fjet x Neuro-Bridge: Latent Geodesic Pre-Play Engine            */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(13, "fjet x Neuro-Bridge: Latent Geodesic Pre-Play & Real-Time BMF Coordinate Synthesis");
+    {
+        FlowNeuroBridge bridge;
+        FLOW_ASSERT_EQ(flow_neuro_bridge_init(&bridge, 4096, 0x1337BEEF), 1);
+
+        FlowNeuroGeodesicPrePlay preplay;
+        FLOW_ASSERT_EQ(flow_neuro_geodesic_preplay_init(&preplay, &bridge, 16, 0.35), 1);
+        FLOW_ASSERT_EQ(preplay.total_tokens_received, 0ULL);
+
+        /* Generate synthetic 4096-D token embedding 1 */
+        float embedding1[4096];
+        for (size_t i = 0; i < 4096; ++i) {
+            embedding1[i] = 0.02f * sinf(0.01f * (float)i);
+        }
+        FlowNeuroProjectionResult token1;
+        FLOW_ASSERT_EQ(flow_neuro_bridge_project(&bridge, embedding1, 4096, FLOW_NEURO_INTENT_SMOOTH_FETCH_LATTE, &token1), 1);
+
+        /* Ingest Token 1 */
+        FLOW_ASSERT_EQ(flow_neuro_geodesic_feed_token(&preplay, &token1, 0.0), 1);
+        FLOW_ASSERT_EQ(preplay.total_tokens_received, 1ULL);
+        FLOW_ASSERT_TRUE(preplay.is_preplaying);
+
+        /* Generate synthetic Token 2 (slight shift in latent intent) */
+        float embedding2[4096];
+        for (size_t i = 0; i < 4096; ++i) {
+            embedding2[i] = 0.02f * sinf(0.01f * (float)i + 0.05f);
+        }
+        FlowNeuroProjectionResult token2;
+        FLOW_ASSERT_EQ(flow_neuro_bridge_project(&bridge, embedding2, 4096, FLOW_NEURO_INTENT_SMOOTH_FETCH_LATTE, &token2), 1);
+
+        /* Ingest Token 2: computes velocity and geodesic acceleration */
+        FLOW_ASSERT_EQ(flow_neuro_geodesic_feed_token(&preplay, &token2, 0.020), 1);
+        FLOW_ASSERT_EQ(preplay.total_tokens_received, 2ULL);
+
+        /* Simulate 10kHz real-time loop during the 20ms gap between Token 2 and Token 3 (200 ticks of 100us) */
+        FlowNeuroProjectionResult live_extrapolated;
+        for (int tick = 0; tick < 200; ++tick) {
+            FLOW_ASSERT_EQ(flow_neuro_geodesic_extrapolate_10khz(&preplay, 0.0001, &live_extrapolated), 1);
+        }
+        FLOW_ASSERT_EQ(preplay.total_10khz_preplays, 200ULL);
+        FLOW_ASSERT_TRUE(live_extrapolated.bmf_coordinates != 0ULL);
+
+        /* Token 3 arrives: verify drift error residual is bounded */
+        float embedding3[4096];
+        for (size_t i = 0; i < 4096; ++i) {
+            embedding3[i] = 0.02f * sinf(0.01f * (float)i + 0.10f);
+        }
+        FlowNeuroProjectionResult token3;
+        FLOW_ASSERT_EQ(flow_neuro_bridge_project(&bridge, embedding3, 4096, FLOW_NEURO_INTENT_SMOOTH_FETCH_LATTE, &token3), 1);
+
+        FLOW_ASSERT_EQ(flow_neuro_geodesic_feed_token(&preplay, &token3, 0.040), 1);
+        FLOW_ASSERT_EQ(preplay.total_tokens_received, 3ULL);
+        FLOW_ASSERT_TRUE(preplay.peak_geodesic_drift <= 0.35); /* Bounded drift residual */
+
+        /* SMT Formal Supreme Court Verification */
+        FlowSMTProofAttestation geodesic_proof;
+        memset(&geodesic_proof, 0, sizeof(geodesic_proof));
+        FLOW_ASSERT_EQ(flow_neuro_geodesic_verify_smt(&preplay, &geodesic_proof), FLOW_SMT_PROVEN_UNSAT);
+        FLOW_ASSERT_SMT_SOUND(geodesic_proof);
+
+        printf("  ✓ Stage 13 Passed: Neuro Latent Geodesic Pre-Play extrapolated 200 ticks @ 10kHz; PeakDrift=%.4f; SMT proven.\n\n",
+               preplay.peak_geodesic_drift);
     }
 
     FLOW_TEST_SUITE_END();

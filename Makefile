@@ -22,7 +22,7 @@ INCLUDEDIR ?= $(PREFIX)/include/flow
 
 PLUGINS_SO := $(BUILD_DIR)/libflow_embodied.so $(BUILD_DIR)/libflow_smt.so $(BUILD_DIR)/libflow_security.so $(BUILD_DIR)/libflow_swarm.so
 
-.PHONY: all clean test demos demo benchmark chaos-benchmark gateway-benchmark frontier-benchmark audit-book autopoiesis-check acceptance install uninstall fuzz test-build test-run test-e2e sync-book audit-mechanisms fvec-flowc-apply-test reload-stress-nightly plugins flowy libflow
+.PHONY: all clean test demos demo benchmark chaos-benchmark gateway-benchmark frontier-benchmark audit-book autopoiesis-check security-test acceptance install uninstall fuzz test-build test-run test-e2e sync-book audit-mechanisms fvec-flowc-apply-test reload-stress-nightly plugins flowy libflow
 
 all: src/generated_book_knowledge.h $(LIBFLOW_A) $(FLOWC) $(FLOWY) plugins
 
@@ -168,7 +168,11 @@ autopoiesis-check: $(FLOWY)
 	$(FLOWY) absorb examples/compiler.flow
 	$(FLOWY) anneal examples/compiler.flow examples/project.flow
 
-acceptance: test benchmark autopoiesis-check security-test
+security-test: $(BUILD_DIR)/test-concurrency
+	@$(BUILD_DIR)/test-concurrency
+
+acceptance: test benchmark autopoiesis-check audit-book
+
 
 fvec-flowc-apply-test: $(FLOWC) $(FLOWY) | $(BUILD_DIR)
 	$(FLOWY) fvec seed .flow/vecs

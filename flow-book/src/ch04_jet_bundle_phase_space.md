@@ -41,3 +41,20 @@ $$\nabla V_{\text{moreau}} \in N_{\mathcal{C}}(q_i)$$
 對於非馬可夫（Non-Markovian）外部擾動，FLOW 採用 Mori-Zwanzig 投影算子分解：
 $$\dot{p}_i = -\nabla V_i - \int_0^t K(t - s) p_i(s) ds + \delta F(t)$$
 記憶核 $K(\tau) = \sum_k \gamma_k e^{-\alpha_k \tau}$ 將未建模高頻擾動轉化為粘彈性能量吸收，在 3.2ms 內平滑平息衝擊。
+
+---
+
+## 4.4 高維 .fjet 橫向穿透三大關鍵前沿 (Cross-Domain Jet Penetrations)
+
+高維 `.fjet` 不僅是孤立的力學積分器，更作為連續相空間幾何介質，橫向穿透了 FLOW 的三大核心領域：
+
+1. **Finance LOB（限價訂單簿 $\to$ 相空間流動性水力學）**：
+   - 檔案：`src/flow_jet_lob.h` / `src/flow_jet_lob.c`。
+   - 將中間價 $P_{\text{mid}}$ 與訂單流不平衡（OFI）作為相空間座標，以二階運動學 $\frac{1}{2} a t^2 + v t = \text{Depth}$ 預測流動性枯竭穿透時間，並在價格加速度爆發時自動拓寬保護性利差 $\Delta S(v, a)$，杜絕高頻微秒搶跑。
+2. **Robot Reflex（10kHz 脊髓反射 $\to$ 非光滑辛衝擊流形）**：
+   - 檔案：`src/flow_jet_impact.h` / `src/flow_jet_impact.c`。
+   - 結合 Moreau 凸分析法向錐與辛動量跳變映射 $p^+ = -e \cdot p^- + \Delta p$，在足底撞擊地面瞬態嚴格維持李雅普諾夫被動性與無穿透約束，徹底消弭致動器高頻震顫。
+3. **Neuro-Bridge（4096-D 神經降維 $\to$ 潛在測地線預演）**：
+   - 檔案：`src/flow_jet_geodesic.h` / `src/flow_jet_geodesic.c`。
+   - 在巨型 VLA / LLM 自回歸生成 Token 的 20ms 空檔期間，C17 引擎在 16-D 潛在流形上以 10kHz 辛幾何外推動作並實時合成 64-bit BMF 座標，達成神經決策的「零等待實體執行」。
+

@@ -10,6 +10,7 @@
 #include "token_ring.h"
 #include "entropy_collapse.h"
 #include "flow_jet.h"
+#include "flow_jet_dead_reckon.h"
 #include "flow_time_crystal.h"
 #include "flow_speculative_jit.h"
 #include "flow_prefetch.h"
@@ -836,7 +837,356 @@ int main(void) {
                sjit.predicted_crossing_time_ns);
     }
 
+    /* ========================================================================= */
+    /* STAGE 13: Linker Hard Gate 6: Physical Invariant & Hamiltonian Barrier    */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(13, "Linker Hard Gate 6: Physical Invariant & Hamiltonian Barrier");
+    {
+        FlowJet jet_sec;
+        FLOW_ASSERT_EQ(flow_jet_init(&jet_sec, "jet_security_test", "Physical Security Jet"), 1);
+        jet_sec.payload.q[0] = 0.5;
+        jet_sec.payload.p[0] = 1.0;
+        jet_sec.header.hamiltonian_energy = flow_jet_hamiltonian(&jet_sec);
+
+        FlowCompositionSpec comp_spec;
+        memset(&comp_spec, 0, sizeof(comp_spec));
+        comp_spec.jet = &jet_sec;
+        comp_spec.max_hamiltonian_drift_ratio = 0.05; /* 5% tolerance */
+        comp_spec.max_velocity_bound = 10.0;
+        comp_spec.max_acceleration_bound = 50.0;
+
+        char gate_msg[160] = {0};
+        FlowSecurityOutcome outcome = flow_security_check_physical_barrier_gate(&comp_spec, gate_msg, sizeof(gate_msg));
+        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PASS);
+
+        /* 1. Sensor Spoofing Attack: Inject NaN into coordinate q[2] */
+        jet_sec.payload.q[2] = NAN;
+        outcome = flow_security_check_physical_barrier_gate(&comp_spec, gate_msg, sizeof(gate_msg));
+        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PHYSICAL_BREACH);
+        FLOW_ASSERT_TRUE(strstr(gate_msg, "NaN or Inf") != NULL);
+
+        /* Fail-Safe Clamping restores safety envelope */
+        FLOW_ASSERT_EQ(flow_jet_clamp_to_safety_envelope(&jet_sec, 2.0, 10.0, 50.0), 1);
+        outcome = flow_security_check_physical_barrier_gate(&comp_spec, gate_msg, sizeof(gate_msg));
+        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PASS);
+
+        /* 2. Symplectic Energy Drift Attack: Kinetic momentum perturbation */
+        jet_sec.payload.p[0] = 2.0; /* Within velocity bound (2.0 < 10.0), but drifts energy by >200% */
+        outcome = flow_security_check_physical_barrier_gate(&comp_spec, gate_msg, sizeof(gate_msg));
+        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PHYSICAL_BREACH);
+        FLOW_ASSERT_TRUE(strstr(gate_msg, "Hamiltonian energy drift") != NULL);
+
+        /* Clamp & re-baseline energy */
+        FLOW_ASSERT_EQ(flow_jet_clamp_to_safety_envelope(&jet_sec, 2.0, 10.0, 50.0), 1);
+        jet_sec.header.hamiltonian_energy = flow_jet_hamiltonian(&jet_sec);
+        outcome = flow_security_check_physical_barrier_gate(&comp_spec, gate_msg, sizeof(gate_msg));
+        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PASS);
+
+        /* 3. Velocity Bound Breach */
+        jet_sec.payload.p[1] = 15.0; /* > 10.0 limit */
+        outcome = flow_security_check_physical_barrier_gate(&comp_spec, gate_msg, sizeof(gate_msg));
+        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PHYSICAL_BREACH);
+        FLOW_ASSERT_TRUE(strstr(gate_msg, "velocity") != NULL);
+
+        printf("  ✓ Stage 13 Passed: Physical Barrier Gate enforced; sensor NaN spoofing & energy drift blocked; fail-safe envelope clamp verified.\n\n");
+    }
+
+    /* ========================================================================= */
+    /* STAGE 14: JIT W^X Memory Protection & Dual-Mapping Hard Gate              */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(14, "JIT W^X Memory Protection & Dual-Mapping Hard Gate");
+    {
+        FlowJITConfig config = {
+            .opt_level = 2,
+            .initial_code_heap_bytes = 1024 * 1024
+        };
+        FlowJITEngine *engine = flow_jit_create(&config);
+        FLOW_ASSERT_TRUE(engine != NULL);
+
+        char wx_msg[160] = {0};
+        FLOW_ASSERT_EQ(flow_jit_verify_wx_invariants(engine, wx_msg, sizeof(wx_msg)), 1);
+
+        FlowJITPoolStats stats;
+        FLOW_ASSERT_EQ(flow_jit_get_pool_stats(engine, &stats), 1);
+
+        /* Legitimate code block within executable heap */
+        FlowJITCodeBlock block = {
+            .start_ip = stats.exec_base + 128,
+            .end_ip = stats.exec_base + 128 + 4096,
+            .code_bytes = 4096,
+            .layout = FLOW_LAYOUT_AOS,
+            .compile_time_ns = 100
+        };
+        FlowSecurityOutcome outcome = flow_security_check_jit_wx_gate(&block, stats.write_base, stats.exec_base,
+                                                                      wx_msg, sizeof(wx_msg));
+        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PASS);
+
+        /* Violation: Writable heap aliased directly to executable heap */
+        outcome = flow_security_check_jit_wx_gate(&block, stats.exec_base, stats.exec_base,
+                                                  wx_msg, sizeof(wx_msg));
+        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_MEMORY_VIOLATION);
+        FLOW_ASSERT_TRUE(strstr(wx_msg, "W^X") != NULL);
+
+        flow_jit_destroy(engine);
+        printf("  ✓ Stage 14 Passed: JIT W^X invariant verified; simultaneous writable+executable page injection blocked.\n\n");
+    }
+
+    /* ========================================================================= */
+    /* STAGE 15: Memory Transposition (AoS <-> SoA) Alignment & Buffer Gate      */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(15, "Memory Transposition Alignment & Buffer Bound Gate");
+    {
+        FlowLayoutMigrationSpec valid_spec = {
+            .item_count = 1000,
+            .field_count = 3,
+            .field_sizes = {8, 4, 4},
+            .from_layout = FLOW_LAYOUT_AOS,
+            .to_layout = FLOW_LAYOUT_SOA,
+            .field_changed = {0, 0, 0}
+        };
+
+        char trans_msg[160] = {0};
+        FlowSecurityOutcome outcome = flow_security_check_transposition_gate(&valid_spec, 1000 * 16,
+                                                                            trans_msg, sizeof(trans_msg));
+        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PASS);
+
+        /* 1. Misaligned layout rejection: 3-byte field creates misaligned 4-byte next offset */
+        FlowLayoutMigrationSpec misaligned_spec = valid_spec;
+        misaligned_spec.field_sizes[0] = 3;
+        outcome = flow_security_check_transposition_gate(&misaligned_spec, 1000 * 16,
+                                                         trans_msg, sizeof(trans_msg));
+        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_MEMORY_VIOLATION);
+        FLOW_ASSERT_TRUE(strstr(trans_msg, "misaligned") != NULL);
+
+        /* 2. Buffer capacity overflow rejection */
+        outcome = flow_security_check_transposition_gate(&valid_spec, 100,
+                                                         trans_msg, sizeof(trans_msg));
+        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_RESOURCE_EXHAUSTION);
+        FLOW_ASSERT_TRUE(strstr(trans_msg, "exceeds buffer") != NULL);
+
+        /* 3. Integer overflow rejection */
+        FlowLayoutMigrationSpec overflow_spec = valid_spec;
+        overflow_spec.item_count = SIZE_MAX;
+        outcome = flow_security_check_transposition_gate(&overflow_spec, 1000000,
+                                                         trans_msg, sizeof(trans_msg));
+        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_MEMORY_VIOLATION);
+        FLOW_ASSERT_TRUE(strstr(trans_msg, "integer overflow") != NULL);
+
+        printf("  ✓ Stage 15 Passed: Transposition alignment & arithmetic buffer overflow gates enforced.\n\n");
+    }
+
+    /* ========================================================================= */
+    /* STAGE 16: Phase Space Attractor IDS: Koopman Spectrum & Ellipsoidal Gate  */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(16, "Phase Space Attractor IDS: Koopman Spectrum & Ellipsoidal Gate");
+    {
+        FlowJetAttractorProfile profile;
+        FLOW_ASSERT_EQ(flow_jet_attractor_profile_init(&profile, 16, 2.0, 5.0, 0.0), 1);
+
+        FlowJet jet_normal;
+        FLOW_ASSERT_EQ(flow_jet_init(&jet_normal, "jet_attractor_normal", "Normal Workload"), 1);
+        jet_normal.payload.q[0] = 0.5;
+        jet_normal.payload.p[0] = 1.0;
+        /* Set dissipative stable Koopman diagonal: Tr(K) = -0.5 * 8 = -4.0 <= 0 */
+        for (int i = 0; i < 8; ++i) {
+            jet_normal.payload.koopman_matrix[i][i] = -0.5;
+        }
+
+        char ids_msg[160] = {0};
+        FlowSecurityOutcome outcome = flow_security_check_attractor_anomaly(&jet_normal, &profile,
+                                                                           ids_msg, sizeof(ids_msg));
+        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PASS);
+
+        /* 1. Attractor Spatial Boundary Breach (State trajectory diverges from attractor) */
+        FlowJet jet_outlier = jet_normal;
+        jet_outlier.payload.q[0] = 10.0; /* Exceeds r_q = 2.0 */
+        outcome = flow_security_check_attractor_anomaly(&jet_outlier, &profile, ids_msg, sizeof(ids_msg));
+        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PHYSICAL_BREACH);
+        FLOW_ASSERT_TRUE(strstr(ids_msg, "attractor breach") != NULL);
+
+        /* 2. Koopman Spectrum Instability Breach (Positive Lyapunov trace expansion Tr(K) > 0) */
+        FlowJet jet_unstable = jet_normal;
+        for (int i = 0; i < 8; ++i) {
+            jet_unstable.payload.koopman_matrix[i][i] = 1.0; /* Tr(K) = +8.0 > 0.0 */
+        }
+        outcome = flow_security_check_attractor_anomaly(&jet_unstable, &profile, ids_msg, sizeof(ids_msg));
+        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PHYSICAL_BREACH);
+        FLOW_ASSERT_TRUE(strstr(ids_msg, "attractor instability") != NULL);
+
+        printf("  ✓ Stage 16 Passed: Attractor IDS enforced; phase divergence and expanding Koopman spectrum blocked.\n\n");
+    }
+
+    /* ========================================================================= */
+    /* STAGE 17: Differential Continuity Proof: C1/C2 Anti-Spoofing & Replay Gate*/
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(17, "Differential Continuity Proof: C1/C2 Anti-Spoofing & Replay Gate");
+    {
+        double dt = 0.01; /* 10ms */
+        double max_jerk = 200.0;
+        double noise_tol = 0.005;
+
+        FlowJet prev_jet, curr_jet;
+        FLOW_ASSERT_EQ(flow_jet_init(&prev_jet, "jet_c2_prev", "Previous Frame"), 1);
+        FLOW_ASSERT_EQ(flow_jet_init(&curr_jet, "jet_c2_curr", "Current Frame"), 1);
+
+        /* Legitimate continuous physical motion */
+        prev_jet.payload.q[0] = 1.0;
+        prev_jet.payload.p[0] = 2.0;
+        prev_jet.payload.a[0] = 0.5;
+
+        /* Taylor extrapolation with small jerk */
+        curr_jet.payload.a[0] = prev_jet.payload.a[0] + 0.1; /* jerk ~ 10.0 < 200.0 */
+        curr_jet.payload.p[0] = prev_jet.payload.p[0] + prev_jet.payload.a[0] * dt;
+        curr_jet.payload.q[0] = prev_jet.payload.q[0] + prev_jet.payload.p[0] * dt + 0.5 * prev_jet.payload.a[0] * dt * dt;
+
+        char cont_msg[160] = {0};
+        FlowSecurityOutcome outcome = flow_security_check_continuity_proof(&prev_jet, &curr_jet, dt,
+                                                                         max_jerk, noise_tol,
+                                                                         cont_msg, sizeof(cont_msg));
+        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PASS);
+
+        /* 1. Impulsive jerk jump (Replay / sensor spoofing injecting instantaneous force spike) */
+        FlowJet spoof_jerk = curr_jet;
+        spoof_jerk.payload.a[0] = 50.0; /* jump from 0.5 to 50.0 in 10ms -> jerk = 4950 > 200 */
+        outcome = flow_security_check_continuity_proof(&prev_jet, &spoof_jerk, dt,
+                                                       max_jerk, noise_tol,
+                                                       cont_msg, sizeof(cont_msg));
+        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PHYSICAL_BREACH);
+        FLOW_ASSERT_TRUE(strstr(cont_msg, "accel jump") != NULL);
+
+        /* 2. Velocity discontinuous step (Instantaneous momentum teleportation) */
+        FlowJet spoof_vel = curr_jet;
+        spoof_vel.payload.p[0] = 5.0; /* step from ~2.0 to 5.0 */
+        outcome = flow_security_check_continuity_proof(&prev_jet, &spoof_vel, dt,
+                                                       max_jerk, noise_tol,
+                                                       cont_msg, sizeof(cont_msg));
+        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PHYSICAL_BREACH);
+        FLOW_ASSERT_TRUE(strstr(cont_msg, "velocity residual") != NULL);
+
+        /* 3. Position discontinuous jump (Teleportation without traversing phase space) */
+        FlowJet spoof_pos = curr_jet;
+        spoof_pos.payload.q[0] = 2.5; /* teleport from 1.0 to 2.5 in 10ms */
+        outcome = flow_security_check_continuity_proof(&prev_jet, &spoof_pos, dt,
+                                                       max_jerk, noise_tol,
+                                                       cont_msg, sizeof(cont_msg));
+        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PHYSICAL_BREACH);
+        FLOW_ASSERT_TRUE(strstr(cont_msg, "position residual") != NULL);
+
+        printf("  ✓ Stage 17 Passed: Differential continuity proof enforced; synthetic impulses & teleportation blocked.\n\n");
+    }
+
+    /* ========================================================================= */
+    /* STAGE 18: Predictive MTD: Second-Order Kinematic Quota Breach Prediction  */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(18, "Predictive MTD: Second-Order Kinematic Quota Breach Prediction");
+    {
+        /* Case 1: Quadratic resource consumption
+         * Usage = 800 MB, Quota = 1000 MB, Distance = 200 MB
+         * Consumption rate v = 100 MB/s, Acceleration a = 20 MB/s^2
+         * Analytical solution: 0.5 * 20 * t^2 + 100 * t - 200 = 0 -> 10 t^2 + 100 t - 200 = 0
+         * t = (-100 + sqrt(10000 + 8000)) / 20 = (-100 + sqrt(18000)) / 20 = (-100 + 134.164) / 20 = 1.7082 s */
+        FlowPredictiveBreachReport report;
+        FLOW_ASSERT_EQ(flow_security_predict_resource_breach(800.0, 100.0, 20.0, 1000.0, 5.0, &report), 1);
+        FLOW_ASSERT_EQ(report.will_breach, 1);
+        FLOW_ASSERT_TRUE(fabs(report.time_to_breach_s - 1.7082) < 0.005);
+        FLOW_ASSERT_TRUE(report.projected_breach_velocity > 100.0);
+
+        /* Proactive morph trigger test: lead time 2.0s triggers proactive evacuation */
+        FLOW_ASSERT_EQ(flow_security_should_proactive_morph(&report, 2.0), 1);
+        /* Lead time 1.0s does not trigger yet */
+        FLOW_ASSERT_EQ(flow_security_should_proactive_morph(&report, 1.0), 0);
+
+        /* Case 2: Constant velocity consumption
+         * Usage = 500 MB, Quota = 1000 MB, Distance = 500 MB, v = 250 MB/s, a = 0 -> t = 2.0 s */
+        FLOW_ASSERT_EQ(flow_security_predict_resource_breach(500.0, 250.0, 0.0, 1000.0, 10.0, &report), 1);
+        FLOW_ASSERT_EQ(report.will_breach, 1);
+        FLOW_ASSERT_TRUE(fabs(report.time_to_breach_s - 2.0) < 1.0e-5);
+
+        /* Case 3: Receding resource consumption (Safe / negative consumption rate) */
+        FLOW_ASSERT_EQ(flow_security_predict_resource_breach(500.0, -50.0, 0.0, 1000.0, 10.0, &report), 1);
+        FLOW_ASSERT_EQ(report.will_breach, 0);
+        FLOW_ASSERT_EQ(flow_security_should_proactive_morph(&report, 5.0), 0);
+
+        printf("  ✓ Stage 18 Passed: Kinematic time-to-breach computed (t_breach=%.3fs); proactive morphing trigger verified.\n\n",
+               1.7082);
+    }
+
+    /* ========================================================================= */
+    /* STAGE 19: Symplectic Byzantine Consensus: O(1) Hamiltonian & Geodesic Gate*/
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(19, "Symplectic Byzantine Consensus: O(1) Hamiltonian & Geodesic Gate");
+    {
+        FlowSymplecticByzantineFilter filter;
+        FLOW_ASSERT_EQ(flow_jet_byzantine_filter_init(&filter, 0.05, 2.0), 1);
+
+        FlowJet local_mirror;
+        FLOW_ASSERT_EQ(flow_jet_init(&local_mirror, "mirror_alpha", "Local Cluster Shadow Mirror"), 1);
+        local_mirror.payload.q[0] = 1.0;
+        local_mirror.payload.p[0] = 1.0;
+        local_mirror.header.hamiltonian_energy = flow_jet_hamiltonian(&local_mirror);
+
+        /* Legitimate remote packet conforming to shadow mirror */
+        FlowJetDeadReckonPacket pkt_good = {
+            .timestamp_ns = 1000000,
+            .node_id = 42,
+            .dim = 16,
+            .q = {1.01},
+            .p = {0.99},
+            .a = {-1.0},
+            .packet_seq = 1
+        };
+        pkt_good.crc32 = flow_jet_crc32(&pkt_good, offsetof(FlowJetDeadReckonPacket, crc32));
+
+        char byz_msg[160] = {0};
+        FlowSecurityOutcome outcome = flow_jet_byzantine_validate_packet(&filter, &pkt_good, &local_mirror,
+                                                                        byz_msg, sizeof(byz_msg));
+        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PASS);
+        FLOW_ASSERT_EQ(filter.byzantine_faults_detected, 0U);
+
+        /* 1. Corrupted CRC packet rejection */
+        FlowJetDeadReckonPacket pkt_bad_crc = pkt_good;
+        pkt_bad_crc.crc32 ^= 0xDEADBEEF;
+        outcome = flow_jet_byzantine_validate_packet(&filter, &pkt_bad_crc, &local_mirror,
+                                                     byz_msg, sizeof(byz_msg));
+        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PHYSICAL_BREACH);
+        FLOW_ASSERT_EQ(filter.byzantine_faults_detected, 1U);
+
+        /* 2. Sensor spoofing NaN packet rejection */
+        FlowJetDeadReckonPacket pkt_nan = pkt_good;
+        pkt_nan.q[3] = NAN;
+        pkt_nan.crc32 = flow_jet_crc32(&pkt_nan, offsetof(FlowJetDeadReckonPacket, crc32));
+        outcome = flow_jet_byzantine_validate_packet(&filter, &pkt_nan, &local_mirror,
+                                                     byz_msg, sizeof(byz_msg));
+        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PHYSICAL_BREACH);
+        FLOW_ASSERT_EQ(filter.byzantine_faults_detected, 2U);
+
+        /* 3. Byzantine energy injection violation (Hamiltonian drift > 5%) */
+        FlowJetDeadReckonPacket pkt_energy_drift = pkt_good;
+        pkt_energy_drift.p[0] = 5.0; /* Massively jumps energy from ~1.0 to ~13.0 */
+        pkt_energy_drift.crc32 = flow_jet_crc32(&pkt_energy_drift, offsetof(FlowJetDeadReckonPacket, crc32));
+        outcome = flow_jet_byzantine_validate_packet(&filter, &pkt_energy_drift, &local_mirror,
+                                                     byz_msg, sizeof(byz_msg));
+        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PHYSICAL_BREACH);
+        FLOW_ASSERT_TRUE(strstr(byz_msg, "energy drift") != NULL);
+        FLOW_ASSERT_EQ(filter.byzantine_faults_detected, 3U);
+
+        /* 4. Geodesic distance divergence (Rotated to opposing phase space manifold) */
+        FlowJetDeadReckonPacket pkt_geodesic = pkt_good;
+        pkt_geodesic.q[0] = -1.0; /* Same individual energy contribution, but phase distance is large */
+        pkt_geodesic.p[0] = -1.0;
+        pkt_geodesic.crc32 = flow_jet_crc32(&pkt_geodesic, offsetof(FlowJetDeadReckonPacket, crc32));
+        outcome = flow_jet_byzantine_validate_packet(&filter, &pkt_geodesic, &local_mirror,
+                                                     byz_msg, sizeof(byz_msg));
+        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PHYSICAL_BREACH);
+        FLOW_ASSERT_TRUE(strstr(byz_msg, "geodesic phase distance") != NULL);
+        FLOW_ASSERT_EQ(filter.byzantine_faults_detected, 4U);
+
+        printf("  ✓ Stage 19 Passed: Symplectic Byzantine consensus validated; CRC, NaN, energy drift, and geodesic faults pruned in O(1).\n\n");
+    }
+
     FLOW_TEST_SUITE_END();
     return 0;
 }
+
+
 

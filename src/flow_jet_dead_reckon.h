@@ -33,7 +33,7 @@ extern "C" {
  * ============================================================================
  */
 
-typedef struct {
+typedef struct FlowJetDeadReckonPacket {
     uint64_t timestamp_ns;
     uint32_t node_id;
     uint32_t dim;

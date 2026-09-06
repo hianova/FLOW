@@ -43,6 +43,9 @@ int flowy_jet_simulate_run(const struct FlowJet *jet, int steps, double dt, FILE
 int flowy_jet_learn_demo(struct FlowJet *jet, int sample_count, FILE *out);
 int flowy_jet_dtc_simulate(struct FlowJet *jet, uint32_t cycles, double period_T, double imperfection, FILE *out);
 int flowy_jet_dead_reckon_demo(struct FlowJet *jet, uint32_t ticks, double threshold, FILE *out);
+int flowy_jet_lob_demo(struct FlowJet *jet, uint32_t ticks, FILE *out);
+int flowy_jet_impact_demo(struct FlowJet *jet, uint32_t ticks, FILE *out);
+int flowy_jet_geodesic_demo(struct FlowJet *jet, uint32_t tokens, FILE *out);
 
 /* Interactive REPL Loop */
 int flowy_interactive_loop(FlowOrchestrator *orch, FILE *in, FILE *out);

@@ -78,6 +78,36 @@ int flow_jit_get_pool_stats(const FlowJITEngine *engine, FlowJITPoolStats *stats
     return 1;
 }
 
+int flow_jit_verify_wx_invariants(const FlowJITEngine *engine, char *message, size_t message_size) {
+    if (engine == NULL) {
+        if (message && message_size) snprintf(message, message_size, "null jit engine");
+        return 0;
+    }
+    if (engine->write_heap == NULL || engine->exec_heap == NULL) {
+        if (message && message_size) snprintf(message, message_size, "uninitialized jit memory heaps");
+        return 0;
+    }
+    /* W^X Rule: write_heap must never equal exec_heap */
+    if (engine->write_heap == engine->exec_heap) {
+        if (message && message_size) {
+            snprintf(message, message_size, "W^X violation: heap simultaneously writable and executable");
+        }
+        return 0;
+    }
+    if (engine->code_heap_used > engine->code_heap_size) {
+        if (message && message_size) {
+            snprintf(message, message_size, "jit code heap buffer overflow: used %zu > size %zu",
+                     engine->code_heap_used, engine->code_heap_size);
+        }
+        return 0;
+    }
+    if (message && message_size) {
+        snprintf(message, message_size, "W^X verified: dual-mapped write_base=0x%lx exec_base=0x%lx",
+                 (unsigned long)(uintptr_t)engine->write_heap, (unsigned long)(uintptr_t)engine->exec_heap);
+    }
+    return 1;
+}
+
 /* Simulated JIT State Execution Wrappers */
 typedef struct {
     uint32_t magic;

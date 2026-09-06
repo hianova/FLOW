@@ -401,6 +401,44 @@ double flow_jet_phase_distance(const FlowJet *a, const FlowJet *b) {
     return sqrt(dist_sq);
 }
 
+int flow_jet_clamp_to_safety_envelope(FlowJet *jet, double max_q, double max_p, double max_a) {
+    if (jet == NULL) return 0;
+    uint32_t dim = jet->header.vector_dim ? jet->header.vector_dim : FLOW_JET_STANDARD_DIM;
+    if (dim > FLOW_JET_MAX_DIM) dim = FLOW_JET_MAX_DIM;
+
+    double q_bound = max_q > 0.0 ? max_q : 10.0;
+    double p_bound = max_p > 0.0 ? max_p : 50.0;
+    double a_bound = max_a > 0.0 ? max_a : 200.0;
+
+    for (size_t i = 0; i < dim; ++i) {
+        if (isnan(jet->payload.q[i]) || isinf(jet->payload.q[i])) {
+            jet->payload.q[i] = 0.0;
+        } else if (jet->payload.q[i] > q_bound) {
+            jet->payload.q[i] = q_bound;
+        } else if (jet->payload.q[i] < -q_bound) {
+            jet->payload.q[i] = -q_bound;
+        }
+
+        if (isnan(jet->payload.p[i]) || isinf(jet->payload.p[i])) {
+            jet->payload.p[i] = 0.0;
+        } else if (jet->payload.p[i] > p_bound) {
+            jet->payload.p[i] = p_bound;
+        } else if (jet->payload.p[i] < -p_bound) {
+            jet->payload.p[i] = -p_bound;
+        }
+
+        if (isnan(jet->payload.a[i]) || isinf(jet->payload.a[i])) {
+            jet->payload.a[i] = 0.0;
+        } else if (jet->payload.a[i] > a_bound) {
+            jet->payload.a[i] = a_bound;
+        } else if (jet->payload.a[i] < -a_bound) {
+            jet->payload.a[i] = -a_bound;
+        }
+    }
+    jet->header.hamiltonian_energy = flow_jet_hamiltonian(jet);
+    return 1;
+}
+
 /* ------------------------------------------------------------------------- */
 /* 6. Serialization, Deserialization & .fvec Interoperability               */
 /* ------------------------------------------------------------------------- */

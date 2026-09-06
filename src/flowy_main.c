@@ -279,6 +279,9 @@ static void flowy_print_jet_usage(FILE *out) {
     fprintf(out, "  learn <file.fjet> [--samples N]      Online Streaming EDMD assimilation & stability proof\n");
     fprintf(out, "  dtc <file.fjet> [options]            Discrete Time Crystal subharmonic oscillation simulation\n");
     fprintf(out, "  dead-reckon <file.fjet> [options]    CXL cluster dead-reckoning bandwidth reduction simulation\n");
+    fprintf(out, "  lob <file.fjet> [--ticks N]          LOB phase-space liquidity hydrodynamics & anti-sniping spread\n");
+    fprintf(out, "  impact <file.fjet> [--ticks N]       Robot reflex non-smooth symplectic impact manifold simulation\n");
+    fprintf(out, "  geodesic <file.fjet> [--tokens N]    Neuro-bridge latent geodesic pre-play simulation @ 10kHz\n");
 }
 
 static void flowy_print_test_usage(FILE *out) {
@@ -978,6 +981,66 @@ int main(int argc, char **argv) {
                 return EXIT_FAILURE;
             }
             flowy_jet_dead_reckon_demo(&jet, ticks, threshold, stdout);
+            return EXIT_SUCCESS;
+        }
+
+        /* Subcommand: flowy jet lob <file.fjet> [--ticks N] */
+        if (strcmp(action, "lob") == 0 || strcmp(action, "hydro") == 0) {
+            if (arg_offset >= argc) {
+                fprintf(stderr, "usage: flowy jet lob <file.fjet> [--ticks N]\n");
+                return EXIT_FAILURE;
+            }
+            const char *filepath = argv[arg_offset++];
+            uint32_t ticks = 50;
+            for (int i = arg_offset; i < argc; ++i) {
+                if (strcmp(argv[i], "--ticks") == 0 && i + 1 < argc) ticks = (uint32_t)atoi(argv[++i]);
+            }
+            FlowJet jet;
+            if (!flow_jet_read_file(filepath, &jet)) {
+                fprintf(stderr, "flowy jet: failed to load or verify '%s'\n", filepath);
+                return EXIT_FAILURE;
+            }
+            flowy_jet_lob_demo(&jet, ticks, stdout);
+            return EXIT_SUCCESS;
+        }
+
+        /* Subcommand: flowy jet impact <file.fjet> [--ticks N] */
+        if (strcmp(action, "impact") == 0) {
+            if (arg_offset >= argc) {
+                fprintf(stderr, "usage: flowy jet impact <file.fjet> [--ticks N]\n");
+                return EXIT_FAILURE;
+            }
+            const char *filepath = argv[arg_offset++];
+            uint32_t ticks = 50;
+            for (int i = arg_offset; i < argc; ++i) {
+                if (strcmp(argv[i], "--ticks") == 0 && i + 1 < argc) ticks = (uint32_t)atoi(argv[++i]);
+            }
+            FlowJet jet;
+            if (!flow_jet_read_file(filepath, &jet)) {
+                fprintf(stderr, "flowy jet: failed to load or verify '%s'\n", filepath);
+                return EXIT_FAILURE;
+            }
+            flowy_jet_impact_demo(&jet, ticks, stdout);
+            return EXIT_SUCCESS;
+        }
+
+        /* Subcommand: flowy jet geodesic <file.fjet> [--tokens N] */
+        if (strcmp(action, "geodesic") == 0 || strcmp(action, "preplay") == 0) {
+            if (arg_offset >= argc) {
+                fprintf(stderr, "usage: flowy jet geodesic <file.fjet> [--tokens N]\n");
+                return EXIT_FAILURE;
+            }
+            const char *filepath = argv[arg_offset++];
+            uint32_t tokens = 5;
+            for (int i = arg_offset; i < argc; ++i) {
+                if (strcmp(argv[i], "--tokens") == 0 && i + 1 < argc) tokens = (uint32_t)atoi(argv[++i]);
+            }
+            FlowJet jet;
+            if (!flow_jet_read_file(filepath, &jet)) {
+                fprintf(stderr, "flowy jet: failed to load or verify '%s'\n", filepath);
+                return EXIT_FAILURE;
+            }
+            flowy_jet_geodesic_demo(&jet, tokens, stdout);
             return EXIT_SUCCESS;
         }
 

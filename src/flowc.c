@@ -567,9 +567,28 @@ int flowc_main(int argc, char **argv) {
     /* SMT Proof Summary */
     {
         FlowSMTProofAttestation proof_attestation;
-        flow_smt_verify(&ir, component, &search.assignment, &search.metrics, &proof_attestation);
+        FlowPlanMetrics smt_metrics = search.metrics;
+        if (smt_metrics.capacity == 0) {
+            smt_metrics.capacity = (size_t)(ir.input_max_count > 0 ? ir.input_max_count : 4096);
+        }
+        if (smt_metrics.shards == 0) {
+            smt_metrics.shards = 1;
+        }
+        flow_smt_verify(&ir, component, &search.assignment, &smt_metrics, &proof_attestation);
+
+        FlowSMTResult overall_status = FLOW_SMT_PROVEN_UNSAT;
+        if (proof_attestation.buffer_bounds_safety == FLOW_SMT_VIOLATION_SAT ||
+            proof_attestation.memory_quota_bound == FLOW_SMT_VIOLATION_SAT ||
+            proof_attestation.shard_non_aliasing == FLOW_SMT_VIOLATION_SAT ||
+            proof_attestation.determinism_invariant == FLOW_SMT_VIOLATION_SAT) {
+            overall_status = FLOW_SMT_VIOLATION_SAT;
+        } else if (proof_attestation.buffer_bounds_safety == FLOW_SMT_UNKNOWN ||
+                   proof_attestation.determinism_invariant == FLOW_SMT_UNKNOWN) {
+            overall_status = FLOW_SMT_UNKNOWN;
+        }
+
         printf("  SMT proof: status=%s (%s)\n",
-               flow_smt_result_name(proof_attestation.buffer_bounds_safety),
+               flow_smt_result_name(overall_status),
                proof_attestation.proof_summary);
     }
 

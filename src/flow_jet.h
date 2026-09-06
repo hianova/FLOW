@@ -167,6 +167,9 @@ int flow_jet_mori_zwanzig_step(FlowJet *jet, double dt);
 /* Phase space metric distance accounting for both position and conjugate momentum */
 double flow_jet_phase_distance(const FlowJet *a, const FlowJet *b);
 
+/* Fail-safe non-allocating physical clamping to restore safe kinematic envelope */
+int flow_jet_clamp_to_safety_envelope(FlowJet *jet, double max_q, double max_p, double max_a);
+
 /* ------------------------------------------------------------------------- */
 /* 7. Serialization & Conversion APIs                                        */
 /* ------------------------------------------------------------------------- */
