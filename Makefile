@@ -123,6 +123,7 @@ TEST_BINARIES := \
 	$(BUILD_DIR)/test-fvec-swarm \
 	$(BUILD_DIR)/test-system \
 	$(BUILD_DIR)/test-refactored-core \
+	$(BUILD_DIR)/test-geometric-axiom \
 	$(BUILD_DIR)/poc-stress-boundaries
 
 $(BUILD_DIR)/test-brain: tests/test_brain.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
@@ -141,6 +142,9 @@ $(BUILD_DIR)/test-system: tests/test_system.c $(FLOWC) $(FLOWY) plugins $(LIBFLO
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
 $(BUILD_DIR)/test-refactored-core: tests/test_refactored_core.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
+
+$(BUILD_DIR)/test-geometric-axiom: tests/test_geometric_axiom.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
 $(BUILD_DIR)/poc-stress-boundaries: tests/poc_stress_boundaries.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
@@ -202,9 +206,11 @@ test-run: $(TEST_BINARIES) fvec-flowc-apply-test
 	@$(BUILD_DIR)/test-fvec-swarm
 	@echo "=== [5/7] System: Compiler Pipeline, Plugin ABI, Edge Gateway, Finance & Doc-as-Intent ==="
 	@$(BUILD_DIR)/test-system
-	@echo "=== [6/7] Refactored Core: Thermal Contact-Jet, Quadratic Polyhedral & 64-Node Mesh ==="
+	@echo "=== [6/8] Refactored Core: Thermal Contact-Jet, Quadratic Polyhedral & 64-Node Mesh ==="
 	@$(BUILD_DIR)/test-refactored-core
-	@echo "=== [7/7] PoC Boundaries: Non-linear, 64-Swarm, Silicon Thermal Wall Stress Tests ==="
+	@echo "=== [7/8] Geometric Axiom: Unified Fiber Bundle Section (SMT + Polyhedral + BMF + Jet) ==="
+	@$(BUILD_DIR)/test-geometric-axiom
+	@echo "=== [8/8] PoC Boundaries: Non-linear, 64-Swarm, Silicon Thermal Wall Stress Tests ==="
 	@$(BUILD_DIR)/poc-stress-boundaries
 
 # Phase 3: End-to-End Compiler CLI & Invariant Smoke Tests
