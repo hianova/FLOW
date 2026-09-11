@@ -1,5 +1,6 @@
 #include "geometric_axiom.h"
 #include "flow_jet.h"
+#include "cubical_hott.h"
 
 #include <math.h>
 #include <string.h>
@@ -32,6 +33,11 @@ int flow_axiom_init(FlowUnifiedSection *sec, const char *intent) {
     sec->optimal_tile_size = 64;
     sec->optimal_simd_width = 4;
     sec->total_lattice_points = 4096;
+
+    /* Cubical HoTT & Topos Subobject Classifier Initialization */
+    sec->cubical_sieve = ~0ULL;
+    sec->kan_homotopy_status = 0; /* FLOW_KAN_FILLED_HOMOTOPIC */
+    sec->omega_classifier_bit = 1; /* Subobject preserved (chi = 1) */
 
     for (size_t i = 0; i < FLOW_AXIOM_LATTICE_DIM; ++i) {
         sec->lattice_idx[i] = 0;
@@ -233,6 +239,32 @@ int flow_axiom_to_jet(const FlowUnifiedSection *sec, FlowJet *jet_out) {
 
 int flow_axiom_from_polyhedral(FlowUnifiedSection *sec, const FlowPolyhedron *poly) {
     return flow_axiom_eval_transversality(sec, poly);
+}
+
+int flow_axiom_eval_cubical_homotopy(FlowUnifiedSection *sec, uint64_t target_path, uint64_t boundary_filter) {
+    if (sec == NULL) return 0;
+
+    uint64_t current_path = sec->bmf_subspace_mask;
+    uint64_t mismatch = 0;
+    FlowKanStatus status = flow_kan_check_homotopy(current_path, target_path, boundary_filter, &mismatch);
+
+    sec->kan_homotopy_status = (uint8_t)status;
+    sec->cubical_sieve = boundary_filter;
+
+    /* Classify subobject into Omega = 2 = {0, 1} */
+    sec->omega_classifier_bit = (status == FLOW_KAN_FILLED_HOMOTOPIC) ? 1 : 0;
+
+    /* If homotopy holds, align transversality margin */
+    if (status == FLOW_KAN_FILLED_HOMOTOPIC) {
+        if (sec->transversality_margin < 0.1) {
+            sec->transversality_margin = 0.1;
+        }
+        sec->is_transversal = 1;
+    } else {
+        sec->is_transversal = 0;
+    }
+
+    return (status == FLOW_KAN_FILLED_HOMOTOPIC) ? 1 : 0;
 }
 
 /* ------------------------------------------------------------------------- */

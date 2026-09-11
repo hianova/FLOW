@@ -33,7 +33,7 @@ INCLUDEDIR ?= $(PREFIX)/include/flow
 
 PLUGINS_SO := $(BUILD_DIR)/libflow_embodied.so $(BUILD_DIR)/libflow_smt.so $(BUILD_DIR)/libflow_security.so $(BUILD_DIR)/libflow_swarm.so
 
-.PHONY: all clean test demos demo benchmark chaos-benchmark gateway-benchmark frontier-benchmark audit-book autopoiesis-check security-test acceptance install uninstall fuzz test-build test-run test-e2e sync-book audit-mechanisms fvec-flowc-apply-test reload-stress-nightly plugins flowy libflow
+.PHONY: all clean test demos demo benchmark chaos-benchmark gateway-benchmark frontier-benchmark audit-book autopoiesis-check security-test acceptance install uninstall fuzz test-build test-run test-e2e sync-book audit-mechanisms fvec-flowc-apply-test reload-stress-nightly plugins flowy libflow test-cubical-hott
 
 all: src/generated_book_knowledge.h $(LIBFLOW_A) $(FLOWC) $(FLOWY) plugins
 
@@ -152,6 +152,7 @@ TEST_BINARIES := \
 	$(BUILD_DIR)/test-system \
 	$(BUILD_DIR)/test-refactored-core \
 	$(BUILD_DIR)/test-geometric-axiom \
+	$(BUILD_DIR)/test-cubical-hott \
 	$(BUILD_DIR)/poc-stress-boundaries
 
 $(BUILD_DIR)/test-brain: tests/test_brain.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
@@ -173,6 +174,9 @@ $(BUILD_DIR)/test-refactored-core: tests/test_refactored_core.c $(FLOWC) $(FLOWY
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
 $(BUILD_DIR)/test-geometric-axiom: tests/test_geometric_axiom.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
+
+$(BUILD_DIR)/test-cubical-hott: tests/test_cubical_hott.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
 $(BUILD_DIR)/poc-stress-boundaries: tests/poc_stress_boundaries.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
@@ -238,8 +242,10 @@ test-run: $(TEST_BINARIES) fvec-flowc-apply-test
 	@$(BUILD_DIR)/test-refactored-core
 	@echo "=== [7/8] Geometric Axiom: Unified Fiber Bundle Section (SMT + Polyhedral + BMF + Jet) ==="
 	@$(BUILD_DIR)/test-geometric-axiom
-	@echo "=== [8/8] PoC Boundaries: Non-linear, 64-Swarm, Silicon Thermal Wall Stress Tests ==="
+	@echo "=== [8/9] PoC Boundaries: Non-linear, 64-Swarm, Silicon Thermal Wall Stress Tests ==="
 	@$(BUILD_DIR)/poc-stress-boundaries
+	@echo "=== [9/9] Cubical HoTT: Discrete Cubical Sets, Kan Fillers & Topos Subobject Classifier ==="
+	@$(BUILD_DIR)/test-cubical-hott
 
 # Phase 3: End-to-End Compiler CLI & Invariant Smoke Tests
 test-e2e: $(FLOWC) $(FLOWY) plugins

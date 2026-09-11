@@ -26,6 +26,7 @@ void cmd_inspect_print_usage(FILE *out) {
     fprintf(out, "  bottleneck               Neural telemetry & bottleneck reasoning\n");
     fprintf(out, "  audit                    Run formal invariant & layer separation audit\n");
     fprintf(out, "  audit-mechanisms         Verify 10 zero-overhead architectural mechanisms\n");
+    fprintf(out, "  topos                    Discrete Cubical HoTT & Topos 4-layer architecture report\n");
     fprintf(out, "  doc [module|all]         Living documentation viewer\n");
     fprintf(out, "  book [chapter|all]       The FLOW Book living viewer\n");
 }
@@ -107,6 +108,12 @@ int cmd_inspect_run(int argc, char **argv) {
         FlowMechanismAuditReport rep;
         flow_benchmark_run_mechanism_audit(&rep);
         flow_benchmark_print_mechanism_audit(&rep, stdout);
+        return EXIT_SUCCESS;
+    }
+
+    /* topos / hott / cubical */
+    if (strcmp(sub, "topos") == 0 || strcmp(sub, "hott") == 0 || strcmp(sub, "cubical") == 0) {
+        flowy_print_cubical_topos_report(stdout);
         return EXIT_SUCCESS;
     }
 

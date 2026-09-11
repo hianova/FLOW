@@ -50,4 +50,7 @@ int flowy_jet_geodesic_demo(struct FlowJet *jet, uint32_t tokens, FILE *out);
 /* Interactive REPL Loop */
 int flowy_interactive_loop(FlowOrchestrator *orch, FILE *in, FILE *out);
 
+/* Discrete Cubical HoTT & Topos 4-Layer Inspection */
+void flowy_print_cubical_topos_report(FILE *out);
+
 #endif /* FLOW_FLOWY_CLI_H */

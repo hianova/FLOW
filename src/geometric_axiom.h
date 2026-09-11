@@ -52,7 +52,9 @@ typedef struct FlowThermalState {
 #define FLOW_AXIOM_DIM 64
 #define FLOW_AXIOM_LATTICE_DIM 4
 
-typedef struct __attribute__((aligned(64))) {
+typedef struct FlowUnifiedSection FlowUnifiedSection;
+
+struct __attribute__((aligned(64))) FlowUnifiedSection {
     /* 1. Base manifold continuous coordinates q in R^64 (512 bytes) */
     double q[FLOW_AXIOM_DIM];
 
@@ -90,12 +92,17 @@ typedef struct __attribute__((aligned(64))) {
     /* 11. Unified SMT Proof Attestation (272 bytes) */
     FlowSMTProofAttestation proof;
 
-    /* 12. Lifecycle, integrity, and cacheline alignment */
+    /* 12. Cubical HoTT & Topos Subobject Classification */
+    uint64_t cubical_sieve;       /* 64-bit covering sieve of morphisms */
+    uint8_t kan_homotopy_status;  /* 0 = homotopic / filled, 1 = obstructed */
+    uint8_t omega_classifier_bit; /* Omega in {0, 1} subobject truth valuation */
+
+    /* 13. Lifecycle, integrity, and cacheline alignment */
     uint32_t crc32;
-    uint8_t is_transversal;   /* 1 if section does not intersect forbidden manifold */
-    uint8_t is_compact;       /* 1 if lattice domain is compact */
-    uint8_t reserved[26];     /* Aligned to 64-byte boundary */
-} FlowUnifiedSection;
+    uint8_t is_transversal;       /* 1 if section does not intersect forbidden manifold */
+    uint8_t is_compact;           /* 1 if lattice domain is compact */
+    uint8_t reserved[16];         /* Aligned to 64-byte boundary */
+};
 
 /* ------------------------------------------------------------------------- */
 /* Core Axiomatic Operations                                                 */
@@ -136,6 +143,13 @@ int flow_axiom_to_jet(const FlowUnifiedSection *sec, FlowJet *jet_out);
 
 /* Morphism between FlowPolyhedron and FlowUnifiedSection */
 int flow_axiom_from_polyhedral(FlowUnifiedSection *sec, const FlowPolyhedron *poly);
+
+/*
+ * Cubical Homotopy & Topos Subobject Evaluation:
+ * Evaluates Kan box filling between sec->bmf_subspace_mask and target_path,
+ * updates sec->cubical_sieve, sec->kan_homotopy_status, and sec->omega_classifier_bit.
+ */
+int flow_axiom_eval_cubical_homotopy(FlowUnifiedSection *sec, uint64_t target_path, uint64_t boundary_filter);
 
 /* Formal SMT Supreme Court verification directly from Geometric Invariants */
 FlowSMTResult flow_axiom_verify_smt(const FlowUnifiedSection *sec,
