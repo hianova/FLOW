@@ -5,11 +5,31 @@
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 
 /* ------------------------------------------------------------------------- */
-/* 1. Initialization                                                         */
+/* 1. Allocation & Lifecycle (Heap/Arena Only)                               */
 /* ------------------------------------------------------------------------- */
+FlowUnifiedSection *flow_axiom_create(const char *intent) {
+    FlowUnifiedSection *sec = NULL;
+    int rc = posix_memalign((void **)&sec, 64, sizeof(FlowUnifiedSection));
+    if (rc != 0 || sec == NULL) {
+        return NULL;
+    }
+    if (!flow_axiom_init(sec, intent)) {
+        free(sec);
+        return NULL;
+    }
+    return sec;
+}
+
+void flow_axiom_destroy(FlowUnifiedSection *sec) {
+    if (sec != NULL) {
+        free(sec);
+    }
+}
+
 int flow_axiom_init(FlowUnifiedSection *sec, const char *intent) {
     if (sec == NULL) return 0;
     memset(sec, 0, sizeof(*sec));

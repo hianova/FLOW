@@ -62,6 +62,18 @@ void flow_emit_metadata(FILE *output, const SemanticIR *ir,
         tuning.growth_percent, tuning.batch_size, tuning.arena_bytes,
         verification_status_name(verification->status), verification->capacity,
         verification->estimated_bytes, verification->message);
+    if (ir->jet.enabled) {
+        fprintf(output,
+            "/* Jet Phase-Space: freq=%.1fHz symplectic=%d max_drift=%.5f zmp_margin=%.3f dt=%.6fs dim=%zu */\n",
+            ir->jet.frequency_hz, ir->jet.symplectic, ir->jet.max_drift,
+            ir->jet.zmp_margin, ir->jet.dt, ir->jet.dim);
+    }
+    if (ir->thermal.enabled) {
+        fprintf(output,
+            "/* Thermal Envelope: max_temp=%.1fC target_temp=%.1fC power_limit=%.1fW r_thermal=%.2f c_thermal=%.2f */\n",
+            ir->thermal.max_temp_c, ir->thermal.target_temp_c, ir->thermal.power_limit_w,
+            ir->thermal.r_thermal, ir->thermal.c_thermal);
+    }
     if (search != NULL) {
         fprintf(output,
             "/* C search: mode=%s iterations=%zu seed=%u genome=%llu energy=%.6f benchmark_ns=%llu capacity=%.0f threads=%.0f shards=%.0f */\n",

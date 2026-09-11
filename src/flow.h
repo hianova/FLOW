@@ -48,6 +48,27 @@ typedef struct {
 } FlowConstraint;
 
 typedef struct {
+    int enabled;
+    char name[FLOW_NAME];
+    double frequency_hz;
+    int symplectic;
+    double max_drift;
+    double zmp_margin;
+    double dt;
+    size_t dim;
+} FlowJetSpec;
+
+typedef struct {
+    int enabled;
+    char name[FLOW_NAME];
+    double max_temp_c;
+    double target_temp_c;
+    double power_limit_w;
+    double r_thermal;
+    double c_thermal;
+} FlowThermalSpec;
+
+typedef struct {
     char input_name[FLOW_NAME];
     int max_count;
     FlowSample samples[FLOW_SAMPLE_MAX];
@@ -78,6 +99,8 @@ typedef struct {
     char project_name[FLOW_NAME];
     char imported_modules[8][FLOW_NAME];
     size_t imported_module_count;
+    FlowJetSpec jet;
+    FlowThermalSpec thermal;
 } FlowSpec;
 
 typedef struct SemanticIR {
@@ -122,6 +145,8 @@ typedef struct SemanticIR {
     size_t fact_count;
     size_t constraint_count;
     size_t hole_count;
+    FlowJetSpec jet;
+    FlowThermalSpec thermal;
     void *domain_ctx;
     void (*domain_ctx_free)(void *ctx);
 } SemanticIR;

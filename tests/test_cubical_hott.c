@@ -174,35 +174,35 @@ int main(void) {
     /* ========================================================================= */
     FLOW_STAGE_BEGIN(6, "Fiber Bundle Holonomy Twist & Unified Section Integration");
     {
-        FlowUnifiedSection sec;
-        flow_axiom_init(&sec, "TEST_CUBICAL_TOPOS");
+        FlowUnifiedSection *sec = flow_axiom_create("TEST_CUBICAL_TOPOS");
+        FLOW_ASSERT_TRUE(sec != NULL);
 
         /* Set initial momentum */
-        sec.p[0] = 5.0;
-        sec.p[1] = 3.0;
+        sec->p[0] = 5.0;
+        sec->p[1] = 3.0;
 
         /* Trivial holonomy (even parity): no phase twist */
         uint64_t even_loop = 0x03ULL; /* 2 bits set -> even */
-        flow_cubical_holonomy_twist(even_loop, &sec);
-        FLOW_ASSERT_FLOAT_EQ(sec.p[0], 5.0, 1e-6);
-        FLOW_ASSERT_FLOAT_EQ(sec.p[1], 3.0, 1e-6);
+        flow_cubical_holonomy_twist(even_loop, sec);
+        FLOW_ASSERT_FLOAT_EQ(sec->p[0], 5.0, 1e-6);
+        FLOW_ASSERT_FLOAT_EQ(sec->p[1], 3.0, 1e-6);
 
         /* Non-trivial holonomy (odd parity): Z_2 spin flip */
         uint64_t odd_loop = 0x01ULL; /* 1 bit set (direction 0) -> odd */
-        flow_cubical_holonomy_twist(odd_loop, &sec);
-        FLOW_ASSERT_FLOAT_EQ(sec.p[0], -5.0, 1e-6); /* Flipped! */
-        FLOW_ASSERT_FLOAT_EQ(sec.p[1], 3.0, 1e-6);  /* Unchanged */
+        flow_cubical_holonomy_twist(odd_loop, sec);
+        FLOW_ASSERT_FLOAT_EQ(sec->p[0], -5.0, 1e-6); /* Flipped! */
+        FLOW_ASSERT_FLOAT_EQ(sec->p[1], 3.0, 1e-6);  /* Unchanged */
 
         /* Symplectic Hamiltonian Conservation under Z_2 flip: p^2 is invariant! */
-        double p0_sq = sec.p[0] * sec.p[0];
+        double p0_sq = sec->p[0] * sec->p[0];
         FLOW_ASSERT_FLOAT_EQ(p0_sq, 25.0, 1e-6);
 
         /* Evaluate cubical homotopy in Unified Section */
-        int eval_ok = flow_axiom_eval_cubical_homotopy(&sec, sec.bmf_subspace_mask, ~0ULL);
+        int eval_ok = flow_axiom_eval_cubical_homotopy(sec, sec->bmf_subspace_mask, ~0ULL);
         FLOW_ASSERT_EQ(eval_ok, 1);
-        FLOW_ASSERT_EQ(sec.kan_homotopy_status, 0);
-        FLOW_ASSERT_EQ(sec.omega_classifier_bit, 1);
-        FLOW_ASSERT_EQ(sec.is_transversal, 1);
+        FLOW_ASSERT_EQ(sec->kan_homotopy_status, 0);
+        FLOW_ASSERT_EQ(sec->omega_classifier_bit, 1);
+        FLOW_ASSERT_EQ(sec->is_transversal, 1);
 
         /* SMT Verification */
         FlowCubicalSieve sieve = { .arrows = ~0ULL, .dimension = 64, .is_closed = 1 };
@@ -213,6 +213,7 @@ int main(void) {
         FLOW_ASSERT_TRUE(strstr(proof.proof_summary, "SMT CUBICAL HOTT SOUND") != NULL);
 
         printf("    * Unified Section 4-Layer Integration: Z_2 Holonomy Flip Sound, SMT=UNSAT\n");
+        flow_axiom_destroy(sec);
     }
 
     FLOW_TEST_SUITE_END();

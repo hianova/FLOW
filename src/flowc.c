@@ -519,6 +519,16 @@ int flowc_main(int argc, char **argv) {
         printf("  symplectic: omega=%.3f mu=%.6f q_sat=%.1f (polyhedral shaped)\n",
                omega_base, mu, q_sat);
     }
+    if (ir.jet.enabled) {
+        printf("  jet phase-space: freq=%.1f Hz symplectic=%s max_drift=%.4f%% zmp_margin=%.3f dt=%.6fs dim=%zu\n",
+               ir.jet.frequency_hz, ir.jet.symplectic ? "YES" : "NO",
+               ir.jet.max_drift * 100.0, ir.jet.zmp_margin, ir.jet.dt, ir.jet.dim);
+    }
+    if (ir.thermal.enabled) {
+        printf("  thermal envelope: max_temp=%.1f C target_temp=%.1f C power_limit=%.1f W (R=%.2f C/W, C=%.2f J/C)\n",
+               ir.thermal.max_temp_c, ir.thermal.target_temp_c, ir.thermal.power_limit_w,
+               ir.thermal.r_thermal, ir.thermal.c_thermal);
+    }
     if (use_search) {
         uint64_t schema_hash = flow_bitspace_compute_schema_hash(&ir, component, &search.dimension_set);
         printf("  C search: mode=%s iterations=%zu seed=%u schema_hash=%llu genome=%llu energy=%.6f benchmark_ns=%llu capacity=%.0f threads=%.0f shards=%.0f tuning_buffer=%zu tuning_initial=%zu tuning_growth=%u tuning_batch=%zu tuning_arena=%zu\n",

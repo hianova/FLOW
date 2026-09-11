@@ -9,6 +9,25 @@
 /* 1. Lifecycle & Canonical Hyperplane Initialization                        */
 /* ------------------------------------------------------------------------- */
 
+FlowHardwiredPolyhedralTemplate *flow_hardwired_create(size_t dimension) {
+    FlowHardwiredPolyhedralTemplate *tpl = NULL;
+    int rc = posix_memalign((void **)&tpl, 64, sizeof(FlowHardwiredPolyhedralTemplate));
+    if (rc != 0 || tpl == NULL) {
+        return NULL;
+    }
+    if (!flow_hardwired_template_init(tpl, dimension)) {
+        free(tpl);
+        return NULL;
+    }
+    return tpl;
+}
+
+void flow_hardwired_destroy(FlowHardwiredPolyhedralTemplate *tpl) {
+    if (tpl != NULL) {
+        free(tpl);
+    }
+}
+
 int flow_hardwired_template_init(FlowHardwiredPolyhedralTemplate *tpl, size_t dimension) {
     if (tpl == NULL) return 0;
     memset(tpl, 0, sizeof(*tpl));

@@ -16,7 +16,9 @@ typedef enum {
     SECTION_PREFER,
     SECTION_RESOURCE,
     SECTION_CAPABILITY,
-    SECTION_DOMAIN
+    SECTION_DOMAIN,
+    SECTION_JET,
+    SECTION_THERMAL
 } Section;
 
 static char *trim(char *text) {
@@ -39,6 +41,20 @@ static void copy_word(char *destination, size_t size, const char *line) {
         char *brace = strchr(destination, '{');
         if (brace != NULL) *brace = '\0';
     }
+}
+
+static double parse_val_with_unit(const char *str) {
+    char *end = NULL;
+    double v = strtod(str, &end);
+    if (end != NULL) {
+        while (isspace((unsigned char)*end)) ++end;
+        if (strcasecmp(end, "khz") == 0) v *= 1000.0;
+        else if (strcasecmp(end, "mhz") == 0) v *= 1000000.0;
+        else if (strcasecmp(end, "ms") == 0) v /= 1000.0;
+        else if (strcasecmp(end, "us") == 0) v /= 1000000.0;
+        else if (strcasecmp(end, "%") == 0) v /= 100.0;
+    }
+    return v;
 }
 
 static int parse_constraint(FlowConstraint *constraint, const char *line) {
@@ -181,6 +197,22 @@ int parse_spec(FILE *input, FlowSpec *spec) {
         if (starts_with(line, "domain ")) {
             section = SECTION_DOMAIN;
             copy_word(spec->domain_name, sizeof(spec->domain_name), line + 7);
+            continue;
+        }
+        if (starts_with(line, "jet ") || strcmp(line, "jet {") == 0) {
+            section = SECTION_JET;
+            spec->jet.enabled = 1;
+            if (starts_with(line, "jet ")) {
+                copy_word(spec->jet.name, sizeof(spec->jet.name), line + 4);
+            }
+            continue;
+        }
+        if (starts_with(line, "thermal ") || strcmp(line, "thermal {") == 0) {
+            section = SECTION_THERMAL;
+            spec->thermal.enabled = 1;
+            if (starts_with(line, "thermal ")) {
+                copy_word(spec->thermal.name, sizeof(spec->thermal.name), line + 8);
+            }
             continue;
         }
         if (starts_with(line, "project ")) {
@@ -353,6 +385,54 @@ int parse_spec(FILE *input, FlowSpec *spec) {
                 fprintf(stderr, "flowc: invalid domain line %d: %s\n", line_number, line);
                 parse_error = 1;
                 break;
+            case SECTION_JET: {
+                char kw[FLOW_NAME] = {0};
+                char val[FLOW_NAME] = {0};
+                if (sscanf(line, "%63s %63s", kw, val) >= 1) {
+                    if (strcmp(kw, "frequency") == 0 || strcmp(kw, "target_frequency") == 0) {
+                        spec->jet.frequency_hz = parse_val_with_unit(val);
+                    } else if (strcmp(kw, "symplectic") == 0) {
+                        spec->jet.symplectic = 1;
+                    } else if (strcmp(kw, "drift") == 0 || strcmp(kw, "max_drift") == 0) {
+                        spec->jet.max_drift = parse_val_with_unit(val);
+                    } else if (strcmp(kw, "zmp") == 0 || strcmp(kw, "zmp_margin") == 0) {
+                        spec->jet.zmp_margin = parse_val_with_unit(val);
+                    } else if (strcmp(kw, "dt") == 0) {
+                        spec->jet.dt = parse_val_with_unit(val);
+                    } else if (strcmp(kw, "dim") == 0) {
+                        spec->jet.dim = (size_t)parse_val_with_unit(val);
+                    } else {
+                        if (spec->constraint_count < FLOW_CONSTRAINT_MAX &&
+                            parse_constraint(&spec->constraints[spec->constraint_count], line)) {
+                            ++spec->constraint_count;
+                        }
+                    }
+                }
+                break;
+            }
+            case SECTION_THERMAL: {
+                char kw[FLOW_NAME] = {0};
+                char val[FLOW_NAME] = {0};
+                if (sscanf(line, "%63s %63s", kw, val) >= 1) {
+                    if (strcmp(kw, "max_temp") == 0 || strcmp(kw, "temp_max") == 0) {
+                        spec->thermal.max_temp_c = parse_val_with_unit(val);
+                    } else if (strcmp(kw, "target_temp") == 0 || strcmp(kw, "temp_target") == 0) {
+                        spec->thermal.target_temp_c = parse_val_with_unit(val);
+                    } else if (strcmp(kw, "power_limit") == 0 || strcmp(kw, "power") == 0) {
+                        spec->thermal.power_limit_w = parse_val_with_unit(val);
+                    } else if (strcmp(kw, "r_thermal") == 0) {
+                        spec->thermal.r_thermal = parse_val_with_unit(val);
+                    } else if (strcmp(kw, "c_thermal") == 0) {
+                        spec->thermal.c_thermal = parse_val_with_unit(val);
+                    } else {
+                        if (spec->constraint_count < FLOW_CONSTRAINT_MAX &&
+                            parse_constraint(&spec->constraints[spec->constraint_count], line)) {
+                            ++spec->constraint_count;
+                        }
+                    }
+                }
+                break;
+            }
             default:
                 fprintf(stderr, "flowc: invalid top-level line %d: %s\n", line_number, line);
                 parse_error = 1;
@@ -378,6 +458,20 @@ int parse_spec(FILE *input, FlowSpec *spec) {
         return 0;
     }
     if (spec->top_n <= 0) spec->top_n = 3;
+    if (spec->jet.enabled) {
+        if (spec->jet.frequency_hz <= 0.0) spec->jet.frequency_hz = 10000.0;
+        if (spec->jet.max_drift <= 0.0) spec->jet.max_drift = 0.005;
+        if (spec->jet.dt <= 0.0) spec->jet.dt = 1.0 / spec->jet.frequency_hz;
+        if (spec->jet.zmp_margin <= 0.0) spec->jet.zmp_margin = 0.02;
+        if (spec->jet.dim == 0) spec->jet.dim = 4;
+    }
+    if (spec->thermal.enabled) {
+        if (spec->thermal.max_temp_c <= 0.0) spec->thermal.max_temp_c = 95.0;
+        if (spec->thermal.target_temp_c <= 0.0) spec->thermal.target_temp_c = 85.0;
+        if (spec->thermal.power_limit_w <= 0.0) spec->thermal.power_limit_w = 25.0;
+        if (spec->thermal.r_thermal <= 0.0) spec->thermal.r_thermal = 6.0;
+        if (spec->thermal.c_thermal <= 0.0) spec->thermal.c_thermal = 0.05;
+    }
     return 1;
 }
 
@@ -465,4 +559,8 @@ void lower_to_ir(const FlowSpec *spec, SemanticIR *ir) {
     if (ir->fact_mutability_read_only) add_fact(ir, FLOW_FACT_MUTABILITY, "read_only");
     if (ir->fact_deterministic) add_fact(ir, FLOW_FACT_DETERMINISM, "deterministic");
     ir->hole_count += strstr(ir->flow_expression, "?") != NULL && ir->hole_count == 0;
+    ir->jet = spec->jet;
+    ir->thermal = spec->thermal;
+    if (ir->jet.enabled) add_fact(ir, FLOW_FACT_CAPABILITY, "jet_phase_space");
+    if (ir->thermal.enabled) add_fact(ir, FLOW_FACT_CAPABILITY, "thermal_envelope");
 }

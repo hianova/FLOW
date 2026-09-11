@@ -47,6 +47,12 @@ extern "C" {
 #define FLOW_HARDWIRED_MAX_PLANES 64
 #define FLOW_HARDWIRED_MAX_DIM    8
 
+/*
+ * IMPORTANT ARCHITECTURAL REQUIREMENT: [Heap/Arena Only]
+ * FlowHardwiredPolyhedralTemplate is ~5KB-9KB and enforces 64-byte cacheline
+ * alignment (alignas(64)). DO NOT allocate this structure on the thread stack.
+ * Always allocate via flow_hardwired_create() or within an arena.
+ */
 typedef struct FlowHardwiredPolyhedralTemplate FlowHardwiredPolyhedralTemplate;
 
 struct __attribute__((aligned(64))) FlowHardwiredPolyhedralTemplate {
@@ -76,6 +82,12 @@ typedef struct {
     double max_violation;                                        /* Peak violation magnitude */
     double projected_x[FLOW_HARDWIRED_MAX_DIM];                  /* Clamped coordinates */
 } FlowHardwiredEvalResult;
+
+/* Allocate 64-byte aligned universal template on Heap (Heap/Arena Only) */
+FlowHardwiredPolyhedralTemplate *flow_hardwired_create(size_t dimension);
+
+/* Free heap-allocated universal template */
+void flow_hardwired_destroy(FlowHardwiredPolyhedralTemplate *tpl);
 
 /* Lifecycle: Initialize universal template with canonical bounding box & simplex normals */
 int flow_hardwired_template_init(FlowHardwiredPolyhedralTemplate *tpl, size_t dimension);

@@ -52,6 +52,14 @@ typedef struct FlowThermalState {
 #define FLOW_AXIOM_DIM 64
 #define FLOW_AXIOM_LATTICE_DIM 4
 
+/*
+ * IMPORTANT ARCHITECTURAL REQUIREMENT: [Heap/Arena Only]
+ * FlowUnifiedSection is 2624 bytes and strictly enforces 64-byte hardware cacheline
+ * alignment (alignas(64)). DO NOT allocate FlowUnifiedSection on the thread stack,
+ * as doing so can trigger stack overflow in restricted environments or threads
+ * with small stack quotas (e.g. coroutines, musl, 10kHz real-time ISRs).
+ * Always allocate via flow_axiom_create() or within an arena.
+ */
 typedef struct FlowUnifiedSection FlowUnifiedSection;
 
 struct __attribute__((aligned(64))) FlowUnifiedSection {
@@ -107,6 +115,12 @@ struct __attribute__((aligned(64))) FlowUnifiedSection {
 /* ------------------------------------------------------------------------- */
 /* Core Axiomatic Operations                                                 */
 /* ------------------------------------------------------------------------- */
+
+/* Allocate 64-byte cacheline aligned Unified Manifold Section on Heap (Heap/Arena Only) */
+FlowUnifiedSection *flow_axiom_create(const char *intent);
+
+/* Free heap-allocated Unified Manifold Section */
+void flow_axiom_destroy(FlowUnifiedSection *sec);
 
 /* Initialize Unified Manifold Section with nominal parameters and zero dissipation */
 int flow_axiom_init(FlowUnifiedSection *sec, const char *intent);
