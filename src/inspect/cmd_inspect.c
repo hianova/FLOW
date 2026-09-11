@@ -28,6 +28,7 @@ void cmd_inspect_print_usage(FILE *out) {
     fprintf(out, "  audit-mechanisms         Verify 10 zero-overhead architectural mechanisms\n");
     fprintf(out, "  topos                    Discrete Cubical HoTT & Topos 4-layer architecture report\n");
     fprintf(out, "  hodge                    Discrete F2-Hodge orthogonal decomposition & rigid control\n");
+    fprintf(out, "  template                 Universal Hardwired Polyhedral Template & Register Hot-Update\n");
     fprintf(out, "  doc [module|all]         Living documentation viewer\n");
     fprintf(out, "  book [chapter|all]       The FLOW Book living viewer\n");
 }
@@ -121,6 +122,12 @@ int cmd_inspect_run(int argc, char **argv) {
     /* hodge / dec / helmholtz */
     if (strcmp(sub, "hodge") == 0 || strcmp(sub, "dec") == 0 || strcmp(sub, "helmholtz") == 0) {
         flowy_hodge_demo(stdout);
+        return EXIT_SUCCESS;
+    }
+
+    /* template / hardwired / no-jit */
+    if (strcmp(sub, "template") == 0 || strcmp(sub, "hardwired") == 0 || strcmp(sub, "no-jit") == 0) {
+        flowy_template_demo(stdout);
         return EXIT_SUCCESS;
     }
 

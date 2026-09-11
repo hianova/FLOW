@@ -58,4 +58,7 @@ void flowy_print_cubical_topos_report(FILE *out);
 /* Discrete F2-Hodge Orthogonal Decomposition & Rigid Control Demo */
 int flowy_hodge_demo(FILE *out);
 
+/* Universal Hardwired Polyhedral Template & Register Hot-Update Demo */
+int flowy_template_demo(FILE *out);
+
 #endif /* FLOW_FLOWY_CLI_H */

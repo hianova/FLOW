@@ -154,6 +154,7 @@ TEST_BINARIES := \
 	$(BUILD_DIR)/test-geometric-axiom \
 	$(BUILD_DIR)/test-cubical-hott \
 	$(BUILD_DIR)/test-f2-hodge \
+	$(BUILD_DIR)/test-hardwired-template \
 	$(BUILD_DIR)/poc-stress-boundaries
 
 $(BUILD_DIR)/test-brain: tests/test_brain.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
@@ -181,6 +182,9 @@ $(BUILD_DIR)/test-cubical-hott: tests/test_cubical_hott.c $(FLOWC) $(FLOWY) plug
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
 $(BUILD_DIR)/test-f2-hodge: tests/test_f2_hodge.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
+
+$(BUILD_DIR)/test-hardwired-template: tests/test_hardwired_template.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
 $(BUILD_DIR)/poc-stress-boundaries: tests/poc_stress_boundaries.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
@@ -250,8 +254,10 @@ test-run: $(TEST_BINARIES) fvec-flowc-apply-test
 	@$(BUILD_DIR)/poc-stress-boundaries
 	@echo "=== [9/10] Cubical HoTT: Discrete Cubical Sets, Kan Fillers & Topos Subobject Classifier ==="
 	@$(BUILD_DIR)/test-cubical-hott
-	@echo "=== [10/10] F2-Hodge: Discrete F2 Exterior Calculus, Orthogonal Decomposition & DTC ==="
+	@echo "=== [10/11] F2-Hodge: Discrete F2 Exterior Calculus, Orthogonal Decomposition & DTC ==="
 	@$(BUILD_DIR)/test-f2-hodge
+	@echo "=== [11/11] Hardwired Template: Universal Polyhedral Core & 1-Cycle Register Hot-Update ==="
+	@$(BUILD_DIR)/test-hardwired-template
 
 # Phase 3: End-to-End Compiler CLI & Invariant Smoke Tests
 test-e2e: $(FLOWC) $(FLOWY) plugins

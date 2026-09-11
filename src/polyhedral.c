@@ -1,5 +1,6 @@
 #include "geometric_axiom.h"
 #include "polyhedral.h"
+#include "hardwired_template.h"
 #include "flow_jet.h"
 #include <string.h>
 #include <math.h>
@@ -239,6 +240,24 @@ int flow_polyhedral_synthesize_jet_potential(size_t capacity,
         landscape_out->q_equilibrium[i] = 0.5 * cap_d;
         landscape_out->moreau_low[i] = 0.0;
         landscape_out->moreau_high[i] = cap_d;
+    }
+    return 1;
+}
+
+int flow_polyhedral_export_template(const FlowPolyhedron *poly,
+                                    FlowHardwiredPolyhedralTemplate *tpl_out) {
+    if (poly == NULL || tpl_out == NULL) return 0;
+    return flow_hardwired_template_from_polyhedron(tpl_out, poly);
+}
+
+int flow_polyhedral_apply_template_mask(FlowPolyhedron *poly, uint64_t mask) {
+    if (poly == NULL) return 0;
+    size_t total_c = poly->constraint_count;
+    for (size_t c = 0; c < total_c; ++c) {
+        size_t plane_bit = poly->dimension * 2 + c;
+        if (plane_bit < 64 && ((mask >> plane_bit) & 1ULL) == 0ULL) {
+            memset(&poly->constraints[c], 0, sizeof(poly->constraints[c]));
+        }
     }
     return 1;
 }

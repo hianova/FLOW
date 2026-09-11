@@ -97,6 +97,15 @@ int flow_polyhedral_synthesize_jet_potential(size_t capacity,
                                             size_t threads,
                                             struct FlowJetPotentialLandscape *landscape_out);
 
+struct FlowHardwiredPolyhedralTemplate;
+
+/* Export to AOT Universal Hardwired Template (zero runtime compilation) */
+int flow_polyhedral_export_template(const FlowPolyhedron *poly,
+                                    struct FlowHardwiredPolyhedralTemplate *tpl_out);
+
+/* Apply 64-bit hyperplane mask to active constraints */
+int flow_polyhedral_apply_template_mask(FlowPolyhedron *poly, uint64_t mask);
+
 #ifdef __cplusplus
 }
 #endif
