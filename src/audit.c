@@ -17,6 +17,8 @@ static void ensure_default_logger(void) {
             .metric_unit = "N*m",
             .violated_constraint = "Center of Mass (CoM) ZMP Polygon & Joint Torque Safe Limit (<=80N*m)",
             .flipped_genome_bit = 14,
+            .pre_state_mask = 0ULL,
+            .post_state_mask = (1ULL << 14),
             .pre_topology = "AoS_LinearArray (Single-Leg Drive)",
             .post_topology = "SoA_Sharded_LoadBalance (Bipedal Torque Distribution)",
             .causal_rationale = "At t=5.2ms, telemetry detected an anomaly on left_leg_actuator (85.4 N*m > 80.0 N*m limit), risking motor burnout and ZMP tip-over. The 1-bit chaotic engine triggered a 1-bit mutation on bit #14, shifting 62% load to right_leg_actuator within 84ns under QSBR grace period without dropping control frames.",
@@ -33,6 +35,8 @@ static void ensure_default_logger(void) {
             .metric_unit = "MB",
             .violated_constraint = "Global Memory Quota Limit (<=64MB)",
             .flipped_genome_bit = 31,
+            .pre_state_mask = 0ULL,
+            .post_state_mask = (1ULL << 31),
             .pre_topology = "AoS_MonolithicBuffer (128MB)",
             .post_topology = "SoA_ColumnarCompressed (3.9MB)",
             .causal_rationale = "At t=18.4ms, memory footprint reached 118.5MB exceeding policy quota (64MB). 1-bit chaotic engine flipped bit #31, triggering zero-downtime layout morphing from AoS to SoA Columnar compression, achieving 96.9% RAM reduction within 112ns.",
@@ -58,9 +62,12 @@ int flow_decision_logger_record(FlowDecisionLogger *logger, const FlowDecisionEv
 }
 
 const FlowDecisionEvent *flow_decision_logger_latest(const FlowDecisionLogger *logger) {
-    if (logger == NULL || logger->total_recorded == 0) {
+    if (logger == NULL) {
         ensure_default_logger();
-        return &g_default_decision_logger.events[0];
+        logger = &g_default_decision_logger;
+    }
+    if (logger->total_recorded == 0) {
+        return NULL;
     }
     size_t idx = (logger->head + FLOW_MAX_DECISION_LOGS - 1) % FLOW_MAX_DECISION_LOGS;
     return &logger->events[idx];

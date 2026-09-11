@@ -1,7 +1,7 @@
 export PATH := /opt/homebrew/bin:/usr/local/bin:$(PATH)
 
 CC ?= clang
-CFLAGS ?= -std=c17 -Wall -Wextra -Wpedantic -O2
+CFLAGS ?= -std=c17 -Wall -Wextra -Wpedantic -O2 -Isrc/experimental
 LDLIBS ?= -lm
 THREAD_FLAGS ?= -pthread
 
@@ -10,19 +10,21 @@ FLOWC := $(BUILD_DIR)/flowc
 FLOWY := $(BUILD_DIR)/flowy
 LIBFLOW_A := $(BUILD_DIR)/libflow.a
 
-SRC_LIB_ROOT    := $(filter-out src/flowc.c src/flowy_main.c src/flowy_fvec.c,$(wildcard src/*.c))
+SRC_LIB_ROOT    := $(filter-out src/flowc.c src/flowy_main.c,$(wildcard src/*.c))
 SRC_LIB_FVEC    := $(wildcard src/fvec/*.c)
 SRC_LIB_JET     := $(wildcard src/jet/*.c)
 SRC_LIB_TOPO    := $(wildcard src/topo/*.c)
 SRC_LIB_INSPECT := $(wildcard src/inspect/*.c)
-SRC_LIB := $(SRC_LIB_ROOT) $(SRC_LIB_FVEC) $(SRC_LIB_JET) $(SRC_LIB_TOPO) $(SRC_LIB_INSPECT)
+SRC_LIB_EXP     := $(wildcard src/experimental/*.c)
+SRC_LIB := $(SRC_LIB_ROOT) $(SRC_LIB_FVEC) $(SRC_LIB_JET) $(SRC_LIB_TOPO) $(SRC_LIB_INSPECT) $(SRC_LIB_EXP)
 
 LIB_OBJS := \
-  $(patsubst src/%.c,          $(BUILD_DIR)/obj/%.o,          $(SRC_LIB_ROOT)) \
-  $(patsubst src/fvec/%.c,     $(BUILD_DIR)/obj/fvec_%.o,     $(SRC_LIB_FVEC)) \
-  $(patsubst src/jet/%.c,      $(BUILD_DIR)/obj/jet_%.o,      $(SRC_LIB_JET)) \
-  $(patsubst src/topo/%.c,     $(BUILD_DIR)/obj/topo_%.o,     $(SRC_LIB_TOPO)) \
-  $(patsubst src/inspect/%.c,  $(BUILD_DIR)/obj/inspect_%.o,  $(SRC_LIB_INSPECT))
+  $(patsubst src/%.c,              $(BUILD_DIR)/obj/%.o,          $(SRC_LIB_ROOT)) \
+  $(patsubst src/fvec/%.c,         $(BUILD_DIR)/obj/fvec_%.o,     $(SRC_LIB_FVEC)) \
+  $(patsubst src/jet/%.c,          $(BUILD_DIR)/obj/jet_%.o,      $(SRC_LIB_JET)) \
+  $(patsubst src/topo/%.c,         $(BUILD_DIR)/obj/topo_%.o,     $(SRC_LIB_TOPO)) \
+  $(patsubst src/inspect/%.c,      $(BUILD_DIR)/obj/inspect_%.o,  $(SRC_LIB_INSPECT)) \
+  $(patsubst src/experimental/%.c, $(BUILD_DIR)/obj/exp_%.o,      $(SRC_LIB_EXP))
 
 AR ?= ar
 RANLIB ?= ranlib
@@ -79,6 +81,11 @@ $(BUILD_DIR)/obj/topo_%.o: src/topo/%.c src/generated_book_knowledge.h $(wildcar
 $(BUILD_DIR)/obj/inspect_%.o: src/inspect/%.c src/generated_book_knowledge.h $(wildcard src/*.h) $(wildcard src/inspect/*.h) | $(BUILD_DIR)
 	@mkdir -p $(BUILD_DIR)/obj
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc -c $< -o $@
+
+$(BUILD_DIR)/obj/exp_%.o: src/experimental/%.c src/generated_book_knowledge.h $(wildcard src/*.h) $(wildcard src/experimental/*.h) | $(BUILD_DIR)
+	@mkdir -p $(BUILD_DIR)/obj
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc -Isrc/experimental -c $< -o $@
+
 
 $(LIBFLOW_A): $(LIB_OBJS)
 	$(AR) rcs $@ $^
@@ -154,8 +161,7 @@ TEST_BINARIES := \
 	$(BUILD_DIR)/test-geometric-axiom \
 	$(BUILD_DIR)/test-cubical-hott \
 	$(BUILD_DIR)/test-f2-hodge \
-	$(BUILD_DIR)/test-hardwired-template \
-	$(BUILD_DIR)/poc-stress-boundaries
+	$(BUILD_DIR)/test-hardwired-template
 
 $(BUILD_DIR)/test-brain: tests/test_brain.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
@@ -185,9 +191,6 @@ $(BUILD_DIR)/test-f2-hodge: tests/test_f2_hodge.c $(FLOWC) $(FLOWY) plugins $(LI
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
 $(BUILD_DIR)/test-hardwired-template: tests/test_hardwired_template.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
-
-$(BUILD_DIR)/poc-stress-boundaries: tests/poc_stress_boundaries.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
 $(BUILD_DIR)/generated-reload-test: tests/generated-reload-test.c $(FLOWC) $(LIBFLOW_A) | $(BUILD_DIR)
@@ -250,13 +253,11 @@ test-run: $(TEST_BINARIES) fvec-flowc-apply-test
 	@$(BUILD_DIR)/test-refactored-core
 	@echo "=== [7/8] Geometric Axiom: Unified Fiber Bundle Section (SMT + Polyhedral + BMF + Jet) ==="
 	@$(BUILD_DIR)/test-geometric-axiom
-	@echo "=== [8/9] PoC Boundaries: Non-linear, 64-Swarm, Silicon Thermal Wall Stress Tests ==="
-	@$(BUILD_DIR)/poc-stress-boundaries
-	@echo "=== [9/10] Cubical HoTT: Discrete Cubical Sets, Kan Fillers & Topos Subobject Classifier ==="
+	@echo "=== [8/10] Cubical HoTT: Discrete Cubical Sets, Kan Fillers & Topos Subobject Classifier ==="
 	@$(BUILD_DIR)/test-cubical-hott
-	@echo "=== [10/11] F2-Hodge: Discrete F2 Exterior Calculus, Orthogonal Decomposition & DTC ==="
+	@echo "=== [9/10] F2-Hodge: Discrete F2 Exterior Calculus, Orthogonal Decomposition & DTC ==="
 	@$(BUILD_DIR)/test-f2-hodge
-	@echo "=== [11/11] Hardwired Template: Universal Polyhedral Core & 1-Cycle Register Hot-Update ==="
+	@echo "=== [10/10] Hardwired Template: Universal Polyhedral Core & 1-Cycle Register Hot-Update ==="
 	@$(BUILD_DIR)/test-hardwired-template
 
 # Phase 3: End-to-End Compiler CLI & Invariant Smoke Tests

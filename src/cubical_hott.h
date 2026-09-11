@@ -177,6 +177,58 @@ FlowSMTResult flow_cubical_verify_smt(const FlowCubicalSieve *sieve,
                                       uint64_t boundary_filter,
                                       FlowSMTProofAttestation *proof_out);
 
+/* ========================================================================= */
+/* 64-Axis Geometric Basis Dictionary & BitSpace Semantic Decoder             */
+/* Hypercube Topology: \mathbb{I}^{64} = {0, 1}^{64}                         */
+/* Unifying Semantics (Face), Action (Path), and Decision (Kan Pullback)     */
+/* ========================================================================= */
+
+typedef enum {
+    FLOW_CUBICAL_SUBSPACE_MEMORY      = 0,  /* Bits 0–7:   Memory Quota, Capacity, Bump Arena, Columnar */
+    FLOW_CUBICAL_SUBSPACE_CONCURRENCY = 1,  /* Bits 8–15:  Threads, Shards, NUMA Affinity, QSBR Epoch */
+    FLOW_CUBICAL_SUBSPACE_MICROARCH   = 2,  /* Bits 16–23: SIMD V*, Loop Tile T*, L1/L2 Prefetch, Branchless */
+    FLOW_CUBICAL_SUBSPACE_LAYOUT      = 3,  /* Bits 24–31: AoS vs SoA, Columnar Partition, Shannon MTD */
+    FLOW_CUBICAL_SUBSPACE_PHYSICAL    = 4,  /* Bits 32–47: Embodied Reflex, Joint Torques, ZMP Polygon, Friction Cone */
+    FLOW_CUBICAL_SUBSPACE_SECURITY    = 5   /* Bits 48–63: W^X JIT, Cap Bounds, Straggler Quarantine, Fail-Safe Fallback */
+} FlowCubicalSubspaceType;
+
+typedef struct {
+    uint32_t axis_index;               /* 0 to 63 */
+    FlowCubicalSubspaceType subspace;
+    const char *axis_name;             /* e.g. "capacity_exponent", "zmp_stability", "memory_quota" */
+    const char *policy_contract;       /* e.g. "Global Memory Quota Ceiling", "ZMP Tip-over Boundary" */
+    const char *module_id;             /* Primary bound module e.g. "jit", "reload", "embodied", "smt" */
+    const char *subspace_name;         /* Subspace title */
+    const char *canonical_explanation; /* Deterministic causal rationale when this bit flips */
+} FlowCubicalAxisInfo;
+
+typedef struct {
+    uint32_t flipped_axis;
+    FlowCubicalSubspaceType subspace;
+    const FlowCubicalAxisInfo *axis_info;
+    uint64_t v_pre;
+    uint64_t v_post;
+    int is_kan_homotopic;
+    char explanation[512];
+    char pre_topology[64];
+    char post_topology[64];
+} FlowCubicalTransitionReport;
+
+/* Query 64-Axis Basis Info */
+const FlowCubicalAxisInfo *flow_cubical_get_axis_info(uint32_t axis_idx);
+
+/* Geometric Decoder: Decode a transition between two BitSpace vertices */
+int flow_cubical_decode_transition(uint64_t v_pre,
+                                   uint64_t v_post,
+                                   uint32_t explicit_axis,
+                                   FlowCubicalTransitionReport *report_out);
+
+/* Text Intent Projection: Project query text to a 64-bit BitSpace Intent Mask */
+uint64_t flow_cubical_project_text_intent(const char *text);
+
+/* Module Signature Mask: Get 64-bit BitSpace characteristic mask for a module */
+uint64_t flow_cubical_get_module_mask(const char *module_id);
+
 #ifdef __cplusplus
 }
 #endif

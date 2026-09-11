@@ -22,8 +22,32 @@ DTC 演化由兩階段交替構成：
 2. **非線性耦合演化階段**：Duffing 立方剛度非線性力 $F_i = \omega_i^2 q_i + L q_i^3$ 與近鄰交互作用。
 
 ### 工程真實性與應用場景
-* **實測次諧波峰值比**：在 `tests/audit-flow-book-all.c` 實測中，次諧波鎖定比達 **100.0%**，展現極強的動力學吸引子剛性（Attractor Rigidity）。
-* **拓撲極限環雙穩態儲存**：透過 `flow_dtc_encode_bit` 與 `flow_dtc_decode_bit`，系統將 0 與 1 儲存於振子極限環的振盪相位中，外部噪聲無法破壞相角穩態。
-* **真實工程落地定位**：
-  1. **具身機器人中樞模式發生器 (CPG)**：為足式機器人步態提供遇阻自平衡的抗衝擊連續節律；
-  2. **高抖動傳感器軟體鎖相 (Software Injection-Locked PLL)**：在時間戳抖動環境下濾除隨機時延，鎖定真實物理週期。
+* **實測次諧波剛性**：在 `tests/test_f2_hodge.c` 與 `tests/audit-flow-book-all.c` 實測中，次諧波剛性比達 **100.0%**，展現極強的動力學吸引子剛性（Attractor Rigidity）。
+* **與 $\mathbb{F}_2$-霍奇投影的「一陰一陽」幾何互補**：
+  * **霍奇投影（陰 / 淬火）**：$P_{\text{exact}} = d \Delta^{-1} \delta$，負責在 1 個週期內消除所有不可積渦旋環路（$\delta_2\Psi$ 與 $H_1$ 諧波空洞），將系統硬性拉回滑模切面；
+  * **時間晶體（陽 / 發動機）**：Floquet DTSB 週期踢擊，負責維持受拓撲保護的次諧波巡弋動力，驅動系統安全遍歷多面體相空間，永不失速或陷入混沌。
+
+---
+
+## 5.3 三大實體落地能力 (Landing Capabilities)
+
+在 `src/flow_time_crystal.c` 中，FLOW 落地了三大抗噪幾何能力：
+
+### 1. 拓撲免校準時鐘分頻器 (Jitter-Free Subharmonic Pacer)
+* **API**：`flow_dtc_pace_subharmonic(dtc, dt_jitter, &pacer_tick)`
+* **物理原理**：傳統數位計數器易受晶振抖動（Clock Jitter）影響產生時基漂移；離散時間晶體利用超立方體相空間的集體自旋鎖定，輸入帶有高頻隨機噪聲（如 $\pm 25\%$ 時延擾動）的微擾踢擊序列，能硬性輸出絕對純淨的 $\frac{1}{2}$ 或 $\frac{1}{4}$ 亞諧波節拍。
+* **適用場景**：高抖動 CAN/IMU 傳感器時序整形、多核非對稱輪詢定拍。
+
+### 2. 動態極限環手性記憶胞 (Dynamical Limit-Cycle Chirality Storage)
+* **API**：`flow_dtc_encode_chirality(dtc, bit)` / `flow_dtc_decode_chirality(dtc)`
+* **幾何不變量**：傳統靜態記憶體依賴電位翻轉（容易被熱噪聲或宇宙射線 SEU 翻轉）。FLOW 利用 2D 相平面軌道角動量 $L = \sum_k (q_{2k} p_{2k+1} - q_{2k+1} p_{2k})$ 作為拓撲不變量：
+  * **軌道 A（自旋手性逆時針，CCW，$L > 0$）**：表示邏輯 `1`；
+  * **軌道 B（自旋手性順時針，CW，$L < 0$）**：表示邏輯 `0`。
+* **自愈特性**：即使座標受到瞬間噪聲衝擊，極限環吸引子的勢能面井深會持續將相點拉回穩態軌道，實現零漏電、抗微擾的動力學位元儲存。
+
+### 3. 霍奇-時間晶體陰陽節奏調節閥 (Hodge-DTC Yin-Yang Rhythm Regulator)
+* **API**：`flow_dtc_regulate_hodge_paced(dtc, surface_mask, quench_active, &state)`
+* **協同閉環**：
+  * 當 `quench_active = 1` 時，啟動霍奇瞬時淬火，單週期消除環路；
+  * 當 `quench_active = 0` 時，時間晶體以次諧波步頻推動狀態在有界多面體流形內受控巡弋，軌跡受滑模切面硬性約束，徹底杜絕死鎖與混沌發散。
+

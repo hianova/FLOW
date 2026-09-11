@@ -4,6 +4,7 @@
 #include "adaptive.h"
 #include "smt.h"
 #include "audit.h"
+#include "cubical_hott.h"
 #include "generated_book_knowledge.h"
 #include "generated_knowledge.h"
 
@@ -97,7 +98,15 @@ void flowy_explain_decision_lang(const FlowDecisionEvent *event, FlowLanguage la
     if (event == NULL || buf_out == NULL || max_len == 0) return;
     double t_ms = (double)event->timestamp_ns / 1000000.0;
 
-    const char *target_mod = "adaptive";
+    /* HoTT Geometric Transition Decoder on 64-Dimensional Hypercube */
+    FlowCubicalTransitionReport rep;
+    memset(&rep, 0, sizeof(rep));
+    flow_cubical_decode_transition(event->pre_state_mask,
+                                   event->post_state_mask,
+                                   event->flipped_genome_bit,
+                                   &rep);
+
+    const char *target_mod = (rep.axis_info && rep.axis_info->module_id) ? rep.axis_info->module_id : "adaptive";
     if (event->trigger_type == FLOW_DECISION_TRIGGER_MEMORY_PRESSURE) {
         target_mod = "jit";
     } else if (event->trigger_type == FLOW_DECISION_TRIGGER_SMT_COUNTEREXAMPLE) {
@@ -112,13 +121,19 @@ void flowy_explain_decision_lang(const FlowDecisionEvent *event, FlowLanguage la
     const FlowModuleBookBinding *b = flow_book_lookup_binding_lang(target_mod, lang);
     const FlowyLocaleTemplate *tpl = &LOCALE_TEMPLATES[lang == FLOW_LANG_EN ? FLOW_LANG_EN : FLOW_LANG_ZH];
 
+    const char *rationale = (event->causal_rationale[0] != '\0') ? event->causal_rationale : rep.explanation;
+    const char *subspace_str = (rep.axis_info && rep.axis_info->subspace_name) ? rep.axis_info->subspace_name : "General";
+    const char *axis_str = (rep.axis_info && rep.axis_info->axis_name) ? rep.axis_info->axis_name : "unknown_axis";
+    const char *kan_str = rep.is_kan_homotopic ? "FILLED (Homotopic 1-Cell Equivalence p ~ q)" : "OBSTRUCTED (Boundary Conflict)";
+
     snprintf(buf_out, max_len,
              "%s\n"
              "Timestamp:         t = %.2f ms (%llu ns)\n"
              "Trigger Source:    %s\n"
              "Observed Telemetry:%10.2f %s (Threshold: %.2f %s)\n"
              "Violated Policy:   %s\n"
-             "BMF Action:Flipped Bit #%u in 64-Bit BitSpace\n"
+             "BMF Action:        Flipped Bit #%u [%s] in Subspace [%s]\n"
+             "Kan Fibration:     %s\n"
              "Topology Mutation: %s -> %s\n"
              "Hot-Swap Latency:  %llu ns (Zero Stop-the-World under QSBR)\n\n"
              "%s\n"
@@ -132,11 +147,14 @@ void flowy_explain_decision_lang(const FlowDecisionEvent *event, FlowLanguage la
              event->observed_metric_value, event->metric_unit,
              event->threshold_limit_value, event->metric_unit,
              event->violated_constraint,
-             event->flipped_genome_bit,
+             rep.flipped_axis,
+             axis_str,
+             subspace_str,
+             kan_str,
              event->pre_topology, event->post_topology,
              (unsigned long long)event->hot_swap_grace_ns,
              tpl->decision_causal_reasoning_title,
-             event->causal_rationale,
+             rationale,
              tpl->decision_book_title,
              (lang == FLOW_LANG_EN ? "Chapter Index" : "章節索引"),
              b ? b->chapter_title : "The FLOW Book",
@@ -286,29 +304,37 @@ int flowy_query_codebase_lang(const FlowTopologyGraph *graph,
         return 1;
     }
 
-    /* Core Reasoning: Map natural language input to language-agnostic module ID via keywords in CODEBASE_KNOWLEDGE */
-    const char *matched_module_id = NULL;
-    uint32_t best_score = 0;
+    /* Core HoTT Subspace Reasoning: Map query text to 64-D BitSpace Hypercube Intent Mask */
+    uint64_t intent_mask = flow_cubical_project_text_intent(query_text);
+
+    typedef struct {
+        const FlowModuleKnowledge *mod;
+        uint32_t score;
+    } FlowModCandidate;
+
+    FlowModCandidate candidates[64];
+    size_t cand_count = 0;
     size_t total_k = flowy_knowledge_count();
 
-    /* 1. Direct module ID match */
-    for (size_t i = 0; i < total_k; ++i) {
+    for (size_t i = 0; i < total_k && cand_count < 64; ++i) {
         const FlowModuleKnowledge *k = flowy_knowledge_at(i);
         if (k == NULL) continue;
+
+        uint32_t score = 0;
+
+        /* 1. Direct module ID match */
         if (strstr(lower_q, k->module_id)) {
-            best_score = 100;
-            matched_module_id = k->module_id;
-            break;
+            score += 150;
         }
-    }
 
-    /* 2. Semantic Keyword & Title Token Matching */
-    if (matched_module_id == NULL) {
-        for (size_t i = 0; i < total_k; ++i) {
-            const FlowModuleKnowledge *k = flowy_knowledge_at(i);
-            if (k == NULL || k->keywords == NULL) continue;
+        /* 2. Geometric Hypercube Subspace Overlap: Dim(Intent \cap Subspace) */
+        uint64_t mod_mask = flow_cubical_get_module_mask(k->module_id);
+        uint64_t common_subspace = intent_mask & mod_mask;
+        int overlap_dim = __builtin_popcountll(common_subspace);
+        score += (uint32_t)(overlap_dim * 30);
 
-            uint32_t current_score = 0;
+        /* 3. Fast keyword token match bonus */
+        if (k->keywords != NULL) {
             char kw_copy[512];
             strncpy(kw_copy, k->keywords, sizeof(kw_copy) - 1);
             kw_copy[sizeof(kw_copy) - 1] = '\0';
@@ -319,25 +345,43 @@ int flowy_query_codebase_lang(const FlowTopologyGraph *graph,
                 char lower_tok[64];
                 str_to_lower(token, lower_tok, sizeof(lower_tok));
                 if (strstr(lower_q, lower_tok) || strstr(query_text, token)) {
-                    current_score += 25;
+                    score += 15;
                 }
                 token = strtok_r(NULL, " ", &saveptr);
             }
+        }
 
-            if (current_score > best_score) {
-                best_score = current_score;
-                matched_module_id = k->module_id;
+        if (score > 0) {
+            candidates[cand_count].mod = k;
+            candidates[cand_count].score = score;
+            cand_count++;
+        }
+    }
+
+    /* Sort candidates descending by score */
+    for (size_t i = 0; i < cand_count; ++i) {
+        for (size_t j = i + 1; j < cand_count; ++j) {
+            if (candidates[j].score > candidates[i].score) {
+                FlowModCandidate tmp = candidates[i];
+                candidates[i] = candidates[j];
+                candidates[j] = tmp;
             }
         }
     }
 
-    const FlowModuleKnowledge *best_m = matched_module_id ? flowy_knowledge_lookup(matched_module_id) : NULL;
+    const FlowModuleKnowledge *best_m = (cand_count > 0) ? candidates[0].mod : flowy_knowledge_lookup("bitspace");
     if (best_m == NULL) {
-        best_m = &CODEBASE_KNOWLEDGE[0]; /* Default to bitspace */
+        best_m = &CODEBASE_KNOWLEDGE[0];
     }
 
     answer_out->primary_module = best_m;
-    answer_out->matched_score = best_score > 0 ? best_score : 10;
+    answer_out->matched_score = (cand_count > 0) ? candidates[0].score : 10;
+
+    /* Populate topological neighbors / related modules */
+    answer_out->related_count = 0;
+    for (size_t i = 1; i < cand_count && answer_out->related_count < 4; ++i) {
+        answer_out->related_modules[answer_out->related_count++] = candidates[i].mod;
+    }
 
     /* Output Presentation Layer: Apply Render Mask based on target language */
     const FlowyLocaleTemplate *tpl = &LOCALE_TEMPLATES[lang == FLOW_LANG_EN ? FLOW_LANG_EN : FLOW_LANG_ZH];
@@ -380,6 +424,21 @@ int flowy_query_codebase_lang(const FlowTopologyGraph *graph,
              tpl->sec4_title, best_m->key_apis,
              tpl->sec5_title, phil_why,
              tpl->sec6_title, book_chap, book_ref, book_exc);
+
+    if (answer_out->related_count > 0) {
+        size_t cur_len = strlen(answer_out->explanation);
+        if (cur_len + 256 < sizeof(answer_out->explanation)) {
+            char rel_buf[256];
+            int rel_pos = snprintf(rel_buf, sizeof(rel_buf), "\n%s: ",
+                                   (lang == FLOW_LANG_EN ? "Topological Neighbors (Cubical Subspace Overlap)" : "拓樸相鄰模組 (超立方交集)"));
+            for (size_t r = 0; r < answer_out->related_count; ++r) {
+                rel_pos += snprintf(rel_buf + rel_pos, sizeof(rel_buf) - rel_pos, "%s%s",
+                                    r > 0 ? ", " : "", answer_out->related_modules[r]->module_id);
+            }
+            snprintf(rel_buf + rel_pos, sizeof(rel_buf) - rel_pos, "\n");
+            strncat(answer_out->explanation, rel_buf, sizeof(answer_out->explanation) - cur_len - 1);
+        }
+    }
 
     return 1;
 }

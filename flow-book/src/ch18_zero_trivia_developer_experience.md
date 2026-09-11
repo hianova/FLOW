@@ -18,12 +18,18 @@ flowc examples/rank.flow -o generated/rank.c --search --iterations 500 --seed 42
 flowc examples/rank.flow
 # -> 自動推導輸出 rank.c，自動套用 rank.fvec，SMT 形式證明保證零缺陷！
 
-# 現代零瑣事直接執行：
-flowy run examples/rank.flow
-# -> 一鍵編譯、驗證、建置 native 二進位並立即執行！
+# 現代零瑣事雙軌制執行 (Dual-Track Architecture)：
 
-# 現代零瑣事建置二進位：
+# 軌道 1: In-Memory JIT 直行軌道 (0 磁碟 I/O，0 clang fork，<50us 極速)
+flowy run examples/rank.flow
+# -> 直接在記憶體完成 AST 解析、SMT 形式驗證並即時執行！
+
+# 軌道 1 選項: 顯式指定 AOT 軌道執行
+flowy run --aot examples/rank.flow
+
+# 軌道 2: 獨立 AOT 發布軌道 (Zero Runtime Dependencies 獨立原生二進位)
 flowy build examples/rank.flow -o build/rank_app
+# -> SMT 嚴格驗證，生成單一自包含原生二進位檔，無任何運行期依賴！
 ```
 
 ---

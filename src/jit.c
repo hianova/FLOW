@@ -243,9 +243,15 @@ int flow_jit_compile_llvm_ir(FlowJITEngine *engine,
         exec_code_ptr = (engine->exec_heap != NULL) ? (engine->exec_heap + engine->code_heap_used) : write_code_ptr;
         engine->code_heap_used += alloc_bytes;
         engine->tlb_shootdowns_avoided++;
+    } else if (engine->write_heap != NULL) {
+        /* Circular code buffer reuse: wrap around when code heap is filled */
+        engine->code_heap_used = 0;
+        write_code_ptr = engine->write_heap;
+        exec_code_ptr = (engine->exec_heap != NULL) ? engine->exec_heap : write_code_ptr;
+        engine->code_heap_used += alloc_bytes;
+        engine->tlb_shootdowns_avoided++;
     } else {
-        write_code_ptr = (uint8_t *)(uintptr_t)0x7fff10000000ULL;
-        exec_code_ptr = write_code_ptr;
+        return 0;
     }
 
     /* Analyze IR intent for native emission */

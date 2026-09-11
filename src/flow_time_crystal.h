@@ -80,6 +80,24 @@ int flow_dtc_decode_bit(const FlowTimeCrystal *dtc);
 FlowSMTResult flow_dtc_verify_soundness_smt(const FlowTimeCrystal *dtc,
                                             FlowSMTProofAttestation *proof_out);
 
+/* ========================================================================= */
+/* Hodge-DTC Yin-Yang Duality & Three Landing Capabilities                   */
+/* ========================================================================= */
+
+/* Feature 1: Jitter-Free Subharmonic Pacer (拓撲免校準時鐘分頻器) */
+int flow_dtc_pace_subharmonic(FlowTimeCrystal *dtc, double dt_jitter, uint8_t *pacer_tick_out);
+
+/* Feature 2: Dynamical Limit-Cycle Chirality Storage (動態極限環手性記憶體) */
+int flow_dtc_encode_chirality(FlowTimeCrystal *dtc, int bit_val);
+int flow_dtc_decode_chirality(const FlowTimeCrystal *dtc);
+double flow_dtc_compute_chirality(const FlowTimeCrystal *dtc);
+
+/* Feature 3: Hodge-DTC Yin-Yang Rhythm Regulator (混沌探索與淬火之間的「節奏調節閥」) */
+int flow_dtc_regulate_hodge_paced(FlowTimeCrystal *dtc,
+                                  uint64_t surface_mask,
+                                  uint8_t quench_active,
+                                  uint64_t *state_inout);
+
 #ifdef __cplusplus
 }
 #endif

@@ -14,6 +14,7 @@
 #include "flow_time_crystal.h"
 #include "flow_speculative_jit.h"
 #include "flow_prefetch.h"
+#include "audit.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -145,6 +146,13 @@ int main(void) {
         FLOW_ASSERT_TRUE(new_state != NULL);
         FLOW_ASSERT_EQ(flow_reload_publish(ctx, &v2, new_state), FLOW_RELOAD_OK);
         FLOW_ASSERT_EQ(flow_reload_generation(ctx), 2ULL);
+
+        /* Real-time causal loop verification: hot-swap must record live decision event */
+        const FlowDecisionEvent *ev = flow_decision_logger_latest(NULL);
+        FLOW_ASSERT_TRUE(ev != NULL);
+        FLOW_ASSERT_EQ(ev->trigger_type, FLOW_DECISION_TRIGGER_STRAGGLER_QUARANTINE);
+        FLOW_ASSERT_STR_EQ(ev->trigger_source, "qsbr_epoch_migration");
+        FLOW_ASSERT_STR_EQ(ev->post_topology, "module_v2");
 
         /* Synchronize QSBR barrier */
         FLOW_ASSERT_EQ(flow_qsbr_synchronize(ctx, 1000000000ULL), FLOW_RELOAD_OK);
@@ -288,6 +296,12 @@ int main(void) {
         FLOW_ASSERT_EQ(morph_status, FLOW_ADAPTIVE_OK);
         FLOW_ASSERT_EQ(morphed_index, 1ULL);
         FLOW_ASSERT_EQ(flow_adaptive_current_index(controller), 1ULL);
+
+        /* Real-time causal loop verification: pressure morph must record live decision event */
+        const FlowDecisionEvent *ev_press = flow_decision_logger_latest(NULL);
+        FLOW_ASSERT_TRUE(ev_press != NULL);
+        FLOW_ASSERT_EQ(ev_press->trigger_type, FLOW_DECISION_TRIGGER_MEMORY_PRESSURE);
+        FLOW_ASSERT_STR_EQ(ev_press->trigger_source, "adaptive_pressure_controller");
 
         flow_reload_reader_unregister(&reader);
         flow_adaptive_destroy(controller);

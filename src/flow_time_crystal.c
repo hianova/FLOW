@@ -1,5 +1,6 @@
 #include "flow_time_crystal.h"
 #include "bitmanifold.h"
+#include "f2_hodge.h"
 
 #include <math.h>
 #include <string.h>
@@ -273,4 +274,94 @@ FlowSMTResult flow_dtc_verify_soundness_smt(const FlowTimeCrystal *dtc,
     }
 
     return (energy_ok && disorder_ok && rigidity_ok && canvas_ok) ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+}
+
+/* ========================================================================= */
+/* Hodge-DTC Yin-Yang Duality & Three Landing Capabilities                   */
+/* ========================================================================= */
+
+int flow_dtc_pace_subharmonic(FlowTimeCrystal *dtc, double dt_jitter, uint8_t *pacer_tick_out) {
+    if (dtc == NULL || pacer_tick_out == NULL) return 0;
+    *pacer_tick_out = 0;
+
+    double dt_effective = (dt_jitter > 0.0) ? dt_jitter : 0.001;
+    flow_dtc_step_floquet(dtc, 1, dt_effective);
+
+    uint32_t order = (dtc->subharmonic_order >= 2) ? dtc->subharmonic_order : 2;
+    if ((dtc->floquet_cycles_total % order) == 0) {
+        *pacer_tick_out = 1;
+    }
+    return 1;
+}
+
+int flow_dtc_encode_chirality(FlowTimeCrystal *dtc, int bit_val) {
+    if (dtc == NULL || dtc->jet == NULL) return 0;
+    FlowJet *jet = dtc->jet;
+    uint32_t dim = jet->header.vector_dim ? jet->header.vector_dim : FLOW_JET_STANDARD_DIM;
+    if (dim > FLOW_JET_MAX_DIM) dim = FLOW_JET_MAX_DIM;
+
+    double p_sign = (bit_val != 0) ? +1.0 : -1.0;
+    for (uint32_t k = 0; k + 1 < dim; k += 2) {
+        jet->payload.q[k] = 1.0;
+        jet->payload.p[k] = 0.0;
+        jet->payload.q[k + 1] = 0.0;
+        jet->payload.p[k + 1] = p_sign * 1.0;
+    }
+    if (dim % 2 == 1) {
+        jet->payload.q[dim - 1] = 1.0;
+        jet->payload.p[dim - 1] = p_sign * 1.0;
+    }
+    dtc->encoded_bit = (bit_val != 0) ? 1 : 0;
+    dtc->current_order_param = flow_dtc_compute_subharmonic_order(dtc);
+    dtc->history_count = 0;
+    dtc->history_order[dtc->history_count++] = dtc->current_order_param;
+    return 1;
+}
+
+double flow_dtc_compute_chirality(const FlowTimeCrystal *dtc) {
+    if (dtc == NULL || dtc->jet == NULL) return 0.0;
+    const FlowJet *jet = dtc->jet;
+    uint32_t dim = jet->header.vector_dim ? jet->header.vector_dim : FLOW_JET_STANDARD_DIM;
+    if (dim > FLOW_JET_MAX_DIM) dim = FLOW_JET_MAX_DIM;
+
+    if (dim < 2) {
+        return jet->payload.q[0] * jet->payload.p[0];
+    }
+
+    double L_sum = 0.0;
+    uint32_t pairs = dim / 2;
+    for (uint32_t k = 0; k < pairs; ++k) {
+        uint32_t i0 = 2 * k;
+        uint32_t i1 = 2 * k + 1;
+        /* Angular momentum / orbital vorticity in 2D coordinate plane */
+        L_sum += (jet->payload.q[i0] * jet->payload.p[i1] - jet->payload.q[i1] * jet->payload.p[i0]);
+    }
+    return L_sum / (double)pairs;
+}
+
+int flow_dtc_decode_chirality(const FlowTimeCrystal *dtc) {
+    double chi = flow_dtc_compute_chirality(dtc);
+    return (chi >= 0.0) ? 1 : 0;
+}
+
+int flow_dtc_regulate_hodge_paced(FlowTimeCrystal *dtc,
+                                  uint64_t surface_mask,
+                                  uint8_t quench_active,
+                                  uint64_t *state_inout) {
+    if (dtc == NULL || state_inout == NULL) return 0;
+
+    if (quench_active) {
+        /* Yin (淬火): Hodge P_exact eliminates chattering vortices in 1 cycle */
+        *state_inout = flow_f2_hodge_anti_chattering(*state_inout, *state_inout ^ surface_mask, surface_mask);
+    } else {
+        /* Yang (發動機): Step Floquet subharmonic limit cycle to scan polyhedral manifold */
+        flow_dtc_step_floquet(dtc, 1, 0.001);
+        uint32_t active_bit = (uint32_t)(dtc->floquet_cycles_total % 64);
+        if ((dtc->phase_mask & (1ULL << active_bit)) != 0ULL) {
+            *state_inout ^= (1ULL << active_bit);
+        }
+        /* Confine trajectory safely to sliding surface */
+        *state_inout = flow_f2_hodge_anti_chattering(*state_inout, *state_inout, surface_mask);
+    }
+    return 1;
 }

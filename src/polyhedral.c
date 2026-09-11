@@ -1,7 +1,9 @@
 #include "geometric_axiom.h"
 #include "polyhedral.h"
+#include "smt.h"
 #include "hardwired_template.h"
 #include "flow_jet.h"
+#include <stdio.h>
 #include <string.h>
 #include <math.h>
 
@@ -260,4 +262,157 @@ int flow_polyhedral_apply_template_mask(FlowPolyhedron *poly, uint64_t mask) {
         }
     }
     return 1;
+}
+
+/*
+ * ============================================================================
+ * Mathematical Polyhedral Constraint & Hypercube Projection Implementation
+ * Linear Inequality System: \mathcal{P} = { x \in R^D | A x <= b }
+ * Orthogonal Projection Operator: \Pi_{\mathcal{P}} : R^D -> {0, 1}^N
+ * ============================================================================
+ */
+
+void flow_polyhedron_init(FlowPolyhedronSystem *poly, size_t dim_count) {
+    if (poly == NULL) return;
+    memset(poly, 0, sizeof(*poly));
+    poly->dimension_count = dim_count < FLOW_POLYTOPE_MAX_DIMS ? dim_count : FLOW_POLYTOPE_MAX_DIMS;
+    for (size_t d = 0; d < poly->dimension_count; ++d) {
+        poly->lower_bounds[d] = 0.0;
+        poly->upper_bounds[d] = 1e12;
+    }
+}
+
+int flow_polyhedron_add_box_bounds(FlowPolyhedronSystem *poly, size_t dim_idx, double min_val, double max_val, const char *tag) {
+    if (poly == NULL || dim_idx >= poly->dimension_count) return 0;
+    if (min_val > poly->lower_bounds[dim_idx]) poly->lower_bounds[dim_idx] = min_val;
+    if (max_val < poly->upper_bounds[dim_idx]) poly->upper_bounds[dim_idx] = max_val;
+
+    if (poly->constraint_count < FLOW_POLYTOPE_MAX_CONSTRAINTS) {
+        FlowLinearConstraint *c = &poly->constraints[poly->constraint_count++];
+        memset(c, 0, sizeof(*c));
+        c->coefficients[dim_idx] = 1.0;
+        c->op = FLOW_CONSTRAINT_INTERVAL;
+        c->rhs_min = min_val;
+        c->rhs_max = max_val;
+        if (tag) snprintf(c->symbolic_tag, sizeof(c->symbolic_tag), "%s", tag);
+    }
+    return 1;
+}
+
+int flow_polyhedron_add_inequality(FlowPolyhedronSystem *poly, const double *coeffs, FlowConstraintOp op, double bound, const char *tag) {
+    if (poly == NULL || coeffs == NULL || poly->constraint_count >= FLOW_POLYTOPE_MAX_CONSTRAINTS) return 0;
+    FlowLinearConstraint *c = &poly->constraints[poly->constraint_count++];
+    memset(c, 0, sizeof(*c));
+    for (size_t d = 0; d < poly->dimension_count; ++d) {
+        c->coefficients[d] = coeffs[d];
+    }
+    c->op = op;
+    if (op == FLOW_CONSTRAINT_LEQ) c->rhs_max = bound;
+    else if (op == FLOW_CONSTRAINT_GEQ) c->rhs_min = bound;
+    else if (op == FLOW_CONSTRAINT_EQ) { c->rhs_min = bound; c->rhs_max = bound; }
+    if (tag) snprintf(c->symbolic_tag, sizeof(c->symbolic_tag), "%s", tag);
+    return 1;
+}
+
+int flow_polyhedron_from_ir(const SemanticIR *ir, const Component *comp, const FlowPlanDimensionSet *dims, FlowPolyhedronSystem *poly) {
+    if (poly == NULL || dims == NULL) return 0;
+    flow_polyhedron_init(poly, dims->count);
+
+    for (size_t i = 0; i < dims->count; ++i) {
+        double min_v = (double)dims->dimensions[i].min_val;
+        double max_v = (double)dims->dimensions[i].max_val;
+
+        if (dims->dimensions[i].kind == FLOW_DIM_EXPONENT) {
+            min_v = (double)(1ULL << dims->dimensions[i].min_val);
+            max_v = (double)(1ULL << dims->dimensions[i].max_val);
+        }
+
+        /* 1. Constraint: capacity >= top_n */
+        if (strcmp(dims->dimensions[i].name, "capacity") == 0 && ir != NULL && ir->top_n > 0) {
+            if ((double)ir->top_n > min_v) min_v = (double)ir->top_n;
+        }
+
+        /* 2. Constraint: capacity >= input_max_count */
+        if (strcmp(dims->dimensions[i].name, "capacity") == 0 && ir != NULL && ir->input_max_count > 0 && ir->state_bounded) {
+            if ((double)ir->input_max_count > min_v) min_v = (double)ir->input_max_count;
+        }
+
+        /* 3. Constraint: memory footprint <= memory_limit_mb */
+        if (strcmp(dims->dimensions[i].name, "capacity") == 0 && ir != NULL && ir->memory_limit_mb > 0 && comp != NULL) {
+            size_t bytes_per_elem = comp->memory_bytes_per_capacity > 0 ? comp->memory_bytes_per_capacity : 8;
+            double max_cap_from_mem = (double)(ir->memory_limit_mb * 1024 * 1024 - (int)comp->memory_fixed_bytes) / (double)bytes_per_elem;
+            if (max_cap_from_mem > 0.0 && max_cap_from_mem < max_v) max_v = max_cap_from_mem;
+        }
+
+        /* 4. Concurrency Constraint: threads == 1 if component does not support parallel/shared */
+        if (strcmp(dims->dimensions[i].name, "threads") == 0 && comp != NULL && (!comp->supports_parallelizable && !comp->supports_shared)) {
+            max_v = 1.0;
+        }
+
+        flow_polyhedron_add_box_bounds(poly, i, min_v, max_v, dims->dimensions[i].name);
+    }
+    return 1;
+}
+
+uint64_t flow_polyhedron_project_mask(const FlowPolyhedronSystem *poly, const FlowPlanDimensionSet *dims, uint32_t total_bits) {
+    if (poly == NULL || dims == NULL) return (total_bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << total_bits) - 1);
+
+    uint64_t projection_mask = 0;
+    unsigned bit_offset = 0;
+
+    for (size_t d = 0; d < dims->count && d < poly->dimension_count; ++d) {
+        unsigned bits = flow_dimension_bits(&dims->dimensions[d]);
+        double upper = poly->upper_bounds[d];
+
+        for (unsigned b = 0; b < bits; ++b) {
+            unsigned global_bit = bit_offset + b;
+            if (global_bit >= 64 || global_bit >= total_bits) break;
+
+            int bit_feasible = 1;
+
+            if (dims->dimensions[d].kind == FLOW_DIM_EXPONENT) {
+                uint64_t bit_weight = (1ULL << b);
+                if (dims->dimensions[d].min_val + bit_weight > dims->dimensions[d].max_val) {
+                    bit_feasible = 0;
+                }
+            } else {
+                uint64_t step = dims->dimensions[d].step > 0 ? dims->dimensions[d].step : 1;
+                uint64_t bit_val = (1ULL << b) * step;
+                if (dims->dimensions[d].min_val + bit_val > (uint64_t)upper && upper > 0) {
+                    bit_feasible = 0;
+                }
+            }
+
+            if (bit_feasible) {
+                projection_mask |= (1ULL << global_bit);
+            }
+        }
+        bit_offset += bits;
+    }
+
+    if (projection_mask == 0) projection_mask = (total_bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << total_bits) - 1);
+    return projection_mask;
+}
+
+int flow_polyhedron_from_affine(const FlowPolyhedron *affine_poly, FlowPolyhedronSystem *poly_out) {
+    if (affine_poly == NULL || poly_out == NULL) return 0;
+    flow_polyhedron_init(poly_out, affine_poly->dimension);
+    for (size_t d = 0; d < affine_poly->dimension && d < FLOW_POLYTOPE_MAX_DIMS; ++d) {
+        flow_polyhedron_add_box_bounds(poly_out, d, (double)affine_poly->lower_bounds[d], (double)affine_poly->upper_bounds[d], "affine_dim");
+    }
+    for (size_t c = 0; c < affine_poly->constraint_count; ++c) {
+        double coeffs[FLOW_POLYTOPE_MAX_DIMS] = {0};
+        for (size_t d = 0; d < affine_poly->dimension && d < FLOW_POLYTOPE_MAX_DIMS; ++d) {
+            coeffs[d] = (double)affine_poly->constraints[c].coeffs[d];
+        }
+        flow_polyhedron_add_inequality(poly_out, coeffs, FLOW_CONSTRAINT_GEQ, (double)-affine_poly->constraints[c].constant, "affine_ineq");
+    }
+    return 1;
+}
+
+uint64_t flow_polyhedral_project_to_bitspace(const FlowPolyhedron *poly, const FlowPlanDimensionSet *dims, uint32_t total_bits) {
+    if (poly == NULL || dims == NULL) return (total_bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << total_bits) - 1);
+    FlowPolyhedronSystem sys;
+    flow_polyhedron_from_affine(poly, &sys);
+    return flow_polyhedron_project_mask(&sys, dims, total_bits);
 }

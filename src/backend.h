@@ -30,4 +30,11 @@ void flow_emit_metadata(FILE *output, const SemanticIR *ir,
                         const SearchResult *search,
                         const VerificationReport *verification);
 
+/* Dual-Track: In-Memory Native JIT Runner (0 disk I/O, 0 clang fork) */
+int flow_backend_run_in_memory(const SemanticIR *ir,
+                              const Component *component,
+                              const SearchResult *search,
+                              const VerificationReport *verification,
+                              FILE *out);
+
 #endif

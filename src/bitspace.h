@@ -5,6 +5,7 @@
 #include "plugin.h"
 #include "adaptive.h"
 #include "bitmanifold.h"
+#include "polyhedral.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -73,44 +74,7 @@ int flow_bmf_canvas_adjudicate_smt(FlowBmf1BitCanvas *canvas);
 void flow_bmf_canvas_to_mask_canvas(const FlowBmf1BitCanvas *canvas, FlowMaskCanvas *mask_canvas_out);
 void flow_bmf_canvas_from_mask_canvas(const FlowMaskCanvas *mask_canvas, uint32_t subspace_id, FlowBmf1BitCanvas *canvas_out);
 
-/* ========================================================================= */
-/* Mathematical Polyhedral Constraint & Hypercube Projection Engine         */
-/* Linear Inequality System: \mathcal{P} = { x \in R^D | A x <= b }          */
-/* Orthogonal Projection Operator: \Pi_{\mathcal{P}} : R^D -> {0, 1}^N       */
-/* ========================================================================= */
-
-#define FLOW_POLYTOPE_MAX_CONSTRAINTS 32
-#define FLOW_POLYTOPE_MAX_DIMS 16
-
-typedef enum {
-    FLOW_CONSTRAINT_LEQ = 0, /* a^T x <= b */
-    FLOW_CONSTRAINT_GEQ = 1, /* a^T x >= b */
-    FLOW_CONSTRAINT_EQ  = 2, /* a^T x == b */
-    FLOW_CONSTRAINT_INTERVAL = 3 /* b_min <= a^T x <= b_max */
-} FlowConstraintOp;
-
-typedef struct {
-    double coefficients[FLOW_POLYTOPE_MAX_DIMS];
-    FlowConstraintOp op;
-    double rhs_min;
-    double rhs_max;
-    char symbolic_tag[64];
-} FlowLinearConstraint;
-
-typedef struct {
-    FlowLinearConstraint constraints[FLOW_POLYTOPE_MAX_CONSTRAINTS];
-    size_t constraint_count;
-    size_t dimension_count;
-    double lower_bounds[FLOW_POLYTOPE_MAX_DIMS];
-    double upper_bounds[FLOW_POLYTOPE_MAX_DIMS];
-} FlowPolyhedronSystem;
-
-/* Polyhedron Lifecycle & Hypercube Projection */
-void flow_polyhedron_init(FlowPolyhedronSystem *poly, size_t dim_count);
-int flow_polyhedron_add_box_bounds(FlowPolyhedronSystem *poly, size_t dim_idx, double min_val, double max_val, const char *tag);
-int flow_polyhedron_add_inequality(FlowPolyhedronSystem *poly, const double *coeffs, FlowConstraintOp op, double bound, const char *tag);
-int flow_polyhedron_from_ir(const SemanticIR *ir, const Component *comp, const FlowPlanDimensionSet *dims, FlowPolyhedronSystem *poly);
-uint64_t flow_polyhedron_project_mask(const FlowPolyhedronSystem *poly, const FlowPlanDimensionSet *dims, uint32_t total_bits);
+/* FlowPolyhedronSystem and hypercube projection are unified in polyhedral.h */
 
 typedef struct {
     double energy;

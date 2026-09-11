@@ -30,6 +30,8 @@ typedef struct {
     char metric_unit[16];          /* e.g., "N*m", "MB", "miss_rate" */
     char violated_constraint[128]; /* e.g., "Center of Mass (CoM) & Joint Torque Safe Limit" */
     uint32_t flipped_genome_bit;   /* e.g., 14 */
+    uint64_t pre_state_mask;       /* 64-bit Cubical state before transition */
+    uint64_t post_state_mask;      /* 64-bit Cubical state after transition */
     char pre_topology[64];         /* e.g., "AoS_LinearArray" */
     char post_topology[64];        /* e.g., "SoA_Sharded_LoadBalance" */
     char causal_rationale[512];    /* Deterministic explanation of WHY the transition occurred */

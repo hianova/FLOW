@@ -216,5 +216,44 @@ int main(void) {
         flow_axiom_destroy(sec);
     }
 
+    /* ========================================================================= */
+    /* 7. 64-Axis Basis Dictionary, Geometric Decoder & Intent Projection       */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(7, "64-Axis Geometric Basis Dictionary & Semantic Intent Projection");
+    {
+        /* Axis Basis Info Lookup */
+        const FlowCubicalAxisInfo *ax14 = flow_cubical_get_axis_info(14);
+        FLOW_ASSERT_TRUE(ax14 != NULL);
+        FLOW_ASSERT_EQ(ax14->axis_index, 14);
+        FLOW_ASSERT_EQ(ax14->subspace, FLOW_CUBICAL_SUBSPACE_CONCURRENCY);
+        FLOW_ASSERT_STR_EQ(ax14->module_id, "embodied");
+
+        const FlowCubicalAxisInfo *ax31 = flow_cubical_get_axis_info(31);
+        FLOW_ASSERT_TRUE(ax31 != NULL);
+        FLOW_ASSERT_EQ(ax31->axis_index, 31);
+        FLOW_ASSERT_EQ(ax31->subspace, FLOW_CUBICAL_SUBSPACE_LAYOUT);
+        FLOW_ASSERT_STR_EQ(ax31->axis_name, "columnar_compact_morph");
+
+        /* Transition Decoding with Homotopy Verification */
+        FlowCubicalTransitionReport rep;
+        int dec_ok = flow_cubical_decode_transition(0ULL, 1ULL << 14, 14, &rep);
+        FLOW_ASSERT_EQ(dec_ok, 1);
+        FLOW_ASSERT_EQ(rep.flipped_axis, 14);
+        FLOW_ASSERT_EQ(rep.subspace, FLOW_CUBICAL_SUBSPACE_CONCURRENCY);
+        FLOW_ASSERT_EQ(rep.is_kan_homotopic, 1);
+        FLOW_ASSERT_TRUE(strstr(rep.explanation, "bipedal_torque_dist") != NULL);
+
+        /* Intent Projection: Memory Pressure Query */
+        uint64_t mem_intent = flow_cubical_project_text_intent("記憶體超標 記憶體配額");
+        FLOW_ASSERT_TRUE((mem_intent & (1ULL << 31)) != 0ULL);
+        FLOW_ASSERT_TRUE((mem_intent & flow_cubical_get_module_mask("jit")) != 0ULL);
+
+        /* Intent Projection: Concurrency Query */
+        uint64_t rcu_intent = flow_cubical_project_text_intent("QSBR 無鎖並發 執行緒");
+        FLOW_ASSERT_TRUE((rcu_intent & flow_cubical_get_module_mask("reload")) != 0ULL);
+
+        printf("    * 64-Axis Basis Dictionary, Homotopic 1-Cell Decoder & Intent Projection 100%% SOUND\n");
+    }
+
     FLOW_TEST_SUITE_END();
 }

@@ -258,5 +258,72 @@ int main(void) {
         printf("    * DTC Subharmonic locks (2T, 4T, 8T) confirmed with Fourier Peak > 70%% & SMT UNSAT\n");
     }
 
+    /* ========================================================================= */
+    /* 8. Hodge-DTC Yin-Yang Pairing & Three Real Landing Capabilities          */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(8, "Hodge-DTC Yin-Yang Duality & Three Landing Capabilities");
+    {
+        FlowJet jet;
+        flow_jet_init(&jet, "dtc_landing_jet", "DTC Landing Verification Jet");
+        jet.header.vector_dim = 8;
+        for (uint32_t i = 0; i < 8; ++i) {
+            jet.payload.q[i] = 1.0;
+            jet.payload.p[i] = 0.0;
+        }
+
+        /* 8.1: Jitter-Free Subharmonic Pacer (時鐘分頻器) */
+        FlowTimeCrystal pacer_dtc;
+        flow_dtc_init_subharmonic(&pacer_dtc, &jet, 0.02, 2, ~0ULL, 1.2);
+        uint32_t total_ticks = 0;
+        for (uint32_t c = 1; c <= 20; ++c) {
+            /* Feed intentionally jittery delta t (+/- 25% noise) */
+            double jittery_dt = 0.001 * (1.0 + 0.25 * sin((double)c));
+            uint8_t tick = 0;
+            int ok = flow_dtc_pace_subharmonic(&pacer_dtc, jittery_dt, &tick);
+            FLOW_ASSERT_EQ(ok, 1);
+            if (tick) total_ticks++;
+        }
+        /* Over 20 cycles with order 2T, exactly 10 pure divided pulses emitted */
+        FLOW_ASSERT_EQ(total_ticks, 10);
+
+        /* 8.2: Dynamic Limit-Cycle Chirality Storage (手性動態記憶胞) */
+        FlowTimeCrystal mem_dtc;
+        flow_dtc_init_subharmonic(&mem_dtc, &jet, 0.02, 2, ~0ULL, 1.2);
+
+        /* Encode State 1 (Counter-Clockwise Chirality) */
+        FLOW_ASSERT_EQ(flow_dtc_encode_chirality(&mem_dtc, 1), 1);
+        flow_dtc_step_floquet(&mem_dtc, 6, 0.001);
+        FLOW_ASSERT_EQ(flow_dtc_decode_chirality(&mem_dtc), 1);
+
+        /* Inject random instantaneous coordinate noise; attractor self-heals */
+        mem_dtc.jet->payload.q[0] += 0.05;
+        mem_dtc.jet->payload.q[1] -= 0.05;
+        flow_dtc_step_floquet(&mem_dtc, 4, 0.001);
+        FLOW_ASSERT_EQ(flow_dtc_decode_chirality(&mem_dtc), 1);
+
+        /* Encode State 0 (Clockwise Chirality) */
+        FLOW_ASSERT_EQ(flow_dtc_encode_chirality(&mem_dtc, 0), 1);
+        flow_dtc_step_floquet(&mem_dtc, 6, 0.001);
+        FLOW_ASSERT_EQ(flow_dtc_decode_chirality(&mem_dtc), 0);
+
+        /* 8.3: Hodge-DTC Yin-Yang Regulator (節奏調節閥) */
+        FlowTimeCrystal reg_dtc;
+        flow_dtc_init_subharmonic(&reg_dtc, &jet, 0.02, 2, ~0ULL, 1.2);
+        uint64_t sliding_surface = 0x00000000000000FFULL;
+        uint64_t state = 0x0000000000000001ULL;
+
+        /* Paced scanning (quench_active = 0): safe subharmonic patrol without deadlock */
+        for (int step = 0; step < 8; ++step) {
+            FLOW_ASSERT_EQ(flow_dtc_regulate_hodge_paced(&reg_dtc, sliding_surface, 0, &state), 1);
+            /* Trajectory is always safely confined to sliding surface boundary */
+            FLOW_ASSERT_EQ(state & ~sliding_surface, 0ULL);
+        }
+
+        /* Quench (quench_active = 1): Hodge P_exact eliminates chattering instantaneously */
+        FLOW_ASSERT_EQ(flow_dtc_regulate_hodge_paced(&reg_dtc, sliding_surface, 1, &state), 1);
+
+        printf("    * Hodge-DTC Yin-Yang Duality: Pacer 10/10 ticks, Chirality Memory 1/0 Sound, Regulator Verified\n");
+    }
+
     FLOW_TEST_SUITE_END();
 }
