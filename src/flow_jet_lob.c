@@ -1,5 +1,4 @@
 #include "flow_jet_lob.h"
-#include "flow_smt_dsl.h"
 
 #include <math.h>
 #include <string.h>
@@ -200,38 +199,39 @@ FlowSMTResult flow_lob_hydrodynamics_verify_smt(const FlowLOBHydrodynamics *hydr
                                                 FlowSMTProofAttestation *proof_out) {
     if (hydro == NULL) return FLOW_SMT_UNKNOWN;
 
-    FLOW_SMT_BOX_BUILDER_DECL(builder);
-
     /* Theorem 1: Mid-Price & Acceleration Boundedness (Non-explosive microstructures) */
-    uint64_t accel_violation = (isnan(hydro->price_acceleration) || fabs(hydro->price_acceleration) > 1.0e7) ? 1 : 0;
-    FLOW_SMT_BOX_ADD_RULE(builder, "lob_hydro_acceleration_bounded", accel_violation, 0, 0,
-                          FLOW_BOX_THEOREM_BUFFER_BOUNDS, "LOB price acceleration diverged or NaN");
+    bool accel_ok = !(isnan(hydro->price_acceleration) || fabs(hydro->price_acceleration) > 1.0e7);
 
     /* Theorem 2: Non-Negative Adaptive Spread (No arbitrage inverted spread) */
     uint64_t base_test_spread = 2;
     uint64_t widened = 0;
     flow_lob_hydrodynamics_compute_adaptive_spread(hydro, base_test_spread, &widened);
-    uint64_t spread_violation = (widened < base_test_spread) ? 1 : 0;
-    FLOW_SMT_BOX_ADD_RULE(builder, "lob_hydro_spread_monotonicity", spread_violation, 0, 0,
-                          FLOW_BOX_THEOREM_MEMORY_QUOTA, "Adaptive spread inverted below base spread");
+    bool spread_ok = (widened >= base_test_spread);
 
     /* Theorem 3: Jet Phase Space Energy Consistency */
     double H = flow_jet_hamiltonian(&hydro->jet);
-    uint64_t energy_violation = (isnan(H) || H < 0.0) ? 1 : 0;
-    FLOW_SMT_BOX_ADD_RULE(builder, "lob_hydro_hamiltonian_valid", energy_violation, 0, 0,
-                          FLOW_BOX_THEOREM_SHARD_ISOLATION, "LOB continuous Hamiltonian is negative or NaN");
+    bool energy_ok = !(isnan(H) || H < 0.0);
 
     /* Theorem 4: Single Cache-Line Confinement */
-    uint64_t canvas_violation = (sizeof(FlowBmf1BitCanvas) != 64) ? 1 : 0;
-    FLOW_SMT_BOX_ADD_RULE(builder, "lob_hydro_canvas_confinement", canvas_violation, 0, 0,
-                          FLOW_BOX_THEOREM_DETERMINISM, "Switchboard canvas is not 64-byte aligned");
+    bool canvas_ok = (sizeof(FlowBmf1BitCanvas) == 64);
 
-    FlowSMTResult res = FLOW_SMT_BOX_VERIFY(builder, "lob_hydrodynamics_soundness", proof_out);
-    if (res == FLOW_SMT_PROVEN_UNSAT && proof_out != NULL) {
-        snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                 "SMT LOB HYDRO SOUND: Mid=%.2f, V=%.3f, A=%.3f, OFI=%.1f, Alerts=%llu (Zero-Defect Guaranteed)",
-                 hydro->mid_price, hydro->price_velocity, hydro->price_acceleration,
-                 hydro->order_flow_imbalance, (unsigned long long)hydro->collapse_alerts_triggered);
+    if (proof_out != NULL) {
+        proof_out->buffer_bounds_safety = accel_ok ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+        proof_out->memory_quota_bound = spread_ok ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+        proof_out->shard_non_aliasing = energy_ok ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+        proof_out->determinism_invariant = canvas_ok ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+
+        if (accel_ok && spread_ok && energy_ok && canvas_ok) {
+            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
+                     "SMT LOB HYDRO SOUND: Mid=%.2f, V=%.3f, A=%.3f, OFI=%.1f, Alerts=%llu (Zero-Defect Guaranteed)",
+                     hydro->mid_price, hydro->price_velocity, hydro->price_acceleration,
+                     hydro->order_flow_imbalance, (unsigned long long)hydro->collapse_alerts_triggered);
+        } else {
+            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
+                     "SMT LOB HYDRO VIOLATION: accel=%d, spread=%d, energy=%d, canvas=%d",
+                     accel_ok, spread_ok, energy_ok, canvas_ok);
+        }
     }
-    return res;
+
+    return (accel_ok && spread_ok && energy_ok && canvas_ok) ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
 }

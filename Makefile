@@ -10,8 +10,19 @@ FLOWC := $(BUILD_DIR)/flowc
 FLOWY := $(BUILD_DIR)/flowy
 LIBFLOW_A := $(BUILD_DIR)/libflow.a
 
-SRC_LIB := $(filter-out src/flowc.c src/flowy_main.c,$(wildcard src/*.c))
-LIB_OBJS := $(patsubst src/%.c,$(BUILD_DIR)/obj/%.o,$(SRC_LIB))
+SRC_LIB_ROOT    := $(filter-out src/flowc.c src/flowy_main.c src/flowy_fvec.c,$(wildcard src/*.c))
+SRC_LIB_FVEC    := $(wildcard src/fvec/*.c)
+SRC_LIB_JET     := $(wildcard src/jet/*.c)
+SRC_LIB_TOPO    := $(wildcard src/topo/*.c)
+SRC_LIB_INSPECT := $(wildcard src/inspect/*.c)
+SRC_LIB := $(SRC_LIB_ROOT) $(SRC_LIB_FVEC) $(SRC_LIB_JET) $(SRC_LIB_TOPO) $(SRC_LIB_INSPECT)
+
+LIB_OBJS := \
+  $(patsubst src/%.c,          $(BUILD_DIR)/obj/%.o,          $(SRC_LIB_ROOT)) \
+  $(patsubst src/fvec/%.c,     $(BUILD_DIR)/obj/fvec_%.o,     $(SRC_LIB_FVEC)) \
+  $(patsubst src/jet/%.c,      $(BUILD_DIR)/obj/jet_%.o,      $(SRC_LIB_JET)) \
+  $(patsubst src/topo/%.c,     $(BUILD_DIR)/obj/topo_%.o,     $(SRC_LIB_TOPO)) \
+  $(patsubst src/inspect/%.c,  $(BUILD_DIR)/obj/inspect_%.o,  $(SRC_LIB_INSPECT))
 
 AR ?= ar
 RANLIB ?= ranlib
@@ -48,7 +59,24 @@ uninstall:
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
+
 $(BUILD_DIR)/obj/%.o: src/%.c src/generated_book_knowledge.h $(wildcard src/*.h) | $(BUILD_DIR)
+	@mkdir -p $(BUILD_DIR)/obj
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc -c $< -o $@
+
+$(BUILD_DIR)/obj/fvec_%.o: src/fvec/%.c src/generated_book_knowledge.h $(wildcard src/*.h) $(wildcard src/fvec/*.h) | $(BUILD_DIR)
+	@mkdir -p $(BUILD_DIR)/obj
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc -c $< -o $@
+
+$(BUILD_DIR)/obj/jet_%.o: src/jet/%.c src/generated_book_knowledge.h $(wildcard src/*.h) $(wildcard src/jet/*.h) | $(BUILD_DIR)
+	@mkdir -p $(BUILD_DIR)/obj
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc -c $< -o $@
+
+$(BUILD_DIR)/obj/topo_%.o: src/topo/%.c src/generated_book_knowledge.h $(wildcard src/*.h) $(wildcard src/topo/*.h) | $(BUILD_DIR)
+	@mkdir -p $(BUILD_DIR)/obj
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc -c $< -o $@
+
+$(BUILD_DIR)/obj/inspect_%.o: src/inspect/%.c src/generated_book_knowledge.h $(wildcard src/*.h) $(wildcard src/inspect/*.h) | $(BUILD_DIR)
 	@mkdir -p $(BUILD_DIR)/obj
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc -c $< -o $@
 

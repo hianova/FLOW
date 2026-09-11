@@ -1,5 +1,4 @@
 #include "flow_jet_geodesic.h"
-#include "flow_smt_dsl.h"
 
 #include <math.h>
 #include <string.h>
@@ -132,44 +131,45 @@ FlowSMTResult flow_neuro_geodesic_verify_smt(const FlowNeuroGeodesicPrePlay *pre
                                              FlowSMTProofAttestation *proof_out) {
     if (preplay == NULL) return FLOW_SMT_UNKNOWN;
 
-    FLOW_SMT_BOX_BUILDER_DECL(builder);
-
     /* Theorem 1: Geodesic Drift Boundedness (||z_pred - z_actual|| <= max_allowed_drift) */
-    uint64_t drift_violation = (preplay->peak_geodesic_drift > preplay->max_allowed_drift ||
-                                isnan(preplay->peak_geodesic_drift)) ? 1 : 0;
-    FLOW_SMT_BOX_ADD_RULE(builder, "geodesic_drift_bounded", drift_violation, 0, 0,
-                          FLOW_BOX_THEOREM_BUFFER_BOUNDS, "Latent geodesic drift exceeded SMT safety threshold");
+    bool drift_ok = !(preplay->peak_geodesic_drift > preplay->max_allowed_drift ||
+                      isnan(preplay->peak_geodesic_drift));
 
     /* Theorem 2: Latent Coordinate Stability (Coordinates remain bounded in [-10.0, 10.0]) */
-    uint64_t coord_violation = 0;
+    bool coord_ok = true;
     for (uint32_t i = 0; i < preplay->active_dim; ++i) {
         double q = preplay->jet.payload.q[i];
         if (isnan(q) || fabs(q) > 10.0) {
-            coord_violation = 1;
+            coord_ok = false;
             break;
         }
     }
-    FLOW_SMT_BOX_ADD_RULE(builder, "geodesic_latent_bounded", coord_violation, 0, 0,
-                          FLOW_BOX_THEOREM_MEMORY_QUOTA, "Latent continuous coordinates exploded or NaN");
 
     /* Theorem 3: Symplectic Pre-Play Energy Conservation */
     double H = flow_jet_hamiltonian(&preplay->jet);
-    uint64_t energy_violation = (isnan(H) || H < 0.0 || H > 1e6) ? 1 : 0;
-    FLOW_SMT_BOX_ADD_RULE(builder, "geodesic_energy_bounded", energy_violation, 0, 0,
-                          FLOW_BOX_THEOREM_SHARD_ISOLATION, "Geodesic Hamiltonian diverged");
+    bool energy_ok = !(isnan(H) || H < 0.0 || H > 1e6);
 
     /* Theorem 4: Single Cache-Line Confinement */
-    uint64_t canvas_violation = (sizeof(FlowBmf1BitCanvas) != 64) ? 1 : 0;
-    FLOW_SMT_BOX_ADD_RULE(builder, "geodesic_canvas_confinement", canvas_violation, 0, 0,
-                          FLOW_BOX_THEOREM_DETERMINISM, "Switchboard canvas is not 64-byte aligned");
+    bool canvas_ok = (sizeof(FlowBmf1BitCanvas) == 64);
 
-    FlowSMTResult res = FLOW_SMT_BOX_VERIFY(builder, "geodesic_preplay_soundness", proof_out);
-    if (res == FLOW_SMT_PROVEN_UNSAT && proof_out != NULL) {
-        snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                 "SMT GEODESIC SOUND: Tokens=%llu, Preplays=%llu, PeakDrift=%.4f (Zero-Defect Guaranteed)",
-                 (unsigned long long)preplay->total_tokens_received,
-                 (unsigned long long)preplay->total_10khz_preplays,
-                 preplay->peak_geodesic_drift);
+    if (proof_out != NULL) {
+        proof_out->buffer_bounds_safety = drift_ok ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+        proof_out->memory_quota_bound = coord_ok ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+        proof_out->shard_non_aliasing = energy_ok ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+        proof_out->determinism_invariant = canvas_ok ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+
+        if (drift_ok && coord_ok && energy_ok && canvas_ok) {
+            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
+                     "SMT GEODESIC SOUND: Tokens=%llu, Preplays=%llu, PeakDrift=%.4f (Zero-Defect Guaranteed)",
+                     (unsigned long long)preplay->total_tokens_received,
+                     (unsigned long long)preplay->total_10khz_preplays,
+                     preplay->peak_geodesic_drift);
+        } else {
+            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
+                     "SMT GEODESIC VIOLATION: drift=%d, coord=%d, energy=%d, canvas=%d",
+                     drift_ok, coord_ok, energy_ok, canvas_ok);
+        }
     }
-    return res;
+
+    return (drift_ok && coord_ok && energy_ok && canvas_ok) ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
 }

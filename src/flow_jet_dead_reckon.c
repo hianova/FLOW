@@ -1,5 +1,4 @@
 #include "flow_jet_dead_reckon.h"
-#include "flow_smt_dsl.h"
 
 #include <math.h>
 #include <string.h>
@@ -141,43 +140,44 @@ FlowSMTResult flow_jet_dead_reckon_verify_smt(const FlowJetDeadReckonSender *sen
                                               FlowSMTProofAttestation *proof_out) {
     if (sender == NULL || sender->actual_jet == NULL) return FLOW_SMT_UNKNOWN;
 
-    FLOW_SMT_BOX_BUILDER_DECL(builder);
-
     /* Theorem 1: Lyapunov Horizon Divergence Boundedness */
     double max_allowed = sender->divergence_threshold * 1.5;
-    uint64_t div_violation = (sender->max_observed_divergence > max_allowed || isnan(sender->max_observed_divergence)) ? 1 : 0;
-    FLOW_SMT_BOX_ADD_RULE(builder, "dead_reckon_divergence_bounded", div_violation, 0, 0,
-                          FLOW_BOX_THEOREM_BUFFER_BOUNDS, "Dead reckoning trajectory divergence breached Lyapunov horizon bound");
+    bool div_ok = !(sender->max_observed_divergence > max_allowed || isnan(sender->max_observed_divergence));
 
     /* Theorem 2: Distributed Interconnect Bandwidth Savings (>= 85%) */
-    uint64_t savings_violation = 0;
+    bool savings_ok = true;
     if (sender->total_ticks >= 20) {
         if (sender->bandwidth_savings_ratio < 0.85 || isnan(sender->bandwidth_savings_ratio)) {
-            savings_violation = 1;
+            savings_ok = false;
         }
     }
-    FLOW_SMT_BOX_ADD_RULE(builder, "dead_reckon_bandwidth_savings", savings_violation, 0, 0,
-                          FLOW_BOX_THEOREM_MEMORY_QUOTA, "Cluster bandwidth savings fell below 85% requirement");
 
     /* Theorem 3: Symplectic Energy Conservation of Shadow Model */
     double H_shadow = flow_jet_hamiltonian(&sender->shadow_jet);
-    uint64_t energy_violation = (H_shadow < 0.0 || H_shadow > 1.0e6 || isnan(H_shadow)) ? 1 : 0;
-    FLOW_SMT_BOX_ADD_RULE(builder, "dead_reckon_energy_bounded", energy_violation, 0, 0,
-                          FLOW_BOX_THEOREM_SHARD_ISOLATION, "Shadow dead-reckoning Hamiltonian diverged");
+    bool energy_ok = !(H_shadow < 0.0 || H_shadow > 1.0e6 || isnan(H_shadow));
 
     /* Theorem 4: Single Cache-Line Confinement */
-    uint64_t canvas_violation = (sizeof(FlowBmf1BitCanvas) != 64) ? 1 : 0;
-    FLOW_SMT_BOX_ADD_RULE(builder, "dead_reckon_canvas_confinement", canvas_violation, 0, 0,
-                          FLOW_BOX_THEOREM_DETERMINISM, "Switchboard canvas is not 64-byte aligned");
+    bool canvas_ok = (sizeof(FlowBmf1BitCanvas) == 64);
 
-    FlowSMTResult res = FLOW_SMT_BOX_VERIFY(builder, "dead_reckon_soundness", proof_out);
-    if (res == FLOW_SMT_PROVEN_UNSAT && proof_out != NULL) {
-        snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                 "SMT DEAD RECKON SOUND: Savings=%.1f%%, Sent=%llu, Suppressed=%llu, MaxDiv=%.4f (Zero-Defect Guaranteed)",
-                 sender->bandwidth_savings_ratio * 100.0,
-                 (unsigned long long)sender->packets_sent,
-                 (unsigned long long)sender->packets_suppressed,
-                 sender->max_observed_divergence);
+    if (proof_out != NULL) {
+        proof_out->buffer_bounds_safety = div_ok ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+        proof_out->memory_quota_bound = savings_ok ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+        proof_out->shard_non_aliasing = energy_ok ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+        proof_out->determinism_invariant = canvas_ok ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+
+        if (div_ok && savings_ok && energy_ok && canvas_ok) {
+            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
+                     "SMT DEAD RECKON SOUND: Savings=%.1f%%, Sent=%llu, Suppressed=%llu, MaxDiv=%.4f (Zero-Defect Guaranteed)",
+                     sender->bandwidth_savings_ratio * 100.0,
+                     (unsigned long long)sender->packets_sent,
+                     (unsigned long long)sender->packets_suppressed,
+                     sender->max_observed_divergence);
+        } else {
+            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
+                     "SMT DEAD RECKON VIOLATION: div=%d, savings=%d, energy=%d, canvas=%d",
+                     div_ok, savings_ok, energy_ok, canvas_ok);
+        }
     }
-    return res;
+
+    return (div_ok && savings_ok && energy_ok && canvas_ok) ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
 }

@@ -1,5 +1,4 @@
 #include "flow_jet_impact.h"
-#include "flow_smt_dsl.h"
 
 #include <math.h>
 #include <string.h>
@@ -137,52 +136,50 @@ FlowSMTResult flow_symplectic_impact_verify_smt(const FlowSymplecticImpactManifo
                                                 FlowSMTProofAttestation *proof_out) {
     if (manifold == NULL || jet == NULL) return FLOW_SMT_UNKNOWN;
 
-    FLOW_SMT_BOX_BUILDER_DECL(builder);
-
     /* Theorem 1: Passivity & Energy Non-Growth during impact (H_post <= H_pre) */
-    uint64_t passivity_violation = 0;
-    if (manifold->restitution_coeff > 1.0 || isnan(manifold->total_dissipated_energy) ||
-        manifold->total_dissipated_energy < 0.0) {
-        passivity_violation = 1;
-    }
-    FLOW_SMT_BOX_ADD_RULE(builder, "symplectic_impact_passivity", passivity_violation, 0, 0,
-                          FLOW_BOX_THEOREM_BUFFER_BOUNDS, "Impact energy grew or passivity violated");
+    bool passivity_ok = !(manifold->restitution_coeff > 1.0 || isnan(manifold->total_dissipated_energy) ||
+                          manifold->total_dissipated_energy < 0.0);
 
     /* Theorem 2: Torque Limit Invariant (tau <= max_allowed_torque) */
-    uint64_t torque_violation = 0;
+    bool torque_ok = true;
     for (size_t j = 0; j < manifold->joint_count; ++j) {
         if (fabs(jet->payload.a[j]) > manifold->max_allowed_torque + 1e-6) {
-            torque_violation = 1;
+            torque_ok = false;
             break;
         }
     }
-    FLOW_SMT_BOX_ADD_RULE(builder, "symplectic_impact_torque_bounded", torque_violation, 0, 0,
-                          FLOW_BOX_THEOREM_MEMORY_QUOTA, "Torque output exceeded motor physical limit");
 
     /* Theorem 3: Moreau Surface Non-Penetration Constraint */
-    uint64_t penetration_violation = 0;
+    bool penetration_ok = true;
     for (size_t j = 0; j < manifold->joint_count; ++j) {
         if (jet->payload.q[j] < manifold->surface_height - 0.01) {
-            penetration_violation = 1;
+            penetration_ok = false;
             break;
         }
     }
-    FLOW_SMT_BOX_ADD_RULE(builder, "symplectic_impact_non_penetration", penetration_violation, 0, 0,
-                          FLOW_BOX_THEOREM_SHARD_ISOLATION, "Ground plane penetration barrier violated");
 
     /* Theorem 4: Single Cache-Line Confinement */
-    uint64_t canvas_violation = (sizeof(FlowBmf1BitCanvas) != 64) ? 1 : 0;
-    FLOW_SMT_BOX_ADD_RULE(builder, "symplectic_impact_canvas_confinement", canvas_violation, 0, 0,
-                          FLOW_BOX_THEOREM_DETERMINISM, "Switchboard canvas is not 64-byte aligned");
+    bool canvas_ok = (sizeof(FlowBmf1BitCanvas) == 64);
 
-    FlowSMTResult res = FLOW_SMT_BOX_VERIFY(builder, "symplectic_impact_soundness", proof_out);
-    if (res == FLOW_SMT_PROVEN_UNSAT && proof_out != NULL) {
-        snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                 "SMT IMPACT SOUND: Restitution=%.2f, Events=%llu, PeakImp=%.3f, DissEnergy=%.3fJ (Zero-Defect Guaranteed)",
-                 manifold->restitution_coeff,
-                 (unsigned long long)manifold->total_impact_events,
-                 manifold->peak_impact_impulse,
-                 manifold->total_dissipated_energy);
+    if (proof_out != NULL) {
+        proof_out->buffer_bounds_safety = passivity_ok ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+        proof_out->memory_quota_bound = torque_ok ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+        proof_out->shard_non_aliasing = penetration_ok ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+        proof_out->determinism_invariant = canvas_ok ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+
+        if (passivity_ok && torque_ok && penetration_ok && canvas_ok) {
+            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
+                     "SMT IMPACT SOUND: Restitution=%.2f, Events=%llu, PeakImp=%.3f, DissEnergy=%.3fJ (Zero-Defect Guaranteed)",
+                     manifold->restitution_coeff,
+                     (unsigned long long)manifold->total_impact_events,
+                     manifold->peak_impact_impulse,
+                     manifold->total_dissipated_energy);
+        } else {
+            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
+                     "SMT IMPACT VIOLATION: passivity=%d, torque=%d, penetration=%d, canvas=%d",
+                     passivity_ok, torque_ok, penetration_ok, canvas_ok);
+        }
     }
-    return res;
+
+    return (passivity_ok && torque_ok && penetration_ok && canvas_ok) ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
 }
