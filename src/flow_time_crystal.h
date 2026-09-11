@@ -46,13 +46,22 @@ typedef struct {
     double initial_energy;                      /* Base Hamiltonian energy H_0 */
     double current_energy;                      /* Current Hamiltonian energy H(t) */
     double max_energy_drift;                    /* Max observed energy deviation |H(t) - H_0| */
-    int is_subharmonic_locked;                  /* 1 if rigid 2T subharmonic oscillation verified */
+    int is_subharmonic_locked;                  /* 1 if rigid subharmonic oscillation verified */
     int encoded_bit;                            /* Stored bit (0 or 1) in topological limit cycle phase */
+    uint32_t subharmonic_order;                 /* Subharmonic period multiplier n in {2, 4, 8} (default 2) */
+    uint64_t phase_mask;                        /* 64-bit spatial phase mask regulating active subharmonic subspace */
 } FlowTimeCrystal;
 
 /* Lifecycle */
 int flow_dtc_init(FlowTimeCrystal *dtc, FlowJet *jet, double period_T,
                   double kick_strength, double disorder_strength);
+
+/* Initialize with customizable subharmonic order n in {2, 4, 8} and spatial phase mask */
+int flow_dtc_init_subharmonic(FlowTimeCrystal *dtc, FlowJet *jet, double period_T,
+                              uint32_t order, uint64_t phase_mask, double disorder_strength);
+
+/* Dynamically set subharmonic order (2T, 4T, 8T) */
+int flow_dtc_set_subharmonic_order(FlowTimeCrystal *dtc, uint32_t order, uint64_t phase_mask);
 
 /* Execute Floquet driving: continuous symplectic evolution over (T - kick) + instantaneous parametric kick */
 int flow_dtc_step_floquet(FlowTimeCrystal *dtc, uint32_t cycles, double dt);

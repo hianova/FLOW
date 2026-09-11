@@ -27,6 +27,7 @@ void cmd_inspect_print_usage(FILE *out) {
     fprintf(out, "  audit                    Run formal invariant & layer separation audit\n");
     fprintf(out, "  audit-mechanisms         Verify 10 zero-overhead architectural mechanisms\n");
     fprintf(out, "  topos                    Discrete Cubical HoTT & Topos 4-layer architecture report\n");
+    fprintf(out, "  hodge                    Discrete F2-Hodge orthogonal decomposition & rigid control\n");
     fprintf(out, "  doc [module|all]         Living documentation viewer\n");
     fprintf(out, "  book [chapter|all]       The FLOW Book living viewer\n");
 }
@@ -114,6 +115,12 @@ int cmd_inspect_run(int argc, char **argv) {
     /* topos / hott / cubical */
     if (strcmp(sub, "topos") == 0 || strcmp(sub, "hott") == 0 || strcmp(sub, "cubical") == 0) {
         flowy_print_cubical_topos_report(stdout);
+        return EXIT_SUCCESS;
+    }
+
+    /* hodge / dec / helmholtz */
+    if (strcmp(sub, "hodge") == 0 || strcmp(sub, "dec") == 0 || strcmp(sub, "helmholtz") == 0) {
+        flowy_hodge_demo(stdout);
         return EXIT_SUCCESS;
     }
 

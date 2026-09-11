@@ -117,27 +117,35 @@ if (strcmp(action, "learn") == 0 || strcmp(action, "edmd") == 0) {
     return EXIT_SUCCESS;
 }
 
-/* Subcommand: flowy jet dtc <file.fjet> [--cycles N] [--period T] [--imperfection E] */
+/* Subcommand: flowy jet dtc <file.fjet> [--cycles N] [--period T] [--imperfection E] [--subharmonic 2|4|8] [--mask 0xM] */
 if (strcmp(action, "dtc") == 0 || strcmp(action, "time-crystal") == 0) {
     if (arg_offset >= argc) {
-        fprintf(stderr, "usage: flowy jet dtc <file.fjet> [--cycles N] [--period T] [--imperfection E]\n");
+        fprintf(stderr, "usage: flowy jet dtc <file.fjet> [--cycles N] [--period T] [--imperfection E] [--subharmonic 2|4|8] [--mask 0xM]\n");
         return EXIT_FAILURE;
     }
     const char *filepath = argv[arg_offset++];
     uint32_t cycles = 24;
     double period_T = 0.02;
     double imperfection = 0.05;
+    uint32_t subharmonic = 2;
+    uint64_t phase_mask = ~0ULL;
     for (int i = arg_offset; i < argc; ++i) {
         if (strcmp(argv[i], "--cycles") == 0 && i + 1 < argc) cycles = (uint32_t)atoi(argv[++i]);
         else if (strcmp(argv[i], "--period") == 0 && i + 1 < argc) period_T = atof(argv[++i]);
         else if (strcmp(argv[i], "--imperfection") == 0 && i + 1 < argc) imperfection = atof(argv[++i]);
+        else if ((strcmp(argv[i], "--subharmonic") == 0 || strcmp(argv[i], "--order") == 0) && i + 1 < argc) {
+            subharmonic = (uint32_t)atoi(argv[++i]);
+        }
+        else if (strcmp(argv[i], "--mask") == 0 && i + 1 < argc) {
+            phase_mask = strtoull(argv[++i], NULL, 0);
+        }
     }
     FlowJet jet;
     if (!flow_jet_read_file(filepath, &jet)) {
         fprintf(stderr, "flowy jet: failed to load or verify '%s'\n", filepath);
         return EXIT_FAILURE;
     }
-    flowy_jet_dtc_simulate(&jet, cycles, period_T, imperfection, stdout);
+    flowy_jet_dtc_simulate_order(&jet, cycles, period_T, imperfection, subharmonic, phase_mask, stdout);
     return EXIT_SUCCESS;
 }
 

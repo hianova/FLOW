@@ -42,6 +42,8 @@ void flowy_render_phase_portrait(const struct FlowJet *jet, uint32_t dim_x, uint
 int flowy_jet_simulate_run(const struct FlowJet *jet, int steps, double dt, FILE *out);
 int flowy_jet_learn_demo(struct FlowJet *jet, int sample_count, FILE *out);
 int flowy_jet_dtc_simulate(struct FlowJet *jet, uint32_t cycles, double period_T, double imperfection, FILE *out);
+int flowy_jet_dtc_simulate_order(struct FlowJet *jet, uint32_t cycles, double period_T, double imperfection,
+                                 uint32_t order, uint64_t phase_mask, FILE *out);
 int flowy_jet_dead_reckon_demo(struct FlowJet *jet, uint32_t ticks, double threshold, FILE *out);
 int flowy_jet_lob_demo(struct FlowJet *jet, uint32_t ticks, FILE *out);
 int flowy_jet_impact_demo(struct FlowJet *jet, uint32_t ticks, FILE *out);
@@ -52,5 +54,8 @@ int flowy_interactive_loop(FlowOrchestrator *orch, FILE *in, FILE *out);
 
 /* Discrete Cubical HoTT & Topos 4-Layer Inspection */
 void flowy_print_cubical_topos_report(FILE *out);
+
+/* Discrete F2-Hodge Orthogonal Decomposition & Rigid Control Demo */
+int flowy_hodge_demo(FILE *out);
 
 #endif /* FLOW_FLOWY_CLI_H */
