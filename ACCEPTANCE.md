@@ -156,42 +156,19 @@ The self-constraining geometric architecture:
 - Derives QSBR watchdog grace periods dynamically from SemanticIR SLA deadlines or Chebyshev 4-sigma distribution bounds ($\mu + 4\sigma$).
 - Computes phase-lag dead-time delay steps dynamically via the Nyquist-Shannon sampling relation $d = \lceil \tau_{\text{delay}} / \Delta t \rceil$.
 
-## M10 — Jet Bundle Dynamics & Multi-Dimensional Cross-Component Fusion (`.fjet`)
+## M10 — Contact-Jet Dynamics, Cubical HoTT Sieve & Lean 4 Reflection
 
 Pass:
 
 ```sh
-make security-test
-./build/test-fvec-swarm
+make test
+make autopoiesis-check
 ```
 
-The high-dimensional `.fjet` continuous phase-space architecture elevates discrete reactive systems into predictive, continuous symplectic physical dynamics across multiple subsystem dimensions:
-
-1. **Negative-Latency Speculative JIT (`flow_speculative_jit.h`, `flow_speculative_jit.c`)**:
-   - Anticipates Moreau phase transitions and boundary crossings over lookahead horizon $\tau$ via high-order Jet coordinates $(q, \dot{q}, \ddot{q})$.
-   - Pre-assembles specialized machine code into dual-mapped W^X memory in background threads.
-   - Commits atomic pointer swaps upon boundary impact with 0ms compilation stall and 0ns TLB shootdowns, formally verified UNSAT by SMT Supreme Court (`flow_speculative_jit_verify_smt`).
-2. **Symplectic Dead-Reckoning for CXL & Swarm Interconnects (`flow_jet_dead_reckon.h`, `flow_jet_dead_reckon.c`)**:
-   - Suppresses greater than 90% (empirically >99%) of telemetry packet traffic across CXL buses and cluster interconnects by local Velocity Verlet dead reckoning.
-   - Restricts packet transmission strictly to Lyapunov divergence horizon breaches ($\Delta > \epsilon$), maintaining continuous sub-microsecond state sync with formal SMT attestation (`flow_jet_dead_reckon_verify_smt`).
-3. **Hardware Hamiltonian Potential Regulation (`flow_jet.h`, `flow_jet.c`, `adaptive.h`)**:
-   - Maps PMU hardware metrics (L3 cache miss rate, IPC, queue backlog) to generalized coordinates $q$ and momentum $p$.
-   - Applies hyperbolic barrier potentials $V(q) = 2\mu / (q_{\text{sat}} - |q|)^3$ and Moreau normal cone restoring forces $\nabla V \in N_C(q)$ to eliminate thrashing and smooth backpressure without heuristic PID oscillations.
-4. **Cross-Component Mathematical Fusions (Implemented & Formally Verified)**:
-   - **Phase-Space Liquidity Hydrodynamics (`src/flow_jet_lob.h`, `src/flow_jet_lob.c`)**:
-     - Models price momentum $\dot{P}$ and Order Flow Imbalance (OFI) acceleration $\ddot{P}$ via Jet Bundle coordinates.
-     - Kinematic quadratic root solver predicts exact time-to-collapse $t_{\text{collapse}}$ of resting book depth under aggressive sell/buy waves.
-     - Automatically calculates protective adaptive spread $\Delta S(v, a)$ during acceleration surges, neutralizing toxic microsecond latency sniping. Formally verified by `flow_lob_hydrodynamics_verify_smt`.
-   - **Non-Smooth Symplectic Impact Manifold (`src/flow_jet_impact.h`, `src/flow_jet_impact.c`)**:
-     - Merges Moreau normal cone restitution with symplectic momentum jump mapping: $p^+ = -e \cdot p^- + \Delta p_{\text{contact}}$.
-     - Coupled with Mori-Zwanzig viscoelastic memory convolution to absorb collision shocks with zero artificial damping during free flight.
-     - Formally guarantees passivity $H(q^+, p^+) \le H(q^-, p^-)$, non-penetration $q \ge q_{\text{surface}}$, and bounded torque limits via `flow_symplectic_impact_verify_smt`.
-   - **Latent Geodesic Pre-Play Engine (`src/flow_jet_geodesic.h`, `src/flow_jet_geodesic.c`)**:
-     - Bridges the temporal impedance mismatch between 20Hz~50Hz LLM/VLA token autoregression and 10kHz physical joint actuation.
-     - Propagates latent state $z$ along symplectic geodesics at 10kHz ($\delta t = 100\mu\text{s}$), dynamically synthesizing 64-bit discrete BMF switchboard coordinates.
-     - Blends incoming token arrivals with $C^1$ Hermite continuity, tracking geodesic drift residual with SMT proof (`flow_neuro_geodesic_verify_smt`).
-   - Verified across `tests/test_fvec_swarm.c` Stages 11, 12, and 13 (580/580 assertions passed).
-
+The unified architecture verifies:
+1. **Thermal Contact-Jet & Symplectic Dynamics (`src/flow_jet.h`, `src/flow_jet.c`)**: Velocity Verlet integration, online streaming EDMD, and thermodynamic dissipation bounds verified by `flow_jet_verify_symplectic_soundness_smt`.
+2. **64-Bit Discrete Cubical HoTT Sieve (`src/cubical_hott.h`, `src/cubical_hott.c`)**: 1-cycle Kan open-box homotopy matching `(intent ^ candidate) & boundary == 0` across `SemanticIR` and `Component` selection.
+3. **Self-Hosting Lean 4 Certificate Emission (`src/abi.h`, `src/abi.c`)**: Zero-sorry / zero-axiom formal Lean 4 proof generation (`--target-lean`) with `@&` borrowed FFI and dimensional newtypes.
 
 ## Core boundary
 

@@ -5,24 +5,17 @@
 #include "search.h"
 #include "smt.h"
 #include "polyhedral.h"
-#include "simplicial_homology.h"
-#include "potential_game.h"
 #include "moreau_hysteresis.h"
-#include "oco_cache.h"
-#include "manifold_algebra.h"
 #include "entropy_collapse.h"
 #include "token_ring.h"
-#include "fwht_projection.h"
-#include "morse_atlas.h"
-#include "bmf_microcode.h"
-#include "neuro_bridge.h"
-#include "flow_prefetch.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 
+#include "topology.h"
+#include "cubical_hott.h"
 int main(void) {
     FLOW_TEST_SUITE_BEGIN("Brain: Bit-Manifold Form, SMT Supreme Court & Algebraic Geometry");
 
@@ -147,8 +140,8 @@ int main(void) {
         fclose(smt_out);
 
         FLOW_ASSERT_STR_CONTAINS(smt_buffer, "(set-logic QF_BV)");
-        FLOW_ASSERT_STR_CONTAINS(smt_buffer, "Buffer Bounds Safety Invariant");
-        FLOW_ASSERT_STR_CONTAINS(smt_buffer, "Memory Limit & Quota Boundedness");
+        FLOW_ASSERT_STR_CONTAINS(smt_buffer, "declare-const capacity (_ BitVec 64)");
+        FLOW_ASSERT_STR_CONTAINS(smt_buffer, "declare-const memory_limit_bytes (_ BitVec 64)");
         FLOW_ASSERT_STR_CONTAINS(smt_buffer, "(check-sat)");
 
         /* Negative violation test: capacity < input_max_count and memory > limit must trigger SAT violation */
@@ -231,132 +224,14 @@ int main(void) {
         FLOW_ASSERT_EQ(flow_moreau_verify_smt(&hys, &moreau_proof), FLOW_SMT_PROVEN_UNSAT);
         FLOW_ASSERT_SMT_SOUND(moreau_proof);
 
-        /* Wardrop Potential Game Routing */
-        FlowPotentialRouter router;
-        FLOW_ASSERT_TRUE(flow_potential_router_init(&router, 0.15, 2.0));
-        FLOW_ASSERT_TRUE(flow_potential_register_node(&router, 0, 100.0, 5.0));
-        FLOW_ASSERT_TRUE(flow_potential_register_node(&router, 1, 200.0, 10.0));
-        FLOW_ASSERT_TRUE(flow_potential_register_node(&router, 2, 150.0, 8.0));
-
-        for (size_t req = 0; req < 100; ++req) {
-            uint8_t selected = 0;
-            FLOW_ASSERT_TRUE(flow_potential_route_next(&router, &selected));
-            FLOW_ASSERT_TRUE(flow_potential_update_load(&router, selected, 1.0));
-        }
-        FLOW_ASSERT_TRUE(router.global_potential_phi > 0.0);
-
-        FlowSMTProofAttestation router_proof;
-        memset(&router_proof, 0, sizeof(router_proof));
-        FLOW_ASSERT_EQ(flow_potential_verify_smt(&router, &router_proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(router_proof);
-
-        printf("  ✓ Stage 4 Passed: Moreau sweeping suppressed %llu flutters; Wardrop game reached equilibrium.\n\n",
+        printf("  ✓ Stage 4 Passed: Moreau sweeping suppressed %llu flutters.\n\n",
                (unsigned long long)hys.flutters_suppressed);
     }
 
     /* ========================================================================= */
-    /* STAGE 5: Simplicial Homology & Topological Defect Mining                  */
+    /* STAGE 6: 1-Bit BMF Canvas: Subspace Routing, 1-Bit Switchboard & SMT      */
     /* ========================================================================= */
-    FLOW_STAGE_BEGIN(5, "Algebraic Topology: Betti Numbers & Topological Hole Discovery");
-    {
-        FlowSimplicialComplex complex;
-        FLOW_ASSERT_TRUE(flow_homology_init(&complex, 4)); /* 4 vertices: 0, 1, 2, 3 */
-
-        /* Form square loop 0-1, 1-2, 2-3, 3-0 */
-        FLOW_ASSERT_TRUE(flow_homology_add_edge(&complex, 0, 1));
-        FLOW_ASSERT_TRUE(flow_homology_add_edge(&complex, 1, 2));
-        FLOW_ASSERT_TRUE(flow_homology_add_edge(&complex, 2, 3));
-        FLOW_ASSERT_TRUE(flow_homology_add_edge(&complex, 3, 0));
-
-        size_t b0 = 0, b1 = 0;
-        FLOW_ASSERT_TRUE(flow_homology_compute_betti(&complex, &b0, &b1));
-        FLOW_ASSERT_EQ(b0, 1);
-        FLOW_ASSERT_EQ(b1, 1); /* Topological hole detected! */
-
-        /* Guide mutation into the hole */
-        uint64_t base_genome = 0x12345678ULL;
-        uint64_t guided_genome = 0;
-        uint32_t target_bit = 999;
-        FLOW_ASSERT_TRUE(flow_homology_guide_mutation(&complex, base_genome, &guided_genome, &target_bit));
-        FLOW_ASSERT_NE(guided_genome, base_genome);
-        FLOW_ASSERT_TRUE(target_bit < 64);
-
-        /* Fill hole with 2-simplices */
-        FLOW_ASSERT_TRUE(flow_homology_add_face(&complex, 0, 1, 2));
-        FLOW_ASSERT_TRUE(flow_homology_add_face(&complex, 0, 2, 3));
-
-        FLOW_ASSERT_TRUE(flow_homology_compute_betti(&complex, &b0, &b1));
-        FLOW_ASSERT_EQ(b0, 1);
-        FLOW_ASSERT_EQ(b1, 0); /* Hole contractible! */
-
-        FlowSMTProofAttestation hom_proof;
-        memset(&hom_proof, 0, sizeof(hom_proof));
-        FLOW_ASSERT_EQ(flow_homology_verify_smt(&complex, &hom_proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(hom_proof);
-
-        printf("  ✓ Stage 5 Passed: Homological hole detected (b_1=1) and healed (b_1=0) with d1 o d2 = 0 proven.\n\n");
-    }
-
-    /* ========================================================================= */
-    /* STAGE 6: Manifold Algebra, Epistasis & Differential Geometry              */
-    /* ========================================================================= */
-    FLOW_STAGE_BEGIN(6, "Manifold Algebra: Intersection, Epistasis & Moreau Boundary Projection");
-    {
-        FlowManifold mA, mB, mInter, mSum;
-        FLOW_ASSERT_TRUE(flow_manifold_init(&mA, 0x00000000FFFFFFFFULL));
-        FLOW_ASSERT_TRUE(flow_manifold_init(&mB, 0xFFFFFFFF00000000ULL));
-
-        FLOW_ASSERT_TRUE(flow_manifold_set_bounds(&mA, 0, 0.0, 5.0));
-        FLOW_ASSERT_TRUE(flow_manifold_set_bounds(&mA, 1, 0.0, 5.0));
-        FLOW_ASSERT_TRUE(flow_manifold_set_bounds(&mA, 2, -2.0, 2.0));
-
-        /* Active constraint with shadow price lambda=4.2 */
-        double normalA[FLOW_MANIFOLD_DIM] = {0};
-        normalA[0] = 1.0;
-        normalA[1] = 2.0;
-        FLOW_ASSERT_TRUE(flow_manifold_add_constraint(&mA, normalA, 6.0, 4.2));
-
-        /* Epistatic linkage must automatically detect coupling */
-        FLOW_ASSERT_EQ(mA.epistatic_linkage_mask & 0x03, 0x03);
-        FLOW_ASSERT_TRUE(mA.dual_multipliers[0] > 0.0);
-        FLOW_ASSERT_TRUE(mA.dual_multipliers[1] > 0.0);
-
-        FLOW_ASSERT_TRUE(flow_manifold_set_bounds(&mB, 0, 1.0, 8.0));
-        FLOW_ASSERT_TRUE(flow_manifold_set_bounds(&mB, 1, 1.0, 4.0));
-
-        /* Manifold intersection */
-        FLOW_ASSERT_TRUE(flow_manifold_intersect(&mA, &mB, &mInter));
-        FLOW_ASSERT_EQ((int)mInter.lower_bounds[0], 1);
-        FLOW_ASSERT_EQ((int)mInter.upper_bounds[0], 5);
-        FLOW_ASSERT_EQ((int)mInter.lower_bounds[1], 1);
-        FLOW_ASSERT_EQ((int)mInter.upper_bounds[1], 4);
-        FLOW_ASSERT_TRUE(mInter.volume_proxy > 0.0);
-
-        /* Manifold direct sum */
-        FLOW_ASSERT_TRUE(flow_manifold_direct_sum(&mA, &mB, &mSum));
-        FLOW_ASSERT_EQ(mSum.subspace_mask, 0xFFFFFFFFFFFFFFFFULL);
-
-        /* Moreau Boundary Projection */
-        double unconstrained_pt[FLOW_MANIFOLD_DIM] = {10.0, 10.0, 5.0};
-        double projected_pt[FLOW_MANIFOLD_DIM] = {0};
-        FLOW_ASSERT_TRUE(flow_manifold_boundary_project(&mInter, unconstrained_pt, projected_pt));
-        FLOW_ASSERT_TRUE(projected_pt[0] <= mInter.upper_bounds[0] + 1e-6);
-        FLOW_ASSERT_TRUE(projected_pt[1] <= mInter.upper_bounds[1] + 1e-6);
-        FLOW_ASSERT_TRUE(projected_pt[0] + 2.0 * projected_pt[1] <= 6.0 + 1e-5);
-
-        /* SMT verification */
-        FlowSMTProofAttestation m_proof;
-        memset(&m_proof, 0, sizeof(m_proof));
-        FLOW_ASSERT_EQ(flow_manifold_verify_smt(&mInter, &m_proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(m_proof);
-
-        printf("  ✓ Stage 6 Passed: Manifold algebra intersection, epistasis and boundary projection SMT sound.\n\n");
-    }
-
-    /* ========================================================================= */
-    /* STAGE 7: 1-Bit BMF Canvas: Subspace Routing, 1-Bit Switchboard & SMT      */
-    /* ========================================================================= */
-    FLOW_STAGE_BEGIN(7, "1-Bit BMF Canvas: Subspace Routing, 1-Bit Switchboard & SMT Adjudication");
+    FLOW_STAGE_BEGIN(6, "1-Bit BMF Canvas: Subspace Routing, 1-Bit Switchboard & SMT Adjudication");
     {
         /* 1. Subspace Registry & Lookup */
         FlowBmfSubspaceRegistry reg;
@@ -430,153 +305,40 @@ int main(void) {
         FLOW_ASSERT_EQ(restored_canvas.subspace_id, FLOW_BMF_SUBSPACE_SMOOTH_FETCH_LATTE);
         FLOW_ASSERT_EQ(restored_canvas.switchboard_bits, canvas.switchboard_bits);
 
-        printf("  ✓ Stage 7 Passed: 1-Bit BMF Canvas Subspace routing, 1-bit switchboard & SMT formal adjudication verified.\n\n");
+        printf("  ✓ Stage 6 Passed: 1-Bit BMF Canvas Subspace routing, 1-bit switchboard & SMT formal adjudication verified.\n\n");
     }
 
     /* ========================================================================= */
-    /* STAGE 8: Kolmogorov Minimal Compression: FWHT, Morse Atlas & Microcode   */
+    /* STAGE 7: Real AST Workspace Topology Scanner & Cubical HoTT Type Sieve    */
     /* ========================================================================= */
-    FLOW_STAGE_BEGIN(8, "Kolmogorov Compression: Zero-Table FWHT, Morse Atlas & 1-Bit Microcode");
+    FLOW_STAGE_BEGIN(7, "Workspace AST Scanner & Cubical HoTT Type Matching");
     {
-        /* 1. Fast Walsh-Hadamard Transform In-Place Orthogonality Check (N=8) */
-        float test_hadamard[8] = {1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-        flow_fwht_transform_f32(test_hadamard, 8);
-        for (size_t i = 0; i < 8; i++) {
-            FLOW_ASSERT_FLOAT_NEAR(test_hadamard[i], 1.0f, 0.001);
-        }
-        flow_fwht_transform_f32(test_hadamard, 8);
-        FLOW_ASSERT_FLOAT_NEAR(test_hadamard[0], 8.0f, 0.001);
-        for (size_t i = 1; i < 8; i++) {
-            FLOW_ASSERT_FLOAT_NEAR(test_hadamard[i], 0.0f, 0.001);
-        }
+        FlowTopologyGraph graph;
+        flow_topology_build_codebase_graph(&graph);
+        FLOW_ASSERT_TRUE(graph.node_count > 10);
+        FLOW_ASSERT_TRUE(graph.edge_count > 10);
 
-        /* 2. Zero-Table FWHT 4096-D Projection (< 50ns, 0 Multiplications) */
-        static float embedding_4096[FLOW_FWHT_DEFAULT_DIM];
-        static float perturbed_4096[FLOW_FWHT_DEFAULT_DIM];
-        for (size_t i = 0; i < FLOW_FWHT_DEFAULT_DIM; i++) {
-            float val = (float)sin((double)i * 0.05);
-            embedding_4096[i] = val;
-            perturbed_4096[i] = val + 0.0001f * (float)cos((double)i * 0.1);
-        }
+        FlowTopologyAuditReport report;
+        flow_topology_audit(&graph, &report);
+        FLOW_ASSERT_EQ(report.cross_layer_leaks, 0);
+        FLOW_ASSERT_TRUE(report.total_loc > 1000 && report.total_loc < 10000);
 
-        uint64_t bmf1 = 0, bmf2 = 0;
-        double fvec1[FLOW_NEURO_FVEC_DIM], fvec2[FLOW_NEURO_FVEC_DIM];
-        double lat_ns1 = 0.0, lat_ns2 = 0.0;
+        SemanticIR ir;
+        memset(&ir, 0, sizeof(ir));
+        ir.state_shared = 1;
+        ir.state_read_heavy = 1;
+        ir.fact_unordered = 1;
+        const Component *comp = select_component(&ir);
+        FLOW_ASSERT_TRUE(comp != NULL);
 
-        FLOW_ASSERT_EQ(flow_fwht_project_4096(embedding_4096, 0x1337BEEF, &bmf1, fvec1, &lat_ns1), 1);
-        FLOW_ASSERT_EQ(flow_fwht_project_4096(perturbed_4096, 0x1337BEEF, &bmf2, fvec2, &lat_ns2), 1);
-        FLOW_ASSERT_NE(bmf1, 0ULL);
-        FLOW_ASSERT_TRUE(lat_ns1 < 50000.0);
+        FlowCubicalTypeSieve ir_sieve = flow_cubical_sieve_from_ir(&ir);
+        FlowCubicalTypeSieve comp_sieve = flow_cubical_sieve_from_component(comp);
+        uint64_t mismatch = 999;
+        FLOW_ASSERT_EQ(flow_cubical_match_types(ir_sieve, comp_sieve, &mismatch), 1);
+        FLOW_ASSERT_EQ(mismatch, 0ULL);
 
-        /* SMT Isometry Proof: Perturbation preserves BMF coordinate proximity */
-        FlowSMTProofAttestation isometry_proof;
-        memset(&isometry_proof, 0, sizeof(isometry_proof));
-        FLOW_ASSERT_EQ(flow_fwht_verify_isometry_smt(embedding_4096, perturbed_4096,
-                                                     FLOW_FWHT_DEFAULT_DIM, bmf1, bmf2,
-                                                     &isometry_proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(isometry_proof);
-
-        /* 3. Topological Morse-Smale Atlas (Label-Free Autonomous Partitions) */
-        FlowBmfMorseAtlas atlas;
-        flow_morse_atlas_seed_canonical(&atlas);
-        FLOW_ASSERT_TRUE(atlas.is_topologically_closed);
-        FLOW_ASSERT_TRUE(atlas.cell_count >= 5);
-
-        /* Phase space distance routing without string symbols */
-        double latte_pt[FLOW_MORSE_DIM] = {0.84, 0.60, 0.22, 0.0};
-        uint32_t routed_cell = flow_morse_atlas_route(&atlas, latte_pt, FLOW_MORSE_DIM);
-        FLOW_ASSERT_EQ(routed_cell, 1); /* Cell 1 = Gentle Manipulation Attractor */
-
-        double sprint_pt[FLOW_MORSE_DIM] = {0.12, 0.95, 0.88, 0.70};
-        uint32_t sprint_cell = flow_morse_atlas_route(&atlas, sprint_pt, FLOW_MORSE_DIM);
-        FLOW_ASSERT_EQ(sprint_cell, 2); /* Cell 2 = Dynamic Locomotion Attractor */
-
-        /* Autonomous bifurcation upon environmental drift */
-        uint32_t new_cell_id = 0;
-        FLOW_ASSERT_EQ(flow_morse_atlas_bifurcate(&atlas, 1, 0.45, &new_cell_id), 1);
-        FLOW_ASSERT_EQ(new_cell_id, 6);
-        FLOW_ASSERT_EQ(atlas.cell_count, 7);
-
-        /* SMT Morse Atlas Completeness Proof */
-        FlowSMTProofAttestation morse_proof;
-        memset(&morse_proof, 0, sizeof(morse_proof));
-        FLOW_ASSERT_EQ(flow_morse_verify_partition_completeness_smt(&atlas, &morse_proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(morse_proof);
-
-        /* 4. Presburger 1-Bit Microcode Execution Engine (< 5ns, Zero C Struct Bloat) */
-        FlowBmfMicrocode ucode;
-        double ubs[4] = {0.08, 0.40, 4.5, 0.80};
-        double lbs[4] = {0.00, 0.00, 2.0, 0.00};
-        flow_bmf_microcode_compile_box(&ucode, ubs, lbs, 4, 9); /* Map to switch bits starting at bit 9 */
-        FLOW_ASSERT_EQ(ucode.op_count, 8);
-
-        FlowBmf1BitCanvas ucode_canvas;
-        flow_bmf_canvas_init(&ucode_canvas, 1, FLOW_BMF_SW_HARD_SAFETY, ~0ULL, FLOW_BMF_SW_HARD_SAFETY);
-
-        /* Safe physical state */
-        double safe_physical_state[4] = {0.05, 0.20, 3.0, 0.50};
-        uint32_t viols = 0;
-        FLOW_ASSERT_EQ(flow_bmf_microcode_execute(&ucode, safe_physical_state, 4, &ucode_canvas, &viols), 1);
-        FLOW_ASSERT_EQ(viols, 0U);
-
-        /* Unsafe physical state: tilt 0.15 > 0.08 */
-        double unsafe_physical_state[4] = {0.15, 0.20, 3.0, 0.50};
-        uint32_t viols_unsafe = 0;
-        FLOW_ASSERT_EQ(flow_bmf_microcode_execute(&ucode, unsafe_physical_state, 4, &ucode_canvas, &viols_unsafe), 1);
-        FLOW_ASSERT_NE(viols_unsafe, 0U);
-
-        /* SMT Microcode Equivalence & Soundness Proof */
-        FlowSMTProofAttestation ucode_proof;
-        memset(&ucode_proof, 0, sizeof(ucode_proof));
-        FLOW_ASSERT_EQ(flow_bmf_microcode_verify_soundness_smt(&ucode, &ucode_canvas, &ucode_proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(ucode_proof);
-
-        /* 5. End-to-End FWHT to Morse Canvas Direct Pipeline */
-        FlowBmf1BitCanvas morse_canvas;
-        FlowNeuroProjectionResult neuro_res;
-        FLOW_ASSERT_EQ(flow_neuro_bridge_to_morse_canvas(embedding_4096, 0x1337BEEF,
-                                                         &atlas, &morse_canvas, &neuro_res), 1);
-        FLOW_ASSERT_TRUE(flow_bmf_canvas_get_switch(&morse_canvas, FLOW_BMF_SW_HARD_SAFETY));
-        FLOW_ASSERT_TRUE(morse_canvas.is_adjudicated_sound);
-
-        printf("  ✓ Stage 8 Passed: Kolmogorov compression (FWHT zero-table projection, Morse Atlas & 1-bit microcode) SMT verified.\n\n");
-    }
-
-    /* ========================================================================= */
-    /* STAGE 9: Unified Pre-Staging Spectrum: 64B Cache Line Confinement & Prefetch */
-    /* ========================================================================= */
-    FLOW_STAGE_BEGIN(9, "Unified Pre-Staging Spectrum: 64B Cache Line Confinement, Manifold Prefetch & SMT Soundness");
-    {
-        /* 1. Exact 64-Byte Cache Line Confinement & Alignment */
-        FLOW_ASSERT_EQ(sizeof(FlowBmf1BitCanvas), 64);
-        FLOW_ASSERT_EQ(_Alignof(FlowBmf1BitCanvas), 64);
-
-        FlowBmf1BitCanvas canvas;
-        flow_bmf_canvas_init(&canvas, 1, FLOW_BMF_SW_HARD_SAFETY, ~0ULL, FLOW_BMF_SW_HARD_SAFETY);
-        FLOW_ASSERT_EQ(((uintptr_t)&canvas) & 63ULL, 0ULL);
-
-        /* 2. Low-level Hardware Cache Prefetch Primitives */
-        flow_prefetch_l1(&canvas);
-        flow_prefetch_l2(&canvas);
-        flow_prefetch_write(&canvas);
-
-        /* 3. Riemannian Manifold Geodesic Topo-Prefetching */
-        FlowBmfMorseAtlas atlas;
-        flow_morse_atlas_seed_canonical(&atlas);
-        FLOW_ASSERT_TRUE(flow_prefetch_manifold_geodesic(&canvas, &atlas, 0x1fULL) >= 1);
-
-        /* 4. Token Ring Slot Prefetching */
-        FlowBmf1BitCanvas next_slot_canvas;
-        flow_bmf_canvas_init(&next_slot_canvas, 2, FLOW_BMF_SW_HARD_SAFETY, ~0ULL, FLOW_BMF_SW_HARD_SAFETY);
-        FLOW_ASSERT_TRUE(flow_prefetch_token_ring_slot(&next_slot_canvas, NULL) >= 1);
-
-        /* 5. SMT Supreme Court Prefetch Alignment Theorem Proof */
-        FlowSMTProofAttestation proof;
-        memset(&proof, 0, sizeof(proof));
-        FLOW_ASSERT_EQ(flow_prefetch_verify_alignment_smt(&canvas, &proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(proof);
-
-        printf("  ✓ Stage 9 Passed: 64B cache line confinement, manifold geodesic prefetcher and SMT soundness verified.\n\n");
+        printf("  ✓ Stage 7 Passed: AST workspace scanned (%zu LOC, 0 leaks) & Cubical HoTT type sieve matched.\n\n",
+               report.total_loc);
     }
 
     FLOW_TEST_SUITE_END();

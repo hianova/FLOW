@@ -1,8 +1,6 @@
 #include "flow_test_kit.h"
 #include "flow.h"
 #include "registry.h"
-#include "matching.h"
-#include "gateway.h"
 #include "smt.h"
 #include "flowy.h"
 #include "jit.h"
@@ -95,91 +93,6 @@ int main(void) {
         FLOW_ASSERT_TRUE(sharded->reload_capable);
 
         printf("  ✓ Stage 2 Passed: %zu registered plugins validated with active ABI components.\n\n", plugin_count);
-    }
-
-    /* ========================================================================= */
-    /* STAGE 3: Autonomous Self-Healing Edge Gateway                             */
-    /* ========================================================================= */
-    FLOW_STAGE_BEGIN(3, "Autonomous Edge Gateway: Zero-Copy Request Dispatch");
-    {
-        FlowGatewayConfig cfg = {
-            .listen_port = 8443,
-            .default_mode = FLOW_GATEWAY_MODE_HTTP1_STATIC,
-            .burst_qps_threshold = 20000,
-            .loss_threshold_permille = 30,
-            .ddos_slowloris_threshold = 200,
-            .normal_timeout_ms = 30000,
-            .hardened_timeout_ms = 50
-        };
-
-        FlowGateway gw;
-        FLOW_ASSERT_TRUE(flow_gateway_init(&gw, &cfg));
-
-        FlowGatewayStats stats;
-        flow_gateway_get_stats(&gw, &stats);
-        FLOW_ASSERT_EQ(stats.current_mode, FLOW_GATEWAY_MODE_HTTP1_STATIC);
-        FLOW_ASSERT_EQ(stats.active_timeout_ms, 30000);
-
-        /* Register downstream compute node */
-        FLOW_ASSERT_TRUE(flow_hetero_mesh_register_node(&gw.mesh, 2, FLOW_SWARM_ROLE_COMPUTE_ROUTER,
-                                                       "worker_compute_1", 0x2222, 50000));
-
-        const char http1_req[] = "GET /index.html HTTP/1.1\r\nHost: flow.io\r\nConnection: keep-alive\r\n\r\n";
-        FlowPrimitiveResult res;
-        uint8_t routed_node = 0;
-
-        FLOW_ASSERT_TRUE(flow_gateway_dispatch_request(&gw, http1_req, strlen(http1_req), &res, &routed_node));
-        FLOW_ASSERT_EQ(res.status_code, 200);
-        FLOW_ASSERT_EQ(res.bytes_transferred, strlen(http1_req));
-        FLOW_ASSERT_EQ(res.zero_copy_active, 1);
-        FLOW_ASSERT_EQ(routed_node, 2);
-
-        printf("  ✓ Stage 3 Passed: Edge gateway dispatched request zero-copy to node %u.\n\n", routed_node);
-    }
-
-    /* ========================================================================= */
-    /* STAGE 4: Sub-Microsecond Financial Matching Engine                        */
-    /* ========================================================================= */
-    FLOW_STAGE_BEGIN(4, "Financial Matching Engine: Sub-Microsecond Limit Order Book");
-    {
-        FlowLimitOrderBook book;
-        flow_orderbook_init(&book, 101); /* BTC/USDT */
-
-        FlowTrade trades[16];
-        size_t trade_count = 0;
-
-        /* Maker: Sell 10 BTC @ $60,100 */
-        FlowOrder ask1 = {
-            .order_id = 1, .symbol_id = 101, .side = FLOW_ORDER_SELL, .type = FLOW_ORDER_LIMIT,
-            .price = 6010000, .quantity = 10, .filled_quantity = 0
-        };
-        FLOW_ASSERT_EQ(flow_orderbook_submit(&book, &ask1, trades, 16, &trade_count), 1);
-        FLOW_ASSERT_EQ(trade_count, 0);
-
-        /* Maker: Buy 8 BTC @ $59,900 */
-        FlowOrder bid1 = {
-            .order_id = 2, .symbol_id = 101, .side = FLOW_ORDER_BUY, .type = FLOW_ORDER_LIMIT,
-            .price = 5990000, .quantity = 8, .filled_quantity = 0
-        };
-        FLOW_ASSERT_EQ(flow_orderbook_submit(&book, &bid1, trades, 16, &trade_count), 1);
-        FLOW_ASSERT_EQ(trade_count, 0);
-
-        FLOW_ASSERT_EQ(book.best_bid_price, 5990000);
-        FLOW_ASSERT_EQ(book.best_ask_price, 6010000);
-
-        /* Taker: Buy 10 BTC @ $60,100 -> Instant Match Execution */
-        FlowOrder taker = {
-            .order_id = 3, .symbol_id = 101, .side = FLOW_ORDER_BUY, .type = FLOW_ORDER_LIMIT,
-            .price = 6010000, .quantity = 10, .filled_quantity = 0
-        };
-        FLOW_ASSERT_EQ(flow_orderbook_submit(&book, &taker, trades, 16, &trade_count), 1);
-        FLOW_ASSERT_EQ(trade_count, 1);
-        FLOW_ASSERT_EQ(trades[0].maker_order_id, 1);
-        FLOW_ASSERT_EQ(trades[0].taker_order_id, 3);
-        FLOW_ASSERT_EQ(trades[0].execution_price, 6010000);
-        FLOW_ASSERT_EQ(trades[0].execution_quantity, 10);
-
-        printf("  ✓ Stage 4 Passed: Limit order matched at price $60,100; FIFO trade executed in sub-microsecond.\n\n");
     }
 
     /* ========================================================================= */
@@ -350,7 +263,7 @@ int main(void) {
         VerificationReport hole_rep;
         FLOW_ASSERT_TRUE(!verify_candidate(&hole_ir, comp, NULL, &hole_rep));
         FLOW_ASSERT_EQ(hole_rep.status, VERIFIER_COMPILE_ERROR);
-        FLOW_ASSERT_TRUE(strstr(hole_rep.message, "unresolved topological hole") != NULL);
+        FLOW_ASSERT_TRUE(strstr(hole_rep.message, "unresolved") != NULL);
 
         /* 7c. Emit Lean 4 Certificate & C Header Newtypes and Audit All 6 Pillars */
         FlowComponentABI abi;

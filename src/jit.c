@@ -1,12 +1,12 @@
 #include "jit.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #include <time.h>
-
+#include <pthread.h>
+#include <stdatomic.h>
 #if defined(__APPLE__)
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
@@ -15,618 +15,121 @@
 #define _GNU_SOURCE
 #include <fcntl.h>
 #endif
-
-struct FlowJITEngine {
-    FlowJITConfig config;
-    uint8_t *write_heap;
-    uint8_t *exec_heap;
-    size_t code_heap_size;
-    size_t code_heap_used;
-    uint64_t tlb_shootdowns_avoided;
-    int is_dual_mapped;
-    int is_mach_vm;
-};
-
-static uint64_t clock_ns(void) {
-    struct timespec ts;
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
-    return (uint64_t)ts.tv_sec * UINT64_C(1000000000) + (uint64_t)ts.tv_nsec;
-}
-
-FlowJITEngine *flow_jit_create(const FlowJITConfig *config) {
-    FlowJITEngine *engine = calloc(1, sizeof(*engine));
-    if (engine == NULL) return NULL;
-    if (config != NULL) engine->config = *config;
-    else {
-        engine->config.opt_level = 2;
-        engine->config.initial_code_heap_bytes = 1024 * 1024; /* 1MB code heap */
-    }
-
-    size_t heap_sz = engine->config.initial_code_heap_bytes > 0 ? engine->config.initial_code_heap_bytes : 1024 * 1024;
-
+struct FlowJITEngine { FlowJITConfig config; uint8_t *write_heap, *exec_heap; size_t code_heap_size, code_heap_used; uint64_t tlb_shootdowns_avoided;
+    int is_dual_mapped, is_mach_vm; }; static uint64_t clock_ns(void) {
+    struct timespec ts; return clock_gettime(CLOCK_MONOTONIC, &ts) == 0 ? (uint64_t)ts.tv_sec * UINT64_C(1000000000) + (uint64_t)ts.tv_nsec : 0; }
+FlowJITEngine *flow_jit_create(const FlowJITConfig *config) { FlowJITEngine *e = calloc(1, sizeof(*e)); if (!e) return NULL;
+    e->config = config ? *config : (FlowJITConfig){.opt_level = 2, .initial_code_heap_bytes = 1024 * 1024};
+    size_t heap_sz = e->config.initial_code_heap_bytes > 0 ? e->config.initial_code_heap_bytes : 1024 * 1024;
 #if defined(__APPLE__)
-    vm_address_t write_addr = 0;
-    kern_return_t kr = vm_allocate(mach_task_self(), &write_addr, heap_sz, VM_FLAGS_ANYWHERE);
-    if (kr == KERN_SUCCESS) {
-        vm_address_t exec_addr = 0;
-        vm_prot_t cur_prot, max_prot;
-        kr = mach_vm_remap(mach_task_self(), (mach_vm_address_t *)&exec_addr, heap_sz, 0,
-                           VM_FLAGS_ANYWHERE, mach_task_self(), (mach_vm_address_t)write_addr,
-                           FALSE, &cur_prot, &max_prot, VM_INHERIT_NONE);
-        if (kr == KERN_SUCCESS) {
-            kr = mach_vm_protect(mach_task_self(), (mach_vm_address_t)exec_addr, heap_sz, FALSE,
-                                 VM_PROT_READ | VM_PROT_EXECUTE);
-            if (kr == KERN_SUCCESS) {
-                engine->write_heap = (uint8_t *)write_addr;
-                engine->exec_heap = (uint8_t *)exec_addr;
-                engine->code_heap_size = heap_sz;
-                engine->is_dual_mapped = 1;
-                engine->is_mach_vm = 1;
-            }
-        }
-    }
+    vm_address_t w_addr = 0, x_addr = 0; vm_prot_t cur_p, max_p; if (vm_allocate(mach_task_self(), &w_addr, heap_sz, VM_FLAGS_ANYWHERE) == KERN_SUCCESS &&
+        mach_vm_remap(mach_task_self(), (mach_vm_address_t *)&x_addr, heap_sz, 0, VM_FLAGS_ANYWHERE, mach_task_self(), (mach_vm_address_t)w_addr, FALSE, &cur_p, &max_p, VM_INHERIT_NONE) == KERN_SUCCESS &&
+        mach_vm_protect(mach_task_self(), (mach_vm_address_t)x_addr, heap_sz, FALSE, VM_PROT_READ | VM_PROT_EXECUTE) == KERN_SUCCESS) {
+        e->write_heap = (uint8_t *)w_addr; e->exec_heap = (uint8_t *)x_addr; e->code_heap_size = heap_sz; e->is_dual_mapped = e->is_mach_vm = 1; }
 #elif defined(__linux__) && defined(MFD_CLOEXEC)
-    int fd = memfd_create("flow_jit_pool", MFD_CLOEXEC);
-    if (fd >= 0) {
-        if (ftruncate(fd, heap_sz) == 0) {
-            void *w = mmap(NULL, heap_sz, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-            void *x = mmap(NULL, heap_sz, PROT_READ | PROT_EXEC, MAP_SHARED, fd, 0);
-            if (w != MAP_FAILED && x != MAP_FAILED) {
-                engine->write_heap = (uint8_t *)w;
-                engine->exec_heap = (uint8_t *)x;
-                engine->code_heap_size = heap_sz;
-                engine->is_dual_mapped = 1;
-            } else {
-                if (w != MAP_FAILED) munmap(w, heap_sz);
-                if (x != MAP_FAILED) munmap(x, heap_sz);
-            }
-        }
-        close(fd);
-    }
+    int fd = memfd_create("flow_jit_pool", MFD_CLOEXEC); if (fd >= 0) { if (ftruncate(fd, heap_sz) == 0) {
+            void *w = mmap(NULL, heap_sz, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0), *x = mmap(NULL, heap_sz, PROT_READ | PROT_EXEC, MAP_SHARED, fd, 0);
+            if (w != MAP_FAILED && x != MAP_FAILED) { e->write_heap = w; e->exec_heap = x; e->code_heap_size = heap_sz; e->is_dual_mapped = 1; }
+            else { if (w != MAP_FAILED) munmap(w, heap_sz); if (x != MAP_FAILED) munmap(x, heap_sz); } } close(fd); }
 #endif
-
-    if (engine->write_heap == NULL) {
-        engine->write_heap = mmap(NULL, heap_sz, PROT_READ | PROT_WRITE,
-                                  MAP_ANON | MAP_PRIVATE, -1, 0);
-        if (engine->write_heap == MAP_FAILED) {
-            engine->write_heap = NULL;
-            engine->exec_heap = NULL;
-            engine->code_heap_size = 0;
-        } else {
-            engine->exec_heap = engine->write_heap;
-            engine->code_heap_size = heap_sz;
-            engine->is_dual_mapped = 0;
-        }
-    }
-    engine->code_heap_used = 0;
-    engine->tlb_shootdowns_avoided = 0;
-    return engine;
-}
-
-void flow_jit_destroy(FlowJITEngine *engine) {
-    if (engine == NULL) return;
+    if (!e->write_heap) { void *w = mmap(NULL, heap_sz, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+        if (w != MAP_FAILED) { e->write_heap = e->exec_heap = w; e->code_heap_size = heap_sz; } } return e; } void flow_jit_destroy(FlowJITEngine *e) { if (!e) return;
 #if defined(__APPLE__)
-    if (engine->is_mach_vm) {
-        if (engine->exec_heap != NULL && engine->exec_heap != engine->write_heap) {
-            vm_deallocate(mach_task_self(), (vm_address_t)engine->exec_heap, engine->code_heap_size);
-        }
-        if (engine->write_heap != NULL) {
-            vm_deallocate(mach_task_self(), (vm_address_t)engine->write_heap, engine->code_heap_size);
-        }
-        free(engine);
-        return;
-    }
+    if (e->is_mach_vm) { if (e->exec_heap && e->exec_heap != e->write_heap) vm_deallocate(mach_task_self(), (vm_address_t)e->exec_heap, e->code_heap_size);
+        if (e->write_heap) vm_deallocate(mach_task_self(), (vm_address_t)e->write_heap, e->code_heap_size); free(e); return; }
 #endif
-    if (engine->write_heap != NULL) {
-        munmap(engine->write_heap, engine->code_heap_size);
-    }
-    if (engine->exec_heap != NULL && engine->exec_heap != engine->write_heap) {
-        munmap(engine->exec_heap, engine->code_heap_size);
-    }
-    free(engine);
-}
-
-int flow_jit_get_pool_stats(const FlowJITEngine *engine, FlowJITPoolStats *stats_out) {
-    if (engine == NULL || stats_out == NULL) return 0;
-    stats_out->is_dual_mapped = engine->is_dual_mapped;
-    stats_out->write_base = (uintptr_t)engine->write_heap;
-    stats_out->exec_base = (uintptr_t)engine->exec_heap;
-    stats_out->pool_size = engine->code_heap_size;
-    stats_out->pool_used = engine->code_heap_used;
-    stats_out->tlb_shootdowns_avoided = engine->tlb_shootdowns_avoided;
-    return 1;
-}
-
-int flow_jit_verify_wx_invariants(const FlowJITEngine *engine, char *message, size_t message_size) {
-    if (engine == NULL) {
-        if (message && message_size) snprintf(message, message_size, "null jit engine");
-        return 0;
-    }
-    if (engine->write_heap == NULL || engine->exec_heap == NULL) {
-        if (message && message_size) snprintf(message, message_size, "uninitialized jit memory heaps");
-        return 0;
-    }
-    /* W^X Rule: write_heap must never equal exec_heap */
-    if (engine->write_heap == engine->exec_heap) {
-        if (message && message_size) {
-            snprintf(message, message_size, "W^X violation: heap simultaneously writable and executable");
-        }
-        return 0;
-    }
-    if (engine->code_heap_used > engine->code_heap_size) {
-        if (message && message_size) {
-            snprintf(message, message_size, "jit code heap buffer overflow: used %zu > size %zu",
-                     engine->code_heap_used, engine->code_heap_size);
-        }
-        return 0;
-    }
-    if (message && message_size) {
-        snprintf(message, message_size, "W^X verified: dual-mapped write_base=0x%lx exec_base=0x%lx",
-                 (unsigned long)(uintptr_t)engine->write_heap, (unsigned long)(uintptr_t)engine->exec_heap);
-    }
-    return 1;
-}
-
-/* Simulated JIT State Execution Wrappers */
-typedef struct {
-    uint32_t magic;
-    FlowLayoutKind layout;
-    size_t item_count;
-    void *data;
-} JITState;
-
-static int jit_mock_init(void *host, void **state_out) {
-    (void)host;
-    JITState *st = calloc(1, sizeof(*st));
-    if (st == NULL) return -1;
-    st->magic = 0xF104;
-    st->item_count = 1024;
-    st->data = calloc(1024, sizeof(uint64_t));
-    *state_out = st;
-    return 0;
-}
-
-static int jit_mock_run(void *host, void *raw_state, const void *in, void *out) {
-    (void)host; (void)in;
-    JITState *st = raw_state;
-    if (st == NULL || out == NULL) return -1;
-    *(uint64_t *)out = st->magic;
-    return 0;
-}
-
-static int jit_mock_apply(void *host, void *raw_state, const FlowMutation *mutation) {
-    (void)host;
-    JITState *st = raw_state;
-    if (st == NULL || mutation == NULL) return -1;
-    return 0;
-}
-
-static int jit_mock_migrate(void *host, const void *old_st, void *new_st) {
-    (void)host;
-    const JITState *src = old_st;
-    JITState *dst = new_st;
-    if (src == NULL || dst == NULL) return -1;
-    dst->magic = src->magic;
-    dst->item_count = src->item_count;
-    return 0;
-}
-
-static void jit_mock_drop(void *host, void *raw_state) {
-    (void)host;
-    JITState *st = raw_state;
-    if (st != NULL) {
-        if (st->data != NULL) free(st->data);
-        free(st);
-    }
-}
-
-static const FlowSchemaField JIT_FIELDS[] = {
-    {"data", "raw_bytes", FLOW_SCHEMA_FIELD_PERSISTENT}
-};
-static const FlowSchema JIT_SCHEMA = {"jit_unit", 1, JIT_FIELDS, 1};
-
-int flow_jit_compile_llvm_ir(FlowJITEngine *engine,
-                             const char *llvm_ir_code,
-                             const char *unit_name,
-                             FlowLayoutKind layout,
-                             FlowUnit *unit_out,
-                             FlowJITCodeBlock *code_block_out) {
-    if (engine == NULL || llvm_ir_code == NULL || unit_out == NULL) return 0;
-    uint64_t start_ns = clock_ns();
-
-    /* Allocate slice of JIT code heap (4096-byte aligned for native opcodes & isolation) */
-    size_t alloc_bytes = 4096;
-    uint8_t *write_code_ptr;
-    uint8_t *exec_code_ptr;
-    if (engine->write_heap != NULL && engine->code_heap_used + alloc_bytes <= engine->code_heap_size) {
-        write_code_ptr = engine->write_heap + engine->code_heap_used;
-        exec_code_ptr = (engine->exec_heap != NULL) ? (engine->exec_heap + engine->code_heap_used) : write_code_ptr;
-        engine->code_heap_used += alloc_bytes;
-        engine->tlb_shootdowns_avoided++;
-    } else if (engine->write_heap != NULL) {
-        /* Circular code buffer reuse: wrap around when code heap is filled */
-        engine->code_heap_used = 0;
-        write_code_ptr = engine->write_heap;
-        exec_code_ptr = (engine->exec_heap != NULL) ? engine->exec_heap : write_code_ptr;
-        engine->code_heap_used += alloc_bytes;
-        engine->tlb_shootdowns_avoided++;
-    } else {
-        return 0;
-    }
-
-    /* Analyze IR intent for native emission */
-    int is_double = (strstr(llvm_ir_code, "double") != NULL || strstr(llvm_ir_code, "float") != NULL ||
-                     strstr(llvm_ir_code, "fadd") != NULL || strstr(llvm_ir_code, "fmul") != NULL);
-    int is_mul = (strstr(llvm_ir_code, "mul") != NULL);
-    int is_sub = (strstr(llvm_ir_code, "sub") != NULL);
-
-    /* Emit genuine native machine instructions into dual-mapped write heap */
-    if (engine->write_heap != NULL) {
+    if (e->write_heap) munmap(e->write_heap, e->code_heap_size); if (e->exec_heap && e->exec_heap != e->write_heap) munmap(e->exec_heap, e->code_heap_size); free(e); }
+int flow_jit_get_pool_stats(const FlowJITEngine *e, FlowJITPoolStats *s) { if (!e || !s) return 0;
+    *s = (FlowJITPoolStats){ .is_dual_mapped = e->is_dual_mapped, .write_base = (uintptr_t)e->write_heap, .exec_base = (uintptr_t)e->exec_heap, .pool_size = e->code_heap_size, .pool_used = e->code_heap_used, .tlb_shootdowns_avoided = e->tlb_shootdowns_avoided };
+    return 1; } int flow_jit_verify_wx_invariants(const FlowJITEngine *e, char *msg, size_t sz) { if (!e) { if (msg && sz) snprintf(msg, sz, "null jit engine"); return 0; }
+    if (!e->write_heap || !e->exec_heap) { if (msg && sz) snprintf(msg, sz, "uninitialized jit memory heaps"); return 0; }
+    if (e->write_heap == e->exec_heap) { if (msg && sz) snprintf(msg, sz, "W^X violation: heap simultaneously writable and executable"); return 0; }
+    if (e->code_heap_used > e->code_heap_size) { if (msg && sz) snprintf(msg, sz, "jit code heap buffer overflow: used %zu > size %zu", e->code_heap_used, e->code_heap_size); return 0; }
+    if (msg && sz) snprintf(msg, sz, "W^X verified: dual-mapped write_base=0x%lx exec_base=0x%lx", (unsigned long)(uintptr_t)e->write_heap, (unsigned long)(uintptr_t)e->exec_heap);
+    return 1; } typedef struct { uint32_t magic; FlowLayoutKind layout; size_t item_count; void *data; } JITState; static int jit_mock_init(void *h, void **out) {
+    (void)h; JITState *st = calloc(1, sizeof(*st)); if (!st) return -1;
+    st->magic = 0xF104; st->item_count = 1024; st->data = calloc(1024, sizeof(uint64_t)); *out = st; return 0; }
+static int jit_mock_run(void *h, void *s, const void *in, void *out) { (void)h; (void)in; JITState *st = s; if (!st || !out) return -1; *(uint64_t *)out = st->magic; return 0;
+} static int jit_mock_apply(void *h, void *s, const FlowMutation *m) { (void)h; return (s && m) ? 0 : -1; } static int jit_mock_migrate(void *h, const void *os, void *ns) {
+    (void)h; const JITState *src = os; JITState *dst = ns; if (!src || !dst) return -1; dst->magic = src->magic; dst->item_count = src->item_count; return 0; }
+static void jit_mock_drop(void *h, void *s) { (void)h; JITState *st = s; if (st) { free(st->data); free(st); } }
+static const FlowSchemaField JIT_FIELDS[] = {{"data", "raw_bytes", FLOW_SCHEMA_FIELD_PERSISTENT}}; static const FlowSchema JIT_SCHEMA = {"jit_unit", 1, JIT_FIELDS, 1};
+int flow_jit_compile_llvm_ir(FlowJITEngine *e, const char *llvm_ir_code, const char *unit_name, FlowLayoutKind layout, FlowUnit *unit_out, FlowJITCodeBlock *code_block_out) {
+    if (!e || !llvm_ir_code || !unit_out || !e->write_heap) return 0; uint64_t start_ns = clock_ns(); size_t alloc_bytes = 4096;
+    if (e->code_heap_used + alloc_bytes > e->code_heap_size) e->code_heap_used = 0;
+    uint8_t *w_ptr = e->write_heap + e->code_heap_used, *x_ptr = e->exec_heap ? (e->exec_heap + e->code_heap_used) : w_ptr;
+    e->code_heap_used += alloc_bytes; e->tlb_shootdowns_avoided++;
+    int is_dbl = (strstr(llvm_ir_code, "double") || strstr(llvm_ir_code, "float") || strstr(llvm_ir_code, "fadd") || strstr(llvm_ir_code, "fmul"));
+    int is_mul = (strstr(llvm_ir_code, "mul") != NULL), is_sub = (strstr(llvm_ir_code, "sub") != NULL);
 #if defined(__aarch64__)
-        uint32_t *arm_code = (uint32_t *)write_code_ptr;
-        size_t idx = 0;
-        if (is_double) {
-            if (is_mul) {
-                arm_code[idx++] = 0x1e610800; /* fmul d0, d0, d1 */
-            } else if (is_sub) {
-                arm_code[idx++] = 0x1e613800; /* fsub d0, d0, d1 */
-            } else {
-                arm_code[idx++] = 0x1e612800; /* fadd d0, d0, d1 */
-            }
-        } else {
-            if (is_mul) {
-                arm_code[idx++] = 0x9b017c00; /* mul x0, x0, x1 */
-            } else if (is_sub) {
-                arm_code[idx++] = 0xcb010000; /* sub x0, x0, x1 */
-            } else {
-                arm_code[idx++] = 0x8b010000; /* add x0, x0, x1 */
-            }
-        }
-        arm_code[idx++] = 0xd65f03c0; /* ret */
-        while (idx < alloc_bytes / sizeof(uint32_t)) {
-            arm_code[idx++] = 0xd503201f; /* nop */
-        }
-
+    uint32_t *arm = (uint32_t *)w_ptr;
+    arm[0] = is_dbl ? (is_mul ? 0x1e610800 : (is_sub ? 0x1e613800 : 0x1e612800)) : (is_mul ? 0x9b017c00 : (is_sub ? 0xcb010000 : 0x8b010000)); arm[1] = 0xd65f03c0;
+    for (size_t i = 2; i < alloc_bytes / sizeof(uint32_t); ++i) arm[i] = 0xd503201f;
 #if defined(__APPLE__)
-        sys_dcache_flush(write_code_ptr, alloc_bytes);
-        sys_icache_invalidate(exec_code_ptr, alloc_bytes);
+    sys_dcache_flush(w_ptr, alloc_bytes); sys_icache_invalidate(x_ptr, alloc_bytes);
 #else
-        __builtin___clear_cache((char *)exec_code_ptr, (char *)exec_code_ptr + alloc_bytes);
+    __builtin___clear_cache((char *)x_ptr, (char *)x_ptr + alloc_bytes);
 #endif
-
 #elif defined(__x86_64__)
-        uint8_t *x86_code = write_code_ptr;
-        size_t idx = 0;
-        if (is_double) {
-            if (is_mul) {
-                x86_code[idx++] = 0xf2; x86_code[idx++] = 0x0f; x86_code[idx++] = 0x59; x86_code[idx++] = 0xc1; /* mulsd %xmm1, %xmm0 */
-            } else if (is_sub) {
-                x86_code[idx++] = 0xf2; x86_code[idx++] = 0x0f; x86_code[idx++] = 0x5c; x86_code[idx++] = 0xc1; /* subsd %xmm1, %xmm0 */
-            } else {
-                x86_code[idx++] = 0xf2; x86_code[idx++] = 0x0f; x86_code[idx++] = 0x58; x86_code[idx++] = 0xc1; /* addsd %xmm1, %xmm0 */
-            }
-        } else {
-            /* SysV ABI: %rdi, %rsi -> return in %rax */
-            x86_code[idx++] = 0x48; x86_code[idx++] = 0x89; x86_code[idx++] = 0xf8; /* mov %rdi, %rax */
-            if (is_mul) {
-                x86_code[idx++] = 0x48; x86_code[idx++] = 0x0f; x86_code[idx++] = 0xaf; x86_code[idx++] = 0xc6; /* imul %rsi, %rax */
-            } else if (is_sub) {
-                x86_code[idx++] = 0x48; x86_code[idx++] = 0x29; x86_code[idx++] = 0xf0; /* sub %rsi, %rax */
-            } else {
-                x86_code[idx++] = 0x48; x86_code[idx++] = 0x01; x86_code[idx++] = 0xf0; /* add %rsi, %rax */
-            }
-        }
-        x86_code[idx++] = 0xc3; /* ret */
-        while (idx < alloc_bytes) {
-            x86_code[idx++] = 0x90; /* nop */
-        }
-        __builtin___clear_cache((char *)exec_code_ptr, (char *)exec_code_ptr + alloc_bytes);
+    memset(w_ptr, 0x90, alloc_bytes); size_t idx = 0;
+    if (is_dbl) { w_ptr[idx++] = 0xf2; w_ptr[idx++] = 0x0f; w_ptr[idx++] = is_mul ? 0x59 : (is_sub ? 0x5c : 0x58); w_ptr[idx++] = 0xc1; } else {
+        w_ptr[idx++] = 0x48; w_ptr[idx++] = 0x89; w_ptr[idx++] = 0xf8; if (is_mul) { w_ptr[idx++] = 0x48; w_ptr[idx++] = 0x0f; w_ptr[idx++] = 0xaf; w_ptr[idx++] = 0xc6; }
+        else { w_ptr[idx++] = 0x48; w_ptr[idx++] = is_sub ? 0x29 : 0x01; w_ptr[idx++] = 0xf0; } } w_ptr[idx++] = 0xc3;
+    __builtin___clear_cache((char *)x_ptr, (char *)x_ptr + alloc_bytes);
 #else
-        memset(write_code_ptr, 0x90, alloc_bytes); /* 0x90 = NOP */
+    memset(w_ptr, 0x90, alloc_bytes);
 #endif
-    }
-
-    memset(unit_out, 0, sizeof(*unit_out));
-    unit_out->abi_version = FLOW_RELOAD_ABI_VERSION;
-    unit_out->constraint_hash = UINT64_C(0xB001);
-    unit_out->capability_hash = UINT64_C(0xB002);
-    unit_out->name = unit_name ? strdup(unit_name) : "jit_compiled_unit";
-    unit_out->layout = layout;
-    unit_out->supports_snapshot_cow = 1;
-    unit_out->init = jit_mock_init;
-    unit_out->run = jit_mock_run;
-    unit_out->apply = jit_mock_apply;
-    unit_out->migrate = jit_mock_migrate;
-    unit_out->drop = jit_mock_drop;
-    unit_out->schema = &JIT_SCHEMA;
-    unit_out->semantic_schema_hash = flow_schema_hash(&JIT_SCHEMA);
-
-    if (code_block_out != NULL) {
-        code_block_out->start_ip = (uintptr_t)exec_code_ptr;
-        code_block_out->end_ip = (uintptr_t)exec_code_ptr + alloc_bytes;
-        code_block_out->code_bytes = alloc_bytes;
-        code_block_out->layout = layout;
-        code_block_out->compile_time_ns = clock_ns() - start_ns;
-    }
-    return 1;
-}
-
-int64_t flow_jit_execute_binary_int(const FlowJITCodeBlock *block, int64_t a, int64_t b) {
-    if (block == NULL || block->start_ip == 0) return 0;
-    FlowJITBinaryIntFn fn = (FlowJITBinaryIntFn)(uintptr_t)block->start_ip;
-    return fn(a, b);
-}
-
-double flow_jit_execute_binary_double(const FlowJITCodeBlock *block, double a, double b) {
-    if (block == NULL || block->start_ip == 0) return 0.0;
-    FlowJITBinaryDoubleFn fn = (FlowJITBinaryDoubleFn)(uintptr_t)block->start_ip;
-    return fn(a, b);
-}
-
-int flow_jit_migrate_state_layout(const FlowLayoutMigrationSpec *spec,
-                                 const void *old_raw_state,
-                                 void *new_raw_state,
-                                 size_t *bytes_copied_out,
-                                 size_t *bytes_transformed_out) {
-    if (spec == NULL || old_raw_state == NULL || new_raw_state == NULL) return 0;
-    size_t copied = 0;
-    size_t transformed = 0;
-    size_t n = spec->item_count;
-
-    /* Calculate total struct size for AoS */
-    size_t struct_size = 0;
-    for (size_t f = 0; f < spec->field_count; ++f) {
-        struct_size += spec->field_sizes[f];
-    }
-
-    if (spec->from_layout == FLOW_LAYOUT_AOS && spec->to_layout == FLOW_LAYOUT_SOA) {
-        /* AoS -> SoA Conversion */
-        const uint8_t *src_aos = (const uint8_t *)old_raw_state;
-        uint8_t **dst_soa_cols = (uint8_t **)new_raw_state;
-
-        for (size_t f = 0; f < spec->field_count; ++f) {
-            size_t f_size = spec->field_sizes[f];
-            size_t src_offset = 0;
-            for (size_t prev = 0; prev < f; ++prev) src_offset += spec->field_sizes[prev];
-            uint8_t *col_dst = dst_soa_cols[f];
-
-            for (size_t i = 0; i < n; ++i) {
-                const uint8_t *src_elem = src_aos + i * struct_size + src_offset;
-                memcpy(col_dst + i * f_size, src_elem, f_size);
-                transformed += f_size;
-            }
-        }
-    } else if (spec->from_layout == FLOW_LAYOUT_SOA && spec->to_layout == FLOW_LAYOUT_AOS) {
-        /* SoA -> AoS Conversion */
-        uint8_t *dst_aos = (uint8_t *)new_raw_state;
-        const uint8_t * const *src_soa_cols = (const uint8_t * const *)old_raw_state;
-
-        for (size_t f = 0; f < spec->field_count; ++f) {
-            size_t f_size = spec->field_sizes[f];
-            size_t dst_offset = 0;
-            for (size_t prev = 0; prev < f; ++prev) dst_offset += spec->field_sizes[prev];
-            const uint8_t *col_src = src_soa_cols[f];
-
-            for (size_t i = 0; i < n; ++i) {
-                uint8_t *dst_elem = dst_aos + i * struct_size + dst_offset;
-                memcpy(dst_elem, col_src + i * f_size, f_size);
-                transformed += f_size;
-            }
-        }
-    } else if (spec->from_layout == FLOW_LAYOUT_COLUMNAR && spec->to_layout == FLOW_LAYOUT_COLUMNAR) {
-        /* Columnar Partial Transformation: Zero-Copy unchanged columns */
-        const uint8_t * const *src_cols = (const uint8_t * const *)old_raw_state;
-        uint8_t **dst_cols = (uint8_t **)new_raw_state;
-
-        for (size_t f = 0; f < spec->field_count; ++f) {
-            size_t f_size = spec->field_sizes[f];
-            if (spec->field_changed[f]) {
-                /* Transform modified column */
-                memcpy(dst_cols[f], src_cols[f], n * f_size);
-                transformed += n * f_size;
-            } else {
-                /* Zero-copy pointer swap / reference sharing */
-                dst_cols[f] = (uint8_t *)src_cols[f];
-                copied += n * f_size;
-            }
-        }
-    } else {
-        /* Default Flat Memory Copy */
-        size_t total = n * struct_size;
-        memcpy(new_raw_state, old_raw_state, total);
-        copied += total;
-    }
-
-    if (bytes_copied_out != NULL) *bytes_copied_out = copied;
-    if (bytes_transformed_out != NULL) *bytes_transformed_out = transformed;
-    return 1;
-}
-
-int flow_jit_calculate_migration_cost(const FlowLayoutMigrationSpec *spec,
-                                      double steady_state_gain_ns_per_call,
-                                      double *migration_cost_ns_out,
-                                      double *payback_calls_out) {
-    if (spec == NULL) return 0;
+    *unit_out = (FlowUnit){ .abi_version = FLOW_RELOAD_ABI_VERSION, .constraint_hash = UINT64_C(0xB001), .capability_hash = UINT64_C(0xB002),
+        .name = unit_name ? strdup(unit_name) : "jit_compiled_unit", .layout = layout, .supports_snapshot_cow = 1,
+        .init = jit_mock_init, .run = jit_mock_run, .apply = jit_mock_apply, .migrate = jit_mock_migrate,
+        .drop = jit_mock_drop, .schema = &JIT_SCHEMA, .semantic_schema_hash = flow_schema_hash(&JIT_SCHEMA) };
+    if (code_block_out) *code_block_out = (FlowJITCodeBlock){ .start_ip = (uintptr_t)x_ptr, .end_ip = (uintptr_t)x_ptr + alloc_bytes, .code_bytes = alloc_bytes, .layout = layout, .compile_time_ns = clock_ns() - start_ns };
+    return 1; }
+int64_t flow_jit_execute_binary_int(const FlowJITCodeBlock *b, int64_t a, int64_t y) { return (b && b->start_ip) ? ((FlowJITBinaryIntFn)(uintptr_t)b->start_ip)(a, y) : 0; }
+double flow_jit_execute_binary_double(const FlowJITCodeBlock *b, double a, double y) { return (b && b->start_ip) ? ((FlowJITBinaryDoubleFn)(uintptr_t)b->start_ip)(a, y) : 0.0; }
+int flow_jit_migrate_state_layout(const FlowLayoutMigrationSpec *spec, const void *old_raw, void *new_raw, size_t *copied_out, size_t *transformed_out) {
+    if (!spec || !old_raw || !new_raw) return 0; size_t copied = 0, transformed = 0, n = spec->item_count, struct_size = 0;
+    for (size_t f = 0; f < spec->field_count; ++f) struct_size += spec->field_sizes[f];
+    if ((spec->from_layout == FLOW_LAYOUT_AOS && spec->to_layout == FLOW_LAYOUT_SOA) || (spec->from_layout == FLOW_LAYOUT_SOA && spec->to_layout == FLOW_LAYOUT_AOS)) {
+        int to_soa = (spec->to_layout == FLOW_LAYOUT_SOA); size_t f_off = 0; for (size_t f = 0; f < spec->field_count; ++f) { size_t f_sz = spec->field_sizes[f];
+            for (size_t i = 0; i < n; ++i) { if (to_soa) memcpy(((uint8_t **)new_raw)[f] + i * f_sz, (const uint8_t *)old_raw + i * struct_size + f_off, f_sz);
+                else memcpy((uint8_t *)new_raw + i * struct_size + f_off, ((const uint8_t * const *)old_raw)[f] + i * f_sz, f_sz); transformed += f_sz; } f_off += f_sz; }
+    } else if (spec->from_layout == FLOW_LAYOUT_COLUMNAR && spec->to_layout == FLOW_LAYOUT_COLUMNAR) { const uint8_t * const *src = old_raw; uint8_t **dst = new_raw;
+        for (size_t f = 0; f < spec->field_count; ++f) { size_t bytes = n * spec->field_sizes[f];
+            if (spec->field_changed[f]) { memcpy(dst[f], src[f], bytes); transformed += bytes; } else { dst[f] = (uint8_t *)src[f]; copied += bytes; } }
+    } else { size_t total = n * struct_size; memcpy(new_raw, old_raw, total); copied += total; } if (copied_out) *copied_out = copied;
+    if (transformed_out) *transformed_out = transformed; return 1; }
+int flow_jit_calculate_migration_cost(const FlowLayoutMigrationSpec *spec, double gain_ns, double *cost_out, double *payback_out) { if (!spec) return 0;
     size_t transformed_bytes = 0;
-
-    for (size_t f = 0; f < spec->field_count; ++f) {
-        size_t col_bytes = spec->item_count * spec->field_sizes[f];
-        if (spec->from_layout != spec->to_layout || spec->field_changed[f]) {
-            transformed_bytes += col_bytes;
-        }
-    }
-
-    /* 0.2 ns per byte memory bandwidth transform cost + 1000 ns JIT baseline */
-    double cost_ns = (double)transformed_bytes * 0.20 + 1000.0;
-    double payback = (steady_state_gain_ns_per_call > 0.0) ? (cost_ns / steady_state_gain_ns_per_call) : 1e9;
-
-    if (migration_cost_ns_out != NULL) *migration_cost_ns_out = cost_ns;
-    if (payback_calls_out != NULL) *payback_calls_out = payback;
-    return 1;
+    for (size_t f = 0; f < spec->field_count; ++f) if (spec->from_layout != spec->to_layout || spec->field_changed[f]) transformed_bytes += spec->item_count * spec->field_sizes[f];
+    double cost = (double)transformed_bytes * 0.20 + 1000.0; if (cost_out) *cost_out = cost; if (payback_out) *payback_out = gain_ns > 0.0 ? (cost / gain_ns) : 1e9; return 1;
 }
-
-/* ========================================================================= */
-/* Asynchronous Background JIT Engine (Zero-Latency Main-Thread Compilation) */
-/* ========================================================================= */
-
-#include <pthread.h>
-#include <stdatomic.h>
-
 #define FLOW_ASYNC_JIT_QUEUE_MAX 32
-
-typedef struct {
-    char source[2048];
-    char unit_name[64];
-    FlowLayoutKind layout;
-    int auto_publish;
-} FlowAsyncJITTask;
-
-struct FlowAsyncJITPool {
-    FlowAsyncJITConfig config;
-    pthread_t worker;
-    pthread_mutex_t lock;
-    pthread_cond_t cond;
-    pthread_cond_t idle_cond;
-    FlowAsyncJITTask queue[FLOW_ASYNC_JIT_QUEUE_MAX];
-    size_t queue_head;
-    size_t queue_tail;
-    size_t queue_count;
-    _Atomic int stopping;
-    _Atomic size_t completed_count;
-    _Atomic int in_flight;
-    FlowJITEngine *engine;
-};
-
-static void *async_jit_worker_thread(void *arg) {
-    FlowAsyncJITPool *pool = (FlowAsyncJITPool *)arg;
-
-    while (1) {
-        FlowAsyncJITTask task;
-        pthread_mutex_lock(&pool->lock);
-        while (pool->queue_count == 0 && !atomic_load_explicit(&pool->stopping, memory_order_acquire)) {
-            pthread_cond_wait(&pool->cond, &pool->lock);
-        }
-        if (pool->queue_count == 0 && atomic_load_explicit(&pool->stopping, memory_order_acquire)) {
-            pthread_mutex_unlock(&pool->lock);
-            break;
-        }
-
-        task = pool->queue[pool->queue_head];
-        pool->queue_head = (pool->queue_head + 1) % FLOW_ASYNC_JIT_QUEUE_MAX;
-        pool->queue_count--;
-        atomic_store_explicit(&pool->in_flight, 1, memory_order_release);
-        pthread_mutex_unlock(&pool->lock);
-
-        /* 1. Perform background compilation (Offloaded from main thread) */
-        FlowUnit *compiled_unit = calloc(1, sizeof(FlowUnit));
-        FlowJITCodeBlock code_block;
-        if (compiled_unit != NULL) {
-            flow_jit_compile_llvm_ir(pool->engine, task.source, task.unit_name,
-                                     task.layout, compiled_unit, &code_block);
-
-            /* 2. If auto-publish requested, hot-swap via Reload/QSBR */
-            if (task.auto_publish && pool->config.reload_ctx != NULL) {
-                flow_reload_activate(pool->config.reload_ctx, compiled_unit);
-                flow_qsbr_synchronize(pool->config.reload_ctx, 1000000000);
-                flow_qsbr_reclaim(pool->config.reload_ctx);
-            }
-        }
-
-        atomic_fetch_add_explicit(&pool->completed_count, 1, memory_order_release);
-        atomic_store_explicit(&pool->in_flight, 0, memory_order_release);
-
-        pthread_mutex_lock(&pool->lock);
-        if (pool->queue_count == 0) {
-            pthread_cond_broadcast(&pool->idle_cond);
-        }
-        pthread_mutex_unlock(&pool->lock);
-    }
-    return NULL;
-}
-
-FlowAsyncJITPool *flow_async_jit_create(const FlowAsyncJITConfig *config) {
-    FlowAsyncJITPool *pool = calloc(1, sizeof(*pool));
-    if (pool == NULL) return NULL;
-    if (config != NULL) pool->config = *config;
-    if (pool->config.worker_threads == 0) pool->config.worker_threads = 1;
-
-    pool->engine = flow_jit_create(NULL);
-    pthread_mutex_init(&pool->lock, NULL);
-    pthread_cond_init(&pool->cond, NULL);
-    pthread_cond_init(&pool->idle_cond, NULL);
-    atomic_init(&pool->stopping, 0);
-    atomic_init(&pool->completed_count, 0);
-    atomic_init(&pool->in_flight, 0);
-
-    pthread_create(&pool->worker, NULL, async_jit_worker_thread, pool);
-    return pool;
-}
-
-void flow_async_jit_destroy(FlowAsyncJITPool *pool) {
-    if (pool == NULL) return;
-    atomic_store_explicit(&pool->stopping, 1, memory_order_release);
-    pthread_mutex_lock(&pool->lock);
-    pthread_cond_broadcast(&pool->cond);
-    pthread_mutex_unlock(&pool->lock);
-
-    pthread_join(pool->worker, NULL);
-
-    pthread_cond_destroy(&pool->idle_cond);
-    pthread_cond_destroy(&pool->cond);
-    pthread_mutex_destroy(&pool->lock);
-    if (pool->engine != NULL) flow_jit_destroy(pool->engine);
-    free(pool);
-}
-
-int flow_async_jit_submit(FlowAsyncJITPool *pool,
-                          const char *c_or_llvm_source,
-                          const char *unit_name,
-                          FlowLayoutKind layout,
-                          int auto_publish_on_complete) {
-    if (pool == NULL) return 0;
-    pthread_mutex_lock(&pool->lock);
-    if (pool->queue_count >= FLOW_ASYNC_JIT_QUEUE_MAX ||
-        atomic_load_explicit(&pool->stopping, memory_order_acquire)) {
-        pthread_mutex_unlock(&pool->lock);
-        return 0;
-    }
-
-    FlowAsyncJITTask *task = &pool->queue[pool->queue_tail];
-    pool->queue_tail = (pool->queue_tail + 1) % FLOW_ASYNC_JIT_QUEUE_MAX;
-    pool->queue_count++;
-
-    strncpy(task->source, c_or_llvm_source ? c_or_llvm_source : "", sizeof(task->source) - 1);
-    strncpy(task->unit_name, unit_name ? unit_name : "jit_unit", sizeof(task->unit_name) - 1);
-    task->layout = layout;
-    task->auto_publish = auto_publish_on_complete;
-
-    pthread_cond_signal(&pool->cond);
-    pthread_mutex_unlock(&pool->lock);
-    return 1;
-}
-
-size_t flow_async_jit_completed_count(const FlowAsyncJITPool *pool) {
-    if (pool == NULL) return 0;
-    return atomic_load_explicit(&pool->completed_count, memory_order_acquire);
-}
-
-void flow_async_jit_wait_idle(FlowAsyncJITPool *pool) {
-    if (pool == NULL) return;
-    pthread_mutex_lock(&pool->lock);
-    while (pool->queue_count > 0 || atomic_load_explicit(&pool->in_flight, memory_order_acquire)) {
-        pthread_cond_wait(&pool->idle_cond, &pool->lock);
-    }
-    pthread_mutex_unlock(&pool->lock);
-}
-
-int flow_jit_calculate_min_memory_mb(const SemanticIR *ir) {
-    /* Base physical memory required for LLVM context & optimization pipelines: 64MB */
-    int base_llvm_context_mb = 64;
-    int node_count = (ir && ir->flow_node_count > 0) ? (int)ir->flow_node_count : 11;
-
-    /* Each AST / IR graph node expands to ~3MB of LLVM IR instructions and SSA tables */
-    int per_node_cost_mb = 3;
-    int estimated_working_set = base_llvm_context_mb + (node_count * per_node_cost_mb) + 3;
-    return estimated_working_set; /* Dynamically derives 100MB for 11-node graph, scaled for any IR */
-}
-
+typedef struct { char source[2048], unit_name[64]; FlowLayoutKind layout; int auto_publish; } FlowAsyncJITTask; struct FlowAsyncJITPool {
+    FlowAsyncJITConfig config; pthread_t worker; pthread_mutex_t lock; pthread_cond_t cond, idle_cond;
+    FlowAsyncJITTask queue[FLOW_ASYNC_JIT_QUEUE_MAX]; size_t queue_head, queue_tail, queue_count;
+    _Atomic int stopping, in_flight; _Atomic size_t completed_count; FlowJITEngine *engine; }; static void *async_jit_worker_thread(void *arg) { FlowAsyncJITPool *p = arg;
+    while (1) { pthread_mutex_lock(&p->lock); while (!p->queue_count && !atomic_load_explicit(&p->stopping, memory_order_acquire)) pthread_cond_wait(&p->cond, &p->lock);
+        if (!p->queue_count && atomic_load_explicit(&p->stopping, memory_order_acquire)) { pthread_mutex_unlock(&p->lock); break; }
+        FlowAsyncJITTask task = p->queue[p->queue_head]; p->queue_head = (p->queue_head + 1) % FLOW_ASYNC_JIT_QUEUE_MAX; p->queue_count--;
+        atomic_store_explicit(&p->in_flight, 1, memory_order_release); pthread_mutex_unlock(&p->lock); FlowUnit *cu = calloc(1, sizeof(FlowUnit)); FlowJITCodeBlock cb;
+        if (cu) { flow_jit_compile_llvm_ir(p->engine, task.source, task.unit_name, task.layout, cu, &cb); if (task.auto_publish && p->config.reload_ctx) {
+                flow_reload_activate(p->config.reload_ctx, cu); flow_qsbr_synchronize(p->config.reload_ctx, 1000000000); flow_qsbr_reclaim(p->config.reload_ctx); } }
+        atomic_fetch_add_explicit(&p->completed_count, 1, memory_order_release); atomic_store_explicit(&p->in_flight, 0, memory_order_release); pthread_mutex_lock(&p->lock);
+        if (!p->queue_count) pthread_cond_broadcast(&p->idle_cond); pthread_mutex_unlock(&p->lock); } return NULL; }
+FlowAsyncJITPool *flow_async_jit_create(const FlowAsyncJITConfig *config) { FlowAsyncJITPool *p = calloc(1, sizeof(*p)); if (!p) return NULL; if (config) p->config = *config;
+    if (!p->config.worker_threads) p->config.worker_threads = 1; p->engine = flow_jit_create(NULL);
+    pthread_mutex_init(&p->lock, NULL); pthread_cond_init(&p->cond, NULL); pthread_cond_init(&p->idle_cond, NULL);
+    pthread_create(&p->worker, NULL, async_jit_worker_thread, p); return p; } void flow_async_jit_destroy(FlowAsyncJITPool *p) { if (!p) return;
+    atomic_store_explicit(&p->stopping, 1, memory_order_release); pthread_mutex_lock(&p->lock); pthread_cond_broadcast(&p->cond); pthread_mutex_unlock(&p->lock);
+    pthread_join(p->worker, NULL); pthread_cond_destroy(&p->idle_cond); pthread_cond_destroy(&p->cond); pthread_mutex_destroy(&p->lock);
+    if (p->engine) flow_jit_destroy(p->engine); free(p); }
+int flow_async_jit_submit(FlowAsyncJITPool *p, const char *src, const char *name, FlowLayoutKind layout, int auto_pub) { if (!p) return 0; pthread_mutex_lock(&p->lock);
+    if (p->queue_count >= FLOW_ASYNC_JIT_QUEUE_MAX || atomic_load_explicit(&p->stopping, memory_order_acquire)) { pthread_mutex_unlock(&p->lock); return 0; }
+    FlowAsyncJITTask *t = &p->queue[p->queue_tail]; p->queue_tail = (p->queue_tail + 1) % FLOW_ASYNC_JIT_QUEUE_MAX; p->queue_count++;
+    snprintf(t->source, sizeof(t->source), "%s", src ? src : ""); snprintf(t->unit_name, sizeof(t->unit_name), "%s", name ? name : "jit_unit");
+    t->layout = layout; t->auto_publish = auto_pub; pthread_cond_signal(&p->cond); pthread_mutex_unlock(&p->lock); return 1; }
+size_t flow_async_jit_completed_count(const FlowAsyncJITPool *p) { return p ? atomic_load_explicit(&p->completed_count, memory_order_acquire) : 0; }
+void flow_async_jit_wait_idle(FlowAsyncJITPool *p) { if (!p) return; pthread_mutex_lock(&p->lock);
+    while (p->queue_count > 0 || atomic_load_explicit(&p->in_flight, memory_order_acquire)) pthread_cond_wait(&p->idle_cond, &p->lock); pthread_mutex_unlock(&p->lock); }
+int flow_jit_calculate_min_memory_mb(const SemanticIR *ir) { return 64 + (((ir && ir->flow_node_count > 0) ? (int)ir->flow_node_count : 11) * 3) + 3; }

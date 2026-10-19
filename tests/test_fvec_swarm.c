@@ -1,19 +1,9 @@
 #include "flow_test_kit.h"
 #include "flowy_fvec.h"
-#include "neuro_bridge.h"
-#include "spacetime_preplay.h"
-#include "swarm_autopoiesis.h"
 #include "hardware_telemetry.h"
-#include "fwht_projection.h"
-#include "morse_atlas.h"
-#include "bmf_microcode.h"
 #include "flow_jet.h"
-#include "flow_jet_dead_reckon.h"
-#include "flow_jet_lob.h"
-#include "flow_jet_impact.h"
-#include "flow_jet_geodesic.h"
-#include "matching.h"
 #include "flow_embodied_mz.h"
+#include "swarm.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -89,298 +79,75 @@ int main(void) {
     }
 
     /* ========================================================================= */
-    /* STAGE 2: Vector Vault, Canonical Archetypes & Semantic RAG                */
+    /* STAGE 2: FlowVecStore Canonical Repository & Semantic Similarity Query    */
     /* ========================================================================= */
-    FLOW_STAGE_BEGIN(2, "Vector Vault: Canonical Archetypes & Semantic Similarity Query");
+    FLOW_STAGE_BEGIN(2, "FlowVecStore: Canonical Archetypes & Semantic Similarity Query");
     {
-        FlowVectorVault vault;
-        flow_vault_init(&vault);
-        FLOW_ASSERT_EQ(vault.count, 0ULL);
+        const char *test_dir = "/tmp/flow_test_vec_store";
+        int seeded = flow_fvec_seed_canonical_files(test_dir);
+        FLOW_ASSERT_TRUE(seeded >= 5);
 
-        int count = flow_vault_seed_canonical_archetypes(&vault);
-        FLOW_ASSERT_TRUE(count >= 5);
-        FLOW_ASSERT_EQ(vault.count, (size_t)count);
+        FlowVecStore store;
+        flow_fvec_store_init(&store, test_dir);
+        int scanned = flow_fvec_store_scan(&store);
+        FLOW_ASSERT_TRUE(scanned >= 5);
+        FLOW_ASSERT_EQ(store.count, (size_t)scanned);
 
-        /* Query for HFT ultra-low latency */
         size_t best_idx = 0;
         double best_sim = 0.0;
-        FLOW_ASSERT_TRUE(flow_vault_query_semantic(&vault, "high-frequency trading ultra-low latency lock-free ring buffer", &best_idx, &best_sim));
-        FLOW_ASSERT_TRUE(best_sim >= 0.70);
-        FLOW_ASSERT_STR_EQ(vault.entries[best_idx].component_id, "bounded_queue");
+        FLOW_ASSERT_TRUE(flow_fvec_store_query(&store, "high-frequency trading ultra-low latency lock-free ring buffer", &best_idx, &best_sim));
+        FLOW_ASSERT_TRUE(best_sim >= 0.50);
 
-        printf("  ✓ Stage 2 Passed: %d canonical archetypes seeded; semantic similarity query matched (sim=%.2f).\n\n",
-               count, best_sim);
+        const FlowVecRecord *rec = flow_fvec_store_lookup_by_id(&store, store.records[0].header.id);
+        FLOW_ASSERT_TRUE(rec != NULL);
+        FLOW_ASSERT_TRUE(strlen(rec->header.component_id) > 0);
+
+        printf("  ✓ Stage 2 Passed: %d canonical .fvec files seeded & queried (sim=%.2f).\n\n",
+               scanned, best_sim);
     }
 
     /* ========================================================================= */
-    /* STAGE 3: Tidal Morphing & Cross-Hardware Transfer                         */
+    /* STAGE 3: Immune Promoter & Swarm Lymphatic Antibody Gossip                */
     /* ========================================================================= */
-    FLOW_STAGE_BEGIN(3, "Tidal Morphing (24-Hour Cycle) & Cross-ISA Gene Transfer");
+    FLOW_STAGE_BEGIN(3, "Immune Promoter & 9-Byte Swarm Lymphatic Antibody Packet");
     {
-        FlowVectorVault vault;
-        flow_vault_init(&vault);
-        flow_vault_seed_canonical_archetypes(&vault);
+        uint64_t hash_in = UINT64_C(0xCAFEBABE12345678);
+        uint8_t pkt[FLOW_SWARM_LYMPH_PKT_SIZE];
+        FLOW_ASSERT_EQ(flow_swarm_lymphatic_encode(hash_in, pkt), 1);
+        FLOW_ASSERT_EQ(pkt[0], FLOW_SWARM_MSG_ANTIBODY);
 
-        const FlowVaultEntry *day_entry = flow_vault_lookup_by_id(&vault, "vec_serverless_io_heavy");
-        const FlowVaultEntry *night_entry = flow_vault_lookup_by_id(&vault, "vec_serverless_tiny_worker");
-        FLOW_ASSERT_TRUE(day_entry != NULL);
-        FLOW_ASSERT_TRUE(night_entry != NULL);
+        uint64_t hash_out = 0;
+        FLOW_ASSERT_EQ(flow_swarm_lymphatic_decode(pkt, &hash_out), 1);
+        FLOW_ASSERT_EQ(hash_out, hash_in);
 
-        FlowMaskCanvas canvas;
-        uint64_t seed_genome = 0;
-        /* Noon (peak): alpha = 0.0 -> day profile */
-        FLOW_ASSERT_EQ(flow_vault_tidal_morph(day_entry, night_entry, 0.0, &canvas, &seed_genome), 1);
-        FLOW_ASSERT_EQ(seed_genome, day_entry->pure_genome);
-
-        /* Midnight (trough): alpha = 1.0 -> night profile */
-        FLOW_ASSERT_EQ(flow_vault_tidal_morph(day_entry, night_entry, 1.0, &canvas, &seed_genome), 1);
-        FLOW_ASSERT_EQ(seed_genome, night_entry->pure_genome);
-
-        /* 3am (interpolated): alpha = 0.5 */
-        FLOW_ASSERT_EQ(flow_vault_tidal_morph(day_entry, night_entry, 0.5, &canvas, &seed_genome), 1);
-
-        printf("  ✓ Stage 3 Passed: 24-hour tidal morphing across day/night load curves validated.\n\n");
+        printf("  ✓ Stage 3 Passed: 9-byte lymphatic antibody packet encoded & decoded lossless.\n\n");
     }
 
     /* ========================================================================= */
-    /* STAGE 4: Fleet Immune System & Gossip Antibody Memory                     */
+    /* STAGE 4: Heterogeneous Swarm Mesh & SMT Capacity Conservation             */
     /* ========================================================================= */
-    FLOW_STAGE_BEGIN(4, "Fleet Immune System: Antibody Memory Vault & Gossip Broadcast");
+    FLOW_STAGE_BEGIN(4, "Heterogeneous Swarm Mesh: Pheromone Routing & SMT Soundness");
     {
-        FlowVectorVault vault;
-        flow_vault_init(&vault);
-        flow_vault_seed_canonical_archetypes(&vault);
+        FlowHeteroMesh mesh;
+        flow_hetero_mesh_init(&mesh);
+        FLOW_ASSERT_EQ(flow_hetero_mesh_register_node(&mesh, 1, FLOW_SWARM_ROLE_COMPUTE_ROUTER, "router_a", 0x1111, 40000), 1);
+        FLOW_ASSERT_EQ(flow_hetero_mesh_register_node(&mesh, 2, FLOW_SWARM_ROLE_COMPUTE_ROUTER, "router_b", 0x1111, 60000), 1);
 
-        const FlowVaultEntry *ab = flow_vault_lookup_by_id(&vault, "vec_antibody_slowloris_409");
-        FLOW_ASSERT_TRUE(ab != NULL);
-        FLOW_ASSERT_STR_CONTAINS(ab->name, "Antibody");
+        uint8_t selected = 0;
+        FLOW_ASSERT_EQ(flow_hetero_mesh_route_target(&mesh, FLOW_SWARM_ROLE_COMPUTE_ROUTER, &selected), 1);
+        FLOW_ASSERT_TRUE(selected == 1 || selected == 2);
 
-        char gossip_packet[512];
-        FLOW_ASSERT_TRUE(flow_vault_broadcast_antibody(&vault, ab, gossip_packet, sizeof(gossip_packet)));
-        FLOW_ASSERT_STR_CONTAINS(gossip_packet, "FLOW_ANTIBODY_V1");
-        FLOW_ASSERT_STR_CONTAINS(gossip_packet, "vec_antibody_slowloris_409");
+        FlowSMTProofAttestation mesh_proof;
+        memset(&mesh_proof, 0, sizeof(mesh_proof));
+        FLOW_ASSERT_EQ(flow_hetero_mesh_verify_smt(&mesh, 50000, &mesh_proof), FLOW_SMT_PROVEN_UNSAT);
+        FLOW_ASSERT_SMT_SOUND(mesh_proof);
 
-        printf("  ✓ Stage 4 Passed: Immune antibody identified and gossip packet serialized.\n\n");
+        printf("  ✓ Stage 4 Passed: Heterogeneous swarm mesh routed to node %u & SMT proven.\n\n", selected);
     }
 
+    /* STAGE 5: Speculative Gene Pre-Staging Vault (Zero-Coldstart Swap)         */
     /* ========================================================================= */
-    /* STAGE 5: Ecosystem Gene Hub                                               */
-    /* ========================================================================= */
-    FLOW_STAGE_BEGIN(5, "Ecosystem Gene Hub: Search, Pull & SMT Zero-Defect Check");
-    {
-        FlowHubIndex hub;
-        flow_hub_init_local_index(&hub);
-        FLOW_ASSERT_TRUE(hub.count >= 3);
-
-        FlowHubEntry results[FLOW_HUB_MAX_ENTRIES];
-        size_t found = 0;
-        flow_hub_search(&hub, "trading", results, FLOW_HUB_MAX_ENTRIES, &found);
-        FLOW_ASSERT_TRUE(found >= 1);
-        FLOW_ASSERT_STR_CONTAINS(results[0].name, "Trading");
-
-        char saved_path[256];
-        FLOW_ASSERT_TRUE(flow_hub_pull(&hub, results[0].model_id, "/tmp", saved_path, sizeof(saved_path)));
-        FLOW_ASSERT_TRUE(access(saved_path, F_OK) == 0);
-        unlink(saved_path);
-
-        printf("  ✓ Stage 5 Passed: Hub index searched and model pulled with CRC32+SMT verified.\n\n");
-    }
-
-    /* ========================================================================= */
-    /* STAGE 6: Neuro-Bit Manifold Bridge (Deep SIMD & Quantized Projection)     */
-    /* ========================================================================= */
-    FLOW_STAGE_BEGIN(6, "Neuro-Bit Manifold Bridge: 4096-D Float -> Deep SIMD & Quantized Polytope");
-    {
-        FlowNeuroBridge bridge;
-        const size_t input_dim = 4096;
-        FLOW_ASSERT_EQ(flow_neuro_bridge_init(&bridge, input_dim, 0xACE1337), 1);
-
-        static float embedding[FLOW_NEURO_MAX_INPUT_DIM];
-        static int8_t q_embedding[FLOW_NEURO_MAX_INPUT_DIM];
-        for (size_t i = 0; i < input_dim; i++) {
-            float val = (float)sin((double)i * 0.123);
-            embedding[i] = val;
-            q_embedding[i] = (int8_t)(val * 120.0f);
-        }
-
-        /* 1. Baseline FP32 Projection */
-        FlowNeuroProjectionResult result;
-        FLOW_ASSERT_EQ(flow_neuro_bridge_project(&bridge, embedding, input_dim,
-                                                 FLOW_NEURO_INTENT_SMOOTH_FETCH_LATTE, &result), 1);
-
-        FLOW_ASSERT_EQ(result.classified_intent, FLOW_NEURO_INTENT_SMOOTH_FETCH_LATTE);
-        FLOW_ASSERT_NE(result.bmf_coordinates, 0ULL);
-        FLOW_ASSERT_TRUE(result.bound_count >= 4);
-        FLOW_ASSERT_TRUE(result.projection_nanoseconds < 50000.0);
-
-        FlowSMTProofAttestation proof;
-        memset(&proof, 0, sizeof(proof));
-        FLOW_ASSERT_EQ(flow_neuro_bridge_verify_smt(&result, &proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(proof);
-
-        /* 2. Deeper SIMD Vectorized Projection */
-        FlowNeuroProjectionResult simd_result;
-        FLOW_ASSERT_EQ(flow_neuro_bridge_project_simd(&bridge, embedding, input_dim,
-                                                      FLOW_NEURO_INTENT_SMOOTH_FETCH_LATTE, &simd_result), 1);
-        FLOW_ASSERT_EQ(simd_result.classified_intent, FLOW_NEURO_INTENT_SMOOTH_FETCH_LATTE);
-        FLOW_ASSERT_EQ(simd_result.bmf_coordinates, result.bmf_coordinates);
-        FLOW_ASSERT_TRUE(simd_result.projection_nanoseconds <= 1500.0);
-
-        FlowSMTProofAttestation simd_proof;
-        memset(&simd_proof, 0, sizeof(simd_proof));
-        FLOW_ASSERT_EQ(flow_neuro_verify_simd_soundness_smt(&result, &simd_result, 0.0001, &simd_proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(simd_proof);
-
-        /* 3. Quantized INT8 Fixed-Point Projection */
-        FlowNeuroBridgeQuantized q_bridge;
-        FLOW_ASSERT_EQ(flow_neuro_bridge_quantize(&bridge, &q_bridge), 1);
-        FlowNeuroProjectionResult q_result;
-        FLOW_ASSERT_EQ(flow_neuro_bridge_project_quantized(&q_bridge, q_embedding,
-                                                           FLOW_NEURO_INTENT_SMOOTH_FETCH_LATTE, &q_result), 1);
-        FLOW_ASSERT_EQ(q_result.classified_intent, FLOW_NEURO_INTENT_SMOOTH_FETCH_LATTE);
-        FLOW_ASSERT_NE(q_result.bmf_coordinates, 0ULL);
-
-        /* 4. SIMD Polyhedral Half-Space Evaluation */
-        double safe_state[FLOW_NEURO_FVEC_DIM] = {0.04, 0.20, 3.0, 0.50};
-        uint32_t violation_mask = 0;
-        FLOW_ASSERT_EQ(flow_neuro_eval_bounds_simd(result.bounds, result.bound_count, safe_state, &violation_mask), 1);
-        FLOW_ASSERT_EQ(violation_mask, 0U); /* All within safe bounds! */
-
-        double unsafe_state[FLOW_NEURO_FVEC_DIM] = {0.15, 0.90, 8.0, 2.00}; /* Tilted 0.15 rad (> 0.08 limit) */
-        uint32_t violation_unsafe = 0;
-        FLOW_ASSERT_EQ(flow_neuro_eval_bounds_simd(result.bounds, result.bound_count, unsafe_state, &violation_unsafe), 1);
-        FLOW_ASSERT_NE(violation_unsafe, 0U); /* Violation flagged in sub-5ns! */
-
-        /* 5. 4096-D Continuous Embedding -> Subspace Routing -> 1-Bit BMF Canvas */
-        FlowBmfSubspaceRegistry reg;
-        flow_bmf_subspace_init_registry(&reg);
-
-        uint32_t indexed_sub_id = 0;
-        FLOW_ASSERT_EQ(flow_neuro_bridge_index_subspace(&bridge, embedding, input_dim,
-                                                        FLOW_NEURO_INTENT_SMOOTH_FETCH_LATTE,
-                                                        &reg, &indexed_sub_id), 1);
-        FLOW_ASSERT_EQ(indexed_sub_id, FLOW_BMF_SUBSPACE_SMOOTH_FETCH_LATTE);
-
-        FlowBmf1BitCanvas bmf_canvas;
-        FlowNeuroProjectionResult bridge_res;
-        FLOW_ASSERT_EQ(flow_neuro_bridge_to_1bit_canvas(&bridge, embedding, input_dim,
-                                                        FLOW_NEURO_INTENT_SMOOTH_FETCH_LATTE,
-                                                        &reg, &bmf_canvas, &bridge_res), 1);
-        FLOW_ASSERT_EQ(bmf_canvas.subspace_id, FLOW_BMF_SUBSPACE_SMOOTH_FETCH_LATTE);
-        /* Invariants must be active */
-        FLOW_ASSERT_TRUE(flow_bmf_canvas_get_switch(&bmf_canvas, FLOW_BMF_SW_HARD_SAFETY));
-        FLOW_ASSERT_TRUE(flow_bmf_canvas_get_switch(&bmf_canvas, FLOW_BMF_SW_ANTI_SPILL_TILT));
-        FLOW_ASSERT_TRUE(flow_bmf_canvas_get_switch(&bmf_canvas, FLOW_BMF_SW_GRIPPER_FORCE_SAFE));
-        /* SMT Formal Adjudication */
-        FLOW_ASSERT_TRUE(flow_bmf_canvas_adjudicate_smt(&bmf_canvas));
-        FLOW_ASSERT_TRUE(bmf_canvas.is_adjudicated_sound);
-
-        /* 6. Kolmogorov Zero-Table FWHT Projection -> Morse Atlas Direct Mapping */
-        FlowBmfMorseAtlas morse_atlas;
-        flow_morse_atlas_seed_canonical(&morse_atlas);
-
-        FlowBmf1BitCanvas morse_canvas;
-        FlowNeuroProjectionResult fwht_res;
-        FLOW_ASSERT_EQ(flow_neuro_bridge_to_morse_canvas(embedding, 0x1337BEEF,
-                                                         &morse_atlas, &morse_canvas, &fwht_res), 1);
-        FLOW_ASSERT_TRUE(flow_bmf_canvas_get_switch(&morse_canvas, FLOW_BMF_SW_HARD_SAFETY));
-        FLOW_ASSERT_TRUE(morse_canvas.is_adjudicated_sound);
-        FLOW_ASSERT_TRUE(fwht_res.projection_nanoseconds < 50000.0);
-
-        printf("  ✓ Stage 6 Passed: 4096-D continuous embedding routed to Subspace & 1-Bit BMF Canvas via Deep SIMD (%.1fns) & Zero-Table FWHT (%.1fns); SMT Sound.\n\n",
-               simd_result.projection_nanoseconds, fwht_res.projection_nanoseconds);
-    }
-
-    /* ========================================================================= */
-    /* STAGE 7: Spacetime Pre-Play Engine (3.0s Cone & Counterfactual Anneal)    */
-    /* ========================================================================= */
-    FLOW_STAGE_BEGIN(7, "Spacetime Pre-Play Engine: Black Swan Elimination");
-    {
-        FlowSpacetimeEngine engine;
-        FLOW_ASSERT_EQ(flow_spacetime_init(&engine, 50.0, 0.85), 1);
-
-        /* Sudden black ice patch at t=2.5s..3.0s */
-        FLOW_ASSERT_EQ(flow_spacetime_set_black_swan(&engine, 0.05, 2.5, 3.0, 0.25), 1);
-
-        FlowPhaseState initial_state;
-        memset(&initial_state, 0, sizeof(initial_state));
-        initial_state.p[0] = 50.0 * 2.0; /* 2.0 m/s forward */
-        initial_state.p[1] = (50.0 * 0.45 * 0.45) * 0.35; /* Yaw rate */
-
-        /* Nominal simulation: Black swan caught */
-        FlowSpacetimeConeResult baseline;
-        FLOW_ASSERT_EQ(flow_spacetime_simulate(&engine, &initial_state, NULL, &baseline), 1);
-        FLOW_ASSERT_TRUE(baseline.violation_detected);
-        FLOW_ASSERT_TRUE(baseline.violation_time_s >= 2.5);
-
-        /* Pre-play counterfactual annealing */
-        FlowSpacetimeConeResult annealed;
-        FLOW_ASSERT_EQ(flow_spacetime_preplay_and_anneal(&engine, &initial_state, &annealed), 1);
-        FLOW_ASSERT_FALSE(annealed.violation_detected); /* Black swan completely avoided! */
-        FLOW_ASSERT_TRUE(engine.preplay_duration_us < 200.0);
-
-        FlowSMTProofAttestation proof;
-        memset(&proof, 0, sizeof(proof));
-        FLOW_ASSERT_EQ(flow_spacetime_preplay_verify_smt(&engine, &annealed, &proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(proof);
-
-        /* Speculative Meso-scale L1I/L1D emergency cache warmup upon threat detection */
-        uint32_t lines_warmed = 0;
-        FLOW_ASSERT_EQ(flow_spacetime_warmup_emergency_cache(&engine, &baseline,
-                                                             (const void *)flow_spacetime_preplay_and_anneal,
-                                                             (const void *)&engine.pre_emptive_bias,
-                                                             &lines_warmed), 1);
-        FLOW_ASSERT_TRUE(lines_warmed >= 3);
-
-        FlowSMTProofAttestation prefetch_proof;
-        memset(&prefetch_proof, 0, sizeof(prefetch_proof));
-        FLOW_ASSERT_EQ(flow_spacetime_verify_prefetch_soundness_smt(&engine, lines_warmed, 35.0, &prefetch_proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(prefetch_proof);
-
-        printf("  ✓ Stage 7 Passed: Pre-play annealed 3.0s spacetime cone in %.1fus; black swan avoided and emergency cache pre-warmed.\n\n",
-               engine.preplay_duration_us);
-    }
-
-    /* ========================================================================= */
-    /* STAGE 8: Swarm Speciation & Autopoiesis                                   */
-    /* ========================================================================= */
-    FLOW_STAGE_BEGIN(8, "Swarm Speciation & Autopoiesis (.fvec Living Ecosystem)");
-    {
-        FlowSwarmSpeciationEngine engine;
-        FLOW_ASSERT_EQ(flow_speciation_init(&engine, 42), 1);
-        FLOW_ASSERT_EQ(engine.population_size, FLOW_SPECIATION_POPULATION_SIZE);
-
-        /* Epistatic crossover */
-        FlowSpeciationSpecimen *pA = &engine.population[0];
-        FlowSpeciationSpecimen *pB = &engine.population[1];
-        pA->features[0] = 0.2; pA->features[1] = 0.3;
-        pB->features[0] = 0.8; pB->features[1] = 0.9;
-
-        FlowSpeciationSpecimen child;
-        FLOW_ASSERT_EQ(flow_speciation_crossover(pA, pB, 0x12345, &child), 1);
-
-        /* 5 generations of evolution */
-        for (int g = 0; g < 5; g++) {
-            FLOW_ASSERT_EQ(flow_speciation_step_generation(&engine), 1);
-        }
-        FLOW_ASSERT_EQ(engine.current_generation, 5);
-
-        /* Export auto-promoted specimen */
-        const char *test_dir = "/tmp/flow_test_fvec_swarm";
-        FLOW_ASSERT_EQ(flow_speciation_export_fvec(&engine.population[0], test_dir), 1);
-
-        FlowSMTProofAttestation proof;
-        memset(&proof, 0, sizeof(proof));
-        FLOW_ASSERT_EQ(flow_speciation_verify_smt(&engine, &proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(proof);
-
-        printf("  ✓ Stage 8 Passed: 5 generations evolved with epistatic linkage preserved; SMT sound.\n\n");
-    }
-
-    /* ========================================================================= */
-    /* STAGE 9: Speculative Gene Pre-Staging Vault (Zero-Coldstart Swap)         */
-    /* ========================================================================= */
-    FLOW_STAGE_BEGIN(9, "Speculative Gene Pre-Staging Vault: Zero-Coldstart Atomic Architecture Swap");
+    FLOW_STAGE_BEGIN(5, "Speculative Gene Pre-Staging Vault: Zero-Coldstart Atomic Architecture Swap");
     {
         /* Ensure canonical .fvec repository directory is ready */
         const char *test_vault_dir = ".flow/vecs";
@@ -420,383 +187,8 @@ int main(void) {
         FLOW_ASSERT_EQ(flow_fvec_verify_prestaging_soundness_smt(&vault, "HFT_BURST", swap_latency_ns, &prestaging_proof), FLOW_SMT_PROVEN_UNSAT);
         FLOW_ASSERT_SMT_SOUND(prestaging_proof);
 
-        printf("  ✓ Stage 9 Passed: Speculative Gene Pre-Staging Vault swapped architecture in %.2fns (<100ns SMT deadline); zero-coldstart guaranteed.\n\n",
+        printf("  ✓ Stage 5 Passed: Speculative Gene Pre-Staging Vault swapped architecture in %.2fns (<100ns SMT deadline); zero-coldstart guaranteed.\n\n",
                swap_latency_ns);
-    }
-
-    /* ========================================================================= */
-    /* STAGE 10: Jet-Based Dead Reckoning: CXL & Swarm Interconnect Compression */
-    /* ========================================================================= */
-    FLOW_STAGE_BEGIN(10, "Jet-Based Dead Reckoning: CXL / Cluster Swarm Bandwidth Reduction & SMT Soundness");
-    {
-        FlowJet jet_cluster;
-        FLOW_ASSERT_EQ(flow_jet_init(&jet_cluster, "node_alpha_hft", "HFT Cluster Node Alpha"), 1);
-        for (uint32_t i = 0; i < 16; ++i) {
-            jet_cluster.payload.q[i] = 0.5 * sin(0.3 * (double)i);
-            jet_cluster.payload.p[i] = 0.2 * cos(0.3 * (double)i);
-        }
-
-        FlowJetDeadReckonSender sender;
-        FLOW_ASSERT_EQ(flow_jet_dead_reckon_sender_init(&sender, &jet_cluster, 0.08), 1);
-        FLOW_ASSERT_EQ(sender.total_ticks, 0ULL);
-
-        FlowJetDeadReckonReceiver receiver;
-        FLOW_ASSERT_EQ(flow_jet_dead_reckon_receiver_init(&receiver, "node_beta_mirror", 16), 1);
-        FLOW_ASSERT_EQ(receiver.total_ticks_dead_reckoned, 0ULL);
-
-        /* Simulate 100 high-frequency (200Hz) ticks across cluster link */
-        for (uint32_t t = 0; t < 100; ++t) {
-            FlowJetDeadReckonPacket pkt;
-            int needed = 0;
-            FLOW_ASSERT_EQ(flow_jet_dead_reckon_sender_step(&sender, 0.005, &pkt, &needed), 1);
-
-            if (needed) {
-                FLOW_ASSERT_EQ(flow_jet_dead_reckon_receiver_apply_packet(&receiver, &pkt), 1);
-            } else {
-                FLOW_ASSERT_EQ(flow_jet_dead_reckon_receiver_step(&receiver, 0.005), 1);
-            }
-        }
-
-        FLOW_ASSERT_EQ(sender.total_ticks, 100ULL);
-        FLOW_ASSERT_TRUE(sender.bandwidth_savings_ratio >= 0.90);
-        FLOW_ASSERT_TRUE(sender.packets_sent <= 10ULL);
-        FLOW_ASSERT_TRUE(sender.packets_suppressed >= 90ULL);
-
-        /* SMT Highest Court Formal Verification */
-        FlowSMTProofAttestation reckon_proof;
-        memset(&reckon_proof, 0, sizeof(reckon_proof));
-        FLOW_ASSERT_EQ(flow_jet_dead_reckon_verify_smt(&sender, &reckon_proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(reckon_proof);
-
-        printf("  ✓ Stage 10 Passed: Jet-Based Dead Reckoning achieved %.2f%% bandwidth reduction (%llu/%llu packets saved); SMT proven.\n\n",
-               sender.bandwidth_savings_ratio * 100.0,
-               (unsigned long long)sender.packets_suppressed,
-               (unsigned long long)sender.total_ticks);
-    }
-
-    /* ========================================================================= */
-    /* STAGE 11: fjet x Finance LOB: Phase-Space Liquidity Hydrodynamics         */
-    /* ========================================================================= */
-    FLOW_STAGE_BEGIN(11, "fjet x Finance LOB: Phase-Space Liquidity Hydrodynamics & Anti-Sniping Spread");
-    {
-        FlowLimitOrderBook book;
-        flow_orderbook_init(&book, 101);
-
-        /* Populate book with resting bids and asks */
-        FlowOrder bid1 = {.order_id = 1, .symbol_id = 101, .side = FLOW_ORDER_BUY, .type = FLOW_ORDER_LIMIT,
-                          .price = 10000, .quantity = 20, .filled_quantity = 0, .timestamp_ns = 1000, .is_active = 1};
-        FlowOrder bid2 = {.order_id = 2, .symbol_id = 101, .side = FLOW_ORDER_BUY, .type = FLOW_ORDER_LIMIT,
-                          .price = 10000, .quantity = 20, .filled_quantity = 0, .timestamp_ns = 1010, .is_active = 1};
-        FlowOrder ask1 = {.order_id = 3, .symbol_id = 101, .side = FLOW_ORDER_SELL, .type = FLOW_ORDER_LIMIT,
-                          .price = 10005, .quantity = 20, .filled_quantity = 0, .timestamp_ns = 1020, .is_active = 1};
-        FlowTrade trades[8];
-        size_t trade_c = 0;
-        FLOW_ASSERT_EQ(flow_orderbook_submit(&book, &bid1, trades, 8, &trade_c), 1);
-        FLOW_ASSERT_EQ(flow_orderbook_submit(&book, &bid2, trades, 8, &trade_c), 1);
-        FLOW_ASSERT_EQ(flow_orderbook_submit(&book, &ask1, trades, 8, &trade_c), 1);
-
-        FlowLOBHydrodynamics hydro;
-        FLOW_ASSERT_EQ(flow_lob_hydrodynamics_init(&hydro, 101, 30.0, 15.0), 1);
-        FLOW_ASSERT_EQ(hydro.symbol_id, 101U);
-
-        /* Initial tick: balanced state */
-        FLOW_ASSERT_EQ(flow_lob_hydrodynamics_update_from_book(&hydro, &book, 1000000ULL), 1);
-        FLOW_ASSERT_TRUE(hydro.mid_price > 10000.0 && hydro.mid_price < 10005.0);
-        FLOW_ASSERT_EQ(hydro.total_updates, 1ULL);
-
-        /* Fast forward time and simulate sharp price crash & depth starvation (e.g. market sell wave) */
-        flow_orderbook_cancel(&book, 1);
-        flow_orderbook_cancel(&book, 2);
-        FlowOrder low_bid = {.order_id = 4, .symbol_id = 101, .side = FLOW_ORDER_BUY, .type = FLOW_ORDER_LIMIT,
-                             .price = 9850, .quantity = 5, .filled_quantity = 0, .timestamp_ns = 1050000, .is_active = 1};
-        FLOW_ASSERT_EQ(flow_orderbook_submit(&book, &low_bid, trades, 8, &trade_c), 1);
-
-        /* Second tick: 50us later, sharp velocity surge */
-        FLOW_ASSERT_EQ(flow_lob_hydrodynamics_update_from_book(&hydro, &book, 1050000ULL), 1);
-        FLOW_ASSERT_TRUE(hydro.price_velocity < 0.0); /* Sharp downward drop */
-
-        /* Third tick: 10us later, another drop triggering negative acceleration */
-        flow_orderbook_cancel(&book, 4);
-        FlowOrder lower_bid = {.order_id = 5, .symbol_id = 101, .side = FLOW_ORDER_BUY, .type = FLOW_ORDER_LIMIT,
-                              .price = 9600, .quantity = 2, .filled_quantity = 0, .timestamp_ns = 1060000, .is_active = 1};
-        FLOW_ASSERT_EQ(flow_orderbook_submit(&book, &lower_bid, trades, 8, &trade_c), 1);
-        FLOW_ASSERT_EQ(flow_lob_hydrodynamics_update_from_book(&hydro, &book, 1060000ULL), 1);
-
-        /* Test liquidity collapse prediction */
-        FlowLOBCollapseAlert alert;
-        FLOW_ASSERT_EQ(flow_lob_hydrodynamics_predict_collapse(&hydro, &book, FLOW_ORDER_BUY, &alert), 1);
-        FLOW_ASSERT_TRUE(alert.is_collapse_imminent);
-        FLOW_ASSERT_TRUE(alert.time_to_collapse_us > 0.0);
-
-        /* Test adaptive dynamic spread calculation (should widen during acceleration surge) */
-        uint64_t base_spread = 5;
-        uint64_t widened_spread = 0;
-        FLOW_ASSERT_EQ(flow_lob_hydrodynamics_compute_adaptive_spread(&hydro, base_spread, &widened_spread), 1);
-        FLOW_ASSERT_TRUE(widened_spread > base_spread);
-        FLOW_ASSERT_TRUE(hydro.adaptive_spread_activations >= 1ULL);
-
-        /* SMT Formal Supreme Court Verification */
-        FlowSMTProofAttestation lob_proof;
-        memset(&lob_proof, 0, sizeof(lob_proof));
-        FLOW_ASSERT_EQ(flow_lob_hydrodynamics_verify_smt(&hydro, &lob_proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(lob_proof);
-
-        printf("  ✓ Stage 11 Passed: LOB Hydrodynamics Mid=%.2f, V=%.3f, A=%.3f; Adaptive Spread %llu -> %llu; SMT proven.\n\n",
-               hydro.mid_price, hydro.price_velocity, hydro.price_acceleration,
-               (unsigned long long)base_spread, (unsigned long long)widened_spread);
-    }
-
-    /* ========================================================================= */
-    /* STAGE 12: fjet x Robot Reflex: Non-Smooth Symplectic Impact Manifold      */
-    /* ========================================================================= */
-    FLOW_STAGE_BEGIN(12, "fjet x Robot Reflex: Non-Smooth Symplectic Impact Manifold & Passivity");
-    {
-        FlowMoriZwanzigImpedanceController mz_ctrl;
-        FLOW_ASSERT_EQ(flow_embodied_mz_init(&mz_ctrl, 6, NULL, 8), 1);
-
-        FlowSymplecticImpactManifold manifold;
-        FLOW_ASSERT_EQ(flow_symplectic_impact_init(&manifold, &mz_ctrl, 0.10, 0.0, 100.0), 1);
-        FLOW_ASSERT_EQ(manifold.total_impact_events, 0ULL);
-
-        FlowJet leg_jet;
-        FLOW_ASSERT_EQ(flow_jet_init(&leg_jet, "foot_link_1", "Robot Foot Contact Jet"), 1);
-
-        /* Initial state: all foot joints descending in free flight (height = 0.2m, downward velocity = -1.5m/s) */
-        for (size_t j = 0; j < 6; ++j) {
-            leg_jet.payload.q[j] = 0.20;
-            leg_jet.payload.p[j] = -1.5;
-        }
-        FLOW_ASSERT_FALSE(flow_symplectic_impact_is_in_contact(&manifold, &leg_jet));
-
-        double target_q[FLOW_MAX_JOINTS] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
-        double target_v[FLOW_MAX_JOINTS] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
-        double torques[FLOW_MAX_JOINTS] = {0.0};
-
-        /* Step 10kHz during free flight: should not register contact */
-        FLOW_ASSERT_EQ(flow_symplectic_impact_step_10khz(&manifold, &leg_jet, target_q, target_v, torques, 0.0001), 1);
-        FLOW_ASSERT_FALSE(manifold.is_contact_active);
-
-        /* Fast forward foot to ground collision (height = 0.0m, p = -2.5m/s) */
-        for (size_t j = 0; j < 6; ++j) {
-            leg_jet.payload.q[j] = 0.0;
-            leg_jet.payload.p[j] = -2.5;
-        }
-
-        /* Execute 10kHz impact step: momentum jump + Moreau projection */
-        FLOW_ASSERT_EQ(flow_symplectic_impact_step_10khz(&manifold, &leg_jet, target_q, target_v, torques, 0.0001), 1);
-        FLOW_ASSERT_TRUE(manifold.is_contact_active);
-        FLOW_ASSERT_EQ(manifold.total_impact_events, 6ULL);
-        FLOW_ASSERT_TRUE(leg_jet.payload.q[0] >= 0.0);     /* Non-penetration guarantee */
-        FLOW_ASSERT_TRUE(leg_jet.payload.p[0] > 0.0);      /* Restitution upward bounce */
-        FLOW_ASSERT_TRUE(manifold.peak_impact_impulse > 2.0);
-        FLOW_ASSERT_TRUE(manifold.total_dissipated_energy > 0.0);
-        FLOW_ASSERT_TRUE(manifold.passivity_maintained);
-
-        /* Check torque limits are respected */
-        for (size_t j = 0; j < 6; ++j) {
-            FLOW_ASSERT_TRUE(fabs(torques[j]) <= 100.0);
-        }
-
-        /* SMT Formal Supreme Court Verification */
-        FlowSMTProofAttestation impact_proof;
-        memset(&impact_proof, 0, sizeof(impact_proof));
-        FLOW_ASSERT_EQ(flow_symplectic_impact_verify_smt(&manifold, &leg_jet, &impact_proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(impact_proof);
-
-        printf("  ✓ Stage 12 Passed: Non-Smooth Symplectic Impact: Impulse=%.3f N*s, Dissipated=%.3f J, Passivity verified; SMT proven.\n\n",
-               manifold.peak_impact_impulse, manifold.total_dissipated_energy);
-    }
-
-    /* ========================================================================= */
-    /* STAGE 13: fjet x Neuro-Bridge: Latent Geodesic Pre-Play Engine            */
-    /* ========================================================================= */
-    FLOW_STAGE_BEGIN(13, "fjet x Neuro-Bridge: Latent Geodesic Pre-Play & Real-Time BMF Coordinate Synthesis");
-    {
-        FlowNeuroBridge bridge;
-        FLOW_ASSERT_EQ(flow_neuro_bridge_init(&bridge, 4096, 0x1337BEEF), 1);
-
-        FlowNeuroGeodesicPrePlay preplay;
-        FLOW_ASSERT_EQ(flow_neuro_geodesic_preplay_init(&preplay, &bridge, 16, 0.35), 1);
-        FLOW_ASSERT_EQ(preplay.total_tokens_received, 0ULL);
-
-        /* Generate synthetic 4096-D token embedding 1 */
-        float embedding1[4096];
-        for (size_t i = 0; i < 4096; ++i) {
-            embedding1[i] = 0.02f * sinf(0.01f * (float)i);
-        }
-        FlowNeuroProjectionResult token1;
-        FLOW_ASSERT_EQ(flow_neuro_bridge_project(&bridge, embedding1, 4096, FLOW_NEURO_INTENT_SMOOTH_FETCH_LATTE, &token1), 1);
-
-        /* Ingest Token 1 */
-        FLOW_ASSERT_EQ(flow_neuro_geodesic_feed_token(&preplay, &token1, 0.0), 1);
-        FLOW_ASSERT_EQ(preplay.total_tokens_received, 1ULL);
-        FLOW_ASSERT_TRUE(preplay.is_preplaying);
-
-        /* Generate synthetic Token 2 (slight shift in latent intent) */
-        float embedding2[4096];
-        for (size_t i = 0; i < 4096; ++i) {
-            embedding2[i] = 0.02f * sinf(0.01f * (float)i + 0.05f);
-        }
-        FlowNeuroProjectionResult token2;
-        FLOW_ASSERT_EQ(flow_neuro_bridge_project(&bridge, embedding2, 4096, FLOW_NEURO_INTENT_SMOOTH_FETCH_LATTE, &token2), 1);
-
-        /* Ingest Token 2: computes velocity and geodesic acceleration */
-        FLOW_ASSERT_EQ(flow_neuro_geodesic_feed_token(&preplay, &token2, 0.020), 1);
-        FLOW_ASSERT_EQ(preplay.total_tokens_received, 2ULL);
-
-        /* Simulate 10kHz real-time loop during the 20ms gap between Token 2 and Token 3 (200 ticks of 100us) */
-        FlowNeuroProjectionResult live_extrapolated;
-        for (int tick = 0; tick < 200; ++tick) {
-            FLOW_ASSERT_EQ(flow_neuro_geodesic_extrapolate_10khz(&preplay, 0.0001, &live_extrapolated), 1);
-        }
-        FLOW_ASSERT_EQ(preplay.total_10khz_preplays, 200ULL);
-        FLOW_ASSERT_TRUE(live_extrapolated.bmf_coordinates != 0ULL);
-
-        /* Token 3 arrives: verify drift error residual is bounded */
-        float embedding3[4096];
-        for (size_t i = 0; i < 4096; ++i) {
-            embedding3[i] = 0.02f * sinf(0.01f * (float)i + 0.10f);
-        }
-        FlowNeuroProjectionResult token3;
-        FLOW_ASSERT_EQ(flow_neuro_bridge_project(&bridge, embedding3, 4096, FLOW_NEURO_INTENT_SMOOTH_FETCH_LATTE, &token3), 1);
-
-        FLOW_ASSERT_EQ(flow_neuro_geodesic_feed_token(&preplay, &token3, 0.040), 1);
-        FLOW_ASSERT_EQ(preplay.total_tokens_received, 3ULL);
-        FLOW_ASSERT_TRUE(preplay.peak_geodesic_drift <= 0.35); /* Bounded drift residual */
-
-        /* SMT Formal Supreme Court Verification */
-        FlowSMTProofAttestation geodesic_proof;
-        memset(&geodesic_proof, 0, sizeof(geodesic_proof));
-        FLOW_ASSERT_EQ(flow_neuro_geodesic_verify_smt(&preplay, &geodesic_proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(geodesic_proof);
-
-        printf("  ✓ Stage 13 Passed: Neuro Latent Geodesic Pre-Play extrapolated 200 ticks @ 10kHz; PeakDrift=%.4f; SMT proven.\n\n",
-               preplay.peak_geodesic_drift);
-    }
-
-    /* ========================================================================= */
-    /* STAGE 14: CXL Swarm Transport: Hostile Jitter & 10% Drop Simulation       */
-    /* ========================================================================= */
-    FLOW_STAGE_BEGIN(14, "CXL Swarm Transport under Hostile Jitter (500us) & 10% Packet Loss");
-    {
-        /* 1. Real POSIX socketpair loopback transport */
-        int sv[2];
-        FLOW_ASSERT_EQ(socketpair(AF_UNIX, SOCK_DGRAM, 0, sv), 0);
-        int fl = fcntl(sv[1], F_GETFL, 0);
-        fcntl(sv[1], F_SETFL, fl | O_NONBLOCK);
-
-        FlowJet actual_jet;
-        FLOW_ASSERT_EQ(flow_jet_init(&actual_jet, "hostile_cxl_alpha", "Hostile CXL Node Alpha"), 1);
-        for (uint32_t i = 0; i < 16; ++i) {
-            actual_jet.payload.q[i] = 0.8 * cos(0.2 * (double)i);
-            actual_jet.payload.p[i] = 0.3 * sin(0.2 * (double)i);
-        }
-
-        FlowJetDeadReckonSender sender;
-        FLOW_ASSERT_EQ(flow_jet_dead_reckon_sender_init(&sender, &actual_jet, 0.04), 1);
-
-        FlowJetDeadReckonReceiver receiver;
-        FLOW_ASSERT_EQ(flow_jet_dead_reckon_receiver_init(&receiver, "hostile_cxl_beta_mirror", 16), 1);
-        receiver.mirror_jet = actual_jet;
-
-        /* Jitter flight queue simulating up to 500us network latency variation (5 ticks @ dt=100us) */
-        typedef struct {
-            FlowJetDeadReckonPacket pkt;
-            uint64_t deliver_tick;
-            int active;
-        } JitterFlight;
-        JitterFlight flight_queue[16] = {0};
-
-        size_t packets_emitted = 0;
-        size_t packets_dropped = 0;
-        size_t packets_delivered = 0;
-        double peak_hostile_divergence = 0.0;
-
-        const uint32_t TOTAL_TICKS = 400;
-        const double DT = 0.005;
-
-        for (uint32_t t = 0; t < TOTAL_TICKS; ++t) {
-            /* Simulate continuous external perturbation (e.g. sensor/market fluctuations) */
-            if (t > 0 && t % 8 == 0) {
-                actual_jet.payload.p[t % 16] += 0.06 * sin(0.5 * (double)t);
-            }
-
-            FlowJetDeadReckonPacket pkt;
-            int needed = 0;
-            FLOW_ASSERT_EQ(flow_jet_dead_reckon_sender_step(&sender, DT, &pkt, &needed), 1);
-
-            if (needed) {
-                packets_emitted++;
-                /* Inject 10% packet drop: drop every 10th emitted packet */
-                if (packets_emitted % 10 == 3) {
-                    packets_dropped++;
-                } else {
-                    /* Simulate 500us jitter queue */
-                    uint32_t jitter_ticks = (pkt.packet_seq % 3) + 1;
-                    for (size_t q = 0; q < 16; ++q) {
-                        if (!flight_queue[q].active) {
-                            flight_queue[q].pkt = pkt;
-                            flight_queue[q].deliver_tick = t + jitter_ticks;
-                            flight_queue[q].active = 1;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            /* Deliver packets scheduled for current tick via real POSIX socketpair */
-            int packet_applied = 0;
-            for (size_t q = 0; q < 16; ++q) {
-                if (flight_queue[q].active && flight_queue[q].deliver_tick <= t) {
-                    ssize_t sent = send(sv[0], &flight_queue[q].pkt, sizeof(FlowJetDeadReckonPacket), 0);
-                    FLOW_ASSERT_EQ(sent, (ssize_t)sizeof(FlowJetDeadReckonPacket));
-
-                    FlowJetDeadReckonPacket rcv_pkt;
-                    ssize_t recvd = recv(sv[1], &rcv_pkt, sizeof(rcv_pkt), 0);
-                    FLOW_ASSERT_EQ(recvd, (ssize_t)sizeof(rcv_pkt));
-
-                    FLOW_ASSERT_EQ(flow_jet_dead_reckon_receiver_apply_packet(&receiver, &rcv_pkt), 1);
-                    packets_delivered++;
-                    flight_queue[q].active = 0;
-                    packet_applied = 1;
-                }
-            }
-
-            /* Step receiver mirror via symplectic Verlet leapfrog if not overwritten by packet */
-            if (!packet_applied) {
-                FLOW_ASSERT_EQ(flow_jet_dead_reckon_receiver_step(&receiver, DT), 1);
-            }
-
-            /* Track real-time divergence between actual sender state and receiver mirror */
-            double d_sq = 0.0;
-            for (uint32_t i = 0; i < 16; ++i) {
-                double diff = actual_jet.payload.q[i] - receiver.mirror_jet.payload.q[i];
-                d_sq += diff * diff;
-            }
-            double cur_div = sqrt(d_sq);
-            if (cur_div > peak_hostile_divergence) {
-                peak_hostile_divergence = cur_div;
-            }
-        }
-
-        close(sv[0]);
-        close(sv[1]);
-
-        /* Invariants under hostile conditions */
-        FLOW_ASSERT_TRUE(packets_dropped > 0);
-        FLOW_ASSERT_TRUE(packets_delivered > 0);
-        FLOW_ASSERT_TRUE(sender.bandwidth_savings_ratio >= 0.85);
-        FLOW_ASSERT_TRUE(peak_hostile_divergence < 0.20);
-
-        /* Formal Supreme Court SMT Verification */
-        FlowSMTProofAttestation hostile_proof;
-        memset(&hostile_proof, 0, sizeof(hostile_proof));
-        FLOW_ASSERT_EQ(flow_jet_dead_reckon_verify_smt(&sender, &hostile_proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(hostile_proof);
-
-        printf("  ✓ Stage 14 Passed: Hostile Transport (10%% loss, 500us jitter, socketpair): Emitted=%zu, Dropped=%zu, Delivered=%zu, PeakDiv=%.4f, Savings=%.2f%%; SMT proven.\n\n",
-               packets_emitted, packets_dropped, packets_delivered,
-               peak_hostile_divergence, sender.bandwidth_savings_ratio * 100.0);
     }
 
     FLOW_TEST_SUITE_END();

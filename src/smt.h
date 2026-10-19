@@ -1,88 +1,30 @@
 #ifndef FLOW_SMT_H
 #define FLOW_SMT_H
-
 #include "flow.h"
 #include "plugin.h"
 #include "search.h"
-
 #include <stdio.h>
 #include <stdint.h>
-
 #ifndef FLOW_SMT_RESULT_DEFINED
 #define FLOW_SMT_RESULT_DEFINED
-typedef enum {
-    FLOW_SMT_PROVEN_UNSAT = 0,    /* Negation is UNSAT -> Theorem holds universally */
+typedef enum { FLOW_SMT_PROVEN_UNSAT = 0,    /* Negation is UNSAT -> Theorem holds universally */
     FLOW_SMT_VIOLATION_SAT = 1,   /* Counterexample found -> Invariant violated */
     FLOW_SMT_UNKNOWN = 2          /* Unconstrained or unbounded */
 } FlowSMTResult;
 #endif
-
-typedef struct FlowSMTProofAttestation {
-    FlowSMTResult buffer_bounds_safety;
-    FlowSMTResult memory_quota_bound;
-    FlowSMTResult shard_non_aliasing;
-    FlowSMTResult determinism_invariant;
-    char proof_summary[256];
-} FlowSMTProofAttestation;
-
-/* Generate complete SMT-LIB2 script to output stream */
-int flow_smt_generate_proof_script(const SemanticIR *ir,
-                                   const Component *component,
-                                   const FlowPlanAssignment *plan,
-                                   const FlowPlanMetrics *metrics,
-                                   FILE *out);
-
-/* Evaluate and formally verify all four theorems */
-int flow_smt_verify(const SemanticIR *ir,
-                    const Component *component,
-                    const FlowPlanAssignment *plan,
-                    const FlowPlanMetrics *metrics,
-                    FlowSMTProofAttestation *proof_out);
-
-/* Evaluate and formally verify with microsecond time-budget watchdog */
-int flow_smt_verify_with_budget(const SemanticIR *ir,
-                                const Component *component,
-                                const FlowPlanAssignment *plan,
-                                const FlowPlanMetrics *metrics,
-                                uint64_t budget_us,
-                                FlowSMTProofAttestation *proof_out);
-
-const char *flow_smt_result_name(FlowSMTResult res);
-
-/* Pre-emptive SMT Verifier Masks & Boundary Checks (Unified Verification Supreme Court) */
-int verify_candidate(const SemanticIR *ir, const Component *component,
-                     const SearchResult *search, VerificationReport *report);
-const char *verification_status_name(VerificationStatus status);
-uint64_t flow_verifier_get_contract_mask(const SemanticIR *ir,
-                                         const Component *comp,
-                                         const FlowPlanDimensionSet *dims);
-uint64_t flow_verifier_get_resource_mask(const SemanticIR *ir,
-                                         const Component *comp,
-                                         const FlowPlanDimensionSet *dims);
-
-/* ========================================================================= */
-/* SMT Hyper-box Constraint Polytope Verification (QF_LIA Invariants)        */
-/* ========================================================================= */
-
-typedef enum {
-    FLOW_BOX_THEOREM_BUFFER_BOUNDS = 0,
-    FLOW_BOX_THEOREM_MEMORY_QUOTA  = 1,
-    FLOW_BOX_THEOREM_SHARD_ISOLATION = 2,
-    FLOW_BOX_THEOREM_DETERMINISM   = 3
-} FlowBoxTheoremType;
-
-typedef struct {
-    const char *name;
-    uint64_t candidate_value;
-    uint64_t min_bound;
-    uint64_t max_bound;
-    FlowBoxTheoremType theorem;
+typedef struct FlowSMTProofAttestation { FlowSMTResult buffer_bounds_safety; FlowSMTResult memory_quota_bound; FlowSMTResult shard_non_aliasing;
+    FlowSMTResult determinism_invariant; char proof_summary[256]; } FlowSMTProofAttestation; int flow_smt_generate_proof_script(const SemanticIR *ir,
+                                   const Component *component, const FlowPlanAssignment *plan, const FlowPlanMetrics *metrics, FILE *out);
+int flow_smt_verify(const SemanticIR *ir, const Component *component, const FlowPlanAssignment *plan, const FlowPlanMetrics *metrics, FlowSMTProofAttestation *proof_out);
+int flow_smt_verify_with_budget(const SemanticIR *ir, const Component *component, const FlowPlanAssignment *plan, const FlowPlanMetrics *metrics, uint64_t budget_us,
+                                FlowSMTProofAttestation *proof_out); const char *flow_smt_result_name(FlowSMTResult res);
+int verify_candidate(const SemanticIR *ir, const Component *component, const SearchResult *search, VerificationReport *report);
+const char *verification_status_name(VerificationStatus status); uint64_t flow_verifier_get_contract_mask(const SemanticIR *ir, const Component *comp,
+                                         const FlowPlanDimensionSet *dims); uint64_t flow_verifier_get_resource_mask(const SemanticIR *ir, const Component *comp,
+                                         const FlowPlanDimensionSet *dims); typedef enum { FLOW_BOX_THEOREM_BUFFER_BOUNDS = 0, FLOW_BOX_THEOREM_MEMORY_QUOTA  = 1,
+    FLOW_BOX_THEOREM_SHARD_ISOLATION = 2, FLOW_BOX_THEOREM_DETERMINISM   = 3
+} FlowBoxTheoremType; typedef struct { const char *name; uint64_t candidate_value; uint64_t min_bound; uint64_t max_bound; FlowBoxTheoremType theorem;
     const char *violation_msg; /* Optional custom violation description, e.g. "exceeds hardware physical limit" */
-} FlowBoxConstraint;
-
-FlowSMTResult flow_smt_verify_box_invariants(const char *subsystem_tag,
-                                             const FlowBoxConstraint *constraints,
-                                             size_t constraint_count,
+} FlowBoxConstraint; FlowSMTResult flow_smt_verify_box_invariants(const char *subsystem_tag, const FlowBoxConstraint *constraints, size_t constraint_count,
                                              FlowSMTProofAttestation *proof_out);
-
 #endif

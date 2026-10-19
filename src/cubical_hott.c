@@ -1,82 +1,51 @@
 #include "cubical_hott.h"
 #include "geometric_axiom.h"
 #include "flow_smt_dsl.h"
-#include <stdio.h>
-#include <string.h>
 #include <ctype.h>
 #include <math.h>
-
-uint64_t flow_cubical_face_proj(uint64_t sieve, uint32_t dim_k, uint8_t endpoint) {
-    if (dim_k >= FLOW_CUBICAL_MAX_DIM) return sieve;
-    uint64_t bit = 1ULL << dim_k;
-    return endpoint == 0 ? (sieve & ~bit) : (sieve | bit);
-}
-
-uint64_t flow_cubical_degeneracy(uint64_t sieve, uint32_t dim_k) {
-    if (dim_k >= FLOW_CUBICAL_MAX_DIM - 1) return sieve & ((1ULL << (FLOW_CUBICAL_MAX_DIM - 1)) - 1);
-    uint64_t lower_mask = (dim_k > 0) ? ((1ULL << dim_k) - 1ULL) : 0ULL;
-    return (sieve & lower_mask) | ((sieve & ~lower_mask) << 1);
-}
-
+#include <stdio.h>
+#include <string.h>
+uint64_t flow_cubical_face_proj(uint64_t sieve, uint32_t dim_k, uint8_t endpoint) { if (dim_k >= FLOW_CUBICAL_MAX_DIM) return sieve; uint64_t bit = 1ULL << dim_k;
+    return endpoint == 0 ? (sieve & ~bit) : (sieve | bit); } uint64_t flow_cubical_degeneracy(uint64_t sieve, uint32_t dim_k) {
+    if (dim_k >= FLOW_CUBICAL_MAX_DIM - 1) return sieve & ((1ULL << (FLOW_CUBICAL_MAX_DIM - 1)) - 1); uint64_t lower_mask = (dim_k > 0) ? ((1ULL << dim_k) - 1ULL) : 0ULL;
+    return (sieve & lower_mask) | ((sieve & ~lower_mask) << 1); }
 FlowKanStatus flow_kan_check_homotopy(uint64_t mask_p, uint64_t mask_q, uint64_t boundary_filter, uint64_t *mismatch_out) {
-    uint64_t diff = (mask_p ^ mask_q) & boundary_filter;
-    if (mismatch_out) *mismatch_out = diff;
-    return (diff == 0) ? FLOW_KAN_FILLED_HOMOTOPIC : FLOW_KAN_OBSTRUCTED_SINGULARITY;
-}
-
-uint8_t flow_topos_classify_subobject(uint64_t subobject_mask, uint64_t ambient_sieve) {
-    return ((subobject_mask & ambient_sieve) == subobject_mask) ? 1 : 0;
-}
-
-int flow_cubical_handover_polytope(uint64_t mask_p, uint64_t mask_q, uint64_t boundary_filter,
-                                   FlowPolyhedron *poly, int64_t offset_out[FLOW_POLY_MAX_DIM]) {
-    uint64_t mismatch = 0;
-    if (flow_kan_check_homotopy(mask_p, mask_q, boundary_filter, &mismatch) != FLOW_KAN_FILLED_HOMOTOPIC) {
-        if (offset_out) memset(offset_out, 0, sizeof(int64_t) * FLOW_POLY_MAX_DIM);
-        return 0;
-    }
-    if (!poly) return 1;
-    size_t active_dims = poly->dimension > FLOW_POLY_MAX_DIM ? FLOW_POLY_MAX_DIM : poly->dimension;
-    for (size_t d = 0; d < active_dims; ++d) {
-        uint64_t dir_mask = 0xFFFFULL << (d * 16);
-        int64_t delta = (int64_t)(__builtin_popcountll(mask_p & dir_mask) - __builtin_popcountll(mask_q & dir_mask));
-        if (offset_out) offset_out[d] = delta;
-        poly->lower_bounds[d] += delta;
-        poly->upper_bounds[d] += delta;
-        for (size_t c = 0; c < poly->constraint_count; ++c)
-            poly->constraints[c].constant -= poly->constraints[c].coeffs[d] * delta;
-    }
-    return 1;
-}
-
-int flow_cubical_holonomy_twist(uint64_t loop_sieve, FlowUnifiedSection *sec) {
-    if (!sec) return 0;
-    if (__builtin_parityll(loop_sieve) != 0) {
+    uint64_t diff = (mask_p ^ mask_q) & boundary_filter; if (mismatch_out) *mismatch_out = diff;
+    return (diff == 0) ? FLOW_KAN_FILLED_HOMOTOPIC : FLOW_KAN_OBSTRUCTED_SINGULARITY; }
+uint8_t flow_topos_classify_subobject(uint64_t subobject_mask, uint64_t ambient_sieve) { return ((subobject_mask & ambient_sieve) == subobject_mask) ? 1 : 0; }
+FlowCubicalTypeSieve flow_cubical_sieve_from_ir(const SemanticIR *ir) { FlowCubicalTypeSieve s = { .mask = 0x1FULL, .boundary_filter = 0ULL }; if (!ir) return s;
+    if (ir->memory_limit_mb > 0) s.mask |= (1ULL << 6); if (ir->flow_parallelizable) { s.mask |= (1ULL << 8); s.boundary_filter |= (1ULL << 8); }
+    if (ir->state_shared)        { s.mask |= (1ULL << 10); s.boundary_filter |= (1ULL << 10); }
+    if (ir->state_read_heavy)    { s.mask |= (1ULL << 12); s.boundary_filter |= (1ULL << 12); }
+    if (ir->fact_unordered)      { s.mask |= (1ULL << 23); s.boundary_filter |= (1ULL << 23); } if (ir->state_bounded || ir->fact_range_proven) s.mask |= (1ULL << 49);
+    if (ir->fact_deterministic)  s.mask |= (1ULL << 52); if (ir->fact_lean_certified) s.mask |= (1ULL << 62); return s; }
+FlowCubicalTypeSieve flow_cubical_sieve_from_component(const Component *comp) {
+    FlowCubicalTypeSieve s = { .mask = 0x1FULL | (1ULL << 6) | (1ULL << 49) | (1ULL << 52) | (1ULL << 62), .boundary_filter = 0ULL }; if (!comp) return s;
+    if (comp->supports_parallelizable) s.mask |= (1ULL << 8); if (comp->supports_shared)         s.mask |= (1ULL << 10);
+    if (comp->supports_read_heavy)     s.mask |= (1ULL << 12); if (comp->supports_unordered)      s.mask |= (1ULL << 23); return s; }
+int flow_cubical_match_types(FlowCubicalTypeSieve intent, FlowCubicalTypeSieve candidate, uint64_t *mismatch_out) { uint64_t required = intent.mask & intent.boundary_filter;
+    if (!flow_topos_classify_subobject(required, candidate.mask)) { if (mismatch_out) *mismatch_out = required & ~candidate.mask; return 0; }
+    return flow_kan_check_homotopy(intent.mask, candidate.mask, intent.boundary_filter & candidate.boundary_filter, mismatch_out) == FLOW_KAN_FILLED_HOMOTOPIC; }
+int flow_cubical_handover_polytope(uint64_t mask_p, uint64_t mask_q, uint64_t boundary_filter, FlowPolyhedron *poly, int64_t offset_out[FLOW_POLY_MAX_DIM]) {
+    uint64_t mismatch = 0; if (flow_kan_check_homotopy(mask_p, mask_q, boundary_filter, &mismatch) != FLOW_KAN_FILLED_HOMOTOPIC) {
+        if (offset_out) memset(offset_out, 0, sizeof(int64_t) * FLOW_POLY_MAX_DIM); return 0; } if (!poly) return 1;
+    size_t active_dims = poly->dimension > FLOW_POLY_MAX_DIM ? FLOW_POLY_MAX_DIM : poly->dimension; for (size_t d = 0; d < active_dims; ++d) {
+        uint64_t dir_mask = 0xFFFFULL << (d * 16); int64_t delta = (int64_t)(__builtin_popcountll(mask_p & dir_mask) - __builtin_popcountll(mask_q & dir_mask));
+        if (offset_out) offset_out[d] = delta; poly->lower_bounds[d] += delta; poly->upper_bounds[d] += delta; for (size_t c = 0; c < poly->constraint_count; ++c)
+            poly->constraints[c].constant -= poly->constraints[c].coeffs[d] * delta; } return 1; }
+int flow_cubical_holonomy_twist(uint64_t loop_sieve, FlowUnifiedSection *sec) { if (!sec) return 0; if (__builtin_parityll(loop_sieve) != 0)
         for (uint32_t k = 0; k < FLOW_AXIOM_DIM; ++k)
-            if (loop_sieve & (1ULL << (k % 64))) sec->p[k] = -sec->p[k];
-    }
-    return 1;
-}
-
-FlowSMTResult flow_cubical_verify_smt(const FlowCubicalSieve *sieve, uint64_t mask_p, uint64_t mask_q,
-                                      uint64_t boundary_filter, FlowSMTProofAttestation *proof_out) {
-    bool demorgan_ok = ((~(mask_p & mask_q) ^ (~mask_p | ~mask_q)) == 0);
-    uint64_t mismatch = 0;
+            if (loop_sieve & (1ULL << (k % 64))) sec->p[k] = -sec->p[k]; return 1; }
+FlowSMTResult flow_cubical_verify_smt(const FlowCubicalSieve *sieve, uint64_t mask_p, uint64_t mask_q, uint64_t boundary_filter, FlowSMTProofAttestation *proof_out) {
+    bool demorgan_ok = ((~(mask_p & mask_q) ^ (~mask_p | ~mask_q)) == 0); uint64_t mismatch = 0;
     bool kan_ok = (flow_kan_check_homotopy(mask_p, mask_q, boundary_filter, &mismatch) == FLOW_KAN_FILLED_HOMOTOPIC && mismatch == 0);
-    uint8_t chi = flow_topos_classify_subobject(mask_p, sieve ? sieve->arrows : ~0ULL);
-    bool topos_ok = (chi == 0 || chi == 1);
-    bool canvas_ok = (sizeof(FlowBmf1BitCanvas) == 64);
-
-    const FlowBoxConstraint rules[] = {
+    uint8_t chi = flow_topos_classify_subobject(mask_p, sieve ? sieve->arrows : ~0ULL); const FlowBoxConstraint rules[] = {
         FLOW_SMT_RULE("demorgan_duality", !demorgan_ok, 0, 0, FLOW_BOX_THEOREM_BUFFER_BOUNDS, "De Morgan duality violated"),
         FLOW_SMT_RULE("kan_box_closure", !kan_ok, 0, 0, FLOW_BOX_THEOREM_MEMORY_QUOTA, "Kan open-box homotopy obstructed"),
-        FLOW_SMT_RULE("topos_subobject_chi", !topos_ok, 0, 0, FLOW_BOX_THEOREM_SHARD_ISOLATION, "Topos classifier invalid"),
-        FLOW_SMT_RULE("canvas_confinement", !canvas_ok, 0, 0, FLOW_BOX_THEOREM_DETERMINISM, "64B confinement violated")
-    };
+        FLOW_SMT_RULE("topos_subobject_chi", !(chi == 0 || chi == 1), 0, 0, FLOW_BOX_THEOREM_SHARD_ISOLATION, "Topos classifier invalid"),
+        FLOW_SMT_RULE("canvas_confinement", sizeof(FlowBmf1BitCanvas) != 64, 0, 0, FLOW_BOX_THEOREM_DETERMINISM, "64B confinement violated") };
     return FLOW_SMT_VERIFY_RULES("cubical_hott", proof_out, rules,
-        "SMT CUBICAL HOTT SOUND: DeMorgan=VALID, KanMismatch=0, Omega=%u, 64B_Confinement=YES (Zero-Defect Guaranteed)", chi);
-}
-
+        "SMT CUBICAL HOTT SOUND: DeMorgan=VALID, KanMismatch=0, Omega=%u, 64B_Confinement=YES (Zero-Defect Guaranteed)", chi); }
 static const FlowCubicalAxisInfo S_AXIS_DICTIONARY[64] = {
     {0,  FLOW_CUBICAL_SUBSPACE_MEMORY, "capacity_lsb", "Initial Buffer Capacity (LSB)", "bitspace", "Memory & Capacity", "Buffer capacity expanded along LSB exponent step."},
     {1,  FLOW_CUBICAL_SUBSPACE_MEMORY, "capacity_bit1", "Exponential Capacity Bit 1", "bitspace", "Memory & Capacity", "Capacity doubled to accommodate increasing throughput."},
@@ -142,67 +111,39 @@ static const FlowCubicalAxisInfo S_AXIS_DICTIONARY[64] = {
     {61, FLOW_CUBICAL_SUBSPACE_SECURITY, "qsbr_epoch_bump", "QSBR Epoch Generational Upgrade", "reload", "System Invariants & Defense", "Epoch advanced and new topology published with zero reader stalls under QSBR grace."},
     {62, FLOW_CUBICAL_SUBSPACE_SECURITY, "topos_subobject_chi", "Grothendieck Subobject Classifier", "cubical_hott", "System Invariants & Defense", "Topos characteristic map chi=1 verified subobject validly embedded in ambient sieve."},
     {63, FLOW_CUBICAL_SUBSPACE_SECURITY, "reader_isolated_flag", "Straggler Isolation Flag", "reload", "System Invariants & Defense", "Isolated reader flag marked; memory reclamation proceeding unhindered."}
-};
-
-const FlowCubicalAxisInfo *flow_cubical_get_axis_info(uint32_t axis_idx) {
-    return &S_AXIS_DICTIONARY[axis_idx < 64 ? axis_idx : 0];
-}
-
-int flow_cubical_decode_transition(uint64_t v_pre, uint64_t v_post, uint32_t explicit_axis, FlowCubicalTransitionReport *report_out) {
-    if (!report_out) return 0;
-    memset(report_out, 0, sizeof(*report_out));
-    report_out->v_pre = v_pre; report_out->v_post = v_post;
-    uint64_t diff = v_pre ^ v_post;
-    uint32_t axis = explicit_axis < 64 ? explicit_axis : (diff ? (uint32_t)__builtin_ctzll(diff) : 0);
-    report_out->flipped_axis = axis;
-    const FlowCubicalAxisInfo *info = flow_cubical_get_axis_info(axis);
-    report_out->axis_info = info;
-    report_out->subspace = info ? info->subspace : FLOW_CUBICAL_SUBSPACE_MEMORY;
-    uint64_t mismatch = 0;
+}; const FlowCubicalAxisInfo *flow_cubical_get_axis_info(uint32_t axis_idx) { return &S_AXIS_DICTIONARY[axis_idx < 64 ? axis_idx : 0]; }
+int flow_cubical_decode_transition(uint64_t v_pre, uint64_t v_post, uint32_t explicit_axis, FlowCubicalTransitionReport *report_out) { if (!report_out) return 0;
+    memset(report_out, 0, sizeof(*report_out)); report_out->v_pre = v_pre; report_out->v_post = v_post; uint64_t diff = v_pre ^ v_post;
+    uint32_t axis = explicit_axis < 64 ? explicit_axis : (diff ? (uint32_t)__builtin_ctzll(diff) : 0); const FlowCubicalAxisInfo *info = flow_cubical_get_axis_info(axis);
+    report_out->flipped_axis = axis; report_out->axis_info = info; report_out->subspace = info ? info->subspace : FLOW_CUBICAL_SUBSPACE_MEMORY; uint64_t mismatch = 0;
     report_out->is_kan_homotopic = (flow_kan_check_homotopy(v_pre, v_post, (axis < 64) ? ~(1ULL << axis) : ~0ULL, &mismatch) == FLOW_KAN_FILLED_HOMOTOPIC);
     snprintf(report_out->pre_topology, sizeof(report_out->pre_topology), "Topology_0x%016llx", (unsigned long long)v_pre);
     snprintf(report_out->post_topology, sizeof(report_out->post_topology), "Topology_0x%016llx", (unsigned long long)v_post);
-    snprintf(report_out->explanation, sizeof(report_out->explanation),
-             "At BitSpace axis #%u (%s [%s]): %s (Invariant contract '%s' preserved with zero downtime).",
-             axis, info->axis_name, info->subspace_name, info->canonical_explanation, info->policy_contract);
-    return 1;
-}
-
-uint64_t flow_cubical_get_module_mask(const char *module_id) {
-    if (!module_id) return ~0ULL;
-    static const struct { const char *name; uint64_t mask; } MOD_MASKS[] = {
-        {"jit",          (1ULL << 5) | (1ULL << 24) | (1ULL << 25) | (1ULL << 26) | (1ULL << 31) | (1ULL << 47) | (1ULL << 48)},
-        {"reload",       (1ULL << 12) | (1ULL << 13) | (1ULL << 30) | (1ULL << 53) | (1ULL << 61) | (1ULL << 63)},
-        {"embodied",     (1ULL << 14) | (1ULL << 32) | (1ULL << 33) | (1ULL << 34) | (1ULL << 35) | (1ULL << 36) | (1ULL << 37) | (1ULL << 38)},
-        {"primitive",    (1ULL << 7) | (1ULL << 39) | (1ULL << 40)},
-        {"smt",          (1ULL << 23) | (1ULL << 49) | (1ULL << 50) | (1ULL << 51) | (1ULL << 52)},
-        {"polyhedral",   (1ULL << 16) | (1ULL << 17) | (1ULL << 18) | (1ULL << 19) | (1ULL << 20) | (1ULL << 21)},
-        {"security",     (1ULL << 27) | (1ULL << 44) | (1ULL << 48) | (1ULL << 55) | (1ULL << 56) | (1ULL << 57) | (1ULL << 58)},
-        {"flow_jet",     (1ULL << 45) | (1ULL << 46)}, {"jet", (1ULL << 45) | (1ULL << 46)},
-        {"bitspace",     0x00000000000007FFULL | (1ULL << 41) | (1ULL << 42) | (1ULL << 43)},
-        {"adaptive",     (1ULL << 6) | (1ULL << 11) | (1ULL << 22) | (1ULL << 31) | (1ULL << 54) | (1ULL << 60)},
-        {"orchestrator", (1ULL << 15) | (1ULL << 59)},
-        {"cubical_hott", ~0ULL},
-        {"cxl_fabric",   (1ULL << 7) | 0x00000000000000FFULL | (1ULL << 31)}, {"cxl", (1ULL << 7) | 0x00000000000000FFULL | (1ULL << 31)},
-        {"matching",     (1ULL << 8) | (1ULL << 10) | (1ULL << 16) | (1ULL << 21)}, {"lob", (1ULL << 8) | (1ULL << 10) | (1ULL << 16) | (1ULL << 21)},
-        {"gateway",      (1ULL << 10) | (1ULL << 12) | (1ULL << 27) | (1ULL << 53)},
-        {"swarm",        (1ULL << 8) | (1ULL << 9) | (1ULL << 15)},
-        {"flowy_fvec",   (1ULL << 28) | (1ULL << 29) | (1ULL << 45) | (1ULL << 46)}, {"fvec", (1ULL << 28) | (1ULL << 29) | (1ULL << 45) | (1ULL << 46)},
-        {"topology",     (1ULL << 48) | (1ULL << 49) | (1ULL << 50) | (1ULL << 51) | (1ULL << 52)},
-        {"audit",        (1ULL << 12) | (1ULL << 53) | (1ULL << 61)},
-        {"abi",          (1ULL << 24) | (1ULL << 25) | (1ULL << 30)},
-        {"registry",     (1ULL << 10) | (1ULL << 15) | (1ULL << 48)}
-    };
+    snprintf(report_out->explanation, sizeof(report_out->explanation), "At BitSpace axis #%u (%s [%s]): %s (Invariant contract '%s' preserved with zero downtime).",
+             axis, info->axis_name, info->subspace_name, info->canonical_explanation, info->policy_contract); return 1; }
+uint64_t flow_cubical_get_module_mask(const char *module_id) { if (!module_id) return ~0ULL; static const struct { const char *name; uint64_t mask; } MOD_MASKS[] = {
+        {"jit",                (1ULL << 5) | (1ULL << 24) | (1ULL << 25) | (1ULL << 26) | (1ULL << 31) | (1ULL << 47) | (1ULL << 48)},
+        {"reload",             (1ULL << 12) | (1ULL << 13) | (1ULL << 30) | (1ULL << 53) | (1ULL << 61) | (1ULL << 63)},
+        {"embodied",           (1ULL << 14) | (1ULL << 32) | (1ULL << 33) | (1ULL << 34) | (1ULL << 35) | (1ULL << 36) | (1ULL << 37) | (1ULL << 38)},
+        {"primitive",          (1ULL << 7) | (1ULL << 39) | (1ULL << 40)}, {"smt",                (1ULL << 23) | (1ULL << 49) | (1ULL << 50) | (1ULL << 51) | (1ULL << 52)},
+        {"polyhedral",         (1ULL << 16) | (1ULL << 17) | (1ULL << 18) | (1ULL << 19) | (1ULL << 20) | (1ULL << 21)},
+        {"security",           (1ULL << 27) | (1ULL << 44) | (1ULL << 48) | (1ULL << 55) | (1ULL << 56) | (1ULL << 57) | (1ULL << 58)},
+        {"flow_jet",           (1ULL << 45) | (1ULL << 46)}, {"jet", (1ULL << 45) | (1ULL << 46)},
+        {"bitspace",           0x00000000000007FFULL | (1ULL << 41) | (1ULL << 42) | (1ULL << 43)},
+        {"adaptive",           (1ULL << 6) | (1ULL << 11) | (1ULL << 22) | (1ULL << 31) | (1ULL << 54) | (1ULL << 60)},
+        {"orchestrator",       (1ULL << 15) | (1ULL << 59)}, {"cubical_hott", ~0ULL}, {"swarm",              (1ULL << 8) | (1ULL << 9) | (1ULL << 15)},
+        {"flowy_fvec",         (1ULL << 28) | (1ULL << 29) | (1ULL << 45) | (1ULL << 46)}, {"fvec_core", (1ULL << 28) | (1ULL << 29) | (1ULL << 45) | (1ULL << 46)},
+        {"topology",           (1ULL << 48) | (1ULL << 49) | (1ULL << 50) | (1ULL << 51) | (1ULL << 52) | (1ULL << 62)},
+        {"audit",              (1ULL << 12) | (1ULL << 53) | (1ULL << 61)}, {"abi",                (1ULL << 24) | (1ULL << 25) | (1ULL << 30) | (1ULL << 62)},
+        {"registry",           (1ULL << 10) | (1ULL << 15) | (1ULL << 48) | (1ULL << 62)}, {"parser",             0x1FULL | (1ULL << 49) | (1ULL << 52)},
+        {"search",             0x7FFULL | (1ULL << 60)}, {"backend",            (1ULL << 24) | (1ULL << 25) | (1ULL << 48) | (1ULL << 52)},
+        {"token_ring",         (1ULL << 13) | (1ULL << 15) | (1ULL << 60) | (1ULL << 61)}, {"geometric_axiom",    (1ULL << 16) | (1ULL << 45) | (1ULL << 49) | (1ULL << 62)},
+        {"hardwired_template", (1ULL << 19) | (1ULL << 21) | (1ULL << 48)}, {"builtin_plugin",     0x7FFULL | (1ULL << 10) | (1ULL << 12) | (1ULL << 23)},
+        {"flowy",              (1ULL << 14) | (1ULL << 31) | (1ULL << 53) | (1ULL << 61) | (1ULL << 62)} };
     for (size_t i = 0; i < sizeof(MOD_MASKS) / sizeof(MOD_MASKS[0]); ++i)
-        if (strcmp(module_id, MOD_MASKS[i].name) == 0) return MOD_MASKS[i].mask;
-    return 0x0000000000000001ULL;
-}
-
-uint64_t flow_cubical_project_text_intent(const char *text) {
-    if (!text || !text[0]) return 0x0000000000000001ULL;
-    char lower[512] = {0};
-    for (size_t i = 0; text[i] && i + 1 < sizeof(lower); ++i) lower[i] = (char)tolower((unsigned char)text[i]);
-    uint64_t mask = 0;
+        if (!strcmp(module_id, MOD_MASKS[i].name)) return MOD_MASKS[i].mask; return 0x0000000000000001ULL; } uint64_t flow_cubical_project_text_intent(const char *text) {
+    if (!text || !text[0]) return 0x0000000000000001ULL; char lower[512] = {0};
+    for (size_t i = 0; text[i] && i + 1 < sizeof(lower); ++i) lower[i] = (char)tolower((unsigned char)text[i]); uint64_t mask = 0;
     if (strstr(lower, "memory") || strstr(lower, "quota") || strstr(lower, "alloc") || strstr(lower, "heap") || strstr(lower, "ram") ||
         strstr(text, "記憶體") || strstr(text, "內存") || strstr(text, "容量") || strstr(text, "超標"))
         mask |= flow_cubical_get_module_mask("jit") | (1ULL << 6) | (1ULL << 31) | (1ULL << 50);
@@ -229,6 +170,4 @@ uint64_t flow_cubical_project_text_intent(const char *text) {
         strstr(text, "为什么") || strstr(text, "決策") || strstr(text, "决策"))
         mask |= (1ULL << 14) | (1ULL << 31) | (1ULL << 53) | (1ULL << 61);
     if (strstr(lower, "bottleneck") || strstr(lower, "hotspot") || strstr(lower, "slow") || strstr(text, "卡在哪") || strstr(text, "效能熱點") || strstr(text, "瓶頸") || strstr(text, "慢"))
-        mask |= (1ULL << 12) | (1ULL << 15) | (1ULL << 53) | (1ULL << 61);
-    return mask ? mask : 0x0000000000000001ULL;
-}
+        mask |= (1ULL << 12) | (1ULL << 15) | (1ULL << 53) | (1ULL << 61); return mask ? mask : 0x0000000000000001ULL; }

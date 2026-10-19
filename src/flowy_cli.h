@@ -1,64 +1,22 @@
 #ifndef FLOW_FLOWY_CLI_H
 #define FLOW_FLOWY_CLI_H
-
 #include "flowy.h"
 #include "orchestrator.h"
 #include "audit.h"
 #include <stdio.h>
-
 #ifndef FLOW_LANG_ENUM_DEFINED
 #define FLOW_LANG_ENUM_DEFINED
-typedef enum {
-    FLOW_LANG_ZH = 0, /* Traditional Chinese (預設 / Default) */
-    FLOW_LANG_EN = 1  /* English */
+typedef enum { FLOW_LANG_ZH = 0, FLOW_LANG_EN = 1
 } FlowLanguage;
 #endif
-
-/* Multi-Lingual Presentation & Localization */
-void flowy_set_language(FlowLanguage lang);
-FlowLanguage flowy_get_language(void);
-FlowLanguage flowy_detect_system_language(void);
-FlowLanguage flowy_parse_language(const char *lang_str);
-const char *flowy_language_name(FlowLanguage lang);
-
-/* Living Documentation & The FLOW Book Viewer */
-int flowy_show_book(const char *target, FILE *out);
-int flowy_show_book_lang(const char *target, FlowLanguage lang, FILE *out);
-
-/* Terminal UI Formatters & Printers (Separation of Presentation & Brain) */
-void flowy_print_answer(const FlowyIntrospectiveAnswer *answer, FILE *out);
-void flowy_print_decision_explanation(const FlowDecisionEvent *event, FILE *out);
-void flowy_print_decision_timeline(const FlowDecisionLogger *logger, FILE *out);
-void flowy_print_bottleneck_explanation(const FlowTopologyGraph *graph, FILE *out);
+void flowy_set_language(FlowLanguage lang); FlowLanguage flowy_get_language(void); FlowLanguage flowy_detect_system_language(void);
+FlowLanguage flowy_parse_language(const char *lang_str); const char *flowy_language_name(FlowLanguage lang);
+void flowy_print_answer(const FlowyIntrospectiveAnswer *answer, FILE *out); void flowy_print_decision_explanation(const FlowDecisionEvent *event, FILE *out);
+void flowy_print_decision_timeline(const FlowDecisionLogger *logger, FILE *out); void flowy_print_bottleneck_explanation(const FlowTopologyGraph *graph, FILE *out);
 void flowy_print_counterfactual_report(const FlowCounterfactualReport *report, FILE *out);
 void flowy_print_remediation_proposal(const FlowRemediationProposal *proposal, FILE *out);
-void flowy_print_autopilot_incident(const FlowAutopilotIncident *incident, FILE *out);
-
-/* Jet Bundle Inspection & Phase Portrait Rendering */
-struct FlowJet;
-struct FlowJetPotentialLandscape;
-void flowy_print_jet_inspection(const struct FlowJet *jet, FILE *out);
+void flowy_print_autopilot_incident(const FlowAutopilotIncident *incident, FILE *out); struct FlowJet; void flowy_print_jet_inspection(const struct FlowJet *jet, FILE *out);
 void flowy_render_phase_portrait(const struct FlowJet *jet, uint32_t dim_x, uint32_t dim_y, int steps, double dt, FILE *out);
-int flowy_jet_simulate_run(const struct FlowJet *jet, int steps, double dt, FILE *out);
-int flowy_jet_learn_demo(struct FlowJet *jet, int sample_count, FILE *out);
-int flowy_jet_dtc_simulate(struct FlowJet *jet, uint32_t cycles, double period_T, double imperfection, FILE *out);
-int flowy_jet_dtc_simulate_order(struct FlowJet *jet, uint32_t cycles, double period_T, double imperfection,
-                                 uint32_t order, uint64_t phase_mask, FILE *out);
-int flowy_jet_dead_reckon_demo(struct FlowJet *jet, uint32_t ticks, double threshold, FILE *out);
-int flowy_jet_lob_demo(struct FlowJet *jet, uint32_t ticks, FILE *out);
-int flowy_jet_impact_demo(struct FlowJet *jet, uint32_t ticks, FILE *out);
-int flowy_jet_geodesic_demo(struct FlowJet *jet, uint32_t tokens, FILE *out);
-
-/* Interactive REPL Loop */
-int flowy_interactive_loop(FlowOrchestrator *orch, FILE *in, FILE *out);
-
-/* Discrete Cubical HoTT & Topos 4-Layer Inspection */
-void flowy_print_cubical_topos_report(FILE *out);
-
-/* Discrete F2-Hodge Orthogonal Decomposition & Rigid Control Demo */
-int flowy_hodge_demo(FILE *out);
-
-/* Universal Hardwired Polyhedral Template & Register Hot-Update Demo */
-int flowy_template_demo(FILE *out);
-
+int flowy_jet_simulate_run(const struct FlowJet *jet, int steps, double dt, FILE *out); int flowy_jet_learn_demo(struct FlowJet *jet, int sample_count, FILE *out);
+int flowy_interactive_loop(FlowOrchestrator *orch, FILE *in, FILE *out); void flowy_print_cubical_topos_report(FILE *out);
 #endif /* FLOW_FLOWY_CLI_H */

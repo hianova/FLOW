@@ -4,12 +4,8 @@
 #include "hardware_telemetry.h"
 #include "embodied.h"
 #include "primitive.h"
-#include "flow_mock_driver.h"
-#include "bus_hybrid_poll.h"
-#include "cxl_fabric.h"
 #include "driver_can.h"
 #include "driver_imu.h"
-#include "embodied_physics_scenarios.h"
 #include "flow_embodied_mz.h"
 
 #include <stdio.h>
@@ -238,88 +234,6 @@ int main(void) {
     }
 
     /* ========================================================================= */
-    /* STAGE 6: Bus Hybrid Polling & Moreau Normal Cone Hysteresis               */
-    /* ========================================================================= */
-    FLOW_STAGE_BEGIN(6, "Bus Hybrid Polling & Non-Smooth Anti-Flapping Hysteresis");
-    {
-        FlowBusHybridPoll bus;
-        FLOW_ASSERT_EQ(flow_bus_hybrid_init(&bus, "gpu_command_bus", 4.0, 16.0, 2000.0), 1);
-        FLOW_ASSERT_EQ(bus.current_mode, FLOW_BUS_MODE_INTERRUPT);
-
-        /* Low traffic -> INTERRUPT */
-        for (int q = 1; q < 16; ++q) {
-            FlowBusMode mode = flow_bus_hybrid_evaluate_phase(&bus, (double)q);
-            FLOW_ASSERT_EQ(mode, FLOW_BUS_MODE_INTERRUPT);
-        }
-
-        /* Crossing threshold (q >= 16) -> BUSY_POLL */
-        FlowBusMode mode_enter = flow_bus_hybrid_evaluate_phase(&bus, 16.0);
-        FLOW_ASSERT_EQ(mode_enter, FLOW_BUS_MODE_BUSY_POLL);
-        FLOW_ASSERT_EQ(bus.current_mode, FLOW_BUS_MODE_BUSY_POLL);
-
-        /* Oscillations inside [4, 16] must NOT flap */
-        for (int i = 0; i < 50; ++i) {
-            double noise_q = 6.0 + (double)(i % 8);
-            FlowBusMode m = flow_bus_hybrid_evaluate_phase(&bus, noise_q);
-            FLOW_ASSERT_EQ(m, FLOW_BUS_MODE_BUSY_POLL);
-        }
-        FLOW_ASSERT_TRUE(bus.flutters_suppressed >= 40);
-
-        /* Draining below exit threshold (q <= 4) -> Fallback to INTERRUPT */
-        FlowBusMode mode_exit = flow_bus_hybrid_evaluate_phase(&bus, 3.0);
-        FLOW_ASSERT_EQ(mode_exit, FLOW_BUS_MODE_INTERRUPT);
-
-        FlowSMTProofAttestation bus_proof;
-        memset(&bus_proof, 0, sizeof(bus_proof));
-        FLOW_ASSERT_EQ(flow_bus_hybrid_verify_smt(&bus, &bus_proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(bus_proof);
-
-        printf("  ✓ Stage 6 Passed: Hybrid polling switched seamlessly; %llu flutters suppressed.\n\n",
-               (unsigned long long)bus.flutters_suppressed);
-    }
-
-    /* ========================================================================= */
-    /* STAGE 7: CXL Heterogeneous Memory Fabric & LLM KV Cache Tiering           */
-    /* ========================================================================= */
-    FLOW_STAGE_BEGIN(7, "CXL Heterogeneous Memory Fabric: Tiered KV Cache");
-    {
-        FlowCxlFabric fabric;
-        FLOW_ASSERT_EQ(flow_cxl_init(&fabric), 1);
-        FLOW_ASSERT_EQ(fabric.cap_hbm, 32);
-        FLOW_ASSERT_EQ(fabric.cap_ddr5, 128);
-        FLOW_ASSERT_EQ(fabric.cap_cxl, 352);
-
-        uint64_t pid1, pid33;
-        /* Session 1: HBM allocation */
-        FLOW_ASSERT_EQ(flow_cxl_allocate_kv_page(&fabric, 1, 0, 128, 0.85, &pid1), 1);
-        FLOW_ASSERT_EQ(fabric.pages[0].current_tier, FLOW_CXL_TIER_HBM);
-
-        /* Saturate Tier 0 HBM */
-        for (int i = 1; i < 32; ++i) {
-            uint64_t pid;
-            FLOW_ASSERT_EQ(flow_cxl_allocate_kv_page(&fabric, 1, i * 128, 128, 0.80, &pid), 1);
-        }
-        FLOW_ASSERT_EQ(fabric.count_hbm, 32);
-
-        /* Page 33 overflows into Tier 1 DDR5 */
-        FLOW_ASSERT_EQ(flow_cxl_allocate_kv_page(&fabric, 2, 0, 128, 0.75, &pid33), 1);
-        FLOW_ASSERT_EQ(fabric.pages[32].current_tier, FLOW_CXL_TIER_DDR5);
-        FLOW_ASSERT_EQ(fabric.count_ddr5, 1);
-
-        /* Access page */
-        uint8_t buffer[FLOW_CXL_PAGE_SIZE];
-        uint64_t lat_ns = 0;
-        FLOW_ASSERT_EQ(flow_cxl_access_kv_page(&fabric, pid1, buffer, &lat_ns), 1);
-        FLOW_ASSERT_TRUE(lat_ns <= 50); /* HBM latency <= 50ns */
-
-        FlowSMTProofAttestation cxl_proof;
-        memset(&cxl_proof, 0, sizeof(cxl_proof));
-        FLOW_ASSERT_EQ(flow_cxl_verify_smt(&fabric, 2, &cxl_proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(cxl_proof);
-
-        printf("  ✓ Stage 7 Passed: CXL multi-tier KV cache allocation & sub-microsecond access verified.\n\n");
-    }
-
     /* ========================================================================= */
     /* STAGE 8: SocketCAN / CAN-FD Real-Time Robot Actuator Driver & SMT Proof   */
     /* ========================================================================= */
@@ -446,59 +360,6 @@ int main(void) {
         FLOW_ASSERT_SMT_SOUND(imu_proof);
 
         printf("  ✓ Stage 9 Passed: IMU sensor streaming & complementary filter verified; SMT Bounds Sound.\n\n");
-    }
-
-    /* ========================================================================= */
-    /* STAGE 10: Advanced Physical Mechanics (Friction Cone, Impact, Co-Manip)   */
-    /* ========================================================================= */
-    FLOW_STAGE_BEGIN(10, "Advanced Physical Mechanics: Friction Cone, Impact & Dual-Robot Co-Manipulation");
-    {
-        /* 1. Coulomb Friction Cone: Gripping a delicate 60g egg with crush limit 15.0N */
-        FlowGraspFrictionCone cone;
-        FLOW_ASSERT_EQ(flow_friction_cone_init(&cone, 0.060, 0.35, 15.0), 1);
-        FLOW_ASSERT_FALSE(cone.is_slipping);
-        FLOW_ASSERT_FALSE(cone.is_crushed);
-
-        /* Apply sudden 5g acceleration disturbance */
-        FLOW_ASSERT_EQ(flow_friction_cone_step_reflex(&cone, 5.0 * 9.81, 0.001), 1);
-        FLOW_ASSERT_FALSE(cone.is_slipping); /* Reflex dynamically increased Fn without slippage */
-        FLOW_ASSERT_FALSE(cone.is_crushed);  /* Stays under 15N limit */
-
-        FlowSMTProofAttestation fric_proof;
-        memset(&fric_proof, 0, sizeof(fric_proof));
-        FLOW_ASSERT_EQ(flow_friction_cone_verify_smt(&cone, &fric_proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(fric_proof);
-
-        /* 2. Non-Smooth Restitution & Touchdown Impact: 45kg biped landing from 0.5m drop */
-        FlowImpactAbsorber ia;
-        FLOW_ASSERT_EQ(flow_impact_absorber_init(&ia, 45.0, 0.15, 10000.0), 1);
-        FLOW_ASSERT_EQ(flow_impact_absorber_simulate_touchdown(&ia, 0.5, 0.001), 1);
-        FLOW_ASSERT_FALSE(ia.gear_damaged);    /* Peak impact within 10kN rating */
-        FLOW_ASSERT_FALSE(ia.rebound_detected); /* Restitution e <= 0.05 (critical damping) */
-        FLOW_ASSERT_TRUE(ia.restitution_e <= 0.05);
-
-        FlowSMTProofAttestation impact_proof;
-        memset(&impact_proof, 0, sizeof(impact_proof));
-        FLOW_ASSERT_EQ(flow_impact_absorber_verify_smt(&ia, &impact_proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(impact_proof);
-
-        /* 3. Dual-Robot Rigid Co-Manipulation: 1.5m carbon-fiber beam co-transport */
-        FlowDualCoManipulation cm;
-        FLOW_ASSERT_EQ(flow_dual_comanip_init(&cm, 1.50, 200000.0, 500.0), 1);
-
-        double dist_vel[3] = {0.8, 0.2, 0.0}; /* Robot A swerves sideways */
-        for (int i = 0; i < 200; i++) {
-            FLOW_ASSERT_EQ(flow_dual_comanip_step(&cm, dist_vel, 0.001), 1);
-        }
-        FLOW_ASSERT_FALSE(cm.yield_violated);
-        FLOW_ASSERT_TRUE(cm.max_sync_error_m <= 0.005); /* <= 5mm rigid boundary */
-
-        FlowSMTProofAttestation cm_proof;
-        memset(&cm_proof, 0, sizeof(cm_proof));
-        FLOW_ASSERT_EQ(flow_dual_comanip_verify_smt(&cm, &cm_proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(cm_proof);
-
-        printf("  ✓ Stage 10 Passed: Friction cone, impact absorption, and dual-robot co-manipulation SMT Sound.\n\n");
     }
 
     /* ========================================================================= */

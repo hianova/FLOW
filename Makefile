@@ -1,7 +1,7 @@
 export PATH := /opt/homebrew/bin:/usr/local/bin:$(PATH)
 
 CC ?= clang
-CFLAGS ?= -std=c17 -Wall -Wextra -Wpedantic -O2 -Isrc/experimental
+CFLAGS ?= -std=c17 -Wall -Wextra -Wpedantic -O2 -Isrc -Iplugins -Itests
 LDLIBS ?= -lm
 THREAD_FLAGS ?= -pthread
 
@@ -15,8 +15,8 @@ SRC_LIB_FVEC    := $(wildcard src/fvec/*.c)
 SRC_LIB_JET     := $(wildcard src/jet/*.c)
 SRC_LIB_TOPO    := $(wildcard src/topo/*.c)
 SRC_LIB_INSPECT := $(wildcard src/inspect/*.c)
-SRC_LIB_EXP     := $(wildcard src/experimental/*.c)
-SRC_LIB := $(SRC_LIB_ROOT) $(SRC_LIB_FVEC) $(SRC_LIB_JET) $(SRC_LIB_TOPO) $(SRC_LIB_INSPECT) $(SRC_LIB_EXP)
+SRC_LIB_PLUGINS := $(wildcard plugins/*.c)
+SRC_LIB := $(SRC_LIB_ROOT) $(SRC_LIB_FVEC) $(SRC_LIB_JET) $(SRC_LIB_TOPO) $(SRC_LIB_INSPECT) $(SRC_LIB_PLUGINS)
 
 LIB_OBJS := \
   $(patsubst src/%.c,              $(BUILD_DIR)/obj/%.o,          $(SRC_LIB_ROOT)) \
@@ -24,7 +24,7 @@ LIB_OBJS := \
   $(patsubst src/jet/%.c,          $(BUILD_DIR)/obj/jet_%.o,      $(SRC_LIB_JET)) \
   $(patsubst src/topo/%.c,         $(BUILD_DIR)/obj/topo_%.o,     $(SRC_LIB_TOPO)) \
   $(patsubst src/inspect/%.c,      $(BUILD_DIR)/obj/inspect_%.o,  $(SRC_LIB_INSPECT)) \
-  $(patsubst src/experimental/%.c, $(BUILD_DIR)/obj/exp_%.o,      $(SRC_LIB_EXP))
+  $(patsubst plugins/%.c,          $(BUILD_DIR)/obj/plugin_%.o,   $(SRC_LIB_PLUGINS))
 
 AR ?= ar
 RANLIB ?= ranlib
@@ -33,17 +33,11 @@ PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 INCLUDEDIR ?= $(PREFIX)/include/flow
 
-PLUGINS_SO := $(BUILD_DIR)/libflow_embodied.so $(BUILD_DIR)/libflow_smt.so $(BUILD_DIR)/libflow_security.so $(BUILD_DIR)/libflow_swarm.so
+PLUGINS_SO := $(BUILD_DIR)/libflow_embodied.so $(BUILD_DIR)/libflow_swarm.so
 
-.PHONY: all clean test demos demo benchmark chaos-benchmark gateway-benchmark frontier-benchmark audit-book autopoiesis-check security-test acceptance install uninstall fuzz test-build test-run test-e2e sync-book audit-mechanisms fvec-flowc-apply-test reload-stress-nightly plugins flowy libflow test-cubical-hott
+.PHONY: all clean test demos demo benchmark chaos-benchmark gateway-benchmark frontier-benchmark autopoiesis-check security-test acceptance install uninstall fuzz test-build test-run test-e2e audit-mechanisms fvec-flowc-apply-test reload-stress-nightly plugins flowy libflow test-cubical-hott
 
-all: src/generated_book_knowledge.h $(LIBFLOW_A) $(FLOWC) $(FLOWY) plugins
-
-sync-book: src/generated_book_knowledge.h
-
-src/generated_book_knowledge.h: tools/sync-flow-book.c $(wildcard flow-book/src/*.md) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) tools/sync-flow-book.c -o $(BUILD_DIR)/sync-flow-book
-	$(BUILD_DIR)/sync-flow-book $@
+all: $(LIBFLOW_A) $(FLOWC) $(FLOWY) plugins
 
 install: $(FLOWC) $(FLOWY) $(LIBFLOW_A)
 	mkdir -p $(DESTDIR)$(BINDIR)
@@ -62,29 +56,29 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 
-$(BUILD_DIR)/obj/%.o: src/%.c src/generated_book_knowledge.h $(wildcard src/*.h) | $(BUILD_DIR)
+$(BUILD_DIR)/obj/%.o: src/%.c $(wildcard src/*.h) | $(BUILD_DIR)
 	@mkdir -p $(BUILD_DIR)/obj
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc -c $< -o $@
 
-$(BUILD_DIR)/obj/fvec_%.o: src/fvec/%.c src/generated_book_knowledge.h $(wildcard src/*.h) $(wildcard src/fvec/*.h) | $(BUILD_DIR)
+$(BUILD_DIR)/obj/fvec_%.o: src/fvec/%.c $(wildcard src/*.h) $(wildcard src/fvec/*.h) | $(BUILD_DIR)
 	@mkdir -p $(BUILD_DIR)/obj
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc -c $< -o $@
 
-$(BUILD_DIR)/obj/jet_%.o: src/jet/%.c src/generated_book_knowledge.h $(wildcard src/*.h) $(wildcard src/jet/*.h) | $(BUILD_DIR)
+$(BUILD_DIR)/obj/jet_%.o: src/jet/%.c $(wildcard src/*.h) $(wildcard src/jet/*.h) | $(BUILD_DIR)
 	@mkdir -p $(BUILD_DIR)/obj
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc -c $< -o $@
 
-$(BUILD_DIR)/obj/topo_%.o: src/topo/%.c src/generated_book_knowledge.h $(wildcard src/*.h) $(wildcard src/topo/*.h) | $(BUILD_DIR)
+$(BUILD_DIR)/obj/topo_%.o: src/topo/%.c $(wildcard src/*.h) $(wildcard src/topo/*.h) | $(BUILD_DIR)
 	@mkdir -p $(BUILD_DIR)/obj
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc -c $< -o $@
 
-$(BUILD_DIR)/obj/inspect_%.o: src/inspect/%.c src/generated_book_knowledge.h $(wildcard src/*.h) $(wildcard src/inspect/*.h) | $(BUILD_DIR)
+$(BUILD_DIR)/obj/inspect_%.o: src/inspect/%.c $(wildcard src/*.h) $(wildcard src/inspect/*.h) | $(BUILD_DIR)
 	@mkdir -p $(BUILD_DIR)/obj
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc -c $< -o $@
 
-$(BUILD_DIR)/obj/exp_%.o: src/experimental/%.c src/generated_book_knowledge.h $(wildcard src/*.h) $(wildcard src/experimental/*.h) | $(BUILD_DIR)
+$(BUILD_DIR)/obj/plugin_%.o: plugins/%.c $(wildcard src/*.h) $(wildcard plugins/*.h) | $(BUILD_DIR)
 	@mkdir -p $(BUILD_DIR)/obj
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc -Isrc/experimental -c $< -o $@
+	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc -Iplugins -c $< -o $@
 
 
 $(LIBFLOW_A): $(LIB_OBJS)
@@ -93,24 +87,18 @@ $(LIBFLOW_A): $(LIB_OBJS)
 
 libflow: $(LIBFLOW_A)
 
-$(FLOWC): src/flowc.c $(LIBFLOW_A) src/generated_book_knowledge.h | $(BUILD_DIR)
+$(FLOWC): src/flowc.c $(LIBFLOW_A) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -Isrc src/flowc.c $(LIBFLOW_A) -o $@ $(LDLIBS) $(THREAD_FLAGS)
 
-$(FLOWY): src/flowy_main.c $(LIBFLOW_A) src/generated_book_knowledge.h | $(BUILD_DIR)
+$(FLOWY): src/flowy_main.c $(LIBFLOW_A) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -Isrc src/flowy_main.c $(LIBFLOW_A) -o $@ $(LDLIBS) $(THREAD_FLAGS)
 
 flowy: $(FLOWY)
 
 plugins: $(PLUGINS_SO)
 
-$(BUILD_DIR)/libflow_embodied.so: src/embodied.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -shared -fPIC -DFLOW_PLUGIN_DSO -undefined dynamic_lookup $(THREAD_FLAGS) -Isrc src/embodied.c -o $@ $(LDLIBS)
-
-$(BUILD_DIR)/libflow_smt.so: src/smt.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -shared -fPIC -DFLOW_PLUGIN_DSO -undefined dynamic_lookup $(THREAD_FLAGS) -Isrc src/smt.c -o $@ $(LDLIBS)
-
-$(BUILD_DIR)/libflow_security.so: src/security.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -shared -fPIC -DFLOW_PLUGIN_DSO -undefined dynamic_lookup $(THREAD_FLAGS) -Isrc src/security.c -o $@ $(LDLIBS)
+$(BUILD_DIR)/libflow_embodied.so: plugins/embodied.c plugins/flow_embodied_mz.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -shared -fPIC -DFLOW_PLUGIN_DSO -undefined dynamic_lookup $(THREAD_FLAGS) -Isrc -Iplugins plugins/embodied.c plugins/flow_embodied_mz.c -o $@ $(LDLIBS)
 
 $(BUILD_DIR)/libflow_swarm.so: src/swarm.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -shared -fPIC -DFLOW_PLUGIN_DSO -undefined dynamic_lookup $(THREAD_FLAGS) -Isrc src/swarm.c -o $@ $(LDLIBS)
@@ -142,10 +130,6 @@ frontier-benchmark: tests/frontier-4pillars-benchmark.c $(LIBFLOW_A) | $(BUILD_D
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $(BUILD_DIR)/frontier-4pillars-benchmark $(LDLIBS)
 	$(BUILD_DIR)/frontier-4pillars-benchmark
 
-audit-book: tests/audit-flow-book-all.c $(LIBFLOW_A) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $(BUILD_DIR)/audit-flow-book-all $(LDLIBS)
-	$(BUILD_DIR)/audit-flow-book-all
-
 # ==============================================================================
 # Two-Stage Native Makefile Test Pipeline (Native Hermetic Barrier)
 # ==============================================================================
@@ -160,8 +144,7 @@ TEST_BINARIES := \
 	$(BUILD_DIR)/test-refactored-core \
 	$(BUILD_DIR)/test-geometric-axiom \
 	$(BUILD_DIR)/test-cubical-hott \
-	$(BUILD_DIR)/test-f2-hodge \
-	$(BUILD_DIR)/test-hardwired-template
+
 
 $(BUILD_DIR)/test-brain: tests/test_brain.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
@@ -185,12 +168,6 @@ $(BUILD_DIR)/test-geometric-axiom: tests/test_geometric_axiom.c $(FLOWC) $(FLOWY
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
 $(BUILD_DIR)/test-cubical-hott: tests/test_cubical_hott.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
-
-$(BUILD_DIR)/test-f2-hodge: tests/test_f2_hodge.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
-
-$(BUILD_DIR)/test-hardwired-template: tests/test_hardwired_template.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
 $(BUILD_DIR)/generated-reload-test: tests/generated-reload-test.c $(FLOWC) $(LIBFLOW_A) | $(BUILD_DIR)
@@ -228,7 +205,7 @@ autopoiesis-check: $(FLOWC) $(FLOWY)
 security-test: $(BUILD_DIR)/test-concurrency
 	@$(BUILD_DIR)/test-concurrency
 
-acceptance: test benchmark autopoiesis-check audit-book
+acceptance: test benchmark autopoiesis-check
 
 
 fvec-flowc-apply-test: $(FLOWC) $(FLOWY) | $(BUILD_DIR)
@@ -257,10 +234,6 @@ test-run: $(TEST_BINARIES) fvec-flowc-apply-test
 	@$(BUILD_DIR)/test-geometric-axiom
 	@echo "=== [8/10] Cubical HoTT: Discrete Cubical Sets, Kan Fillers & Topos Subobject Classifier ==="
 	@$(BUILD_DIR)/test-cubical-hott
-	@echo "=== [9/10] F2-Hodge: Discrete F2 Exterior Calculus, Orthogonal Decomposition & DTC ==="
-	@$(BUILD_DIR)/test-f2-hodge
-	@echo "=== [10/10] Hardwired Template: Universal Polyhedral Core & 1-Cycle Register Hot-Update ==="
-	@$(BUILD_DIR)/test-hardwired-template
 
 # Phase 3: End-to-End Compiler CLI & Invariant Smoke Tests
 test-e2e: $(FLOWC) $(FLOWY) plugins

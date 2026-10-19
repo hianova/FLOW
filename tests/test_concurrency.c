@@ -10,10 +10,6 @@
 #include "token_ring.h"
 #include "entropy_collapse.h"
 #include "flow_jet.h"
-#include "flow_jet_dead_reckon.h"
-#include "flow_time_crystal.h"
-#include "flow_speculative_jit.h"
-#include "flow_prefetch.h"
 #include "audit.h"
 
 #include <stdio.h>
@@ -655,10 +651,6 @@ int main(void) {
         FLOW_ASSERT_EQ(flow_jet_from_fvec(&fvec_hdr, &fvec_payload, &jet_reconstructed), 1);
         FLOW_ASSERT_EQ(jet_reconstructed.payload.pure_genome, jet_loaded.payload.pure_genome);
 
-        /* 5. CPU Hardware Cache Prefetching Along Jet Phase Trajectory */
-        int prefetched_lines = flow_prefetch_jet_trajectory(&jet_forward, 50.0);
-        FLOW_ASSERT_TRUE(prefetched_lines >= 3);
-
         /* 6. Formal SMT Verification of Symplectic Soundness */
         FlowSMTProofAttestation jet_proof;
         memset(&jet_proof, 0, sizeof(jet_proof));
@@ -764,94 +756,6 @@ int main(void) {
                trace_K);
     }
 
-    /* ========================================================================= */
-    /* STAGE 11: Discrete Time Crystal (DTC): Floquet DTTSB & Cyclic Memory      */
-    /* ========================================================================= */
-    FLOW_STAGE_BEGIN(11, "Discrete Time Crystal (DTC): Floquet DTTSB, Limit-Cycle Memory & Subharmonic Rigidity");
-    {
-        FlowJet jet_dtc;
-        FLOW_ASSERT_EQ(flow_jet_init(&jet_dtc, "jet_dtc_crystal", "DTC Quantum Memory Jet"), 1);
-
-        FlowTimeCrystal dtc;
-        FLOW_ASSERT_EQ(flow_dtc_init(&dtc, &jet_dtc, 0.02, 0.95 * 3.141592653589793, 1.2), 1);
-        FLOW_ASSERT_EQ(dtc.floquet_cycles_total, 0);
-
-        /* 1. Run 20 Floquet driving cycles */
-        FLOW_ASSERT_EQ(flow_dtc_step_floquet(&dtc, 20, 0.001), 1);
-        FLOW_ASSERT_EQ(dtc.floquet_cycles_total, 20);
-
-        /* 2. Subharmonic 2T Fourier peak locked */
-        double ratio = flow_dtc_get_fourier_subharmonic_ratio(&dtc);
-        FLOW_ASSERT_TRUE(ratio >= 0.85);
-        FLOW_ASSERT_EQ(dtc.is_subharmonic_locked, 1);
-
-        /* 3. Non-thermalizing MBL energy conservation */
-        FLOW_ASSERT_TRUE(dtc.max_energy_drift < 0.35);
-
-        /* 4. Cyclic Computational Memory: Encode & Decode bit */
-        FLOW_ASSERT_EQ(flow_dtc_encode_bit(&dtc, 1), 1);
-        FLOW_ASSERT_EQ(flow_dtc_step_floquet(&dtc, 10, 0.001), 1);
-        FLOW_ASSERT_EQ(flow_dtc_decode_bit(&dtc), 1);
-
-        FLOW_ASSERT_EQ(flow_dtc_encode_bit(&dtc, 0), 1);
-        FLOW_ASSERT_EQ(flow_dtc_step_floquet(&dtc, 10, 0.001), 1);
-        FLOW_ASSERT_EQ(flow_dtc_decode_bit(&dtc), 0);
-
-        /* 5. SMT Supreme Court Formal Proof */
-        FlowSMTProofAttestation dtc_proof;
-        memset(&dtc_proof, 0, sizeof(dtc_proof));
-        FLOW_ASSERT_EQ(flow_dtc_verify_soundness_smt(&dtc, &dtc_proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(dtc_proof);
-
-        printf("  ✓ Stage 11 Passed: Discrete Time Crystal sustained 2T subharmonic lock (ratio=%.2f%%); bit memory preserved; SMT proven.\n\n",
-               ratio * 100.0);
-    }
-
-    /* ========================================================================= */
-    /* STAGE 12: Speculative JIT: Koopman Moreau Crossing & Negative Latency Swap */
-    /* ========================================================================= */
-    FLOW_STAGE_BEGIN(12, "Speculative JIT: Koopman Moreau Crossing & Negative Latency Hot-Swap");
-    {
-        FlowJet jet_sjit;
-        FLOW_ASSERT_EQ(flow_jet_init(&jet_sjit, "jet_speculative", "Speculative JIT Jet"), 1);
-        jet_sjit.payload.q[0] = 1.05;
-        jet_sjit.payload.p[0] = 2.0; /* Approaching boundary threshold 1.1 */
-        jet_sjit.payload.a[0] = 0.0;
-
-        FlowReloadContext *reload_ctx = flow_reload_create(NULL);
-        FLOW_ASSERT_TRUE(reload_ctx != NULL);
-        uint64_t initial_gen = flow_reload_generation(reload_ctx);
-
-        FlowSpeculativeJIT sjit;
-        FLOW_ASSERT_EQ(flow_speculative_jit_init(&sjit, &jet_sjit, NULL, reload_ctx, 50000000.0, 1.1, 0), 1);
-        FLOW_ASSERT_EQ(sjit.is_compilation_dispatched, 0);
-
-        /* 1. Evaluate trajectory: lookahead anticipates boundary crossing */
-        FLOW_ASSERT_EQ(flow_speculative_jit_evaluate(&sjit, 0.001), 1);
-        FLOW_ASSERT_EQ(sjit.is_compilation_dispatched, 1);
-        FLOW_ASSERT_EQ(sjit.is_compilation_ready, 1);
-        FLOW_ASSERT_TRUE(sjit.predicted_crossing_time_ns > 0.0);
-
-        /* 2. Trajectory reaches threshold: auto-commits negative-latency swap */
-        jet_sjit.payload.q[0] = 1.15;
-        FLOW_ASSERT_EQ(flow_speculative_jit_evaluate(&sjit, 0.0), 1);
-        FLOW_ASSERT_EQ(sjit.is_hot_swapped, 1);
-        FLOW_ASSERT_EQ(sjit.total_negative_latency_swaps, 1);
-        FLOW_ASSERT_EQ(flow_reload_generation(reload_ctx), initial_gen + 1);
-
-        /* 3. SMT Highest Court Verification */
-        FlowSMTProofAttestation sjit_proof;
-        memset(&sjit_proof, 0, sizeof(sjit_proof));
-        FLOW_ASSERT_EQ(flow_speculative_jit_verify_smt(&sjit, &sjit_proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(sjit_proof);
-
-        flow_reload_destroy(reload_ctx);
-
-        printf("  ✓ Stage 12 Passed: Speculative JIT anticipated Moreau crossing (t_pred=%.1fns); negative latency hot-swap committed; SMT proven.\n\n",
-               sjit.predicted_crossing_time_ns);
-    }
-
-    /* ========================================================================= */
     /* STAGE 13: Linker Hard Gate 6: Physical Invariant & Hamiltonian Barrier    */
     /* ========================================================================= */
     FLOW_STAGE_BEGIN(13, "Linker Hard Gate 6: Physical Invariant & Hamiltonian Barrier");
@@ -877,7 +781,7 @@ int main(void) {
         jet_sec.payload.q[2] = NAN;
         outcome = flow_security_check_physical_barrier_gate(&comp_spec, gate_msg, sizeof(gate_msg));
         FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PHYSICAL_BREACH);
-        FLOW_ASSERT_TRUE(strstr(gate_msg, "NaN or Inf") != NULL);
+        FLOW_ASSERT_TRUE(strstr(gate_msg, "NaN/Inf") != NULL);
 
         /* Fail-Safe Clamping restores safety envelope */
         FLOW_ASSERT_EQ(flow_jet_clamp_to_safety_envelope(&jet_sec, 2.0, 10.0, 50.0), 1);
@@ -888,7 +792,7 @@ int main(void) {
         jet_sec.payload.p[0] = 2.0; /* Within velocity bound (2.0 < 10.0), but drifts energy by >200% */
         outcome = flow_security_check_physical_barrier_gate(&comp_spec, gate_msg, sizeof(gate_msg));
         FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PHYSICAL_BREACH);
-        FLOW_ASSERT_TRUE(strstr(gate_msg, "Hamiltonian energy drift") != NULL);
+        FLOW_ASSERT_TRUE(strstr(gate_msg, "Hamiltonian drift") != NULL);
 
         /* Clamp & re-baseline energy */
         FLOW_ASSERT_EQ(flow_jet_clamp_to_safety_envelope(&jet_sec, 2.0, 10.0, 50.0), 1);
@@ -976,7 +880,7 @@ int main(void) {
         outcome = flow_security_check_transposition_gate(&valid_spec, 100,
                                                          trans_msg, sizeof(trans_msg));
         FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_RESOURCE_EXHAUSTION);
-        FLOW_ASSERT_TRUE(strstr(trans_msg, "exceeds buffer") != NULL);
+        FLOW_ASSERT_TRUE(strstr(trans_msg, "exceed buffer") != NULL);
 
         /* 3. Integer overflow rejection */
         FlowLayoutMigrationSpec overflow_spec = valid_spec;
@@ -1025,7 +929,7 @@ int main(void) {
         }
         outcome = flow_security_check_attractor_anomaly(&jet_unstable, &profile, ids_msg, sizeof(ids_msg));
         FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PHYSICAL_BREACH);
-        FLOW_ASSERT_TRUE(strstr(ids_msg, "attractor instability") != NULL);
+        FLOW_ASSERT_TRUE(strstr(ids_msg, "Koopman trace") != NULL);
 
         printf("  ✓ Stage 16 Passed: Attractor IDS enforced; phase divergence and expanding Koopman spectrum blocked.\n\n");
     }
@@ -1075,7 +979,7 @@ int main(void) {
                                                        max_jerk, noise_tol,
                                                        cont_msg, sizeof(cont_msg));
         FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PHYSICAL_BREACH);
-        FLOW_ASSERT_TRUE(strstr(cont_msg, "velocity residual") != NULL);
+        FLOW_ASSERT_TRUE(strstr(cont_msg, "velocity step") != NULL);
 
         /* 3. Position discontinuous jump (Teleportation without traversing phase space) */
         FlowJet spoof_pos = curr_jet;
@@ -1084,7 +988,7 @@ int main(void) {
                                                        max_jerk, noise_tol,
                                                        cont_msg, sizeof(cont_msg));
         FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PHYSICAL_BREACH);
-        FLOW_ASSERT_TRUE(strstr(cont_msg, "position residual") != NULL);
+        FLOW_ASSERT_TRUE(strstr(cont_msg, "position teleport") != NULL);
 
         printf("  ✓ Stage 17 Passed: Differential continuity proof enforced; synthetic impulses & teleportation blocked.\n\n");
     }
@@ -1123,79 +1027,6 @@ int main(void) {
 
         printf("  ✓ Stage 18 Passed: Kinematic time-to-breach computed (t_breach=%.3fs); proactive morphing trigger verified.\n\n",
                1.7082);
-    }
-
-    /* ========================================================================= */
-    /* STAGE 19: Symplectic Byzantine Consensus: O(1) Hamiltonian & Geodesic Gate*/
-    /* ========================================================================= */
-    FLOW_STAGE_BEGIN(19, "Symplectic Byzantine Consensus: O(1) Hamiltonian & Geodesic Gate");
-    {
-        FlowSymplecticByzantineFilter filter;
-        FLOW_ASSERT_EQ(flow_jet_byzantine_filter_init(&filter, 0.05, 2.0), 1);
-
-        FlowJet local_mirror;
-        FLOW_ASSERT_EQ(flow_jet_init(&local_mirror, "mirror_alpha", "Local Cluster Shadow Mirror"), 1);
-        local_mirror.payload.q[0] = 1.0;
-        local_mirror.payload.p[0] = 1.0;
-        local_mirror.header.hamiltonian_energy = flow_jet_hamiltonian(&local_mirror);
-
-        /* Legitimate remote packet conforming to shadow mirror */
-        FlowJetDeadReckonPacket pkt_good = {
-            .timestamp_ns = 1000000,
-            .node_id = 42,
-            .dim = 16,
-            .q = {1.01},
-            .p = {0.99},
-            .a = {-1.0},
-            .packet_seq = 1
-        };
-        pkt_good.crc32 = flow_jet_crc32(&pkt_good, offsetof(FlowJetDeadReckonPacket, crc32));
-
-        char byz_msg[160] = {0};
-        FlowSecurityOutcome outcome = flow_jet_byzantine_validate_packet(&filter, &pkt_good, &local_mirror,
-                                                                        byz_msg, sizeof(byz_msg));
-        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PASS);
-        FLOW_ASSERT_EQ(filter.byzantine_faults_detected, 0U);
-
-        /* 1. Corrupted CRC packet rejection */
-        FlowJetDeadReckonPacket pkt_bad_crc = pkt_good;
-        pkt_bad_crc.crc32 ^= 0xDEADBEEF;
-        outcome = flow_jet_byzantine_validate_packet(&filter, &pkt_bad_crc, &local_mirror,
-                                                     byz_msg, sizeof(byz_msg));
-        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PHYSICAL_BREACH);
-        FLOW_ASSERT_EQ(filter.byzantine_faults_detected, 1U);
-
-        /* 2. Sensor spoofing NaN packet rejection */
-        FlowJetDeadReckonPacket pkt_nan = pkt_good;
-        pkt_nan.q[3] = NAN;
-        pkt_nan.crc32 = flow_jet_crc32(&pkt_nan, offsetof(FlowJetDeadReckonPacket, crc32));
-        outcome = flow_jet_byzantine_validate_packet(&filter, &pkt_nan, &local_mirror,
-                                                     byz_msg, sizeof(byz_msg));
-        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PHYSICAL_BREACH);
-        FLOW_ASSERT_EQ(filter.byzantine_faults_detected, 2U);
-
-        /* 3. Byzantine energy injection violation (Hamiltonian drift > 5%) */
-        FlowJetDeadReckonPacket pkt_energy_drift = pkt_good;
-        pkt_energy_drift.p[0] = 5.0; /* Massively jumps energy from ~1.0 to ~13.0 */
-        pkt_energy_drift.crc32 = flow_jet_crc32(&pkt_energy_drift, offsetof(FlowJetDeadReckonPacket, crc32));
-        outcome = flow_jet_byzantine_validate_packet(&filter, &pkt_energy_drift, &local_mirror,
-                                                     byz_msg, sizeof(byz_msg));
-        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PHYSICAL_BREACH);
-        FLOW_ASSERT_TRUE(strstr(byz_msg, "energy drift") != NULL);
-        FLOW_ASSERT_EQ(filter.byzantine_faults_detected, 3U);
-
-        /* 4. Geodesic distance divergence (Rotated to opposing phase space manifold) */
-        FlowJetDeadReckonPacket pkt_geodesic = pkt_good;
-        pkt_geodesic.q[0] = -1.0; /* Same individual energy contribution, but phase distance is large */
-        pkt_geodesic.p[0] = -1.0;
-        pkt_geodesic.crc32 = flow_jet_crc32(&pkt_geodesic, offsetof(FlowJetDeadReckonPacket, crc32));
-        outcome = flow_jet_byzantine_validate_packet(&filter, &pkt_geodesic, &local_mirror,
-                                                     byz_msg, sizeof(byz_msg));
-        FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PHYSICAL_BREACH);
-        FLOW_ASSERT_TRUE(strstr(byz_msg, "geodesic phase distance") != NULL);
-        FLOW_ASSERT_EQ(filter.byzantine_faults_detected, 4U);
-
-        printf("  ✓ Stage 19 Passed: Symplectic Byzantine consensus validated; CRC, NaN, energy drift, and geodesic faults pruned in O(1).\n\n");
     }
 
     FLOW_TEST_SUITE_END();
