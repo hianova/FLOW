@@ -1,117 +1,66 @@
 #include "gateway.h"
-#include "flow_str.h"
 #include "flow_smt_dsl.h"
-
+#include "flow_str.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
+static uint64_t gw_now_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+}
+
 int flow_gateway_init(FlowGateway *gw, const FlowGatewayConfig *config) {
-    if (gw == NULL) return 0;
+    if (!gw) return 0;
     memset(gw, 0, sizeof(*gw));
-
-    if (config != NULL) {
-        gw->config = *config;
-    } else {
-        gw->config.listen_port = 8080;
-        gw->config.default_mode = FLOW_GATEWAY_MODE_HTTP1_STATIC;
-        gw->config.burst_qps_threshold = 20000;
-        gw->config.loss_threshold_permille = 30;     /* 3.0% drop rate */
-        gw->config.ddos_slowloris_threshold = 200;   /* 20.0% slowloris ratio */
-        gw->config.normal_timeout_ms = 30000;
-        gw->config.hardened_timeout_ms = 50;
-    }
-
-    /* Initialize protocol primitive driver registry */
+    gw->config = config ? *config : (FlowGatewayConfig){
+        .listen_port = 8080, .default_mode = FLOW_GATEWAY_MODE_HTTP1_STATIC, .burst_qps_threshold = 20000,
+        .loss_threshold_permille = 30, .ddos_slowloris_threshold = 200, .normal_timeout_ms = 30000, .hardened_timeout_ms = 50
+    };
     flow_primitive_registry_init(&gw->registry);
-    flow_primitive_register(&gw->registry, flow_primitive_http1_driver());
-    flow_primitive_register(&gw->registry, flow_primitive_http2_driver());
-    flow_primitive_register(&gw->registry, flow_primitive_quic_driver());
-    flow_primitive_register(&gw->registry, flow_primitive_grpc_driver());
-    flow_primitive_register(&gw->registry, flow_primitive_websocket_driver());
-
-    memset(gw->cache, 0, sizeof(gw->cache));
+    const FlowPrimitiveDriver *(*drvs[])(void) = {
+        flow_primitive_http1_driver, flow_primitive_http2_driver, flow_primitive_quic_driver,
+        flow_primitive_grpc_driver, flow_primitive_websocket_driver
+    };
+    for (size_t i = 0; i < 5; ++i) flow_primitive_register(&gw->registry, drvs[i]());
 
     gw->current_driver = flow_primitive_http1_driver();
     atomic_store(&gw->active_mode, gw->config.default_mode);
     atomic_store(&gw->active_timeout_ms, gw->config.normal_timeout_ms);
-    atomic_store(&gw->is_hardened, 0);
-
-    /* Encode initial 64-bit protocol genome: HTTP/1, 1 stream, 4KB header, zero-copy */
     uint64_t genome = 0;
     flow_protocol_encode_genome(FLOW_PROTO_HTTP1, 1, 4096, 1, &genome);
     atomic_store(&gw->active_genome, genome);
 
-    /* Initialize downstream heterogeneous service mesh */
     flow_hetero_mesh_init(&gw->mesh);
     flow_hetero_mesh_register_node(&gw->mesh, 1, FLOW_SWARM_ROLE_INGRESS_GATEWAY, "flow_gw_ingress", 0x1000, 100000);
-
-    /* Initialize lock-free QSBR hot-swap context */
     gw->reload_ctx = flow_reload_create(gw);
     if (gw->reload_ctx) {
-        gw->reload_reader = (FlowReloadReader *)calloc(1, sizeof(FlowReloadReader));
-        if (gw->reload_reader) {
-            flow_reload_reader_register(gw->reload_ctx, gw->reload_reader);
-        }
+        gw->reload_reader = calloc(1, sizeof(FlowReloadReader));
+        if (gw->reload_reader) flow_reload_reader_register(gw->reload_ctx, gw->reload_reader);
     }
-
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    gw->last_morph_timestamp_ns = (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
-
+    gw->last_morph_timestamp_ns = gw_now_ns();
     return 1;
 }
 
 void flow_gateway_destroy(FlowGateway *gw) {
-    if (gw == NULL) return;
-    if (gw->reload_ctx) {
-        if (gw->reload_reader) {
-            flow_reload_reader_unregister(gw->reload_reader);
-            free(gw->reload_reader);
-            gw->reload_reader = NULL;
-        }
-        flow_reload_destroy(gw->reload_ctx);
-        gw->reload_ctx = NULL;
-    }
+    if (!gw || !gw->reload_ctx) return;
+    if (gw->reload_reader) { flow_reload_reader_unregister(gw->reload_reader); free(gw->reload_reader); gw->reload_reader = NULL; }
+    flow_reload_destroy(gw->reload_ctx);
+    gw->reload_ctx = NULL;
 }
 
 int flow_gateway_adapt_entropy(FlowGateway *gw, const FlowTrafficEntropy *entropy) {
-    if (gw == NULL || entropy == NULL) return 0;
+    if (!gw || !entropy) return 0;
+    FlowGatewayMode current = atomic_load(&gw->active_mode), target;
+    if (entropy->slowloris_ratio_permille >= gw->config.ddos_slowloris_threshold) target = FLOW_GATEWAY_MODE_DDOS_HARDENED;
+    else if (entropy->packet_loss_permille >= gw->config.loss_threshold_permille) target = FLOW_GATEWAY_MODE_QUIC_LOSSY;
+    else if (entropy->request_qps >= gw->config.burst_qps_threshold) target = FLOW_GATEWAY_MODE_HTTP2_BURST;
+    else target = FLOW_GATEWAY_MODE_HTTP1_STATIC;
 
-    FlowGatewayMode current = atomic_load(&gw->active_mode);
-    FlowGatewayMode target = current;
-
-    /* 1. Slowloris Anti-DDoS SMT Tightening has highest priority */
-    if (entropy->slowloris_ratio_permille >= gw->config.ddos_slowloris_threshold) {
-        target = FLOW_GATEWAY_MODE_DDOS_HARDENED;
-    }
-    /* 2. Lossy / mobile networks -> HTTP/3 QUIC UDP Datagram */
-    else if (entropy->packet_loss_permille >= gw->config.loss_threshold_permille) {
-        target = FLOW_GATEWAY_MODE_QUIC_LOSSY;
-    }
-    /* 3. 100k QPS burst -> HTTP/2 Multiplexing */
-    else if (entropy->request_qps >= gw->config.burst_qps_threshold) {
-        target = FLOW_GATEWAY_MODE_HTTP2_BURST;
-    }
-    /* 4. Normal low-load conditions -> HTTP/1.1 Static Keep-Alive */
-    else {
-        target = FLOW_GATEWAY_MODE_HTTP1_STATIC;
-    }
-
-    /* Morph if target differs or if hardening state changes */
     if (target != current || (target == FLOW_GATEWAY_MODE_DDOS_HARDENED && !atomic_load(&gw->is_hardened))) {
-        struct timespec t_start, t_end;
-        clock_gettime(CLOCK_MONOTONIC, &t_start);
-
-        typedef struct {
-            const FlowPrimitiveDriver *(*driver_fn)(void);
-            FlowProtocolKind proto_kind;
-            uint32_t streams;
-            int is_hardened;
-        } FlowGatewayModeDesc;
-
-        static const FlowGatewayModeDesc MODE_DESCS[6] = {
+        static const struct { const FlowPrimitiveDriver *(*fn)(void); FlowProtocolKind kind; uint32_t streams; int hardened; } DESCS[6] = {
             [FLOW_GATEWAY_MODE_HTTP1_STATIC]   = { flow_primitive_http1_driver,     FLOW_PROTO_HTTP1,      1,   0 },
             [FLOW_GATEWAY_MODE_HTTP2_BURST]    = { flow_primitive_http2_driver,     FLOW_PROTO_HTTP2,      128, 0 },
             [FLOW_GATEWAY_MODE_QUIC_LOSSY]     = { flow_primitive_quic_driver,      FLOW_PROTO_QUIC_HTTP3, 512, 0 },
@@ -119,234 +68,118 @@ int flow_gateway_adapt_entropy(FlowGateway *gw, const FlowTrafficEntropy *entrop
             [FLOW_GATEWAY_MODE_GRPC_RPC]       = { flow_primitive_grpc_driver,      FLOW_PROTO_GRPC,       256, 0 },
             [FLOW_GATEWAY_MODE_WEBSOCKET_PUSH] = { flow_primitive_websocket_driver, FLOW_PROTO_WEBSOCKET,  512, 0 },
         };
-
-        const FlowGatewayModeDesc *desc = &MODE_DESCS[(size_t)target < 6 ? target : 0];
-        int hardened = desc->is_hardened;
-        uint32_t timeout = hardened ? gw->config.hardened_timeout_ms : gw->config.normal_timeout_ms;
-        uint32_t streams = desc->streams;
-        const FlowPrimitiveDriver *next_driver;
-        FlowProtocolKind proto_kind;
-
-        if (target == FLOW_GATEWAY_MODE_DDOS_HARDENED) {
-            int lossy = (entropy->packet_loss_permille >= gw->config.loss_threshold_permille);
-            next_driver = lossy ? flow_primitive_quic_driver() : flow_primitive_http2_driver();
-            proto_kind = lossy ? FLOW_PROTO_QUIC_HTTP3 : FLOW_PROTO_HTTP2;
-        } else {
-            next_driver = desc->driver_fn ? desc->driver_fn() : flow_primitive_http1_driver();
-            proto_kind = desc->proto_kind;
-        }
+        size_t idx = (size_t)target < 6 ? target : 0;
+        int hardened = DESCS[idx].hardened;
+        int lossy = (entropy->packet_loss_permille >= gw->config.loss_threshold_permille);
+        const FlowPrimitiveDriver *next_drv = (target == FLOW_GATEWAY_MODE_DDOS_HARDENED) ? (lossy ? flow_primitive_quic_driver() : flow_primitive_http2_driver()) : (DESCS[idx].fn ? DESCS[idx].fn() : flow_primitive_http1_driver());
+        FlowProtocolKind kind = (target == FLOW_GATEWAY_MODE_DDOS_HARDENED) ? (lossy ? FLOW_PROTO_QUIC_HTTP3 : FLOW_PROTO_HTTP2) : DESCS[idx].kind;
 
         uint64_t genome = 0;
-        flow_protocol_encode_genome(proto_kind, streams, 4096, 1, &genome);
-        if (hardened) {
-            genome |= (1ULL << 63); /* SMT Hardened Timeout Flag */
-        }
+        flow_protocol_encode_genome(kind, DESCS[idx].streams, 4096, 1, &genome);
+        if (hardened) genome |= (1ULL << 63);
+        if (gw->reload_reader) flow_qsbr_checkpoint(gw->reload_reader);
 
-        /* QSBR Hot-Swap Grace Point */
-        if (gw->reload_reader) {
-            flow_qsbr_checkpoint(gw->reload_reader);
-        }
-
-        /* Atomic transition */
-        gw->current_driver = next_driver;
+        gw->current_driver = next_drv;
         atomic_store(&gw->active_mode, target);
-        atomic_store(&gw->active_timeout_ms, timeout);
+        atomic_store(&gw->active_timeout_ms, hardened ? gw->config.hardened_timeout_ms : gw->config.normal_timeout_ms);
         atomic_store(&gw->active_genome, genome);
         atomic_store(&gw->is_hardened, hardened);
-
-        clock_gettime(CLOCK_MONOTONIC, &t_end);
-        uint64_t morph_ns = (t_end.tv_sec - t_start.tv_sec) * 1000000000ULL + (t_end.tv_nsec - t_start.tv_nsec);
-        gw->last_morph_timestamp_ns = (uint64_t)t_end.tv_sec * 1000000000ULL + (uint64_t)t_end.tv_nsec;
-
+        gw->last_morph_timestamp_ns = gw_now_ns();
         atomic_fetch_add(&gw->total_morph_events, 1);
-        (void)morph_ns;
     }
-
     atomic_store(&gw->current_connections, entropy->active_connections);
     return 1;
 }
 
-int flow_gateway_thwart_ddos(FlowGateway *gw,
-                             uint32_t slowloris_conns,
-                             uint32_t *pruned_conns_out,
-                             uint64_t *prune_latency_ns_out) {
-    if (gw == NULL) return 0;
-
-    struct timespec t0, t1;
-    clock_gettime(CLOCK_MONOTONIC, &t0);
-
-    /* SMT Hard Polytope Tightening: Force timeout down to 50ms */
+int flow_gateway_thwart_ddos(FlowGateway *gw, uint32_t slowloris_conns, uint32_t *pruned_conns_out, uint64_t *prune_latency_ns_out) {
+    if (!gw) return 0;
+    uint64_t t0 = gw_now_ns();
     atomic_store(&gw->active_timeout_ms, gw->config.hardened_timeout_ms);
     atomic_store(&gw->is_hardened, 1);
     atomic_store(&gw->active_mode, FLOW_GATEWAY_MODE_DDOS_HARDENED);
-
-    /* Prune all lingering slow connections violating the 50ms SMT bound */
-    uint32_t pruned = slowloris_conns;
-    atomic_fetch_add(&gw->total_ddos_connections_pruned, pruned);
-
+    atomic_fetch_add(&gw->total_ddos_connections_pruned, slowloris_conns);
     uint32_t cur = atomic_load(&gw->current_connections);
-    if (cur >= pruned) {
-        atomic_store(&gw->current_connections, cur - pruned);
-    } else {
-        atomic_store(&gw->current_connections, 0);
-    }
-
-    clock_gettime(CLOCK_MONOTONIC, &t1);
-    uint64_t latency_ns = (t1.tv_sec - t0.tv_sec) * 1000000000ULL + (t1.tv_nsec - t0.tv_nsec);
-
-    if (pruned_conns_out) *pruned_conns_out = pruned;
-    if (prune_latency_ns_out) *prune_latency_ns_out = latency_ns;
-
+    atomic_store(&gw->current_connections, (cur >= slowloris_conns) ? (cur - slowloris_conns) : 0);
+    uint64_t t1 = gw_now_ns();
+    if (pruned_conns_out) *pruned_conns_out = slowloris_conns;
+    if (prune_latency_ns_out) *prune_latency_ns_out = t1 - t0;
     return 1;
 }
 
-int flow_gateway_dispatch_request(FlowGateway *gw,
-                                  const void *req_data,
-                                  size_t req_len,
-                                  FlowPrimitiveResult *res_out,
-                                  uint8_t *routed_node_id_out) {
-    if (gw == NULL || res_out == NULL) return 0;
-
-    const FlowPrimitiveDriver *drv = gw->current_driver;
-    if (drv == NULL) drv = flow_primitive_http1_driver();
-
-    FlowPrimitiveContext ctx;
-    ctx.active_genome = atomic_load(&gw->active_genome);
-    ctx.user_data = (void *)req_data;
-    ctx.data_len = req_len;
-    ctx.flags = atomic_load(&gw->is_hardened) ? 0x01 : 0x00;
-
-    memset(res_out, 0, sizeof(*res_out));
-    if (drv->execute_primitive) {
-        drv->execute_primitive(&ctx, res_out);
-    } else {
-        res_out->status_code = 200;
-        res_out->bytes_transferred = req_len;
-        res_out->latency_cycles = 50;
-        res_out->zero_copy_active = 1;
-    }
-
-    /* Downstream Heterogeneous Fluid Mesh Routing */
-    if (routed_node_id_out != NULL) {
+int flow_gateway_dispatch_request(FlowGateway *gw, const void *req_data, size_t req_len, FlowPrimitiveResult *res_out, uint8_t *routed_node_id_out) {
+    if (!gw || !res_out) return 0;
+    const FlowPrimitiveDriver *drv = gw->current_driver ? gw->current_driver : flow_primitive_http1_driver();
+    FlowPrimitiveContext ctx = { .active_genome = atomic_load(&gw->active_genome), .user_data = (void *)req_data, .data_len = req_len, .flags = atomic_load(&gw->is_hardened) ? 0x01 : 0x00 };
+    *res_out = (FlowPrimitiveResult){ .status_code = 200, .bytes_transferred = req_len, .latency_cycles = 50, .zero_copy_active = 1 };
+    if (drv->execute_primitive) drv->execute_primitive(&ctx, res_out);
+    if (routed_node_id_out) {
         *routed_node_id_out = 0;
-        if (gw->mesh.node_count > 1) {
-            flow_hetero_mesh_route_target(&gw->mesh, FLOW_SWARM_ROLE_COMPUTE_ROUTER, routed_node_id_out);
-        }
+        if (gw->mesh.node_count > 1) flow_hetero_mesh_route_target(&gw->mesh, FLOW_SWARM_ROLE_COMPUTE_ROUTER, routed_node_id_out);
     }
-
-    /* Update Statistics */
     atomic_fetch_add(&gw->total_requests, 1);
     atomic_fetch_add(&gw->total_bytes_transferred, res_out->bytes_transferred);
-    if (res_out->zero_copy_active) {
-        atomic_fetch_add(&gw->total_zero_copy_frames, 1);
-    }
-
-    /* Track P99 Latency (Cycles to approximate nanoseconds) */
+    if (res_out->zero_copy_active) atomic_fetch_add(&gw->total_zero_copy_frames, 1);
     uint64_t lat_ns = (res_out->latency_cycles > 0) ? (uint64_t)(res_out->latency_cycles * 0.35) : 25;
-    if (lat_ns < 15) lat_ns = 15;
-    atomic_store(&gw->p99_latency_ns, lat_ns);
-
+    atomic_store(&gw->p99_latency_ns, lat_ns < 15 ? 15 : lat_ns);
     return 1;
 }
 
-FlowSMTResult flow_gateway_verify_smt(const FlowGateway *gw,
-                                      const FlowTrafficEntropy *entropy,
-                                      FlowSMTProofAttestation *proof_out) {
-    if (gw == NULL) return FLOW_SMT_UNKNOWN;
-
-    /* 1. Protocol Bounds Safety Theorem */
-    FlowSMTResult res_proto = FLOW_SMT_PROVEN_UNSAT;
+FlowSMTResult flow_gateway_verify_smt(const FlowGateway *gw, const FlowTrafficEntropy *entropy, FlowSMTProofAttestation *proof_out) {
+    if (!gw) return FLOW_SMT_UNKNOWN;
+    FlowSMTResult res_proto = FLOW_SMT_PROVEN_UNSAT, res_mesh = FLOW_SMT_PROVEN_UNSAT;
     const FlowPrimitiveDriver *drv = gw->current_driver;
     if (drv) {
-        uint32_t streams = 1;
         FlowGatewayMode mode = atomic_load(&gw->active_mode);
-        if (mode == FLOW_GATEWAY_MODE_HTTP2_BURST || mode == FLOW_GATEWAY_MODE_DDOS_HARDENED) streams = 128;
-        else if (mode == FLOW_GATEWAY_MODE_QUIC_LOSSY) streams = 512;
-
+        uint32_t streams = (mode == FLOW_GATEWAY_MODE_QUIC_LOSSY) ? 512 : ((mode == FLOW_GATEWAY_MODE_HTTP2_BURST || mode == FLOW_GATEWAY_MODE_DDOS_HARDENED) ? 128 : 1);
         res_proto = flow_primitive_verify_protocol_smt(drv, streams, 4096, proof_out);
     }
-
-    /* 2. Downstream Mesh Flow Conservation Theorem */
-    FlowSMTResult res_mesh = FLOW_SMT_PROVEN_UNSAT;
     uint32_t req_qps = entropy ? entropy->request_qps : 1000;
-    if (gw->mesh.node_count > 1) {
-        res_mesh = flow_hetero_mesh_verify_smt(&gw->mesh, req_qps, proof_out);
-    }
+    if (gw->mesh.node_count > 1) res_mesh = flow_hetero_mesh_verify_smt(&gw->mesh, req_qps, proof_out);
 
-    /* 3. Timeout Polytope Hard Invariant Theorem using flow_smt_dsl */
     uint32_t active_timeout = atomic_load(&gw->active_timeout_ms);
     uint32_t max_timeout = atomic_load(&gw->is_hardened) ? gw->config.hardened_timeout_ms : gw->config.normal_timeout_ms;
-    FLOW_SMT_BOX_BUILDER_DECL(timeout_builder);
-    FLOW_SMT_BOX_ADD(timeout_builder, "gateway timeout", active_timeout, 0, max_timeout);
-    FlowSMTResult res_timeout = FLOW_SMT_BOX_VERIFY(timeout_builder, "gateway_timeout", NULL);
-
-    FlowSMTResult overall = (res_proto == FLOW_SMT_PROVEN_UNSAT &&
-                             res_mesh == FLOW_SMT_PROVEN_UNSAT &&
-                             res_timeout == FLOW_SMT_PROVEN_UNSAT)
-                            ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
+    const FlowBoxConstraint trules[] = { FLOW_SMT_RULE("gateway timeout", active_timeout, 0, max_timeout, FLOW_BOX_THEOREM_BUFFER_BOUNDS, "out of bounds") };
+    FlowSMTResult res_timeout = FLOW_SMT_VERIFY_RULES("gateway_timeout", NULL, trules, NULL);
+    FlowSMTResult overall = (res_proto == FLOW_SMT_PROVEN_UNSAT && res_mesh == FLOW_SMT_PROVEN_UNSAT && res_timeout == FLOW_SMT_PROVEN_UNSAT) ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
 
     if (proof_out) {
-        proof_out->buffer_bounds_safety = res_proto;
-        proof_out->memory_quota_bound = res_mesh;
-        proof_out->shard_non_aliasing = res_timeout;
-        proof_out->determinism_invariant = FLOW_SMT_PROVEN_UNSAT;
-
-        if (overall == FLOW_SMT_PROVEN_UNSAT) {
-            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                     "SMT GATEWAY SOUND: protocol=%s, timeout=%ums, mesh_qps=%u (Zero-Defect Guaranteed)",
-                     drv ? drv->driver_name : "unknown", active_timeout, req_qps);
-        } else {
-            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                     "SMT GATEWAY VIOLATION: proto_res=%d, mesh_res=%d, timeout_res=%d",
-                     res_proto, res_mesh, res_timeout);
-        }
+        *proof_out = (FlowSMTProofAttestation){ .buffer_bounds_safety = res_proto, .memory_quota_bound = res_mesh, .shard_non_aliasing = res_timeout, .determinism_invariant = FLOW_SMT_PROVEN_UNSAT };
+        if (overall == FLOW_SMT_PROVEN_UNSAT)
+            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary), "SMT GATEWAY SOUND: protocol=%s, timeout=%ums, mesh_qps=%u (Zero-Defect Guaranteed)", drv ? drv->driver_name : "unknown", active_timeout, req_qps);
+        else
+            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary), "SMT GATEWAY VIOLATION: proto_res=%d, mesh_res=%d, timeout_res=%d", res_proto, res_mesh, res_timeout);
     }
-
     return overall;
 }
 
 void flow_gateway_get_stats(const FlowGateway *gw, FlowGatewayStats *stats_out) {
-    if (gw == NULL || stats_out == NULL) return;
-    stats_out->total_requests = atomic_load(&gw->total_requests);
-    stats_out->total_bytes_transferred = atomic_load(&gw->total_bytes_transferred);
-    stats_out->total_morph_events = atomic_load(&gw->total_morph_events);
-    stats_out->total_ddos_connections_pruned = atomic_load(&gw->total_ddos_connections_pruned);
-    stats_out->total_zero_copy_frames = atomic_load(&gw->total_zero_copy_frames);
-    stats_out->total_cache_hits = atomic_load(&gw->total_cache_hits);
-    stats_out->total_waf_blocked = atomic_load(&gw->total_waf_blocked);
-    stats_out->current_active_connections = atomic_load(&gw->current_connections);
-    stats_out->p99_latency_ns = atomic_load(&gw->p99_latency_ns);
-    stats_out->current_mode = atomic_load(&gw->active_mode);
-    stats_out->active_genome = atomic_load(&gw->active_genome);
-    stats_out->active_timeout_ms = atomic_load(&gw->active_timeout_ms);
+    if (!gw || !stats_out) return;
+    *stats_out = (FlowGatewayStats){
+        .total_requests = atomic_load(&gw->total_requests), .total_bytes_transferred = atomic_load(&gw->total_bytes_transferred),
+        .total_morph_events = atomic_load(&gw->total_morph_events), .total_ddos_connections_pruned = atomic_load(&gw->total_ddos_connections_pruned),
+        .total_zero_copy_frames = atomic_load(&gw->total_zero_copy_frames), .total_cache_hits = atomic_load(&gw->total_cache_hits),
+        .total_waf_blocked = atomic_load(&gw->total_waf_blocked), .current_active_connections = atomic_load(&gw->current_connections),
+        .p99_latency_ns = atomic_load(&gw->p99_latency_ns), .current_mode = atomic_load(&gw->active_mode),
+        .active_genome = atomic_load(&gw->active_genome), .active_timeout_ms = atomic_load(&gw->active_timeout_ms)
+    };
 }
 
 const char *flow_gateway_mode_name(FlowGatewayMode mode) {
     static const char *const s_mode_names[6] = {
-        "HTTP/1.1 Static (Keep-Alive)",
-        "HTTP/2 Burst (Multiplexing)",
-        "HTTP/3 QUIC (Loss-Resistant UDP)",
-        "SMT Hardened DDoS (Slowloris Anti-Flood)",
-        "gRPC Microservice RPC (HTTP/2 Framed)",
-        "WebSocket Duplex Push (RFC 6455)"
+        "HTTP/1.1 Static (Keep-Alive)", "HTTP/2 Burst (Multiplexing)", "HTTP/3 QUIC (Loss-Resistant UDP)",
+        "SMT Hardened DDoS (Slowloris Anti-Flood)", "gRPC Microservice RPC (HTTP/2 Framed)", "WebSocket Duplex Push (RFC 6455)"
     };
     return ((size_t)mode < 6) ? s_mode_names[mode] : "Unknown";
 }
 
 int flow_gateway_cache_lookup(FlowGateway *gw, uint64_t key_hash, void *buf_out, size_t *len_out) {
-    if (gw == NULL || buf_out == NULL || len_out == NULL) return 0;
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    uint64_t now_ns = (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
-
-    size_t idx = key_hash % FLOW_EDGE_CACHE_CAPACITY;
-    FlowEdgeCacheEntry *entry = &gw->cache[idx];
-    if (entry->is_valid && entry->key_hash == key_hash && entry->expire_ns > now_ns) {
-        size_t copy_len = entry->data_len;
-        if (copy_len > *len_out) copy_len = *len_out;
-        memcpy(buf_out, entry->data, copy_len);
+    if (!gw || !buf_out || !len_out) return 0;
+    FlowEdgeCacheEntry *e = &gw->cache[key_hash % FLOW_EDGE_CACHE_CAPACITY];
+    if (e->is_valid && e->key_hash == key_hash && e->expire_ns > gw_now_ns()) {
+        size_t copy_len = (e->data_len > *len_out) ? *len_out : e->data_len;
+        memcpy(buf_out, e->data, copy_len);
         *len_out = copy_len;
-        entry->access_count++;
+        e->access_count++;
         atomic_fetch_add(&gw->total_cache_hits, 1);
         return 1;
     }
@@ -354,69 +187,36 @@ int flow_gateway_cache_lookup(FlowGateway *gw, uint64_t key_hash, void *buf_out,
 }
 
 int flow_gateway_cache_put(FlowGateway *gw, uint64_t key_hash, const void *data, size_t len, uint64_t ttl_ns) {
-    if (gw == NULL || data == NULL || len == 0) return 0;
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    uint64_t now_ns = (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
-
-    size_t idx = key_hash % FLOW_EDGE_CACHE_CAPACITY;
-    FlowEdgeCacheEntry *entry = &gw->cache[idx];
-    entry->key_hash = key_hash;
-    entry->data_len = (len > sizeof(entry->data)) ? sizeof(entry->data) : len;
-    memcpy(entry->data, data, entry->data_len);
-    entry->expire_ns = now_ns + ttl_ns;
-    entry->access_count = 1;
-    entry->is_valid = 1;
+    if (!gw || !data || !len) return 0;
+    FlowEdgeCacheEntry *e = &gw->cache[key_hash % FLOW_EDGE_CACHE_CAPACITY];
+    e->key_hash = key_hash;
+    e->data_len = (len > sizeof(e->data)) ? sizeof(e->data) : len;
+    memcpy(e->data, data, e->data_len);
+    e->expire_ns = gw_now_ns() + ttl_ns;
+    e->access_count = 1;
+    e->is_valid = 1;
     return 1;
 }
 
-FlowSMTResult flow_gateway_evaluate_waf_smt(FlowGateway *gw,
-                                            const void *payload,
-                                            size_t len,
-                                            FlowSMTProofAttestation *proof_out) {
-    if (gw == NULL) return FLOW_SMT_UNKNOWN;
-    if (payload == NULL || len == 0) {
-        if (proof_out) {
-            proof_out->buffer_bounds_safety = FLOW_SMT_PROVEN_UNSAT;
-            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary), "SMT WAF SOUND: Empty payload");
-        }
+FlowSMTResult flow_gateway_evaluate_waf_smt(FlowGateway *gw, const void *payload, size_t len, FlowSMTProofAttestation *proof_out) {
+    if (!gw) return FLOW_SMT_UNKNOWN;
+    if (!payload || !len) {
+        if (proof_out) { proof_out->buffer_bounds_safety = FLOW_SMT_PROVEN_UNSAT; snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary), "SMT WAF SOUND: Empty payload"); }
         return FLOW_SMT_PROVEN_UNSAT;
     }
-
-    const char *str = (const char *)payload;
-    int is_malicious = 0;
-    const char *reason = "Safe";
-
-    /* Fast 1-cycle string search for OWASP Top exploit patterns using flow_str_contains */
-    if (flow_str_contains(str, "' OR '") || flow_str_contains(str, "' OR 1=1") ||
-        flow_str_contains(str, "UNION SELECT") || flow_str_contains(str, "DROP TABLE") ||
-        flow_str_contains(str, "1=1--")) {
-        is_malicious = 1;
+    const char *str = (const char *)payload, *reason = NULL;
+    if (flow_str_contains(str, "' OR '") || flow_str_contains(str, "' OR 1=1") || flow_str_contains(str, "UNION SELECT") || flow_str_contains(str, "DROP TABLE") || flow_str_contains(str, "1=1--"))
         reason = "SQL Injection exploit detected";
-    } else if (flow_str_contains(str, "../..") || flow_str_contains(str, "/etc/passwd") ||
-               flow_str_contains(str, "..\\..")) {
-        is_malicious = 1;
+    else if (flow_str_contains(str, "../..") || flow_str_contains(str, "/etc/passwd") || flow_str_contains(str, "..\\.."))
         reason = "Path Traversal directory climb detected";
-    } else if (flow_str_contains(str, "<script") || flow_str_contains(str, "javascript:") ||
-               flow_str_contains(str, "onerror=")) {
-        is_malicious = 1;
+    else if (flow_str_contains(str, "<script") || flow_str_contains(str, "javascript:") || flow_str_contains(str, "onerror="))
         reason = "Cross-Site Scripting (XSS) payload detected";
-    }
 
-    if (is_malicious) {
+    if (reason) {
         atomic_fetch_add(&gw->total_waf_blocked, 1);
-        if (proof_out) {
-            proof_out->buffer_bounds_safety = FLOW_SMT_VIOLATION_SAT;
-            snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                     "SMT WAF VIOLATION: %s (Polytope Bitmask Filter Rejection)", reason);
-        }
+        if (proof_out) { proof_out->buffer_bounds_safety = FLOW_SMT_VIOLATION_SAT; snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary), "SMT WAF VIOLATION: %s (Polytope Bitmask Filter Rejection)", reason); }
         return FLOW_SMT_VIOLATION_SAT;
     }
-
-    if (proof_out) {
-        proof_out->buffer_bounds_safety = FLOW_SMT_PROVEN_UNSAT;
-        snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                 "SMT WAF SOUND: Polytope safety envelope verified (0 exploits)");
-    }
+    if (proof_out) { proof_out->buffer_bounds_safety = FLOW_SMT_PROVEN_UNSAT; snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary), "SMT WAF SOUND: Polytope safety envelope verified (0 exploits)"); }
     return FLOW_SMT_PROVEN_UNSAT;
 }

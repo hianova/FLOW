@@ -2,24 +2,15 @@
 #define FLOW_SMT_DSL_H
 
 #include "smt.h"
-
-#include <stdint.h>
+#include <stdarg.h>
 #include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/*
- * ============================================================================
- * FLOW SMT Hyper-Box Constraint Verification DSL (flow_smt_dsl.h)
- * ============================================================================
- *
- * Provides a pure C17 fluent builder and macro DSL to assemble and verify
- * hyper-box polytope invariants with zero heap allocation.
- * ============================================================================
- */
 
 #define FLOW_SMT_BUILDER_MAX_RULES 32
 
@@ -29,39 +20,48 @@ typedef struct {
 } FlowSMTBoxBuilder;
 
 static inline void flow_smt_box_builder_init(FlowSMTBoxBuilder *b) {
-    if (b) {
-        memset(b, 0, sizeof(*b));
-    }
+    if (b) memset(b, 0, sizeof(*b));
 }
 
-static inline int flow_smt_box_builder_add(FlowSMTBoxBuilder *b,
-                                           const char *name,
-                                           uint64_t candidate,
-                                           uint64_t min_bound,
-                                           uint64_t max_bound,
-                                           FlowBoxTheoremType theorem,
+static inline int flow_smt_box_builder_add(FlowSMTBoxBuilder *b, const char *name,
+                                           uint64_t candidate, uint64_t min_bound,
+                                           uint64_t max_bound, FlowBoxTheoremType theorem,
                                            const char *violation_msg) {
     if (!b || b->count >= FLOW_SMT_BUILDER_MAX_RULES) return 0;
-    FlowBoxConstraint *c = &b->rules[b->count++];
-    c->name = name;
-    c->candidate_value = candidate;
-    c->min_bound = min_bound;
-    c->max_bound = max_bound;
-    c->theorem = theorem;
-    c->violation_msg = violation_msg;
+    b->rules[b->count++] = (FlowBoxConstraint){
+        .name = name, .candidate_value = candidate, .min_bound = min_bound,
+        .max_bound = max_bound, .theorem = theorem, .violation_msg = violation_msg
+    };
     return 1;
 }
 
 static inline FlowSMTResult flow_smt_box_builder_verify(const FlowSMTBoxBuilder *b,
                                                         const char *tag,
                                                         FlowSMTProofAttestation *proof_out) {
-    if (!b) return FLOW_SMT_UNKNOWN;
-    return flow_smt_verify_box_invariants(tag, b->rules, b->count, proof_out);
+    return b ? flow_smt_verify_box_invariants(tag, b->rules, b->count, proof_out) : FLOW_SMT_UNKNOWN;
 }
 
+static inline FlowSMTResult flow_smt_verify_rules(const char *tag, const FlowBoxConstraint *rules,
+                                                  size_t count, FlowSMTProofAttestation *proof_out,
+                                                  const char *summary_fmt, ...) {
+    FlowSMTResult res = flow_smt_verify_box_invariants(tag, rules, count, proof_out);
+    if (res == FLOW_SMT_PROVEN_UNSAT && proof_out && summary_fmt) {
+        va_list ap;
+        va_start(ap, summary_fmt);
+        vsnprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary), summary_fmt, ap);
+        va_end(ap);
+    }
+    return res;
+}
+
+#define FLOW_SMT_RULE(name_str, cand, min_b, max_b, th, msg_str) \
+    { (name_str), (uint64_t)(cand), (uint64_t)(min_b), (uint64_t)(max_b), (th), (msg_str) }
+
+#define FLOW_SMT_VERIFY_RULES(tag, proof_out, rules_arr, ...) \
+    flow_smt_verify_rules((tag), (rules_arr), sizeof(rules_arr) / sizeof((rules_arr)[0]), (proof_out), __VA_ARGS__)
+
 #define FLOW_SMT_BOX_BUILDER_DECL(var_name) \
-    FlowSMTBoxBuilder var_name; \
-    flow_smt_box_builder_init(&var_name)
+    FlowSMTBoxBuilder var_name; flow_smt_box_builder_init(&var_name)
 
 #define FLOW_SMT_BOX_ADD_RULE(builder, name_str, cand, min_b, max_b, th, msg_str) \
     flow_smt_box_builder_add(&(builder), (name_str), (uint64_t)(cand), (uint64_t)(min_b), (uint64_t)(max_b), (th), (msg_str))

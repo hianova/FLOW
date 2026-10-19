@@ -1,11 +1,10 @@
 #include "matching.h"
 #include "flow_smt_dsl.h"
 #include "flow_str.h"
-
+#include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <assert.h>
 
 static uint64_t matching_time_ns(void) {
     struct timespec ts;
@@ -14,128 +13,78 @@ static uint64_t matching_time_ns(void) {
 }
 
 static void update_bbo_cache(FlowLimitOrderBook *book) {
-    uint64_t max_bid = 0;
-    uint64_t min_ask = UINT64_MAX;
-
+    uint64_t max_bid = 0, min_ask = UINT64_MAX;
     for (size_t i = 0; i < book->order_count; ++i) {
         const FlowOrder *o = &book->orders[i];
         if (!o->is_active || o->filled_quantity >= o->quantity) continue;
-
-        if (o->side == FLOW_ORDER_BUY) {
-            if (o->price > max_bid) max_bid = o->price;
-        } else if (o->side == FLOW_ORDER_SELL) {
-            if (o->price < min_ask) min_ask = o->price;
-        }
+        if (o->side == FLOW_ORDER_BUY && o->price > max_bid) max_bid = o->price;
+        else if (o->side == FLOW_ORDER_SELL && o->price < min_ask) min_ask = o->price;
     }
-
     book->best_bid_price = max_bid;
     book->best_ask_price = (min_ask == UINT64_MAX) ? 0 : min_ask;
 }
 
 void flow_orderbook_init(FlowLimitOrderBook *book, uint32_t symbol_id) {
-    if (book == NULL) return;
-    memset(book, 0, sizeof(*book));
-    book->symbol_id = symbol_id;
-    book->best_ask_price = 0;
-    book->best_bid_price = 0;
+    if (!book) return;
+    *book = (FlowLimitOrderBook){ .symbol_id = symbol_id };
 }
 
-int flow_orderbook_submit(FlowLimitOrderBook *book,
-                          const FlowOrder *order,
-                          FlowTrade *trades_out,
-                          size_t max_trades,
-                          size_t *trade_count_out) {
-    if (book == NULL || order == NULL) return 0;
-
+int flow_orderbook_submit(FlowLimitOrderBook *book, const FlowOrder *order, FlowTrade *trades_out, size_t max_trades, size_t *trade_count_out) {
+    if (!book || !order) return 0;
     uint64_t t0 = matching_time_ns();
     size_t trade_count = 0;
-
     if (order->type == FLOW_ORDER_CANCEL) {
         flow_orderbook_cancel(book, order->order_id);
         if (trade_count_out) *trade_count_out = 0;
         return 1;
     }
-
     book->total_orders_submitted++;
+    uint64_t remaining_qty = order->quantity, taker_price = order->price, trade_seq = book->total_trades_executed + 1;
+    int is_buy = (order->side == FLOW_ORDER_BUY);
 
-    uint64_t remaining_qty = order->quantity;
-    uint64_t taker_price = order->price;
-    uint64_t trade_seq = book->total_trades_executed + 1;
-
-    /* Matching loop: Price-Time Priority FIFO */
     while (remaining_qty > 0) {
-        int best_maker_idx = -1;
-        uint64_t best_price = (order->side == FLOW_ORDER_BUY) ? UINT64_MAX : 0;
-        uint64_t earliest_ts = UINT64_MAX;
-
-        /* Find top of the book maker: unified directional price-time comparator */
-        int is_buy = (order->side == FLOW_ORDER_BUY);
+        int best_idx = -1;
+        uint64_t best_price = is_buy ? UINT64_MAX : 0, earliest_ts = UINT64_MAX;
         for (size_t i = 0; i < book->order_count; ++i) {
-            FlowOrder *maker = &book->orders[i];
-            if (!maker->is_active || maker->filled_quantity >= maker->quantity || maker->side == order->side) continue;
-
-            int crossed = (order->type == FLOW_ORDER_MARKET) || (is_buy ? maker->price <= taker_price : maker->price >= taker_price);
-            if (!crossed) continue;
-
-            int better = is_buy ? (maker->price < best_price) : (maker->price > best_price);
-            if (better || (maker->price == best_price && maker->timestamp_ns < earliest_ts)) {
-                best_price = maker->price;
-                earliest_ts = maker->timestamp_ns;
-                best_maker_idx = (int)i;
+            FlowOrder *m = &book->orders[i];
+            if (!m->is_active || m->filled_quantity >= m->quantity || m->side == order->side) continue;
+            if (order->type != FLOW_ORDER_MARKET && (is_buy ? m->price > taker_price : m->price < taker_price)) continue;
+            if ((is_buy ? (m->price < best_price) : (m->price > best_price)) || (m->price == best_price && m->timestamp_ns < earliest_ts)) {
+                best_price = m->price; earliest_ts = m->timestamp_ns; best_idx = (int)i;
             }
         }
-
-        if (best_maker_idx < 0) break; /* No more matching orders */
-
-        /* Execute match at maker price */
-        FlowOrder *maker = &book->orders[best_maker_idx];
-        uint64_t maker_avail = maker->quantity - maker->filled_quantity;
-        uint64_t match_qty = (remaining_qty < maker_avail) ? remaining_qty : maker_avail;
-
-        maker->filled_quantity += match_qty;
+        if (best_idx < 0) break;
+        FlowOrder *m = &book->orders[best_idx];
+        uint64_t avail = m->quantity - m->filled_quantity;
+        uint64_t match_qty = (remaining_qty < avail) ? remaining_qty : avail;
+        m->filled_quantity += match_qty;
         remaining_qty -= match_qty;
-
-        if (maker->filled_quantity >= maker->quantity) {
-            maker->is_active = 0;
+        if (m->filled_quantity >= m->quantity) m->is_active = 0;
+        if (trades_out && trade_count < max_trades) {
+            trades_out[trade_count++] = (FlowTrade){
+                .trade_id = trade_seq++, .symbol_id = book->symbol_id, .maker_order_id = m->order_id,
+                .taker_order_id = order->order_id, .execution_price = m->price, .execution_quantity = match_qty, .timestamp_ns = t0
+            };
         }
-
-        /* Record trade */
-        if (trades_out != NULL && trade_count < max_trades) {
-            FlowTrade *t = &trades_out[trade_count++];
-            t->trade_id = trade_seq++;
-            t->symbol_id = book->symbol_id;
-            t->maker_order_id = maker->order_id;
-            t->taker_order_id = order->order_id;
-            t->execution_price = maker->price;
-            t->execution_quantity = match_qty;
-            t->timestamp_ns = t0;
-        }
-
         book->total_trades_executed++;
         book->total_volume_traded += match_qty;
     }
-
-    /* Rest remaining limit order quantity on the book */
-    if (remaining_qty > 0 && order->type == FLOW_ORDER_LIMIT &&
-        book->order_count < FLOW_MATCHING_MAX_ORDERS) {
-        FlowOrder *resting = &book->orders[book->order_count++];
-        *resting = *order;
-        resting->filled_quantity = order->quantity - remaining_qty;
-        resting->is_active = 1;
-        resting->timestamp_ns = t0;
+    if (remaining_qty > 0 && order->type == FLOW_ORDER_LIMIT && book->order_count < FLOW_MATCHING_MAX_ORDERS) {
+        FlowOrder *r = &book->orders[book->order_count++];
+        *r = *order;
+        r->filled_quantity = order->quantity - remaining_qty;
+        r->is_active = 1;
+        r->timestamp_ns = t0;
     }
-
     update_bbo_cache(book);
-
     uint64_t t1 = matching_time_ns();
     book->last_tick_to_trade_ns = (t1 > t0) ? (t1 - t0) : 45;
-
     if (trade_count_out) *trade_count_out = trade_count;
     return 1;
 }
 
 int flow_orderbook_cancel(FlowLimitOrderBook *book, uint64_t order_id) {
-    if (book == NULL) return 0;
+    if (!book) return 0;
     for (size_t i = 0; i < book->order_count; ++i) {
         if (book->orders[i].order_id == order_id && book->orders[i].is_active) {
             book->orders[i].is_active = 0;
@@ -148,102 +97,46 @@ int flow_orderbook_cancel(FlowLimitOrderBook *book, uint64_t order_id) {
 }
 
 void flow_matching_mesh_init(FlowMatchingMesh *mesh, size_t shard_count, FlowHeteroMesh *telemetry_mesh) {
-    if (mesh == NULL) return;
-    memset(mesh, 0, sizeof(*mesh));
-    mesh->shard_count = (shard_count > 0 && shard_count <= FLOW_MATCHING_MAX_SHARDS) ? shard_count : 4;
-    mesh->mesh = telemetry_mesh;
-
-    for (size_t i = 0; i < mesh->shard_count; ++i) {
-        flow_orderbook_init(&mesh->shards[i], (uint32_t)(i + 1));
-    }
+    if (!mesh) return;
+    *mesh = (FlowMatchingMesh){ .shard_count = (shard_count > 0 && shard_count <= FLOW_MATCHING_MAX_SHARDS) ? shard_count : 4, .mesh = telemetry_mesh };
+    for (size_t i = 0; i < mesh->shard_count; ++i) flow_orderbook_init(&mesh->shards[i], (uint32_t)(i + 1));
 }
 
-int flow_matching_mesh_submit(FlowMatchingMesh *mesh,
-                              const FlowOrder *order,
-                              FlowTrade *trades_out,
-                              size_t max_trades,
-                              size_t *trade_count_out) {
-    if (mesh == NULL || order == NULL || mesh->shard_count == 0) return 0;
-
-    size_t shard_idx = (size_t)(order->symbol_id % mesh->shard_count);
+int flow_matching_mesh_submit(FlowMatchingMesh *mesh, const FlowOrder *order, FlowTrade *trades_out, size_t max_trades, size_t *trade_count_out) {
+    if (!mesh || !order || !mesh->shard_count) return 0;
     mesh->total_routed_orders++;
-
-    return flow_orderbook_submit(&mesh->shards[shard_idx], order, trades_out, max_trades, trade_count_out);
+    return flow_orderbook_submit(&mesh->shards[order->symbol_id % mesh->shard_count], order, trades_out, max_trades, trade_count_out);
 }
 
-FlowSMTResult flow_matching_verify_smt(const FlowLimitOrderBook *book,
-                                       FlowSMTProofAttestation *proof_out) {
-    if (book == NULL) return FLOW_SMT_UNKNOWN;
-
-    /* 1. Crossed Book Invariant (Bid < Ask) */
-    uint64_t crossed_val = (book->best_bid_price > 0 && book->best_ask_price > 0 &&
-                            book->best_bid_price >= book->best_ask_price) ? 1 : 0;
-
-    /* 2. Non-Negative Inventory Invariant */
-    uint64_t max_fill_excess = 0;
-    for (size_t i = 0; i < book->order_count; ++i) {
-        const FlowOrder *o = &book->orders[i];
-        if (o->filled_quantity > o->quantity) {
-            max_fill_excess = o->filled_quantity - o->quantity;
-            break;
-        }
-    }
-
-    /* Unified SMT Box Constraint Invariants using flow_smt_dsl */
-    FLOW_SMT_BOX_BUILDER_DECL(builder);
-    FLOW_SMT_BOX_ADD_RULE(builder, "crossed book indicator", crossed_val, 0, 0,
-                          FLOW_BOX_THEOREM_BUFFER_BOUNDS, "Crossed book detected (Bid >= Ask)");
-    FLOW_SMT_BOX_ADD_RULE(builder, "fill excess", max_fill_excess, 0, 0,
-                          FLOW_BOX_THEOREM_MEMORY_QUOTA, "Over-filled order detected (filled > requested)");
-
-    FlowSMTResult res = FLOW_SMT_BOX_VERIFY(builder, "financial_matching", proof_out);
-    if (res == FLOW_SMT_PROVEN_UNSAT && proof_out != NULL) {
-        snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                 "SMT FINANCIAL SOUND: Symbol=%u, Orders=%zu, Trades=%llu, TickToTrade=%lluns (Zero-Defect Soundness)",
-                 book->symbol_id, book->order_count, (unsigned long long)book->total_trades_executed,
-                 (unsigned long long)book->last_tick_to_trade_ns);
-    }
-    return res;
+FlowSMTResult flow_matching_verify_smt(const FlowLimitOrderBook *book, FlowSMTProofAttestation *proof_out) {
+    if (!book) return FLOW_SMT_UNKNOWN;
+    uint64_t crossed = (book->best_bid_price > 0 && book->best_ask_price > 0 && book->best_bid_price >= book->best_ask_price);
+    uint64_t max_excess = 0;
+    for (size_t i = 0; i < book->order_count; ++i)
+        if (book->orders[i].filled_quantity > book->orders[i].quantity) { max_excess = book->orders[i].filled_quantity - book->orders[i].quantity; break; }
+    const FlowBoxConstraint rules[] = {
+        FLOW_SMT_RULE("crossed book indicator", crossed, 0, 0, FLOW_BOX_THEOREM_BUFFER_BOUNDS, "Crossed book detected (Bid >= Ask)"),
+        FLOW_SMT_RULE("fill excess", max_excess, 0, 0, FLOW_BOX_THEOREM_MEMORY_QUOTA, "Over-filled order detected (filled > requested)")
+    };
+    return FLOW_SMT_VERIFY_RULES("financial_matching", proof_out, rules,
+        "SMT FINANCIAL SOUND: Symbol=%u, Orders=%zu, Trades=%llu, TickToTrade=%lluns (Zero-Defect Soundness)",
+        book->symbol_id, book->order_count, (unsigned long long)book->total_trades_executed, (unsigned long long)book->last_tick_to_trade_ns);
 }
 
-/* ============================================================================
- * Financial Matching Primitive Driver Implementation
- * ============================================================================ */
-
-static int matching_register(void) {
+static int matching_register(void) { return 1; }
+static int matching_get_bounds(FlowHardwareBounds *b) {
+    if (!b) return 0;
+    *b = (FlowHardwareBounds){ .max_queue_depth = FLOW_MATCHING_MAX_ORDERS, .max_buffer_bytes = 16ULL << 20, .supports_zero_copy = 1, .is_kernel_bypass = 1, .genome_bits_required = 8 };
+    flow_str_copy(b->name, sizeof(b->name), "order_book_matcher");
     return 1;
 }
-
-static int matching_get_bounds(FlowHardwareBounds *bounds_out) {
-    if (bounds_out == NULL) return 0;
-    flow_str_copy(bounds_out->name, sizeof(bounds_out->name), "order_book_matcher");
-    bounds_out->max_queue_depth = FLOW_MATCHING_MAX_ORDERS;
-    bounds_out->max_buffer_bytes = 16ULL * 1024ULL * 1024ULL;
-    bounds_out->supports_zero_copy = 1;
-    bounds_out->is_kernel_bypass = 1;
-    bounds_out->genome_bits_required = 8;
-    return 1;
-}
-
-static int matching_execute(const FlowPrimitiveContext *ctx, FlowPrimitiveResult *res_out) {
-    if (ctx == NULL || res_out == NULL) return -1;
-
-    res_out->status_code = 0;
-    res_out->bytes_transferred = ctx->data_len;
-    res_out->latency_cycles = 75; /* Sub-microsecond match overhead */
-    res_out->zero_copy_active = 1;
-
+static int matching_execute(const FlowPrimitiveContext *ctx, FlowPrimitiveResult *res) {
+    if (!ctx || !res) return -1;
+    *res = (FlowPrimitiveResult){ .status_code = 0, .bytes_transferred = ctx->data_len, .latency_cycles = 75, .zero_copy_active = 1 };
     return 0;
 }
-
 static const FlowPrimitiveDriver s_matching_driver = {
-    .driver_name = "order_book_matcher",
-    .driver_version = "v1.0",
-    .register_primitive = matching_register,
-    .get_hardware_bounds = matching_get_bounds,
-    .execute_primitive = matching_execute
+    .driver_name = "order_book_matcher", .driver_version = "v1.0",
+    .register_primitive = matching_register, .get_hardware_bounds = matching_get_bounds, .execute_primitive = matching_execute
 };
-
-const FlowPrimitiveDriver *flow_primitive_matching_driver(void) {
-    return &s_matching_driver;
-}
+const FlowPrimitiveDriver *flow_primitive_matching_driver(void) { return &s_matching_driver; }

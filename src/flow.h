@@ -10,14 +10,8 @@
 #define FLOW_SAMPLE_MAX 32
 #define FLOW_CONSTRAINT_MAX 32
 
-typedef struct {
-    char name[FLOW_NAME];
-} FlowNode;
-
-typedef struct {
-    int id;
-    int score;
-} FlowSample;
+typedef struct { char name[FLOW_NAME]; } FlowNode;
+typedef struct { int id; int score; } FlowSample;
 
 typedef enum {
     FLOW_FACT_SHARED_STATE,
@@ -36,10 +30,7 @@ typedef enum {
     FLOW_FACT_LEAN_CERTIFIED
 } FlowFactKind;
 
-typedef struct {
-    FlowFactKind kind;
-    char detail[FLOW_NAME];
-} FlowFact;
+typedef struct { FlowFactKind kind; char detail[FLOW_NAME]; } FlowFact;
 
 typedef struct {
     char name[FLOW_NAME];
@@ -51,105 +42,70 @@ typedef struct {
 typedef struct {
     int enabled;
     char name[FLOW_NAME];
-    double frequency_hz;
+    double frequency_hz, max_drift, zmp_margin, dt;
     int symplectic;
-    double max_drift;
-    double zmp_margin;
-    double dt;
     size_t dim;
 } FlowJetSpec;
 
 typedef struct {
     int enabled;
     char name[FLOW_NAME];
-    double max_temp_c;
-    double target_temp_c;
-    double power_limit_w;
-    double r_thermal;
-    double c_thermal;
+    double max_temp_c, target_temp_c, power_limit_w, r_thermal, c_thermal;
 } FlowThermalSpec;
 
-typedef struct {
-    char input_name[FLOW_NAME];
-    int max_count;
-    FlowSample samples[FLOW_SAMPLE_MAX];
-    size_t sample_count;
-    char output_name[FLOW_NAME];
-    char output_type[FLOW_NAME];
-    char state_name[FLOW_NAME];
-    int shared;
-    int read_heavy;
-    int bounded;
-    char flow_name[FLOW_NAME];
-    char flow_expression[FLOW_LINE];
-    FlowNode flow_nodes[FLOW_NODE_MAX];
-    size_t flow_node_count;
-    int top_n;
-    int deterministic;
-    int lean_certified;
-    int memory_mb;
-    int prefer_latency;
-    int ensure_count;
-    FlowConstraint constraints[FLOW_CONSTRAINT_MAX];
-    size_t constraint_count;
-    char resource_name[FLOW_NAME];
-    char capability_name[FLOW_NAME];
-    char domain_name[FLOW_NAME];
-    char contract_name[FLOW_NAME];
-    char fallback_policy[FLOW_NAME];
-    char plugin_name[FLOW_NAME];
-    char project_name[FLOW_NAME];
-    char imported_modules[8][FLOW_NAME];
-    size_t imported_module_count;
-    FlowJetSpec jet;
+#define FLOW_SPEC_CORE_FIELDS \
+    char input_name[FLOW_NAME]; \
+    union { int max_count; int input_max_count; }; \
+    FlowSample samples[FLOW_SAMPLE_MAX]; \
+    size_t sample_count; \
+    char output_name[FLOW_NAME]; \
+    char output_type[FLOW_NAME]; \
+    char state_name[FLOW_NAME]; \
+    union { int shared; int state_shared; }; \
+    union { int read_heavy; int state_read_heavy; }; \
+    union { int bounded; int state_bounded; }; \
+    char flow_name[FLOW_NAME]; \
+    char flow_expression[FLOW_LINE]; \
+    FlowNode flow_nodes[FLOW_NODE_MAX]; \
+    size_t flow_node_count; \
+    int top_n; \
+    union { int deterministic; int fact_deterministic; }; \
+    union { int lean_certified; int fact_lean_certified; }; \
+    union { int memory_mb; int memory_limit_mb; }; \
+    int prefer_latency; \
+    int ensure_count; \
+    FlowConstraint constraints[FLOW_CONSTRAINT_MAX]; \
+    size_t declared_constraint_count; \
+    char resource_name[FLOW_NAME]; \
+    char capability_name[FLOW_NAME]; \
+    char domain_name[FLOW_NAME]; \
+    char contract_name[FLOW_NAME]; \
+    char fallback_policy[FLOW_NAME]; \
+    char plugin_name[FLOW_NAME]; \
+    char project_name[FLOW_NAME]; \
+    char imported_modules[8][FLOW_NAME]; \
+    size_t imported_module_count; \
+    FlowJetSpec jet; \
     FlowThermalSpec thermal;
+
+typedef struct {
+    FLOW_SPEC_CORE_FIELDS
+    size_t constraint_count;
 } FlowSpec;
 
 typedef struct SemanticIR {
-    char input_name[FLOW_NAME];
-    int input_max_count;
-    FlowSample samples[FLOW_SAMPLE_MAX];
-    size_t sample_count;
-    char output_name[FLOW_NAME];
-    char output_type[FLOW_NAME];
-    char state_name[FLOW_NAME];
-    int state_shared;
-    int state_read_heavy;
-    int state_bounded;
-    char flow_name[FLOW_NAME];
-    char flow_expression[FLOW_LINE];
-    FlowNode flow_nodes[FLOW_NODE_MAX];
-    size_t flow_node_count;
+    FLOW_SPEC_CORE_FIELDS
     int flow_parallelizable;
     int fact_ordered;
     int fact_range_proven;
     int fact_size_preserved;
     int fact_mutability_read_only;
-    int top_n;
     int fact_unordered;
-    int fact_deterministic;
-    int fact_lean_certified;
-    int memory_limit_mb;
-    int prefer_latency;
-    int ensure_count;
-    FlowConstraint constraints[FLOW_CONSTRAINT_MAX];
-    size_t declared_constraint_count;
-    char resource_name[FLOW_NAME];
-    char capability_name[FLOW_NAME];
-    char domain_name[FLOW_NAME];
-    char contract_name[FLOW_NAME];
-    char fallback_policy[FLOW_NAME];
-    char plugin_name[FLOW_NAME];
-    char project_name[FLOW_NAME];
-    char imported_modules[8][FLOW_NAME];
-    size_t imported_module_count;
     size_t workload_bytes;
     FlowFact facts[FLOW_NODE_MAX];
     size_t fact_count;
     size_t constraint_count;
     size_t hole_count;
-    FlowJetSpec jet;
-    FlowThermalSpec thermal;
     void *domain_ctx;
     void (*domain_ctx_free)(void *ctx);
 } SemanticIR;
