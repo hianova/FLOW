@@ -269,5 +269,16 @@ int flow_abi_check_composition(const FlowComponentABI *producer,
 int flow_abi_emit_c_header(FILE *output, const FlowComponentABI *abi);
 int flow_abi_emit_rust_adapter(FILE *output, const FlowComponentABI *abi);
 int flow_abi_emit_python_adapter(FILE *output, const FlowComponentABI *abi);
+int flow_abi_emit_lean_adapter(FILE *output,
+                               const SemanticIR *ir,
+                               const FlowComponentABI *abi,
+                               uint64_t genome,
+                               size_t capacity,
+                               size_t shards);
+
+/* Pure-C17 structural, non-vacuity, and zero-sorry auditor for generated Lean 4 certificates */
+int flow_abi_audit_lean_certificate(const char *lean_source,
+                                    char *err_msg,
+                                    size_t err_size);
 
 #endif

@@ -219,7 +219,9 @@ fuzz: | $(BUILD_DIR)
 reload-stress-nightly: $(BUILD_DIR)/reload-stress-test
 	FLOW_STRESS_THREADS=32 FLOW_STRESS_CALLS=312500 FLOW_STRESS_PUBLISHES=1000 $<
 
-autopoiesis-check: $(FLOWY)
+autopoiesis-check: $(FLOWC) $(FLOWY)
+	@mkdir -p generated
+	$(FLOWC) examples/compiler.flow -o generated/compiler.c --target-lean generated/compiler.lean --target-c-header generated/compiler.h
 	$(FLOWY) absorb examples/compiler.flow
 	$(FLOWY) anneal examples/compiler.flow examples/project.flow
 
@@ -333,10 +335,15 @@ test-e2e: $(FLOWC) $(FLOWY) plugins
 	$(BUILD_DIR)/project | grep -q 'flow: browser_pipeline'
 	$(FLOWC) examples/project.flow -o generated/project-locked.c --profile generated/flowplan.lock
 	grep -q 'Project: browser_runtime' generated/project-locked.c
-	$(FLOWC) examples/rank.flow -o generated/rank-cross.c --target-c-header generated/rank-cross.h --target-rust generated/rank-cross.rs --target-python generated/rank-cross.py
+	$(FLOWC) examples/rank.flow -o generated/rank-cross.c --target-c-header generated/rank-cross.h --target-rust generated/rank-cross.rs --target-python generated/rank-cross.py --target-lean generated/rank-cross.lean
 	grep -q 'flow_sharded_hash_create' generated/rank-cross.h
+	grep -q 'flow_pct_vol_t' generated/rank-cross.h
 	grep -q 'pub struct ShardedHash' generated/rank-cross.rs
 	grep -q 'class ShardedHash:' generated/rank-cross.py
+	grep -q 'namespace Flow.ShardedHash' generated/rank-cross.lean
+	grep -q 'theorem non_vacuous_precondition_witness' generated/rank-cross.lean
+	grep -q 'theorem theorem5_kan_open_box_homotopy' generated/rank-cross.lean
+	! $(FLOWC) examples/ambiguous.flow -o /tmp/flow-ambiguous-lean.c --target-lean /tmp/flow-ambiguous.lean
 	! $(FLOWC) examples/invalid_capacity.flow -o /tmp/flow-invalid.c
 	! $(FLOWC) examples/invalid_syntax.flow -o /tmp/flow-invalid-syntax.c
 	! $(FLOWC) examples/invalid_unclosed.flow -o /tmp/flow-invalid-unclosed.c

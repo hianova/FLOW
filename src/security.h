@@ -93,6 +93,9 @@ FlowSecurityOutcome flow_security_check_resource_quota_gate(
 FlowSecurityOutcome flow_security_check_physical_barrier_gate(
     const FlowCompositionSpec *spec, char *message, size_t message_size);
 
+FlowSecurityOutcome flow_security_check_lean_proof_gate(
+    const FlowCompositionSpec *spec, char *message, size_t message_size);
+
 FlowSecurityOutcome flow_security_check_composition_gate(
     const FlowCompositionSpec *spec, char *message, size_t message_size);
 

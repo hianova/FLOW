@@ -32,7 +32,8 @@ typedef enum {
     FLOW_FACT_RANGE,
     FLOW_FACT_SIZE,
     FLOW_FACT_MUTABILITY,
-    FLOW_FACT_DETERMINISM
+    FLOW_FACT_DETERMINISM,
+    FLOW_FACT_LEAN_CERTIFIED
 } FlowFactKind;
 
 typedef struct {
@@ -85,6 +86,7 @@ typedef struct {
     size_t flow_node_count;
     int top_n;
     int deterministic;
+    int lean_certified;
     int memory_mb;
     int prefer_latency;
     int ensure_count;
@@ -126,6 +128,7 @@ typedef struct SemanticIR {
     int top_n;
     int fact_unordered;
     int fact_deterministic;
+    int fact_lean_certified;
     int memory_limit_mb;
     int prefer_latency;
     int ensure_count;

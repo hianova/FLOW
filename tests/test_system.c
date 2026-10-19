@@ -7,6 +7,8 @@
 #include "flowy.h"
 #include "jit.h"
 #include "adaptive.h"
+#include "abi.h"
+#include "security.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -275,6 +277,131 @@ int main(void) {
         FLOW_ASSERT_TRUE(strstr(watchdog_proof.proof_summary, "Conservative Polytope Interval Bounding Box") != NULL);
 
         printf("  ✓ Stage 6 Passed: JIT sizing (100MB), Schmitt hysteresis (anti-flapping), and SMT 5us watchdog verified.\n\n");
+    }
+
+    /* ========================================================================= */
+    /* STAGE 7: Self-Hosting Lean 4 Reflection, Hard Gate & 6-Pillar Audit       */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(7, "Lean 4 Self-Hosting Reflection: .flow lean_certified Gate, 64-Axis Witness & @& FFI");
+    {
+        /* 7a. Parse spec with lean_certified requirement */
+        const char *lean_spec_src =
+            "input source {\n"
+            "    max_count 4096\n"
+            "}\n"
+            "output c_source {\n"
+            "    type text\n"
+            "}\n"
+            "state compiler {\n"
+            "    bounded\n"
+            "}\n"
+            "flow compiler {\n"
+            "    source -> read_file -> parse -> arena -> graph -> hash_table -> work_queue -> ffi -> lower -> select -> emit\n"
+            "}\n"
+            "require {\n"
+            "    deterministic\n"
+            "    lean_certified\n"
+            "    memory < 64mb\n"
+            "}\n"
+            "ensure {\n"
+            "    deterministic\n"
+            "    lean_certified\n"
+            "}\n"
+            "resource cpu {\n"
+            "}\n"
+            "capability stdio {\n"
+            "}\n"
+            "domain compiler {\n"
+            "}\n"
+            "contract compiler\n";
+
+        FILE *mem = tmpfile();
+        FLOW_ASSERT_TRUE(mem != NULL);
+        fputs(lean_spec_src, mem);
+        rewind(mem);
+
+        FlowSpec lspec;
+        memset(&lspec, 0, sizeof(lspec));
+        FLOW_ASSERT_TRUE(parse_spec(mem, &lspec));
+        fclose(mem);
+        FLOW_ASSERT_EQ(lspec.lean_certified, 1);
+        FLOW_ASSERT_EQ(lspec.deterministic, 1);
+
+        SemanticIR lir;
+        memset(&lir, 0, sizeof(lir));
+        lower_to_ir(&lspec, &lir);
+        const FlowPlugin *builtin_mod = flow_registry_lookup("builtin");
+        FLOW_ASSERT_TRUE(builtin_mod != NULL);
+        flow_plugin_lower_semantics(&lspec, &lir, builtin_mod);
+        FLOW_ASSERT_EQ(lir.fact_lean_certified, 1);
+        FLOW_ASSERT_EQ(lir.hole_count, 0);
+
+        const Component *comp = select_component(&lir);
+        FLOW_ASSERT_TRUE(comp != NULL);
+        FLOW_ASSERT_STR_EQ(comp->id, "flowc_bootstrap");
+
+        VerificationReport vrep;
+        FLOW_ASSERT_TRUE(verify_candidate(&lir, comp, NULL, &vrep));
+        FLOW_ASSERT_EQ(vrep.status, VERIFIER_PROVEN);
+
+        /* 7b. Reject unresolved '?' hole (sorry) under lean_certified gate */
+        SemanticIR hole_ir = lir;
+        hole_ir.hole_count = 1;
+        VerificationReport hole_rep;
+        FLOW_ASSERT_TRUE(!verify_candidate(&hole_ir, comp, NULL, &hole_rep));
+        FLOW_ASSERT_EQ(hole_rep.status, VERIFIER_COMPILE_ERROR);
+        FLOW_ASSERT_TRUE(strstr(hole_rep.message, "unresolved topological hole") != NULL);
+
+        /* 7c. Emit Lean 4 Certificate & C Header Newtypes and Audit All 6 Pillars */
+        FlowComponentABI abi;
+        FLOW_ASSERT_TRUE(flow_abi_build_for_component(&lir, comp, &abi));
+
+        FILE *lean_mem = tmpfile();
+        FLOW_ASSERT_TRUE(lean_mem != NULL);
+        FLOW_ASSERT_TRUE(flow_abi_emit_lean_adapter(lean_mem, &lir, &abi, 0x0000000000000021ULL, 4096, 1));
+        long lean_len = ftell(lean_mem);
+        FLOW_ASSERT_TRUE(lean_len > 500);
+        rewind(lean_mem);
+
+        char *lean_buf = (char *)calloc((size_t)lean_len + 1, 1);
+        FLOW_ASSERT_TRUE(lean_buf != NULL);
+        size_t read_bytes = fread(lean_buf, 1, (size_t)lean_len, lean_mem);
+        FLOW_ASSERT_EQ(read_bytes, (size_t)lean_len);
+        fclose(lean_mem);
+
+        char audit_err[256] = {0};
+        FLOW_ASSERT_TRUE(flow_abi_audit_lean_certificate(lean_buf, audit_err, sizeof(audit_err)));
+
+        /* 7d. Verify auditor catches injected `sorry` and custom `axiom` */
+        const char *bad_sorry = "theorem bad : 1 = 2 := by sorry\n";
+        FLOW_ASSERT_TRUE(!flow_abi_audit_lean_certificate(bad_sorry, audit_err, sizeof(audit_err)));
+        FLOW_ASSERT_TRUE(strstr(audit_err, "sorry") != NULL);
+
+        const char *bad_axiom = "axiom fake_soundness : False\n";
+        FLOW_ASSERT_TRUE(!flow_abi_audit_lean_certificate(bad_axiom, audit_err, sizeof(audit_err)));
+        FLOW_ASSERT_TRUE(strstr(audit_err, "axiom") != NULL);
+
+        /* 7e. Verify C Header emits Dimensional Newtypes & FLOW_LEAN_PRE_GUARD */
+        FILE *hdr_mem = tmpfile();
+        FLOW_ASSERT_TRUE(hdr_mem != NULL);
+        FLOW_ASSERT_TRUE(flow_abi_emit_c_header(hdr_mem, &abi));
+        long hdr_len = ftell(hdr_mem);
+        FLOW_ASSERT_TRUE(hdr_len > 200);
+        rewind(hdr_mem);
+        char *hdr_buf = (char *)calloc((size_t)hdr_len + 1, 1);
+        FLOW_ASSERT_TRUE(hdr_buf != NULL);
+        (void)fread(hdr_buf, 1, (size_t)hdr_len, hdr_mem);
+        fclose(hdr_mem);
+        FLOW_ASSERT_TRUE(strstr(hdr_buf, "flow_pct_vol_t") != NULL);
+        FLOW_ASSERT_TRUE(strstr(hdr_buf, "flow_point_vol_t") != NULL);
+        FLOW_ASSERT_TRUE(strstr(hdr_buf, "flow_bachelier_std_dev") != NULL);
+        FLOW_ASSERT_TRUE(strstr(hdr_buf, "FLOW_LEAN_PRE_GUARD") != NULL);
+
+        free(hdr_buf);
+        free(lean_buf);
+        flow_ir_cleanup(&lir);
+
+        printf("  ✓ Stage 7 Passed: Lean 4 reflection certificate, zero-sorry gate, 64-axis witness, and @& FFI verified.\n\n");
     }
 
     FLOW_TEST_SUITE_END();

@@ -342,6 +342,11 @@ int parse_spec(FILE *input, FlowSpec *spec) {
                 ++spec->constraint_count;
                 if (strcmp(line, "deterministic") == 0) {
                     spec->deterministic = 1;
+                } else if (strcmp(line, "lean_certified") == 0 ||
+                           strcmp(line, "proof_carrying") == 0 ||
+                           strcmp(line, "no_sorry") == 0) {
+                    spec->lean_certified = 1;
+                    spec->deterministic = 1;
                 } else if (strcmp(spec->constraints[spec->constraint_count - 1].name,
                                   "memory") == 0) {
                     if (sscanf(line, "memory < %dmb %c", &value,
@@ -357,6 +362,12 @@ int parse_spec(FILE *input, FlowSpec *spec) {
             case SECTION_ENSURE:
                 if (strcmp(line, "deterministic") == 0) {
                     ++spec->ensure_count;
+                    spec->deterministic = 1;
+                } else if (strcmp(line, "lean_certified") == 0 ||
+                           strcmp(line, "proof_carrying") == 0 ||
+                           strcmp(line, "no_sorry") == 0) {
+                    ++spec->ensure_count;
+                    spec->lean_certified = 1;
                     spec->deterministic = 1;
                 } else {
                     fprintf(stderr, "flowc: invalid ensure line %d: %s\n", line_number, line);
@@ -518,6 +529,7 @@ void lower_to_ir(const FlowSpec *spec, SemanticIR *ir) {
     ir->fact_ordered = has_flow_node(ir, "sort");
     ir->fact_unordered = !ir->fact_ordered;
     ir->fact_deterministic = spec->deterministic;
+    ir->fact_lean_certified = spec->lean_certified;
     ir->fact_range_proven = ir->input_max_count > 0;
     ir->fact_size_preserved = has_flow_node(ir, "transform") &&
                               has_flow_node(ir, "collect");
@@ -558,6 +570,7 @@ void lower_to_ir(const FlowSpec *spec, SemanticIR *ir) {
     if (ir->fact_size_preserved) add_fact(ir, FLOW_FACT_SIZE, "length_preserved");
     if (ir->fact_mutability_read_only) add_fact(ir, FLOW_FACT_MUTABILITY, "read_only");
     if (ir->fact_deterministic) add_fact(ir, FLOW_FACT_DETERMINISM, "deterministic");
+    if (ir->fact_lean_certified) add_fact(ir, FLOW_FACT_LEAN_CERTIFIED, "lean_certified");
     ir->hole_count += strstr(ir->flow_expression, "?") != NULL && ir->hole_count == 0;
     ir->jet = spec->jet;
     ir->thermal = spec->thermal;

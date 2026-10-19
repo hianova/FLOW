@@ -682,6 +682,51 @@ FlowSecurityOutcome flow_jet_byzantine_validate_packet(
     return FLOW_SECURITY_PASS;
 }
 
+FlowSecurityOutcome flow_security_check_lean_proof_gate(
+    const FlowCompositionSpec *spec, char *message, size_t message_size) {
+    if (spec == NULL || spec->ir == NULL || spec->component == NULL) {
+        if (message && message_size) snprintf(message, message_size, "lean proof gate: null spec, ir, or component");
+        return FLOW_SECURITY_CONTRACT_VIOLATION;
+    }
+    /* 1. Zero-Hole / Zero-Sorry Obligation: no unresolved '?' holes permitted */
+    if (spec->ir->hole_count > 0) {
+        if (message && message_size) {
+            snprintf(message, message_size,
+                     "lean proof gate rejected: %zu unresolved topological hole(s) ('?' / sorry) in flow '%s'",
+                     spec->ir->hole_count, spec->ir->flow_name);
+        }
+        return FLOW_SECURITY_INCOMPLETE;
+    }
+    /* 2. Pure Functional Determinism Obligation */
+    if (!spec->ir->fact_deterministic) {
+        if (message && message_size) {
+            snprintf(message, message_size,
+                     "lean proof gate rejected: flow '%s' lacks deterministic invariant required by Lean 4 kernel",
+                     spec->ir->flow_name);
+        }
+        return FLOW_SECURITY_CONTRACT_VIOLATION;
+    }
+    /* 3. Non-Vacuous Domain & Static Capacity Proof Obligation */
+    if (spec->ir->input_max_count <= 0) {
+        if (message && message_size) {
+            snprintf(message, message_size,
+                     "lean proof gate rejected: vacuous or unbounded input domain (max_count=%d)",
+                     spec->ir->input_max_count);
+        }
+        return FLOW_SECURITY_CONTRACT_VIOLATION;
+    }
+    if (spec->metrics != NULL && spec->metrics->capacity > 0 &&
+        spec->metrics->capacity < (size_t)spec->ir->input_max_count) {
+        if (message && message_size) {
+            snprintf(message, message_size,
+                     "lean proof gate rejected: capacity (%zu) < input_max_count (%d), proof erasure unsafe",
+                     spec->metrics->capacity, spec->ir->input_max_count);
+        }
+        return FLOW_SECURITY_CONTRACT_VIOLATION;
+    }
+    return FLOW_SECURITY_PASS;
+}
+
 FlowSecurityOutcome flow_security_check_composition_gate(
     const FlowCompositionSpec *spec, char *message, size_t message_size) {
     FlowSecurityOutcome outcome;
@@ -695,6 +740,10 @@ FlowSecurityOutcome flow_security_check_composition_gate(
     if (outcome != FLOW_SECURITY_PASS) return outcome;
     outcome = flow_security_check_physical_barrier_gate(spec, message, message_size);
     if (outcome != FLOW_SECURITY_PASS) return outcome;
+    if (spec != NULL && spec->ir != NULL && spec->ir->fact_lean_certified) {
+        outcome = flow_security_check_lean_proof_gate(spec, message, message_size);
+        if (outcome != FLOW_SECURITY_PASS) return outcome;
+    }
     return FLOW_SECURITY_PASS;
 }
 

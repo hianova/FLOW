@@ -16,11 +16,13 @@ flow compiler {
 
 require {
     deterministic
+    lean_certified
     memory < 64mb
 }
 
 ensure {
     deterministic
+    lean_certified
 }
 
 resource cpu {

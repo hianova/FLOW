@@ -56,6 +56,7 @@ static void flowc_print_usage(FILE *out) {
     fprintf(out, "  --target-rust <file.rs>  Emit Rust FFI adapter\n");
     fprintf(out, "  --target-python <file.py> Emit Python ctypes adapter\n");
     fprintf(out, "  --target-c-header <f.h>  Emit C interface header\n");
+    fprintf(out, "  --target-lean <f.lean>   Emit Lean 4 reflection certificate & @& FFI\n");
     fprintf(out, "  --target-llvm-ir <f.ll>  Emit LLVM IR\n");
     fprintf(out, "  --target-mlir <f.mlir>   Emit MLIR\n");
 }
@@ -83,6 +84,7 @@ int flowc_main(int argc, char **argv) {
     const char *target_c_header = NULL;
     const char *target_rust = NULL;
     const char *target_python = NULL;
+    const char *target_lean = NULL;
     const char *target_mlir = NULL;
     const char *target_llvm_ir = NULL;
     const char *apply_fvec_path = NULL;
@@ -133,6 +135,8 @@ int flowc_main(int argc, char **argv) {
             target_rust = argv[++arg];
         } else if (strcmp(argv[arg], "--target-python") == 0 && arg + 1 < argc) {
             target_python = argv[++arg];
+        } else if (strcmp(argv[arg], "--target-lean") == 0 && arg + 1 < argc) {
+            target_lean = argv[++arg];
         } else if (strcmp(argv[arg], "--target-mlir") == 0 && arg + 1 < argc) {
             target_mlir = argv[++arg];
         } else if (strcmp(argv[arg], "--target-llvm-ir") == 0 && arg + 1 < argc) {
@@ -198,6 +202,9 @@ int flowc_main(int argc, char **argv) {
     fclose(input);
 
     lower_to_ir(&spec, &ir);
+    if (target_lean != NULL) {
+        ir.fact_lean_certified = 1;
+    }
     ir.workload_bytes = workload_bytes;
 
     /* Dynamic Domain Module & DSO Plugin Resolution */
@@ -540,7 +547,7 @@ int flowc_main(int argc, char **argv) {
                search.tuning.batch_size, search.tuning.arena_bytes);
     }
 
-    if (target_c_header != NULL || target_rust != NULL || target_python != NULL || target_mlir != NULL || target_llvm_ir != NULL) {
+    if (target_c_header != NULL || target_rust != NULL || target_python != NULL || target_lean != NULL || target_mlir != NULL || target_llvm_ir != NULL) {
         FlowComponentABI abi;
         flow_abi_build_for_component(&ir, component, &abi);
         if (target_c_header != NULL) {
@@ -565,6 +572,16 @@ int flowc_main(int argc, char **argv) {
                 flow_abi_emit_python_adapter(py_fp, &abi);
                 fclose(py_fp);
                 printf("  target-python: wrote %s\n", target_python);
+            }
+        }
+        if (target_lean != NULL) {
+            FILE *lean_fp = fopen(target_lean, "w");
+            if (lean_fp != NULL) {
+                size_t emit_cap = use_search && search.capacity > 0 ? (size_t)search.capacity : verification.capacity;
+                size_t emit_shards = use_search && search.shards > 0 ? (size_t)search.shards : 1;
+                flow_abi_emit_lean_adapter(lean_fp, &ir, &abi, search.genome, emit_cap, emit_shards);
+                fclose(lean_fp);
+                printf("  target-lean: wrote %s\n", target_lean);
             }
         }
         if (target_mlir != NULL) {

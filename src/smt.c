@@ -420,10 +420,17 @@ int verify_candidate(const SemanticIR *ir, const Component *component,
     }
 
     report->max_count_proven = (size_t)ir->input_max_count <= capacity;
+    if (ir->fact_lean_certified && !report->max_count_proven) {
+        report->status = VERIFIER_COMPILE_ERROR;
+        snprintf(report->message, sizeof(report->message),
+                 "lean_certified requires compile-time proven input bound (capacity %zu < input_max_count %d)",
+                 capacity, ir->input_max_count);
+        return 0;
+    }
     report->runtime_input_guard = !report->max_count_proven;
     report->status = report->max_count_proven ? VERIFIER_PROVEN : VERIFIER_RUNTIME_CHECK;
     snprintf(report->message, sizeof(report->message),
-             report->max_count_proven ? "input bound proven" :
+             report->max_count_proven ? (ir->fact_lean_certified ? "lean_certified & input bound proven" : "input bound proven") :
                                         "input bound requires runtime guard");
     return 1;
 }
