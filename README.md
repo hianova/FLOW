@@ -95,7 +95,7 @@ make autopoiesis-check
 
 ## 📚 The FLOW Book (`flow-book/`)
 
-The 18-chapter bilingual specification and architectural guide lives in [`flow-book/src/`](flow-book/src/SUMMARY.md) as pure Literate Markdown (`.md`). Chapters containing embedded ```` ```flow ```` blocks can be compiled directly by `flowc`.
+The 6-chapter distilled bilingual specification and architectural guide lives in [`flow-book/src/`](flow-book/src/SUMMARY.md) as pure Literate Markdown (`.md`). Chapters containing embedded ```` ```flow ```` blocks can be compiled directly by `flowc`.
 
 ---
 

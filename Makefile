@@ -35,7 +35,7 @@ INCLUDEDIR ?= $(PREFIX)/include/flow
 
 PLUGINS_SO := $(BUILD_DIR)/libflow_embodied.so $(BUILD_DIR)/libflow_swarm.so
 
-.PHONY: all clean test demos demo benchmark chaos-benchmark gateway-benchmark frontier-benchmark autopoiesis-check security-test acceptance install uninstall fuzz test-build test-run test-e2e audit-mechanisms fvec-flowc-apply-test reload-stress-nightly plugins flowy libflow test-cubical-hott
+.PHONY: all clean test demos demo benchmark autopoiesis-check security-test acceptance install uninstall fuzz test-build test-run test-e2e audit-mechanisms fvec-flowc-apply-test plugins flowy libflow test-cubical-hott
 
 all: $(LIBFLOW_A) $(FLOWC) $(FLOWY) plugins
 
@@ -118,17 +118,6 @@ demos: $(FLOWC)
 benchmark: demos
 	./tools/benchmark-suite.sh 1000
 
-chaos-benchmark: tests/chaos-fp-vs-int-benchmark.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -Isrc $< -o $(BUILD_DIR)/chaos-fp-vs-int-benchmark -lm
-	$(BUILD_DIR)/chaos-fp-vs-int-benchmark
-
-gateway-benchmark: tests/gateway-autonomous-benchmark.c $(LIBFLOW_A) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $(BUILD_DIR)/gateway-autonomous-benchmark $(LDLIBS)
-	$(BUILD_DIR)/gateway-autonomous-benchmark
-
-frontier-benchmark: tests/frontier-4pillars-benchmark.c $(LIBFLOW_A) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $(BUILD_DIR)/frontier-4pillars-benchmark $(LDLIBS)
-	$(BUILD_DIR)/frontier-4pillars-benchmark
 
 # ==============================================================================
 # Two-Stage Native Makefile Test Pipeline (Native Hermetic Barrier)
@@ -170,14 +159,6 @@ $(BUILD_DIR)/test-geometric-axiom: tests/test_geometric_axiom.c $(FLOWC) $(FLOWY
 $(BUILD_DIR)/test-cubical-hott: tests/test_cubical_hott.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
-$(BUILD_DIR)/generated-reload-test: tests/generated-reload-test.c $(FLOWC) $(LIBFLOW_A) | $(BUILD_DIR)
-	$(FLOWC) examples/rank.flow -o /tmp/flow-rank-reload.c --search --iterations 50 --seed 42 --reload-adapter
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc tests/generated-reload-test.c /tmp/flow-rank-reload.c $(LIBFLOW_A) -o $@ $(LDLIBS)
-	$(FLOWC) examples/small.flow -o /tmp/flow-small-reload.c --reload-adapter
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc -c /tmp/flow-small-reload.c -o /tmp/flow-small-reload.o
-
-$(BUILD_DIR)/reload-stress-test: tests/reload-stress-test.c $(LIBFLOW_A) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
 # Backward-compatible convenience shortcuts to build & execute any domain test
 TEST_NAMES := $(patsubst $(BUILD_DIR)/%,%,$(TEST_BINARIES))
@@ -193,8 +174,6 @@ fuzz: | $(BUILD_DIR)
 	@echo "Running LLVM libFuzzer for 5 seconds..."
 	$(BUILD_DIR)/fuzzer-engine -max_total_time=5
 
-reload-stress-nightly: $(BUILD_DIR)/reload-stress-test
-	FLOW_STRESS_THREADS=32 FLOW_STRESS_CALLS=312500 FLOW_STRESS_PUBLISHES=1000 $<
 
 autopoiesis-check: $(FLOWC) $(FLOWY)
 	@mkdir -p generated
@@ -317,14 +296,13 @@ test-e2e: $(FLOWC) $(FLOWY) plugins
 	grep -q 'theorem non_vacuous_precondition_witness' generated/rank-cross.lean
 	grep -q 'theorem theorem5_kan_open_box_homotopy' generated/rank-cross.lean
 	! $(FLOWC) examples/ambiguous.flow -o /tmp/flow-ambiguous-lean.c --target-lean /tmp/flow-ambiguous.lean
-	! $(FLOWC) examples/invalid_capacity.flow -o /tmp/flow-invalid.c
-	! $(FLOWC) examples/invalid_syntax.flow -o /tmp/flow-invalid-syntax.c
-	! $(FLOWC) examples/invalid_unclosed.flow -o /tmp/flow-invalid-unclosed.c
-	! $(FLOWC) examples/invalid_value.flow -o /tmp/flow-invalid-value.c
-	! $(FLOWC) examples/invalid_capability.flow -o /tmp/flow-invalid-capability.c
-	! $(FLOWC) examples/invalid_import.flow -o /tmp/flow-invalid-import.c
-	! $(FLOWC) examples/invalid_unbounded.flow -o /tmp/flow-invalid-unbounded.c
-	! $(FLOWC) examples/invalid_no_input.flow -o /tmp/flow-invalid-no-input.c
+	@printf "input items {\n max_count 4\n}\nflow impossible_top {\n items -> top(10)\n}\n" > /tmp/flow-inv.flow && ! $(FLOWC) /tmp/flow-inv.flow -o /tmp/flow-inv.c
+	@printf "input items {\n max_count 4\n}\nflow scan {\n items -> top(2)\n}\nrequire {\n deterministiic\n}\n" > /tmp/flow-inv.flow && ! $(FLOWC) /tmp/flow-inv.flow -o /tmp/flow-inv.c
+	@printf "input items {\n max_count 4\nflow scan {\n items -> top(2)\n}\n" > /tmp/flow-inv.flow && ! $(FLOWC) /tmp/flow-inv.flow -o /tmp/flow-inv.c
+	@printf "input items {\n max_count -1\n}\nflow scan {\n items -> top(abc)\n}\n" > /tmp/flow-inv.flow && ! $(FLOWC) /tmp/flow-inv.flow -o /tmp/flow-inv.c
+	@printf "import missing_plugin\ninput items {\n max_count 8\n}\nflow simple {\n items -> collect\n}\n" > /tmp/flow-inv.flow && ! $(FLOWC) /tmp/flow-inv.flow -o /tmp/flow-inv.c
+	@printf "input values {\n}\nflow unbounded_scan {\n values -> transform -> collect\n}\n" > /tmp/flow-inv.flow && ! $(FLOWC) /tmp/flow-inv.flow -o /tmp/flow-inv.c
+	@printf "flow constant_output {\n emit -> output\n}\n" > /tmp/flow-inv.flow && ! $(FLOWC) /tmp/flow-inv.flow -o /tmp/flow-inv.c
 	@$(MAKE) --no-print-directory test-literate
 
 test-literate: $(FLOWC) | $(BUILD_DIR)

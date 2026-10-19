@@ -1,7 +1,0 @@
-flow constant_output {
-    emit -> output
-}
-
-require {
-    deterministic
-}
