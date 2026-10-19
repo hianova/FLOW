@@ -188,13 +188,11 @@ FlowAdaptiveStatus flow_adaptive_tick(FlowAdaptiveController *ctrl) {
         pthread_mutex_lock(&ctrl->lock); ctrl->evaluating = 0; pthread_mutex_unlock(&ctrl->lock);
         return FLOW_ADAPTIVE_NO_CHANGE;
     }
-    size_t best_idx = cur;
-    best_score = cur_score;
+    size_t best_idx = cur; best_score = cur_score;
     for (size_t i = 0; i < ctrl->candidate_count; ++i) {
         double score;
         if (i != cur && ctrl->probe(ctrl->host_context, &ctrl->candidates[i], &m, &score) == 0 && score < best_score) {
-            best_score = score;
-            best_idx = i;
+            best_score = score; best_idx = i;
         }
     }
     if (best_idx == cur || cur_score <= 0.0 || (cur_score - best_score) * 100.0 < cur_score * ctrl->config.min_improvement_percent) {
@@ -212,10 +210,8 @@ FlowAdaptiveStatus flow_adaptive_tick_pmu(FlowAdaptiveController *ctrl, const Fl
     ctrl->debounce.ticks_since_last_swap++;
 
     double a = ctrl->anti_thrash.ema_alpha > 0.0 ? ctrl->anti_thrash.ema_alpha : 0.25;
-    #define EMA(v, c) (v = !v ? (c) : (1.0 - a) * (v) + a * (c))
-    EMA(ctrl->debounce.smoothed_miss_rate, ctrl->pmu.cache_miss_rate);
-    EMA(ctrl->debounce.smoothed_ipc, ctrl->pmu.ipc);
-    #undef EMA
+    ctrl->debounce.smoothed_miss_rate = !ctrl->debounce.smoothed_miss_rate ? ctrl->pmu.cache_miss_rate : (1.0 - a) * ctrl->debounce.smoothed_miss_rate + a * ctrl->pmu.cache_miss_rate;
+    ctrl->debounce.smoothed_ipc = !ctrl->debounce.smoothed_ipc ? ctrl->pmu.ipc : (1.0 - a) * ctrl->debounce.smoothed_ipc + a * ctrl->pmu.ipc;
 
     int moreau_state = 0;
     if (thresh->cache_miss_rate_threshold > 0.0) {
@@ -282,19 +278,15 @@ const char *flow_adaptive_status_name(FlowAdaptiveStatus s) {
 
 uint64_t flow_adaptive_telemetry_bias_from_pmu(const FlowPMUTelemetry *pmu, int write_heavy, const FlowPlanDimensionSet *dims) {
     if (!dims || !dims->count) return 0;
-    uint64_t bias_mask = 0;
-    unsigned shift = 0;
-    uint8_t flags = (write_heavy ? 1 : 0) |
-                    ((pmu && pmu->cache_miss_rate > 0.30) ? 2 : 0) |
-                    ((pmu && pmu->ipc > 0.0 && pmu->ipc < 0.8) ? 4 : 0);
-
+    uint64_t bias_mask = 0; unsigned shift = 0;
+    uint8_t flags = (write_heavy ? 1 : 0) | ((pmu && pmu->cache_miss_rate > 0.30) ? 2 : 0) | ((pmu && pmu->ipc > 0.0 && pmu->ipc < 0.8) ? 4 : 0);
     for (size_t i = 0; i < dims->count; ++i) {
         const FlowPlanDimension *d = &dims->dimensions[i];
         unsigned bits = flow_dimension_bits(d);
         if (!bits) continue;
         uint64_t m = (bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << bits) - 1);
-        int bias = !flags ? (d->dim_class == FLOW_DIM_CLASS_TACTILE_PARAM) : ((lookup_bias_attr(d->name) & flags) != 0);
-        if (bias) bias_mask |= (m << shift);
+        if (!flags ? (d->dim_class == FLOW_DIM_CLASS_TACTILE_PARAM) : ((lookup_bias_attr(d->name) & flags) != 0))
+            bias_mask |= (m << shift);
         shift += bits;
     }
     return bias_mask;
@@ -315,6 +307,22 @@ uint64_t flow_adaptive_synthesize_env_mask(const FlowAdaptiveController *c, cons
     return flow_component_environment_mask(NULL, comp, dims, env);
 }
 
+static void record_adaptive_decision(uint64_t ts_ns, FlowDecisionTriggerType trig, const char *src,
+                                     double obs, double lim, const char *unit, const char *viol,
+                                     uint32_t bit, uint64_t pre_m, uint64_t post_m,
+                                     const char *pre_t, const char *post_t, const char *rat, uint64_t grace_ns) {
+    FlowDecisionEvent ev = {.timestamp_ns = ts_ns, .trigger_type = trig, .observed_metric_value = obs,
+                            .threshold_limit_value = lim, .flipped_genome_bit = bit, .pre_state_mask = pre_m,
+                            .post_state_mask = post_m, .hot_swap_grace_ns = grace_ns};
+    snprintf(ev.trigger_source, sizeof(ev.trigger_source), "%s", src);
+    snprintf(ev.metric_unit, sizeof(ev.metric_unit), "%s", unit);
+    snprintf(ev.violated_constraint, sizeof(ev.violated_constraint), "%s", viol);
+    snprintf(ev.pre_topology, sizeof(ev.pre_topology), "%s", pre_t);
+    snprintf(ev.post_topology, sizeof(ev.post_topology), "%s", post_t);
+    snprintf(ev.causal_rationale, sizeof(ev.causal_rationale), "%s", rat);
+    flow_decision_logger_record(flow_decision_logger_default(), &ev);
+}
+
 FlowAdaptiveStatus flow_adaptive_handle_pressure_event(FlowAdaptiveController *ctrl, const FlowEnvironmentState *env, size_t *morphed_out) {
     if (!ctrl || !env) return FLOW_ADAPTIVE_INVALID;
     pthread_mutex_lock(&ctrl->lock);
@@ -332,37 +340,26 @@ FlowAdaptiveStatus flow_adaptive_handle_pressure_event(FlowAdaptiveController *c
         if (morphed_out) *morphed_out = curr;
         return FLOW_ADAPTIVE_NO_CHANGE;
     }
-    int res = flow_reload_activate(ctrl->context, ctrl->candidates[best_idx].unit);
-    if (res != FLOW_RELOAD_OK) { pthread_mutex_unlock(&ctrl->lock); return FLOW_ADAPTIVE_RELOAD_FAILED; }
+    if (flow_reload_activate(ctrl->context, ctrl->candidates[best_idx].unit) != FLOW_RELOAD_OK) {
+        pthread_mutex_unlock(&ctrl->lock);
+        return FLOW_ADAPTIVE_RELOAD_FAILED;
+    }
     ctrl->current_index = best_idx; ctrl->calls_since_switch = 0; ctrl->debounce.swap_count++;
 
-    /* Record real-time adaptive hot-swap telemetry event for causal introspection (flowy why) */
-    FlowDecisionEvent ev = {0};
-    ev.timestamp_ns = clock_ns();
-    FlowDecisionTriggerType trigger = FLOW_DECISION_TRIGGER_MEMORY_PRESSURE;
-    if (env->pressure_level == FLOW_ENV_PRESSURE_CACHE_THRASHING) {
-        trigger = FLOW_DECISION_TRIGGER_CACHE_MISS_SPIKE;
-    } else if (env->pressure_level == FLOW_ENV_PRESSURE_LATENCY_SPIKE) {
-        trigger = FLOW_DECISION_TRIGGER_STRAGGLER_QUARANTINE;
-    }
-    ev.trigger_type = trigger;
-    snprintf(ev.trigger_source, sizeof(ev.trigger_source), "adaptive_pressure_controller");
-    ev.observed_metric_value = (env->measured_miss_rate > 0.0) ? env->measured_miss_rate : (double)env->pressure_level;
-    ev.threshold_limit_value = (env->measured_miss_rate > 0.0) ? 0.15 : 2.0;
-    snprintf(ev.metric_unit, sizeof(ev.metric_unit), "%s", (env->measured_miss_rate > 0.0) ? "miss_rate" : "pressure_lvl");
-    snprintf(ev.violated_constraint, sizeof(ev.violated_constraint), "Adaptive Telemetry Performance Envelope (Pressure Level %d)", (int)env->pressure_level);
-    ev.flipped_genome_bit = (uint32_t)best_idx;
-    ev.pre_state_mask = (1ULL << 6);
-    ev.post_state_mask = (1ULL << 6) | (1ULL << (best_idx % 64));
-    snprintf(ev.pre_topology, sizeof(ev.pre_topology), "%s",
-             ctrl->candidates[curr].unit ? ctrl->candidates[curr].unit->name : "candidate_pre");
-    snprintf(ev.post_topology, sizeof(ev.post_topology), "%s",
-             ctrl->candidates[best_idx].unit ? ctrl->candidates[best_idx].unit->name : "candidate_post");
-    snprintf(ev.causal_rationale, sizeof(ev.causal_rationale),
-             "Hardware pressure reached level %d (miss_rate=%.2f). Telemetry triggered 1-cycle topology hot-swap from '%s' to '%s' to preserve throughput SLA under QSBR grace period.",
-             (int)env->pressure_level, env->measured_miss_rate, ev.pre_topology, ev.post_topology);
-    ev.hot_swap_grace_ns = 92;
-    flow_decision_logger_record(flow_decision_logger_default(), &ev);
+    FlowDecisionTriggerType trig = env->pressure_level == FLOW_ENV_PRESSURE_CACHE_THRASHING ? FLOW_DECISION_TRIGGER_CACHE_MISS_SPIKE :
+                                  (env->pressure_level == FLOW_ENV_PRESSURE_LATENCY_SPIKE ? FLOW_DECISION_TRIGGER_STRAGGLER_QUARANTINE : FLOW_DECISION_TRIGGER_MEMORY_PRESSURE);
+    const char *pre_t = ctrl->candidates[curr].unit ? ctrl->candidates[curr].unit->name : "candidate_pre";
+    const char *post_t = ctrl->candidates[best_idx].unit ? ctrl->candidates[best_idx].unit->name : "candidate_post";
+    char viol[128], rat[256];
+    snprintf(viol, sizeof(viol), "Adaptive Telemetry Performance Envelope (Pressure Level %d)", (int)env->pressure_level);
+    snprintf(rat, sizeof(rat), "Hardware pressure reached level %d (miss_rate=%.2f). Telemetry triggered 1-cycle topology hot-swap from '%s' to '%s' to preserve throughput SLA under QSBR grace period.",
+             (int)env->pressure_level, env->measured_miss_rate, pre_t, post_t);
+    record_adaptive_decision(clock_ns(), trig, "adaptive_pressure_controller",
+                             env->measured_miss_rate > 0.0 ? env->measured_miss_rate : (double)env->pressure_level,
+                             env->measured_miss_rate > 0.0 ? 0.15 : 2.0,
+                             env->measured_miss_rate > 0.0 ? "miss_rate" : "pressure_lvl",
+                             viol, (uint32_t)best_idx, 1ULL << 6, (1ULL << 6) | (1ULL << (best_idx % 64)),
+                             pre_t, post_t, rat, 92);
 
     pthread_mutex_unlock(&ctrl->lock);
     if (morphed_out) *morphed_out = best_idx;
@@ -392,26 +389,13 @@ int flow_adaptive_fallback_to_golden_baseline(FlowAdaptiveController *c, const c
         strncpy(snap.author_attestation, reason ? reason : "OOD_SPIKE_FALLBACK", sizeof(snap.author_attestation) - 1);
         flow_audit_trail_record(c->context, &snap);
 
-        /* Record decision event in audit causal logger */
-        FlowDecisionEvent ev = {0};
-        ev.timestamp_ns = snap.timestamp_ns;
-        ev.trigger_type = FLOW_DECISION_TRIGGER_GOLDEN_FALLBACK;
-        snprintf(ev.trigger_source, sizeof(ev.trigger_source), "adaptive_error_watchdog");
-        ev.observed_metric_value = 3.0;
-        ev.threshold_limit_value = 3.0;
-        snprintf(ev.metric_unit, sizeof(ev.metric_unit), "errors");
-        snprintf(ev.violated_constraint, sizeof(ev.violated_constraint), "Maximum Consecutive Error Threshold (Fail-Safe)");
-        ev.flipped_genome_bit = 54; /* golden_fallback */
-        ev.pre_state_mask = 0ULL;
-        ev.post_state_mask = (1ULL << 54);
-        snprintf(ev.pre_topology, sizeof(ev.pre_topology), "active_hot_candidate");
-        snprintf(ev.post_topology, sizeof(ev.post_topology), "%s",
-                 c->golden_unit->name ? c->golden_unit->name : "golden_baseline");
-        snprintf(ev.causal_rationale, sizeof(ev.causal_rationale),
-                 "Consecutive runtime errors exceeded watchdog ceiling. Emergency fallback triggered switch to golden baseline unit '%s' (%s).",
-                 ev.post_topology, reason ? reason : "UNSPECIFIED");
-        ev.hot_swap_grace_ns = 75;
-        flow_decision_logger_record(flow_decision_logger_default(), &ev);
+        const char *post_t = c->golden_unit->name ? c->golden_unit->name : "golden_baseline";
+        char rat[256];
+        snprintf(rat, sizeof(rat), "Consecutive runtime errors exceeded watchdog ceiling. Emergency fallback triggered switch to golden baseline unit '%s' (%s).",
+                 post_t, reason ? reason : "UNSPECIFIED");
+        record_adaptive_decision(snap.timestamp_ns, FLOW_DECISION_TRIGGER_GOLDEN_FALLBACK, "adaptive_error_watchdog",
+                                 3.0, 3.0, "errors", "Maximum Consecutive Error Threshold (Fail-Safe)",
+                                 54, 0ULL, 1ULL << 54, "active_hot_candidate", post_t, rat, 75);
     }
     pthread_mutex_unlock(&c->lock);
     return ok;
