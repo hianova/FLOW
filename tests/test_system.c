@@ -862,9 +862,27 @@ int main(void) {
         FLOW_ASSERT_TRUE(strstr(emb_lean_buf, "theorem kernel_step_certified : stepReflex 0 24 24 1 = 0 := by decide") != NULL);
         free(emb_lean_buf);
 
-        /* Verify Unicode operators (≥, ≤, ≠, ∧, ∨) in extern_kernel_body compile cleanly in C17 */
+        /* Verify Unicode operators (≥, ≤, ≠, ∧, ∨, ¬) and nested if/then/else-if chains compile cleanly in C17 */
+        const char *nested_lean =
+            "namespace Embodied.NestedReflex\n"
+            "def nestedKernel (baseOff byteLen stride epoch : UInt64) : UInt32 :=\n"
+            "  if stride < 24 then 2\n"
+            "  else if ¬(epoch ≠ 0) then 1\n"
+            "  else if stride ≥ 24 ∧ (0 ≤ baseOff ∨ byteLen ≥ 24) then if epoch > 0 then 0 else 3\n"
+            "  else 4\n"
+            "theorem nested_ok : nestedKernel 0 24 24 1 = 0 := by decide\n"
+            "end Embodied.NestedReflex\n";
+        FILE *nl_fp = tmpfile();
+        FLOW_ASSERT_TRUE(nl_fp != NULL);
+        fputs(nested_lean, nl_fp);
+        rewind(nl_fp);
+        FlowSpec nl_spec;
+        memset(&nl_spec, 0, sizeof(nl_spec));
+        FLOW_ASSERT_TRUE(parse_spec(nl_fp, &nl_spec));
+        fclose(nl_fp);
+        FLOW_ASSERT_TRUE(strstr(nl_spec.extern_kernel_body, "else 4") != NULL);
         SemanticIR uni_ir = emb_ir;
-        strncpy(uni_ir.extern_kernel_body, "if stride ≥ 24 ∧ epoch ≠ 0 ∧ (0 ≤ baseOff ∨ byteLen ≥ 24) then 0 else 1", sizeof(uni_ir.extern_kernel_body) - 1);
+        strncpy(uni_ir.extern_kernel_body, nl_spec.extern_kernel_body, sizeof(uni_ir.extern_kernel_body) - 1);
         FILE *uni_c_fp = fopen("/tmp/flow_uni_lean_dso.c", "w");
         FLOW_ASSERT_TRUE(uni_c_fp != NULL);
         FLOW_ASSERT_TRUE(emit_c(uni_c_fp, &uni_ir, emb_sel, NULL, &emb_vrep, 0));

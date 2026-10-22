@@ -32,7 +32,7 @@ flowc src/app.lean \
     --target-lean build/app_cert.lean
 
 # 2. 編譯原生 C17 + QSBR 動態庫
-clang -std=c17 -O2 -shared -fPIC -pthread build/app.c -o build/libapp.so -lm
+clang -std=c17 -O2 -shared -fPIC -DFLOW_SHARED_LIB -pthread build/app.c -o build/libapp.so -lm
 ```
 
 在 **Python (FastAPI / 量化腳本 / ERP 外掛)** 中以零拷貝方式呼叫：

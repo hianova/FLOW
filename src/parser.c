@@ -57,7 +57,7 @@ static int is_internal_lean_def(const char *s) {
 }
 static int parse_lean_spec(FILE *input, FlowSpec *spec) {
     char raw[FLOW_LINE], sym[FLOW_NAME] = {0}, cand_fn[FLOW_NAME] = {0}, cand_body[FLOW_LINE] = {0};
-    unsigned long long v = 0; int saw_lean = 0, in_struct = 0, in_block_comment = 0, explicit_stride = 0, explicit_export = 0, awaiting_body = 0; size_t struct_bytes = 0;
+    unsigned long long v = 0; int saw_lean = 0, in_struct = 0, in_block_comment = 0, explicit_stride = 0, explicit_export = 0, awaiting_body = 0, in_u32_body = 0; size_t struct_bytes = 0;
     memset(spec, 0, sizeof(*spec)); strncpy(spec->input_name, "lean_stream", FLOW_NAME - 1); strncpy(spec->flow_name, "lean_kernel_flow", FLOW_NAME - 1);
     spec->max_count = 1024; spec->input_stride_bytes = 8; spec->input_align_bytes = 8; spec->state_schema_version = 1; spec->top_n = 3;
     spec->deterministic = 1; spec->lean_certified = 1; spec->bounded = 1; spec->memory_mb = 64;
@@ -85,6 +85,15 @@ static int parse_lean_spec(FILE *input, FlowSpec *spec) {
             if (spec->extern_kernel[0]) strncpy(spec->extern_kernel_body, cand_body, FLOW_LINE - 1);
             awaiting_body = 0; continue;
         }
+        if (in_u32_body && cand_body[0] && (starts_with(line, "else ") || starts_with(line, "then "))) {
+            size_t cur = strlen(cand_body);
+            if (cur + 1 + strlen(line) < FLOW_LINE) {
+                cand_body[cur] = ' '; strncpy(cand_body + cur + 1, line, FLOW_LINE - cur - 2);
+                if (spec->extern_kernel[0]) strncpy(spec->extern_kernel_body, cand_body, FLOW_LINE - 1);
+            }
+            continue;
+        }
+        in_u32_body = 0;
         if (in_struct) {
             char fn[FLOW_NAME] = {0}, ft[FLOW_NAME] = {0};
             if (starts_with(line, "deriving ") || starts_with(line, "def ") || starts_with(line, "theorem ") ||
@@ -135,6 +144,7 @@ static int parse_lean_spec(FILE *input, FlowSpec *spec) {
                     const char *ce = strstr(line, ":=");
                     if (ce) {
                         char *rhs = trim((char *)(ce + 2));
+                        in_u32_body = 1;
                         if (*rhs) {
                             strncpy(cand_body, rhs, FLOW_LINE - 1);
                             if (spec->extern_kernel[0]) strncpy(spec->extern_kernel_body, cand_body, FLOW_LINE - 1);
