@@ -25,7 +25,7 @@ static void flowc_print_usage(FILE *out) { fprintf(out, "FLOW Modern Declarative
         "  --iterations <N>         Search iterations (default: 250)\n"
         "  --seed <N>               Deterministic PRNG seed\n"
         "  --component <id>         Manually pin component implementation\n"
-        "  --target-rust/python/c-header/lean/llvm-ir/mlir <file>\n"); } static int validate_and_lower_module(const char *mod_name, const FlowSpec *spec, SemanticIR *ir) {
+        "  --target-rust/python/c-header/lean/llvm-ir/mlir/ui <file>\n"); } static int validate_and_lower_module(const char *mod_name, const FlowSpec *spec, SemanticIR *ir) {
     resolve_and_load_plugin(mod_name); const FlowPlugin *module = flow_registry_lookup(mod_name); char err_msg[128] = {0};
     if (!module) { fprintf(stderr, "flowc: imported domain module '%s' not registered\n", mod_name); return 0; } flow_plugin_lower_semantics(spec, ir, module);
     if (!flow_component_validate_contract(ir, module, err_msg, sizeof(err_msg))) {
@@ -33,7 +33,7 @@ static void flowc_print_usage(FILE *out) { fprintf(out, "FLOW Modern Declarative
 int flowc_main(int argc, char **argv) { const char *input_path = NULL, *output_path = NULL, *profile_path = NULL, *profile_out = NULL;
     const char *component_override = NULL, *target_c_header = NULL, *target_rust = NULL;
     const char *target_python = NULL, *target_lean = NULL, *target_mlir = NULL, *target_llvm_ir = NULL, *apply_fvec_path = NULL;
-    const char *target_js = NULL, *target_cuda = NULL, *target_matlab = NULL, *target_julia = NULL;
+    const char *target_js = NULL, *target_cuda = NULL, *target_matlab = NULL, *target_julia = NULL, *target_ui = NULL;
     char auto_output_buf[512] = {0}, auto_fvec_path[512] = {0}; FlowSpec spec; SemanticIR ir; const Component *component; VerificationReport verification;
     SearchResult search = {0}; ProfileSeed profile = {0}; int use_search = 0, use_benchmark = 0, use_reload_adapter = 0;
     size_t iterations = 250, workload_bytes = 0; uint32_t seed = 0xC0F0123u;
@@ -54,6 +54,7 @@ int flowc_main(int argc, char **argv) { const char *input_path = NULL, *output_p
         else if (!strcmp(argv[arg], "--target-cuda") && arg + 1 < argc) target_cuda = argv[++arg];
         else if (!strcmp(argv[arg], "--target-matlab") && arg + 1 < argc) target_matlab = argv[++arg];
         else if (!strcmp(argv[arg], "--target-julia") && arg + 1 < argc) target_julia = argv[++arg];
+        else if (!strcmp(argv[arg], "--target-ui") && arg + 1 < argc) target_ui = argv[++arg];
         else if (!strcmp(argv[arg], "--target-mlir") && arg + 1 < argc) target_mlir = argv[++arg];
         else if (!strcmp(argv[arg], "--target-llvm-ir") && arg + 1 < argc) target_llvm_ir = argv[++arg];
         else if (!strcmp(argv[arg], "--workload-bytes") && arg + 1 < argc) workload_bytes = (size_t)strtoull(argv[++arg], NULL, 10);
@@ -139,7 +140,7 @@ int flowc_main(int argc, char **argv) { const char *input_path = NULL, *output_p
     if (use_search) { uint64_t schema_hash = flow_bitspace_compute_schema_hash(&ir, component, &search.dimension_set);
         printf("  C search: mode=%s iterations=%zu seed=%u schema_hash=%llu genome=%llu energy=%.6f benchmark_ns=%llu capacity=%.0f threads=%.0f shards=%.0f tuning_buffer=%zu tuning_initial=%zu tuning_growth=%u tuning_batch=%zu tuning_arena=%zu\n",
                search.measured ? "benchmark" : "model", search.iterations, search.seed, (unsigned long long)schema_hash, (unsigned long long)search.genome, search.energy, (unsigned long long)search.benchmark_ns, search.capacity, search.threads, search.shards, search.tuning.buffer_bytes, search.tuning.initial_capacity, search.tuning.growth_percent, search.tuning.batch_size, search.tuning.arena_bytes);
-    } if (target_c_header || target_rust || target_python || target_lean || target_js || target_cuda || target_matlab || target_julia || target_mlir || target_llvm_ir) {
+    } if (target_c_header || target_rust || target_python || target_lean || target_js || target_cuda || target_matlab || target_julia || target_ui || target_mlir || target_llvm_ir) {
         FlowComponentABI abi; flow_abi_build_for_component(&ir, component, &abi);
         #define EMIT_TARGET(path, tag, call) do { if (path) { FILE *fp = fopen(path, "w"); if (fp) { call; fclose(fp); printf("  " tag ": wrote %s\n", path); } } } while (0)
         EMIT_TARGET(target_c_header, "target-c-header", flow_abi_emit_c_header(fp, &abi)); EMIT_TARGET(target_rust, "target-rust", flow_abi_emit_rust_adapter(fp, &abi));
@@ -148,6 +149,7 @@ int flowc_main(int argc, char **argv) { const char *input_path = NULL, *output_p
         EMIT_TARGET(target_cuda, "target-cuda", flow_abi_emit_polyglot_adapter(fp, &abi, "cuda"));
         EMIT_TARGET(target_matlab, "target-matlab", flow_abi_emit_polyglot_adapter(fp, &abi, "matlab"));
         EMIT_TARGET(target_julia, "target-julia", flow_abi_emit_polyglot_adapter(fp, &abi, "julia"));
+        EMIT_TARGET(target_ui, "target-ui", flow_abi_emit_ui_adapter(fp, &ir, &abi));
         EMIT_TARGET(target_lean, "target-lean", flow_abi_emit_lean_adapter(fp, &ir, &abi, search.genome, use_search && search.capacity > 0 ? (size_t)search.capacity : verification.capacity, use_search && search.shards > 0 ? (size_t)search.shards : 1));
         if (target_lean) {
             char lean_err[256] = {0};

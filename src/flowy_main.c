@@ -70,10 +70,89 @@ static int flowy_run_cmd(int argc, char **argv) {
         for (int i = 2; i < argc && aot_argc < 127; ++i) if (strcmp(argv[i], "--aot") != 0) aot_argv[aot_argc++] = argv[i]; aot_argv[aot_argc] = NULL;
         return flowy_build_cmd(aot_argc, aot_argv, 1); } int ret = flowy_run_jit_direct(spec_file);
     if (ret == -1) { printf("[Dual-Track: Fallback] Custom external plugin link required; falling back to AOT...\n"); return flowy_build_cmd(argc, argv, 1); } return ret; }
+static int flowy_ui_cmd(int argc, char **argv) {
+    if (argc < 3 || is_help_flag(argv[2])) {
+        printf("Usage: flowy ui <spec.lean|spec.flow> [--port <port>] [--selftest]\n");
+        return (argc < 3) ? EXIT_FAILURE : EXIT_SUCCESS;
+    }
+    const char *spec_file = NULL; int port = 8095, selftest = 0;
+    for (int i = 2; i < argc; ++i) {
+        if (!strcmp(argv[i], "--port") && i + 1 < argc) port = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--selftest")) selftest = 1;
+        else if (argv[i][0] != '-' && !spec_file) spec_file = argv[i];
+    }
+    if (!spec_file) { fprintf(stderr, "flowy ui: missing specification file\n"); return EXIT_FAILURE; }
+    const char *slash = strrchr(spec_file, '/'), *base = slash ? slash + 1 : spec_file, *dot = strrchr(base, '.');
+    char stem[128] = {0}; snprintf(stem, sizeof(stem), "%.*s", (int)(dot ? (size_t)(dot - base) : strlen(base)), base);
+    system("mkdir -p build 2>/dev/null");
+    char sibling_flowc[512] = {0}; const char *flowc_bin = getenv("FLOWC");
+    if (!flowc_bin || !flowc_bin[0]) {
+        const char *last_slash = (argc > 0 && argv[0]) ? strrchr(argv[0], '/') : NULL;
+        if (last_slash) {
+            snprintf(sibling_flowc, sizeof(sibling_flowc), "%.*s/flowc", (int)(last_slash - argv[0]), argv[0]);
+            FILE *fs = fopen(sibling_flowc, "rb"); if (fs) { fclose(fs); flowc_bin = sibling_flowc; }
+        }
+    }
+    if (!flowc_bin || !flowc_bin[0]) {
+        FILE *ft = fopen("./build/flowc", "rb"); if (ft) { fclose(ft); flowc_bin = "./build/flowc"; } else flowc_bin = "flowc";
+    }
+    char c_path[256], py_path[256], ui_path[256], so_path[256], cmd[4096];
+    snprintf(c_path, sizeof(c_path), "build/%s_ui.c", stem);
+    snprintf(py_path, sizeof(py_path), "build/%s_ui_abi.py", stem);
+    snprintf(ui_path, sizeof(ui_path), "build/%s_ui.html", stem);
+    snprintf(so_path, sizeof(so_path), "build/lib%s_ui.so", stem);
+    snprintf(cmd, sizeof(cmd), "\"%s\" \"%s\" -o \"%s\" --target-python \"%s\" --target-ui \"%s\"", flowc_bin, spec_file, c_path, py_path, ui_path);
+    if (system(cmd) != 0) { fprintf(stderr, "flowy ui: failed to compile %s\n", spec_file); return EXIT_FAILURE; }
+    const char *cc = getenv("CC"); if (!cc || !cc[0]) cc = "clang";
+    snprintf(cmd, sizeof(cmd), "%s -std=c17 -O2 -shared -fPIC -DFLOW_SHARED_LIB -pthread \"%s\" -o \"%s\" -lm 2>/dev/null || %s -std=c17 -O2 -shared -fPIC -DFLOW_SHARED_LIB \"%s\" -o \"%s\" -lm", cc, c_path, so_path, cc, c_path, so_path);
+    if (system(cmd) != 0) { fprintf(stderr, "flowy ui: failed to build shared library %s\n", so_path); return EXIT_FAILURE; }
+    snprintf(cmd, sizeof(cmd),
+        "python3 -B -c \""
+        "import sys, json, importlib.util, http.server\n"
+        "spec = importlib.util.spec_from_file_location('uimod', '%s')\n"
+        "mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)\n"
+        "cls = next(v for v in vars(mod).values() if isinstance(v, type) and hasattr(v, 'LEAN_FUNCTIONS'))\n"
+        "eng = cls('%s')\n"
+        "ui_html = open('%s', 'r', encoding='utf-8').read()\n"
+        "assert 'FLOW_SCHEMA' in ui_html\n"
+        "if %d:\n"
+        "    w = eng.step_words([0, 64, 1])\n"
+        "    for fn in eng.LEAN_FUNCTIONS:\n"
+        "        res = eng.call_lean(fn['name'], *([10]*len(fn['params'])))\n"
+        "    print(f'  ✓ [FLOW Schema-Driven UI & C17 Bridge] Self-test passed (fields={len(eng.STATE_FIELDS)}, fns={len(eng.LEAN_FUNCTIONS)}, theorems={len(eng.LEAN_THEOREMS)})')\n"
+        "    eng.close(); sys.exit(0)\n"
+        "ledger = []\n"
+        "fn_names = {f['name'] for f in eng.LEAN_FUNCTIONS}\n"
+        "class H(http.server.BaseHTTPRequestHandler):\n"
+        "    def log_message(self, *a): pass\n"
+        "    def _json(self, obj, code=200):\n"
+        "        b = json.dumps(obj).encode('utf-8'); self.send_response(code)\n"
+        "        self.send_header('Content-Type', 'application/json'); self.send_header('Content-Length', str(len(b))); self.end_headers(); self.wfile.write(b)\n"
+        "    def do_GET(self):\n"
+        "        if self.path == '/api/schema': return self._json({'ok':True,'state_fields':eng.STATE_FIELDS,'lean_functions':list(eng.LEAN_FUNCTIONS),'lean_theorems':eng.LEAN_THEOREMS,'ledger':ledger})\n"
+        "        b = ui_html.encode('utf-8'); self.send_response(200); self.send_header('Content-Type','text/html; charset=utf-8'); self.send_header('Content-Length',str(len(b))); self.end_headers(); self.wfile.write(b)\n"
+        "    def do_POST(self):\n"
+        "        ln = int(self.headers.get('Content-Length', '0'))\n"
+        "        body = json.loads(self.rfile.read(ln).decode('utf-8') or '{}')\n"
+        "        try:\n"
+        "            if self.path == '/api/call': return self._json({'ok':True,'fn':body['fn'],'result':eng.call_lean(body['fn'], *body.get('args',[]))})\n"
+        "            if self.path == '/api/step': return self._json({'ok':True,'words':eng.step_words(body.get('words',[]))})\n"
+        "            if self.path == '/api/ledger':\n"
+        "                sod = (body.get('auth',0) != body.get('exec',0) and body.get('auth',0) > 0 and body.get('exec',0) > 0)\n"
+        "                res = eng.call_lean(body['fn'], *body.get('args',[])) if body.get('fn') in fn_names else True\n"
+        "                ent = {'seq':len(ledger)+1,'fn':body.get('fn',''),'sod_ok':sod,'result':res}\n"
+        "                ledger.append(ent); return self._json({'ok':True,**ent})\n"
+        "        except Exception as e: return self._json({'ok':False,'error':str(e)}, 400)\n"
+        "print('▶ FLOW Schema-Driven Control Plane listening on http://127.0.0.1:%d')\n"
+        "http.server.ThreadingHTTPServer(('127.0.0.1', %d), H).serve_forever()\n\"",
+        py_path, so_path, ui_path, selftest, port, port);
+    return system(cmd) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+}
 static void flowy_print_usage(FILE *out) { fprintf(out, "FLOW 2.0 Living System & Declarative Toolchain (flowy) v2.5.0\nUsage: flowy <command> [options...]\n\n"
                  "Primary Commands:\n"
                  "  run [--aot] <spec.flow> [args...] Run instantly via In-Memory JIT Direct Track (or --aot)\n"
                  "  build <spec.flow> [-o <bin>]   Build standalone AOT native binary\n"
+                 "  ui <spec.lean> [--port <N>]    Synthesize & serve schema-driven C17 Control Plane & SoD Ledger UI\n"
                  "  why                            Explain real-time scheduling / hardware decision\n"
                  "  audit                          Run formal invariant & layer separation audit\n"
                  "  shell                          Start the autonomic interactive REPL\n"
@@ -103,6 +182,7 @@ int main(int argc, char **argv) { if (argc < 2 || is_help_flag(argv[1])) { flowy
     if (!strcmp(argv[1], "-v") || !strcmp(argv[1], "--version") || !strcmp(argv[1], "version")) {
         printf("FLOW System Framework (flowy) v2.5.0 | Bit-Manifold Form (BMF) & Cubical HoTT\n"); return EXIT_SUCCESS; }
     if (!strcmp(argv[1], "test")) return run_test_cmd(argc, argv); if (!strcmp(argv[1], "run")) return flowy_run_cmd(argc, argv);
+    if (!strcmp(argv[1], "ui") || !strcmp(argv[1], "--ui")) return flowy_ui_cmd(argc, argv);
     if (!strcmp(argv[1], "build") || !strcmp(argv[1], "compile")) return flowy_build_cmd(argc, argv, 0); if (!strcmp(argv[1], "topo")) {
         if (argc < 3 || is_help_flag(argv[2])) { cmd_topo_print_usage(stdout); return EXIT_SUCCESS; } return cmd_topo_run(argc - 1, argv + 1); }
     static const char *const topo_aliases[] = { "shell","--shell","absorb","--absorb","anneal","--anneal","landscape","--landscape",

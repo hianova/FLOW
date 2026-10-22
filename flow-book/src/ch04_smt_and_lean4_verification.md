@@ -6,9 +6,9 @@ FLOW 將 `.lean` 提升為 **「領域意圖 + 數學證明 + 算子核函數」
 
 ## 4.1 三層自動推導機制
 
-1. **零 `@[export]` 之定理錨定算子推導 ([`src/parser.c`](../../src/parser.c))**：
+1. **零 `@[export]` 之定理錨定算子與全純量 `def` 自動 C17 降階 ([`src/parser.c`](../../src/parser.c), [`src/backend.c`](../../src/backend.c))**：
    - 開發者只需撰寫標準 Lean 4 的 `structure`（資料型別）、`def`（純計算函數）與 `theorem`（安全邊界證明）。
-   - 解析器自動從 `structure` 推導 `stride`、`align` 與熱重載欄位，並將被 `theorem` 引用驗證的最後一個計算型 `def` 自動綁定為 `extern_kernel`，於 [`src/backend.c`](../../src/backend.c) 合成帶有 `__attribute__((weak))` 的原生 C17 核函數。
+   - 解析器自動從 `structure` 推導 `stride`、`align` 與熱重載欄位，將被 `theorem` 引用驗證的最後一個計算型 `def` 自動綁定為 `extern_kernel`，並將檔案內**所有**純量 `def`（`Nat`、`UInt64`、`UInt32`、`Bool`、`Float`）自動編譯為匯出的 C17 原生函數（含 Lean 4 飽和減法 `flow_nat_sub`、安全除法 `flow_nat_div`、`let` 綁定、`match` 與跨函數呼叫），同步綁定至 C Header、Rust、Python、JS 與 `--target-ui`。
 2. **Plugin 領域意圖函子降階 ([`plugins/embodied.c`](../../plugins/embodied.c))**：
    - 當 `.lean` 宣告 `namespace Embodied.*` 與 `theorem zmp_torque_safe` 時，`EMBODIED_PLUGIN` 自動透過 `lower_domain_semantics` 展開 1kHz 實時迴圈 SLA、辛幾何（Symplectic Jet）相空間約束與 ZMP 穩定多邊形遮罩。
 3. **SMT QF_LIA 四大定理與零 `sorry` 鐵門 ([`src/smt.c`](../../src/smt.c), [`src/abi.c`](../../src/abi.c))**：
@@ -16,12 +16,12 @@ FLOW 將 `.lean` 提升為 **「領域意圖 + 數學證明 + 算子核函數」
 
 ---
 
-## 4.2 標準 `build.sh` 與多語言零拷貝呼叫範本（Zero-Copy Polyglot FFI）
+## 4.2 標準 `build.sh`、Schema-Driven UI 與多語言零拷貝呼叫範本（Zero-Copy Polyglot FFI）
 
-任何基於 FLOW 的專案，只需一行 `flowc` 指令即可從 `src/app.lean` 同時產出 C17、Rust、Python、JS/Bun、CUDA 與 Lean 4 證明證書：
+任何基於 FLOW 的專案，只需一行 `flowc` 指令即可從 `src/app.lean` 同時產出 C17、Rust、Python、JS/Bun、CUDA、HTML5 控制面板（`--target-ui`）與 Lean 4 證明證書，或直接透過 `flowy ui src/app.lean` 啟動零依賴 C17 雙簽責任帳本與控制面板：
 
 ```sh
-# 1. 從單一 .lean 合成全語言零拷貝介面
+# 1. 從單一 .lean 合成全語言零拷貝介面與 HTML5 控制面板
 flowc src/app.lean \
     -o build/app.c \
     --target-c-header build/app.h \
@@ -29,9 +29,10 @@ flowc src/app.lean \
     --target-python build/app.py \
     --target-js build/app.js \
     --target-cuda build/app.cuh \
+    --target-ui build/app_ui.html \
     --target-lean build/app_cert.lean
 
-# 2. 編譯原生 C17 + QSBR 動態庫
+# 2. 編譯原生 C17 + QSBR 動態庫（或直接執行 flowy ui src/app.lean --selftest）
 clang -std=c17 -O2 -shared -fPIC -DFLOW_SHARED_LIB -pthread build/app.c -o build/libapp.so -lm
 ```
 

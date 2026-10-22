@@ -55,9 +55,106 @@ static int is_internal_lean_def(const char *s) {
     for (int i = 0; D[i]; ++i) if (!strcmp(s, D[i])) return 1;
     return 0;
 }
+static int is_scalar_lean_type(const char *t) {
+    static const char *const S[] = {"Nat", "UInt64", "USize", "Int", "Int64", "UInt32", "Int32", "UInt16", "Int16", "UInt8", "Int8", "Bool", "Float", "Float32", NULL};
+    if (!t || !*t) return 0;
+    for (int i = 0; S[i]; ++i) if (!strcmp(t, S[i])) return 1;
+    return 0;
+}
+static int has_word_match(const char *hay, const char *word) {
+    size_t wlen = strlen(word); if (!wlen) return 0;
+    for (const char *p = strstr(hay, word); p; p = strstr(p + 1, word)) {
+        int left_ok = (p == hay) || (!isalnum((unsigned char)p[-1]) && p[-1] != '_' && p[-1] != '.');
+        int right_ok = !isalnum((unsigned char)p[wlen]) && p[wlen] != '_' && p[wlen] != '\'';
+        if (left_ok && right_ok) return 1;
+    }
+    return 0;
+}
+static void normalize_lean_body(const char *in, char *out, size_t max_len) {
+    size_t j = 0;
+    for (size_t i = 0; in[i] && j + 16 < max_len; ) {
+        if (!strncmp(in + i, "\xe2\x89\xa4", 3)) { out[j++] = '<'; out[j++] = '='; i += 3; }
+        else if (!strncmp(in + i, "\xe2\x89\xa5", 3)) { out[j++] = '>'; out[j++] = '='; i += 3; }
+        else if (!strncmp(in + i, "\xe2\x89\xa0", 3)) { out[j++] = '!'; out[j++] = '='; i += 3; }
+        else if (!strncmp(in + i, "\xe2\x88\xa7", 3)) { out[j++] = '&'; out[j++] = '&'; i += 3; }
+        else if (!strncmp(in + i, "\xe2\x88\xa8", 3)) { out[j++] = '|'; out[j++] = '|'; i += 3; }
+        else if (!strncmp(in + i, "\xc2\xac", 2)) { out[j++] = '!'; i += 2; }
+        else if (!strncmp(in + i, "Nat.min", 7) && !isalnum((unsigned char)in[i + 7])) { memcpy(out + j, "flow_nat_min", 12); j += 12; i += 7; }
+        else if (!strncmp(in + i, "Nat.max", 7) && !isalnum((unsigned char)in[i + 7])) { memcpy(out + j, "flow_nat_max", 12); j += 12; i += 7; }
+        else out[j++] = in[i++];
+    }
+    out[j] = '\0';
+}
+static int is_valid_scalar_lean_body(const FlowSpec *spec, const FlowLeanFunction *fn) {
+    static const char *const KW[] = {"if", "then", "else", "let", "in", "match", "with", "true", "false", "decide", "flow_nat_min", "flow_nat_max", "_", NULL};
+    char let_vars[16][FLOW_NAME]; size_t let_cnt = 0; const char *b = fn->body;
+    if (!b[0]) return 0;
+    for (const char *p = b; *p; ++p) {
+        if (*p == '{' || *p == '}' || *p == '[' || *p == ']') return 0;
+        if (*p == '.' && isalpha((unsigned char)p[1])) return 0;
+        if (!strncmp(p, "let ", 4) && (p == b || isspace((unsigned char)p[-1]) || p[-1] == '(')) {
+            char lv[FLOW_NAME] = {0};
+            if (sscanf(p + 4, "%63s", lv) == 1 && let_cnt < 16) strncpy(let_vars[let_cnt++], lv, FLOW_NAME - 1);
+        }
+    }
+    for (const char *p = b; *p; ) {
+        if (isdigit((unsigned char)*p)) { while (isalnum((unsigned char)*p) || *p == '_') ++p; continue; }
+        if (isalpha((unsigned char)*p) || *p == '_') {
+            char id[FLOW_NAME] = {0}; size_t k = 0;
+            while (isalnum((unsigned char)*p) || *p == '_' || *p == '\'') { if (*p == '\'') return 0; if (k + 1 < sizeof(id)) id[k++] = *p; ++p; }
+            int ok = 0;
+            for (int i = 0; KW[i]; ++i) if (!strcmp(id, KW[i])) { ok = 1; break; }
+            for (size_t i = 0; !ok && i < fn->param_count; ++i) if (!strcmp(id, fn->param_names[i])) ok = 1;
+            for (size_t i = 0; !ok && i < let_cnt; ++i) if (!strcmp(id, let_vars[i])) ok = 1;
+            for (size_t i = 0; !ok && i < spec->lean_function_count; ++i) if (!strcmp(id, spec->lean_functions[i].name)) ok = 1;
+            if (!ok) return 0;
+        } else ++p;
+    }
+    return 1;
+}
+static void try_add_lean_function(FlowSpec *spec, const char *sig_in, const char *body_in) {
+    if (!spec || spec->lean_function_count >= FLOW_LEAN_FN_MAX || !sig_in || !body_in) return;
+    char sig[FLOW_LEAN_BODY_MAX]; strncpy(sig, sig_in, sizeof(sig) - 1); sig[sizeof(sig) - 1] = '\0';
+    char *s = trim(sig); if (!starts_with(s, "def ")) return;
+    FlowLeanFunction fn; memset(&fn, 0, sizeof(fn));
+    if (sscanf(s + 4, "%63[^ ({:\t\n]", fn.name) != 1 || !fn.name[0] || is_internal_lean_def(fn.name)) return;
+    char *first_lp = strchr(s, '('), *last_rp = strrchr(s, ')');
+    if (!first_lp || !last_rp || last_rp <= first_lp) return;
+    char *ret_colon = strchr(last_rp + 1, ':'); if (!ret_colon) return;
+    char ret_t[32] = {0}, extra[16] = {0};
+    if (sscanf(ret_colon + 1, "%31s %15s", ret_t, extra) != 1 || !is_scalar_lean_type(ret_t)) return;
+    strncpy(fn.return_type, ret_t, sizeof(fn.return_type) - 1);
+    for (char *p = first_lp; p && p < last_rp; ) {
+        char *lp = strchr(p, '('); if (!lp || lp >= last_rp) break;
+        char *rp = strchr(lp + 1, ')'); if (!rp || rp > last_rp) return;
+        char grp[256] = {0}; size_t glen = (size_t)(rp - (lp + 1));
+        if (glen >= sizeof(grp)) return;
+        memcpy(grp, lp + 1, glen);
+        char *colon = strchr(grp, ':'); if (!colon) return;
+        *colon = '\0'; char pt[32] = {0}, pextra[16] = {0};
+        if (sscanf(colon + 1, "%31s %15s", pt, pextra) != 1 || !is_scalar_lean_type(pt)) return;
+        for (char *tok = strtok(grp, " \t\n\r"); tok; tok = strtok(NULL, " \t\n\r")) {
+            if (fn.param_count >= FLOW_LEAN_PARAM_MAX) return;
+            strncpy(fn.param_names[fn.param_count], tok, FLOW_NAME - 1);
+            strncpy(fn.param_types[fn.param_count], pt, sizeof(fn.param_types[0]) - 1);
+            fn.param_count++;
+        }
+        p = rp + 1;
+    }
+    if (fn.param_count == 0) return;
+    normalize_lean_body(body_in, fn.body, sizeof(fn.body));
+    if (!is_valid_scalar_lean_body(spec, &fn)) return;
+    spec->lean_functions[spec->lean_function_count++] = fn;
+}
+static int is_lean_top_decl(const char *line) {
+    static const char *const P[] = {"def ", "theorem ", "structure ", "inductive ", "namespace ", "end ", "@[", "#print ", "opaque ", "open ", "import ", "module", "deriving ", NULL};
+    for (int i = 0; P[i]; ++i) if (starts_with(line, P[i])) return 1;
+    return 0;
+}
 static int parse_lean_spec(FILE *input, FlowSpec *spec) {
     char raw[FLOW_LINE], sym[FLOW_NAME] = {0}, cand_fn[FLOW_NAME] = {0}, cand_body[FLOW_LINE] = {0};
-    unsigned long long v = 0; int saw_lean = 0, in_struct = 0, in_block_comment = 0, explicit_stride = 0, explicit_export = 0, awaiting_body = 0, in_u32_body = 0; size_t struct_bytes = 0;
+    char def_sig[FLOW_LEAN_BODY_MAX] = {0}, def_body[FLOW_LEAN_BODY_MAX] = {0};
+    unsigned long long v = 0; int saw_lean = 0, in_struct = 0, in_block_comment = 0, explicit_stride = 0, explicit_export = 0, awaiting_body = 0, in_u32_body = 0, in_def = 0, active_thm = -1; size_t struct_bytes = 0;
     memset(spec, 0, sizeof(*spec)); strncpy(spec->input_name, "lean_stream", FLOW_NAME - 1); strncpy(spec->flow_name, "lean_kernel_flow", FLOW_NAME - 1);
     spec->max_count = 1024; spec->input_stride_bytes = 8; spec->input_align_bytes = 8; spec->state_schema_version = 1; spec->top_n = 3;
     spec->deterministic = 1; spec->lean_certified = 1; spec->bounded = 1; spec->memory_mb = 64;
@@ -80,6 +177,27 @@ static int parse_lean_spec(FILE *input, FlowSpec *spec) {
             if (!strncmp(p, "sorry", 5) && (p == line || !isalnum((unsigned char)p[-1])) && !isalnum((unsigned char)p[5])) return 0;
             if (!strncmp(p, "axiom ", 6) && (p == line || isspace((unsigned char)p[-1]))) return 0;
         }
+        if (in_def && is_lean_top_decl(line)) {
+            if (in_def == 2) try_add_lean_function(spec, def_sig, def_body);
+            in_def = 0; def_sig[0] = '\0'; def_body[0] = '\0';
+        }
+        if (active_thm >= 0 && is_lean_top_decl(line)) active_thm = -1;
+        if (in_def == 1) {
+            size_t sl = strlen(def_sig);
+            if (sl + 1 + strlen(line) < sizeof(def_sig)) { def_sig[sl] = ' '; strncpy(def_sig + sl + 1, line, sizeof(def_sig) - sl - 2); }
+            char *ce = strstr(def_sig, ":=");
+            if (ce) {
+                *ce = '\0'; char *rhs = trim(ce + 2);
+                strncpy(def_body, rhs, sizeof(def_body) - 1);
+                in_def = 2;
+            }
+        } else if (in_def == 2) {
+            size_t bl = strlen(def_body);
+            if (bl + 1 + strlen(line) < sizeof(def_body)) {
+                if (bl > 0) def_body[bl++] = '\n';
+                strncpy(def_body + bl, line, sizeof(def_body) - bl - 1);
+            }
+        }
         if (awaiting_body) {
             strncpy(cand_body, line, FLOW_LINE - 1);
             if (spec->extern_kernel[0]) strncpy(spec->extern_kernel_body, cand_body, FLOW_LINE - 1);
@@ -96,9 +214,7 @@ static int parse_lean_spec(FILE *input, FlowSpec *spec) {
         in_u32_body = 0;
         if (in_struct) {
             char fn[FLOW_NAME] = {0}, ft[FLOW_NAME] = {0};
-            if (starts_with(line, "deriving ") || starts_with(line, "def ") || starts_with(line, "theorem ") ||
-                starts_with(line, "structure ") || starts_with(line, "inductive ") || starts_with(line, "namespace ") ||
-                starts_with(line, "end ") || starts_with(line, "@[")) {
+            if (is_lean_top_decl(line)) {
                 in_struct = 0;
             } else if (sscanf(line, "%63s : %63s", fn, ft) == 2 && spec->state_field_count < FLOW_FIELD_MAX) {
                 size_t b = parse_lean_type_bytes(ft);
@@ -136,43 +252,83 @@ static int parse_lean_spec(FILE *input, FlowSpec *spec) {
                 FlowFieldSpec *fs = &spec->state_fields[spec->state_field_count++];
                 strncpy(fs->name, fn, FLOW_NAME - 1); fs->size_bytes = (size_t)b; fs->flags = fl;
             }
-        } else if (starts_with(line, "def ") && strchr(line, '(') && !strstr(line, ": Prop") && !strstr(line, ": Type")) {
+        } else if (starts_with(line, "def ") && !strstr(line, ": Prop") && !strstr(line, ": Type")) {
             char fn[FLOW_NAME] = {0};
-            if (sscanf(line + 4, "%63[^ ({]", fn) == 1 && !is_internal_lean_def(fn)) {
-                saw_lean = 1; strncpy(cand_fn, fn, FLOW_NAME - 1);
-                if (strstr(line, ": UInt32")) {
-                    const char *ce = strstr(line, ":=");
-                    if (ce) {
-                        char *rhs = trim((char *)(ce + 2));
-                        in_u32_body = 1;
-                        if (*rhs) {
-                            strncpy(cand_body, rhs, FLOW_LINE - 1);
-                            if (spec->extern_kernel[0]) strncpy(spec->extern_kernel_body, cand_body, FLOW_LINE - 1);
-                        } else awaiting_body = 1;
-                    }
+            if (sscanf(line + 4, "%63[^ ({:\t]", fn) == 1 && !is_internal_lean_def(fn)) {
+                saw_lean = 1;
+                char *ce = strstr(line, ":=");
+                if (ce) {
+                    size_t slen = (size_t)(ce - line);
+                    if (slen >= sizeof(def_sig)) slen = sizeof(def_sig) - 1;
+                    memcpy(def_sig, line, slen); def_sig[slen] = '\0';
+                    strncpy(def_body, trim(ce + 2), sizeof(def_body) - 1);
+                    in_def = 2;
                 } else {
-                    strncpy(cand_body, "if stride > 0 && epoch > 0 && baseOff + byteLen >= baseOff then 0 else 1", FLOW_LINE - 1);
+                    strncpy(def_sig, line, sizeof(def_sig) - 1);
+                    def_body[0] = '\0';
+                    in_def = 1;
+                }
+                if (strchr(line, '(')) {
+                    strncpy(cand_fn, fn, FLOW_NAME - 1);
+                    if (strstr(line, ": UInt32")) {
+                        if (ce) {
+                            char *rhs = trim(ce + 2);
+                            in_u32_body = 1;
+                            if (*rhs) {
+                                strncpy(cand_body, rhs, FLOW_LINE - 1);
+                                if (spec->extern_kernel[0]) strncpy(spec->extern_kernel_body, cand_body, FLOW_LINE - 1);
+                            } else awaiting_body = 1;
+                        }
+                    } else {
+                        strncpy(cand_body, "if stride > 0 && epoch > 0 && baseOff + byteLen >= baseOff then 0 else 1", FLOW_LINE - 1);
+                    }
                 }
             }
         } else if (starts_with(line, "theorem ")) {
             saw_lean = 1;
-            if (sscanf(line + 8, "%63[^ (: ]", sym) == 1 && !strcmp(sym, "zmp_torque_safe")) {
-                strncpy(spec->contract_name, "zmp_torque_safe", FLOW_NAME - 1);
-                if (!spec->domain_name[0]) {
-                    strncpy(spec->domain_name, "embodied", FLOW_NAME - 1);
-                    strncpy(spec->plugin_name, "flow.embodied", FLOW_NAME - 1);
-                    if (spec->imported_module_count == 0) strncpy(spec->imported_modules[spec->imported_module_count++], "flow.embodied", FLOW_NAME - 1);
+            if (sscanf(line + 8, "%63[^ (:{\t]", sym) == 1) {
+                if (!strcmp(sym, "zmp_torque_safe")) {
+                    strncpy(spec->contract_name, "zmp_torque_safe", FLOW_NAME - 1);
+                    if (!spec->domain_name[0]) {
+                        strncpy(spec->domain_name, "embodied", FLOW_NAME - 1);
+                        strncpy(spec->plugin_name, "flow.embodied", FLOW_NAME - 1);
+                        if (spec->imported_module_count == 0) strncpy(spec->imported_modules[spec->imported_module_count++], "flow.embodied", FLOW_NAME - 1);
+                    }
+                }
+                if (spec->lean_theorem_count < FLOW_LEAN_THEOREM_MAX) {
+                    active_thm = (int)spec->lean_theorem_count++;
+                    strncpy(spec->lean_theorems[active_thm].name, sym, FLOW_NAME - 1);
+                    spec->lean_theorems[active_thm].anchored_fn[0] = '\0';
+                }
+            }
+            if (active_thm >= 0 && !spec->lean_theorems[active_thm].anchored_fn[0]) {
+                for (size_t fi = spec->lean_function_count; fi > 0; --fi) {
+                    if (has_word_match(line, spec->lean_functions[fi - 1].name)) {
+                        strncpy(spec->lean_theorems[active_thm].anchored_fn, spec->lean_functions[fi - 1].name, FLOW_NAME - 1);
+                        break;
+                    }
                 }
             }
             if (cand_fn[0] && strstr(line, cand_fn)) {
                 if (!explicit_export) strncpy(spec->extern_kernel, cand_fn, FLOW_NAME - 1);
                 strncpy(spec->extern_kernel_body, cand_body, FLOW_LINE - 1);
             }
-        } else if (cand_fn[0] && strstr(line, cand_fn)) {
-            if (!explicit_export) strncpy(spec->extern_kernel, cand_fn, FLOW_NAME - 1);
-            strncpy(spec->extern_kernel_body, cand_body, FLOW_LINE - 1);
+        } else {
+            if (active_thm >= 0 && !spec->lean_theorems[active_thm].anchored_fn[0]) {
+                for (size_t fi = spec->lean_function_count; fi > 0; --fi) {
+                    if (has_word_match(line, spec->lean_functions[fi - 1].name)) {
+                        strncpy(spec->lean_theorems[active_thm].anchored_fn, spec->lean_functions[fi - 1].name, FLOW_NAME - 1);
+                        break;
+                    }
+                }
+            }
+            if (cand_fn[0] && strstr(line, cand_fn)) {
+                if (!explicit_export) strncpy(spec->extern_kernel, cand_fn, FLOW_NAME - 1);
+                strncpy(spec->extern_kernel_body, cand_body, FLOW_LINE - 1);
+            }
         }
     }
+    if (in_def == 2) try_add_lean_function(spec, def_sig, def_body);
     if (!explicit_stride && struct_bytes > 0) spec->input_stride_bytes = (struct_bytes + 7u) & ~7u;
     if (cand_fn[0] && !spec->extern_kernel[0]) {
         strncpy(spec->extern_kernel, cand_fn, FLOW_NAME - 1);

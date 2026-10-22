@@ -53,9 +53,9 @@ When authoring a new FLOW project in pure `.lean`, follow these **4 deterministi
 | Rule | Specification & Exact Convention |
 | :--- | :--- |
 | **1. Supported Subset & 64B `structure`** | • Use zero-dependency Core Lean 4 only (**do not** `import Mathlib`; **never** use `sorry` or custom `axiom`).<br>• Primitive types map directly to C17: `UInt64` / `Nat` $\to$ `uint64_t`, `UInt32` $\to$ `uint32_t`, `Bool` $\to$ `bool`, `Float` $\to$ `double`.<br>• Define your primary `structure` with **8 × 64-bit fields (64 bytes)** so `flowc` infers `stride = 64` (1 CPU cache line). |
-| **2. Zero-`@[export]` Kernel Discovery** | • `flowc` scans the AST for the **last computational `def` referenced inside a `theorem`** and automatically binds it as the C17 kernel entry point (`spec->extern_kernel`).<br>• Standard 1PB zero-copy kernel signature (returns `0` for PASS, `1` for REJECT):<br>`def myStepKernel (baseOff byteLen stride epoch : UInt64) : UInt32 := if stride >= 64 && ... then 0 else 1` |
+| **2. Zero-`@[export]` Kernel & Full Scalar `def` Lowering** | • `flowc` scans the AST for the **last computational `def` referenced inside a `theorem`** (`spec->extern_kernel`) AND automatically lowers **all** pure scalar `def` functions (`Nat`, `UInt64`, `UInt32`, `Bool`, `Float`) into exported C17 functions (with Lean 4 saturating subtraction `flow_nat_sub` and safe division `flow_nat_div`), binding them + `STATE_FIELDS`, `LEAN_FUNCTIONS`, and `LEAN_THEOREMS` across C, Rust, Python, JS, and `--target-ui`.<br>• Standard 1PB zero-copy kernel signature (returns `0` for PASS, `1` for REJECT):<br>`def myStepKernel (baseOff byteLen stride epoch : UInt64) : UInt32 := if stride >= 64 && ... then 0 else 1` |
 | **3. Zero-Retry Proof Tactics (`decide` & `omega`)** | • **Concrete test vectors / boundary checks**: Use `:= by decide` (e.g., `theorem kernel_ok : myStepKernel 0 64 64 1 = 0 := by decide`).<br>• **Universal linear arithmetic (`∀`)**: Use `:= by omega`. **Crucial `Nat` Subtraction Rule**: Lean 4 `Nat` subtraction truncates at `0` (`a - b = 0` when `a < b`). Every theorem containing `a - b` **must** include the precondition `(h : b ≤ a)` in its signature so `omega` succeeds immediately. |
-| **4. 5-Line Zero-Copy FFI Invocation** | Compile via `flowc spec.lean -o build/app.c --target-python build/app.py --target-rust build/app.rs` and `clang -O2 -shared -fPIC -DFLOW_SHARED_LIB -pthread build/app.c -o build/libapp.so -lm`, then call in Python/Rust/JS:<br>`with app.LinearArray("build/libapp.so") as eng:`<br>`    out_ext = eng.process_descriptor(app.FlowExtentDescriptor(0, 1 << 50, 0, 64, 8, 1, 0))` |
+| **4. 5-Line Zero-Copy FFI & Schema-Driven UI** | Compile via `flowc spec.lean -o build/app.c --target-python build/app.py --target-rust build/app.rs --target-ui build/app_ui.html` (or launch live via `flowy ui spec.lean`), then call any Lean `def` or extent in Python/Rust/JS:<br>`with app.LinearArray("build/libapp.so") as eng:`<br>`    out_ext = eng.process_descriptor(app.FlowExtentDescriptor(0, 1 << 50, 0, 64, 8, 1, 0))` |
 
 ### Plain-Language Guide to `flowc` / `flowy` CLI Output
 
@@ -101,19 +101,23 @@ theorem zmp_torque_safe : stepReflex 0 24 24 1 = 0 := by decide
 end Embodied.GaitReflex
 ```
 
-Compile, verify, and execute directly or emit polyglot zero-copy adapters:
+Compile, verify, and execute directly or emit polyglot zero-copy adapters and schema-driven Control Plane UI:
 
 ```sh
 # Directly verify, synthesize C + QSBR wrapper, and execute via flowy
 ./build/flowy run reflex.lean
 
-# Emit C header, Rust, Python, CUDA, JS, MATLAB, Julia, and Lean 4 reflection certificate
+# Synthesize and serve the schema-driven HTML5 Control Plane & SoD Ledger UI (or --selftest)
+./build/flowy ui reflex.lean --selftest
+
+# Emit C header, Rust, Python, CUDA, JS, HTML5 UI, and Lean 4 reflection certificate
 ./build/flowc reflex.lean -o build/reflex.c \
     --target-c-header build/reflex.h \
     --target-rust build/reflex.rs \
     --target-python build/reflex.py \
     --target-cuda build/reflex.cuh \
-    --target-js build/reflex.js
+    --target-js build/reflex.js \
+    --target-ui build/reflex_ui.html
 ```
 
 ### 3. Real-World Production Blueprints & Benchmarks

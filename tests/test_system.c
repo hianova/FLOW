@@ -981,6 +981,112 @@ int main(void) {
         printf("  ✓ Stage 11 Passed: Pure .lean (Embodied reflex + AWS Cedar 427-line Authorization.lean) verified end-to-end.\n\n");
     }
 
+    /* =========================================================================
+     * STAGE 12: Full .lean Scalar Def C17 Lowering, Theorem Registry & UI Target
+     * ========================================================================= */
+    printf("--- [Stage 12: Full .lean Scalar Def C17 Lowering, Theorem Registry & Schema-Driven UI] ---\n");
+    {
+        const char *scalar_lean =
+            "namespace Flow.TestScalar\n"
+            "structure LedgerState where\n"
+            "  epoch : UInt64\n"
+            "  budgetBps : UInt64\n"
+            "  driftBps : UInt64\n"
+            "def totalDrift (a : Nat) (b : Nat) : Nat := a + b\n"
+            "def slackDeficit (a : Nat) (b : Nat) (budget : Nat) : Nat :=\n"
+            "  let tot := totalDrift a b\n"
+            "  tot - budget\n"
+            "def tierLimit (tier : Nat) : Nat :=\n"
+            "  match tier with\n"
+            "  | 1 => 100\n"
+            "  | 2 => 300\n"
+            "  | _ => 0\n"
+            "def safeRatio (num : Nat) (den : Nat) : Nat := num / den\n"
+            "def canApprove\n"
+            "    (creator : Nat) (approver : Nat) (tier : Nat) (deficit : Nat) : Bool :=\n"
+            "  creator != 0 && approver != 0 && creator != approver && deficit <= tierLimit tier\n"
+            "def stepLedgerKernel (baseOff : UInt64) (byteLen : UInt64) (stride : UInt64) (epoch : UInt64) : UInt32 :=\n"
+            "  if stride >= 24 && epoch > 0 && baseOff + byteLen >= baseOff then 0 else 1\n"
+            "theorem deficit_zero_when_within_budget : slackDeficit 20 30 60 = 0 := by decide\n"
+            "theorem approve_requires_sod : canApprove 7 7 2 100 = false := by decide\n"
+            "end Flow.TestScalar\n";
+        const char *s_lean_path = "/tmp/flow_test_scalar.lean";
+        FILE *sl_fp = fopen(s_lean_path, "w");
+        FLOW_ASSERT_TRUE(sl_fp != NULL);
+        fputs(scalar_lean, sl_fp);
+        fclose(sl_fp);
+
+        sl_fp = fopen(s_lean_path, "r");
+        FLOW_ASSERT_TRUE(sl_fp != NULL);
+        FlowSpec s_spec;
+        memset(&s_spec, 0, sizeof(s_spec));
+        FLOW_ASSERT_TRUE(parse_spec(sl_fp, &s_spec));
+        fclose(sl_fp);
+
+        FLOW_ASSERT_EQ(s_spec.lean_function_count, 6);
+        FLOW_ASSERT_EQ(s_spec.lean_theorem_count, 2);
+        FLOW_ASSERT_STR_EQ(s_spec.lean_functions[0].name, "totalDrift");
+        FLOW_ASSERT_STR_EQ(s_spec.lean_functions[1].name, "slackDeficit");
+        FLOW_ASSERT_STR_EQ(s_spec.lean_functions[4].name, "canApprove");
+        FLOW_ASSERT_STR_EQ(s_spec.lean_theorems[0].anchored_fn, "slackDeficit");
+        FLOW_ASSERT_STR_EQ(s_spec.lean_theorems[1].anchored_fn, "canApprove");
+
+        SemanticIR s_ir;
+        memset(&s_ir, 0, sizeof(s_ir));
+        lower_to_ir(&s_spec, &s_ir);
+        const Component *s_comp = select_component(&s_ir);
+        FLOW_ASSERT_TRUE(s_comp != NULL);
+        VerificationReport s_vrep;
+        FLOW_ASSERT_TRUE(verify_candidate(&s_ir, s_comp, NULL, &s_vrep));
+        FlowComponentABI s_abi;
+        FLOW_ASSERT_TRUE(flow_abi_build_for_component(&s_ir, s_comp, &s_abi));
+
+        FILE *sc_fp = fopen("/tmp/flow_test_scalar.c", "w");
+        FLOW_ASSERT_TRUE(sc_fp != NULL);
+        FLOW_ASSERT_TRUE(emit_c(sc_fp, &s_ir, s_comp, NULL, &s_vrep, 0));
+        fclose(sc_fp);
+
+        FLOW_ASSERT_EQ(system("cc -std=c17 -Wall -Wextra -Werror -O2 -shared -fPIC -DFLOW_SHARED_LIB /tmp/flow_test_scalar.c -o /tmp/libflow_test_scalar.so -lpthread"), 0);
+
+        FILE *ui_fp = fopen("/tmp/flow_test_scalar_ui.html", "w");
+        FLOW_ASSERT_TRUE(ui_fp != NULL);
+        FLOW_ASSERT_TRUE(flow_abi_emit_ui_adapter(ui_fp, &s_ir, &s_abi));
+        fclose(ui_fp);
+
+        FILE *spy_fp = fopen("/tmp/flow_test_scalar.py", "w");
+        FLOW_ASSERT_TRUE(spy_fp != NULL);
+        FLOW_ASSERT_TRUE(flow_abi_emit_python_adapter(spy_fp, &s_abi));
+        fputs("\nif __name__ == '__main__':\n"
+              "    with LinearArray('/tmp/libflow_test_scalar.so') as eng:\n"
+              "        assert len(eng.LEAN_FUNCTIONS) == 6\n"
+              "        assert len(eng.LEAN_THEOREMS) == 2\n"
+              "        assert eng.totalDrift(120, 80) == 200\n"
+              "        assert eng.slackDeficit(20, 30, 60) == 0\n"
+              "        assert eng.slackDeficit(120, 80, 150) == 50\n"
+              "        assert eng.tierLimit(1) == 100 and eng.tierLimit(2) == 300 and eng.tierLimit(9) == 0\n"
+              "        assert eng.safeRatio(100, 0) == 0 and eng.safeRatio(100, 4) == 25\n"
+              "        assert eng.canApprove(10, 20, 2, 250) is True\n"
+              "        assert eng.canApprove(10, 10, 2, 250) is False\n"
+              "        assert eng.canApprove(-5, 20, 2, 250) is False\n", spy_fp);
+        fclose(spy_fp);
+
+        FLOW_ASSERT_EQ(system("python3 /tmp/flow_test_scalar.py"), 0);
+        FLOW_ASSERT_EQ(system("./build/flowy ui /tmp/flow_test_scalar.lean --selftest >/dev/null"), 0);
+
+        remove(s_lean_path);
+        remove("/tmp/flow_test_scalar.c");
+        remove("/tmp/libflow_test_scalar.so");
+        remove("/tmp/flow_test_scalar_ui.html");
+        remove("/tmp/flow_test_scalar.py");
+        remove("build/flow_test_scalar_ui.c");
+        remove("build/flow_test_scalar_ui_abi.py");
+        remove("build/flow_test_scalar_ui.html");
+        remove("build/libflow_test_scalar_ui.so");
+        flow_ir_cleanup(&s_ir);
+
+        printf("  ✓ Stage 12 Passed: Full .lean scalar def C17 lowering, theorem registry & schema-driven UI verified.\n\n");
+    }
+
     FLOW_TEST_SUITE_END();
     return 0;
 }

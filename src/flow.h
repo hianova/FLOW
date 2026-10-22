@@ -9,8 +9,14 @@
 #define FLOW_SAMPLE_MAX 32
 #define FLOW_CONSTRAINT_MAX 32
 #define FLOW_FIELD_MAX 16
+#define FLOW_LEAN_FN_MAX 64
+#define FLOW_LEAN_PARAM_MAX 8
+#define FLOW_LEAN_THEOREM_MAX 32
+#define FLOW_LEAN_BODY_MAX 768
 typedef struct { char name[FLOW_NAME]; } FlowNode; typedef struct { int id; int score; } FlowSample;
 typedef struct { char name[FLOW_NAME]; size_t size_bytes; uint32_t flags; } FlowFieldSpec;
+typedef struct { char name[FLOW_NAME]; char return_type[16]; size_t param_count; char param_names[FLOW_LEAN_PARAM_MAX][FLOW_NAME]; char param_types[FLOW_LEAN_PARAM_MAX][16]; char body[FLOW_LEAN_BODY_MAX]; } FlowLeanFunction;
+typedef struct { char name[FLOW_NAME]; char anchored_fn[FLOW_NAME]; } FlowLeanTheorem;
 typedef enum { FLOW_FACT_SHARED_STATE, FLOW_FACT_COLLECTION,
     FLOW_FACT_TRANSFORM, FLOW_FACT_PARALLELIZABLE, FLOW_FACT_ORDERED, FLOW_FACT_BOUNDED, FLOW_FACT_CAPABILITY, FLOW_FACT_CONSTRAINT, FLOW_FACT_HOLE, FLOW_FACT_RANGE,
     FLOW_FACT_SIZE, FLOW_FACT_MUTABILITY, FLOW_FACT_DETERMINISM, FLOW_FACT_LEAN_CERTIFIED
@@ -57,6 +63,10 @@ typedef enum { FLOW_FACT_SHARED_STATE, FLOW_FACT_COLLECTION,
     uint64_t sla_latency_ns; \
     char extern_kernel[FLOW_NAME]; \
     char extern_kernel_body[FLOW_LINE]; \
+    FlowLeanFunction lean_functions[FLOW_LEAN_FN_MAX]; \
+    size_t lean_function_count; \
+    FlowLeanTheorem lean_theorems[FLOW_LEAN_THEOREM_MAX]; \
+    size_t lean_theorem_count; \
     FlowJetSpec jet; \
     FlowThermalSpec thermal;
 typedef struct { FLOW_SPEC_CORE_FIELDS

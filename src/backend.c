@@ -1,4 +1,5 @@
 #include "backend.h"
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -107,38 +108,225 @@ static void emit_runtime_common(FILE *output, const SemanticIR *ir, const Compon
     {"parallel_map", "#include <pthread.h>\n\ntypedef struct {\n    const flow_item *input;\n    flow_item *output;\n    size_t begin;\n    size_t end;\n} map_task;\n\nstatic void *map_worker(void *raw_task) {\n    map_task *task = raw_task;\n    for (size_t i = task->begin; i < task->end; ++i) {\n        task->output[i] = task->input[i];\n        task->output[i].score *= 2;\n    }\n    return NULL;\n}\n\nstatic void map_serial(const flow_item *input, flow_item *output,\n                       size_t begin, size_t end) {\n    for (size_t i = begin; i < end; ++i) {\n        output[i] = input[i];\n        output[i].score *= 2;\n    }\n}\n\nint main(void) {\n    flow_item results[FLOW_INPUT_COUNT];\n    pthread_t workers[FLOW_THREADS];\n    map_task tasks[FLOW_THREADS];\n    size_t worker_count = FLOW_THREADS < FLOW_INPUT_COUNT ? FLOW_THREADS : FLOW_INPUT_COUNT;\n    if (!flow_verify_input(FLOW_INPUT_COUNT)) return EXIT_FAILURE;\n    if (FLOW_INPUT_COUNT < FLOW_THREADS * 2) {\n        map_serial(input_items, results, 0, FLOW_INPUT_COUNT);\n    } else {\n        for (size_t i = 0; i < worker_count; ++i) {\n            tasks[i] = (map_task){input_items, results,\n                i * FLOW_INPUT_COUNT / worker_count,\n                (i + 1) * FLOW_INPUT_COUNT / worker_count};\n            if (pthread_create(&workers[i], NULL, map_worker, &tasks[i]) != 0) return EXIT_FAILURE;\n        }\n        for (size_t i = 0; i < worker_count; ++i)\n            if (pthread_join(workers[i], NULL) != 0) return EXIT_FAILURE;\n    }\n    print_header();\n    print_results(results, FLOW_INPUT_COUNT);\n    return EXIT_SUCCESS;\n}\n"},
     {"binary_parser", "static int parse_packet(const unsigned char *packet, size_t length, flow_item *result) {\n    if (length < 4 || packet[0] != 0xF1) return 0;\n    if ((size_t)packet[1] + 2 > length) return 0;\n    result->id = packet[2];\n    result->score = packet[3];\n    return 1;\n}\n\nint main(void) {\n    static const unsigned char packet[] = {0xF1, 0x02, 0x07, 0x2A};\n    flow_item result;\n    if (!flow_verify_input(1)) return EXIT_FAILURE;\n    print_header();\n    if (!parse_packet(packet, sizeof(packet), &result)) {\n        fputs(\"binary parser rejected packet\\n\", stderr);\n        return EXIT_FAILURE;\n    }\n    flow_puts(\"packet_valid\");\n    print_results(&result, 1);\n    return EXIT_SUCCESS;\n}\n"},
     {"state_machine", "typedef enum { STATE_IDLE, STATE_RUNNING, STATE_DONE } flow_state;\n\nstatic flow_state transition(flow_state state, int event) {\n    switch (state) {\n        case STATE_IDLE: return event == 1 ? STATE_RUNNING : STATE_IDLE;\n        case STATE_RUNNING: return event == 2 ? STATE_DONE : STATE_RUNNING;\n        case STATE_DONE: return STATE_DONE;\n    }\n    return STATE_IDLE;\n}\n\nint main(void) {\n    const int events[] = {1, 1, 2, 2};\n    flow_state state = STATE_IDLE;\n    flow_item result = {0, 0};\n    if (!flow_verify_input(sizeof(events) / sizeof(events[0]))) return EXIT_FAILURE;\n    for (size_t i = 0; i < sizeof(events) / sizeof(events[0]); ++i)\n        state = transition(state, events[i]);\n    result.id = (int)state;\n    result.score = (int)state;\n    print_header();\n    flow_printf(\"final_state %d\\n\", result.id);\n    print_results(&result, 1);\n    return state == STATE_DONE ? EXIT_SUCCESS : EXIT_FAILURE;\n}\n"},
-}; static void emit_norm_lean_slice(FILE *out, const char *s, size_t len) {
-    while (len > 0 && (*s == ' ' || *s == '\t')) { s++; len--; }
-    while (len > 0 && (s[len - 1] == ' ' || s[len - 1] == '\t')) len--;
-    if (len > 3 && !strncmp(s, "if ", 3)) {
-        const char *end = s + len, *th = NULL, *el = NULL; int d = 0;
-        for (const char *p = s + 3; p + 6 <= end; ++p) {
-            if (!strncmp(p, "if ", 3) && (p == s + 3 || p[-1] == ' ' || p[-1] == '(')) d++;
-            else if (!strncmp(p, " then ", 6)) { if (d == 0) { th = p; break; } d--; }
+};
+static const char *lean_scalar_to_c_type(const char *t) {
+    if (!t) return "uint64_t";
+    if (!strcmp(t, "Bool")) return "bool";
+    if (!strcmp(t, "Float")) return "double";
+    if (!strcmp(t, "Float32")) return "float";
+    if (!strcmp(t, "UInt32")) return "uint32_t";
+    if (!strcmp(t, "Int32")) return "int32_t";
+    if (!strcmp(t, "UInt16")) return "uint16_t";
+    if (!strcmp(t, "Int16")) return "int16_t";
+    if (!strcmp(t, "UInt8")) return "uint8_t";
+    if (!strcmp(t, "Int8")) return "int8_t";
+    if (!strcmp(t, "Int") || !strcmp(t, "Int64")) return "int64_t";
+    return "uint64_t";
+}
+static int is_lean_kw_at(const char *p, const char *start, const char *end, const char *kw, size_t kwlen) {
+    if ((size_t)(end - p) < kwlen || strncmp(p, kw, kwlen) != 0) return 0;
+    int l_ok = (p == start) || isspace((unsigned char)p[-1]) || p[-1] == '(';
+    int r_ok = (p + kwlen == end) || isspace((unsigned char)p[kwlen]) || p[kwlen] == '(' || p[kwlen] == ')';
+    return l_ok && r_ok;
+}
+static void subst_lean_var(const char *src, size_t src_len, const char *var, const char *val, size_t val_len, char *out, size_t out_max) {
+    size_t vlen = strlen(var), j = 0;
+    for (size_t i = 0; i < src_len && j + 4 < out_max; ) {
+        if (i + vlen <= src_len && !strncmp(src + i, var, vlen)) {
+            int l_ok = (i == 0) || (!isalnum((unsigned char)src[i - 1]) && src[i - 1] != '_');
+            int r_ok = (i + vlen == src_len) || (!isalnum((unsigned char)src[i + vlen]) && src[i + vlen] != '_');
+            if (l_ok && r_ok && j + val_len + 3 < out_max) {
+                out[j++] = '('; memcpy(out + j, val, val_len); j += val_len; out[j++] = ')';
+                i += vlen; continue;
+            }
+        }
+        out[j++] = src[i++];
+    }
+    out[j] = '\0';
+}
+static void emit_norm_lean_slice(FILE *out, const char *s, size_t len) {
+    for (;;) {
+        while (len > 0 && isspace((unsigned char)*s)) { s++; len--; }
+        while (len > 0 && isspace((unsigned char)s[len - 1])) len--;
+        if (len >= 2 && s[0] == '(' && s[len - 1] == ')') {
+            int d = 0, wrapped = 1;
+            for (size_t i = 0; i + 1 < len; ++i) {
+                if (s[i] == '(') d++;
+                else if (s[i] == ')') { if (--d == 0) { wrapped = 0; break; } }
+            }
+            if (wrapped) { s++; len -= 2; continue; }
+        }
+        break;
+    }
+    if (len == 0) { fputs("0", out); return; }
+    const char *end = s + len;
+    if (is_lean_kw_at(s, s, end, "let", 3)) {
+        const char *ce = NULL;
+        for (const char *p = s + 3; p + 1 < end && *p != '\n'; ++p) if (p[0] == ':' && p[1] == '=') { ce = p; break; }
+        if (ce) {
+            char var[FLOW_NAME] = {0}; size_t k = 0;
+            for (const char *p = s + 3; p < ce; ++p) if (!isspace((unsigned char)*p) && k + 1 < sizeof(var)) var[k++] = *p;
+            const char *rhs = ce + 2, *rhs_end = end, *rest = end; int pd = 0;
+            for (const char *p = rhs; p < end; ++p) {
+                if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
+                else if (pd == 0 && *p == '\n') { rhs_end = p; rest = p + 1; break; }
+                else if (pd == 0 && is_lean_kw_at(p, rhs, end, "in", 2)) { rhs_end = p; rest = p + 2; break; }
+            }
+            char sub[4096];
+            subst_lean_var(rest, (size_t)(end - rest), var, rhs, (size_t)(rhs_end - rhs), sub, sizeof(sub));
+            emit_norm_lean_slice(out, sub, strlen(sub)); return;
+        }
+    }
+    if (is_lean_kw_at(s, s, end, "match", 5)) {
+        const char *w = NULL; int pd = 0;
+        for (const char *p = s + 5; p < end; ++p) {
+            if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
+            else if (pd == 0 && is_lean_kw_at(p, s, end, "with", 4)) { w = p; break; }
+        }
+        if (w) {
+            const char *scrut = s + 5; size_t scrut_len = (size_t)(w - scrut);
+            const char *arms[16]; size_t arm_cnt = 0; pd = 0;
+            for (const char *p = w + 4; p < end; ++p) {
+                if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
+                else if (pd == 0 && *p == '|' && (p == w + 4 || p[-1] != '|') && (p + 1 == end || p[1] != '|')) {
+                    if (arm_cnt < 16) arms[arm_cnt++] = p;
+                }
+            }
+            if (arm_cnt > 0) {
+                int open_parens = 0;
+                for (size_t a = 0; a < arm_cnt; ++a) {
+                    const char *a_start = arms[a] + 1, *a_end = (a + 1 < arm_cnt) ? arms[a + 1] : end, *arr = NULL;
+                    for (const char *p = a_start; p + 1 < a_end; ++p) if (p[0] == '=' && p[1] == '>') { arr = p; break; }
+                    if (!arr) break;
+                    const char *pat = a_start; size_t pat_len = (size_t)(arr - a_start);
+                    while (pat_len > 0 && isspace((unsigned char)*pat)) { pat++; pat_len--; }
+                    while (pat_len > 0 && isspace((unsigned char)pat[pat_len - 1])) pat_len--;
+                    if ((pat_len == 1 && pat[0] == '_') || a + 1 == arm_cnt) {
+                        emit_norm_lean_slice(out, arr + 2, (size_t)(a_end - (arr + 2)));
+                        break;
+                    }
+                    fputs("((", out); emit_norm_lean_slice(out, scrut, scrut_len);
+                    fputs(" == ", out); emit_norm_lean_slice(out, pat, pat_len);
+                    fputs(") ? ", out); emit_norm_lean_slice(out, arr + 2, (size_t)(a_end - (arr + 2)));
+                    fputs(" : ", out); open_parens++;
+                }
+                while (open_parens-- > 0) fputc(')', out);
+                return;
+            }
+        }
+    }
+    if (is_lean_kw_at(s, s, end, "if", 2)) {
+        const char *th = NULL, *el = NULL; int d = 0, pd = 0;
+        for (const char *p = s + 2; p < end; ++p) {
+            if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
+            else if (pd == 0 && is_lean_kw_at(p, s, end, "if", 2)) d++;
+            else if (pd == 0 && is_lean_kw_at(p, s, end, "then", 4)) { if (d == 0) { th = p; break; } d--; }
         }
         if (th) {
-            d = 0;
-            for (const char *p = th + 6; p + 6 <= end; ++p) {
-                if (!strncmp(p, "if ", 3) && (p == th + 6 || p[-1] == ' ' || p[-1] == '(')) d++;
-                else if (!strncmp(p, " else ", 6)) { if (d == 0) { el = p; break; } d--; }
+            d = 0; pd = 0;
+            for (const char *p = th + 4; p < end; ++p) {
+                if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
+                else if (pd == 0 && is_lean_kw_at(p, s, end, "if", 2)) d++;
+                else if (pd == 0 && is_lean_kw_at(p, s, end, "else", 4)) { if (d == 0) { el = p; break; } d--; }
             }
         }
         if (th && el) {
-            fputs("((", out); emit_norm_lean_slice(out, s + 3, (size_t)(th - (s + 3)));
-            fputs(") ? (", out); emit_norm_lean_slice(out, th + 6, (size_t)(el - (th + 6)));
-            fputs(") : (", out); emit_norm_lean_slice(out, el + 6, (size_t)(end - (el + 6))); fputs("))", out); return;
+            fputc('(', out); emit_norm_lean_slice(out, s + 2, (size_t)(th - (s + 2)));
+            fputs(" ? ", out); emit_norm_lean_slice(out, th + 4, (size_t)(el - (th + 4)));
+            fputs(" : ", out); emit_norm_lean_slice(out, el + 4, (size_t)(end - (el + 4))); fputc(')', out); return;
         }
     }
-    fprintf(out, "(%.*s)", (int)len, s);
-} static void emit_lean_expr_as_c(FILE *out, const char *expr) {
-    char norm[1024]; size_t j = 0;
-    for (size_t i = 0; expr[i] && j + 4 < sizeof(norm); ) {
+    for (int pass = 1; pass <= 8; ++pass) {
+        int pd = 0;
+        for (const char *p = end - 1; p > s; --p) {
+            if (*p == ')') pd++; else if (*p == '(' && pd > 0) pd--;
+            if (pd != 0) continue;
+            if (pass == 1 && p + 1 < end && p[0] == '|' && p[1] == '|' && p[-1] != '|' && (p + 2 == end || p[2] != '|')) {
+                fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s)); fputs(" || ", out); emit_norm_lean_slice(out, p + 2, (size_t)(end - (p + 2))); fputc(')', out); return;
+            }
+            if (pass == 2 && p + 1 < end && p[0] == '&' && p[1] == '&' && p[-1] != '&' && (p + 2 == end || p[2] != '&')) {
+                fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s)); fputs(" && ", out); emit_norm_lean_slice(out, p + 2, (size_t)(end - (p + 2))); fputc(')', out); return;
+            }
+            if (pass == 3) {
+                if (p + 1 < end && ((p[0] == '=' && p[1] == '=') || (p[0] == '!' && p[1] == '=') || (p[0] == '<' && p[1] == '=' && p[-1] != '<') || (p[0] == '>' && p[1] == '=' && p[-1] != '>'))) {
+                    fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s)); fprintf(out, " %c%c ", p[0], p[1]); emit_norm_lean_slice(out, p + 2, (size_t)(end - (p + 2))); fputc(')', out); return;
+                }
+                if (p[0] == '<' && p[-1] != '<' && (p + 1 < end && p[1] != '<' && p[1] != '=')) {
+                    fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s)); fputs(" < ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1))); fputc(')', out); return;
+                }
+                if (p[0] == '>' && p[-1] != '>' && p[-1] != '=' && p[-1] != '-' && (p + 1 < end && p[1] != '>' && p[1] != '=')) {
+                    fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s)); fputs(" > ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1))); fputc(')', out); return;
+                }
+                if (p[0] == '=' && p[-1] != '=' && p[-1] != '!' && p[-1] != '<' && p[-1] != '>' && p[-1] != ':' && (p + 1 < end && p[1] != '=' && p[1] != '>')) {
+                    fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s)); fputs(" == ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1))); fputc(')', out); return;
+                }
+            }
+            if (pass == 4 && p + 2 < end && ((p[0] == '^' && p[1] == '^' && p[2] == '^') || (p[0] == '&' && p[1] == '&' && p[2] == '&') || (p[0] == '|' && p[1] == '|' && p[2] == '|'))) {
+                fputs("((uint64_t)", out); emit_norm_lean_slice(out, s, (size_t)(p - s)); fprintf(out, " %c (uint64_t)", p[0]); emit_norm_lean_slice(out, p + 3, (size_t)(end - (p + 3))); fputc(')', out); return;
+            }
+            if (pass == 5 && p + 2 < end && ((p[0] == '<' && p[1] == '<' && p[2] == '<') || (p[0] == '>' && p[1] == '>' && p[2] == '>'))) {
+                fputs("((uint64_t)", out); emit_norm_lean_slice(out, s, (size_t)(p - s)); fprintf(out, " %c%c (uint64_t)", p[0], p[0]); emit_norm_lean_slice(out, p + 3, (size_t)(end - (p + 3))); fputc(')', out); return;
+            }
+            if (pass == 6 && (p[0] == '+' || (p[0] == '-' && (p + 1 == end || p[1] != '>')))) {
+                const char *l = p - 1; while (l > s && isspace((unsigned char)*l)) --l;
+                if (isalnum((unsigned char)*l) || *l == ')' || *l == '_') {
+                    if (p[0] == '+') { fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s)); fputs(" + ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1))); fputc(')', out); return; }
+                    fputs("flow_nat_sub(", out); emit_norm_lean_slice(out, s, (size_t)(p - s)); fputs(", ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1))); fputc(')', out); return;
+                }
+            }
+            if (pass == 7 && (p[0] == '*' || p[0] == '/' || p[0] == '%')) {
+                if (p[0] == '*') { fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s)); fputs(" * ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1))); fputc(')', out); return; }
+                fprintf(out, "flow_nat_%s(", p[0] == '/' ? "div" : "mod");
+                emit_norm_lean_slice(out, s, (size_t)(p - s)); fputs(", ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1))); fputc(')', out); return;
+            }
+            if (pass == 8 && p[0] == '^' && p[-1] != '^' && (p + 1 == end || p[1] != '^')) {
+                fputs("flow_nat_pow(", out); emit_norm_lean_slice(out, s, (size_t)(p - s)); fputs(", ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1))); fputc(')', out); return;
+            }
+        }
+    }
+    if (s[0] == '!') {
+        fputs("(!", out); emit_norm_lean_slice(out, s + 1, len - 1); fputc(')', out); return;
+    }
+    const char *tok_s[16]; size_t tok_l[16], tok_cnt = 0;
+    for (const char *p = s; p < end && tok_cnt < 16; ) {
+        while (p < end && isspace((unsigned char)*p)) ++p;
+        if (p >= end) break;
+        const char *ts = p;
+        if (*p == '(') {
+            int pd = 0;
+            while (p < end) { if (*p == '(') pd++; else if (*p == ')' && --pd == 0) { ++p; break; } ++p; }
+        } else {
+            while (p < end && !isspace((unsigned char)*p) && *p != '(' && *p != ')') ++p;
+        }
+        tok_s[tok_cnt] = ts; tok_l[tok_cnt] = (size_t)(p - ts); tok_cnt++;
+    }
+    if (tok_cnt > 1) {
+        if (tok_l[0] == 6 && !strncmp(tok_s[0], "decide", 6) && tok_cnt == 2) {
+            fputs("((bool)", out); emit_norm_lean_slice(out, tok_s[1], tok_l[1]); fputc(')', out); return;
+        }
+        fprintf(out, "%.*s(", (int)tok_l[0], tok_s[0]);
+        for (size_t ti = 1; ti < tok_cnt; ++ti) {
+            if (ti > 1) fputs(", ", out);
+            emit_norm_lean_slice(out, tok_s[ti], tok_l[ti]);
+        }
+        fputc(')', out); return;
+    }
+    if (len > 10 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X') && isxdigit((unsigned char)s[len - 1])) {
+        fprintf(out, "%.*sULL", (int)len, s); return;
+    }
+    fprintf(out, "%.*s", (int)len, s);
+}
+static void emit_lean_expr_as_c(FILE *out, const char *expr) {
+    char norm[2048]; size_t j = 0;
+    for (size_t i = 0; expr[i] && j + 16 < sizeof(norm); ) {
         if (!strncmp(expr + i, "\xe2\x89\xa4", 3)) { norm[j++] = '<'; norm[j++] = '='; i += 3; }
         else if (!strncmp(expr + i, "\xe2\x89\xa5", 3)) { norm[j++] = '>'; norm[j++] = '='; i += 3; }
         else if (!strncmp(expr + i, "\xe2\x89\xa0", 3)) { norm[j++] = '!'; norm[j++] = '='; i += 3; }
         else if (!strncmp(expr + i, "\xe2\x88\xa7", 3)) { norm[j++] = '&'; norm[j++] = '&'; i += 3; }
         else if (!strncmp(expr + i, "\xe2\x88\xa8", 3)) { norm[j++] = '|'; norm[j++] = '|'; i += 3; }
         else if (!strncmp(expr + i, "\xc2\xac", 2)) { norm[j++] = '!'; i += 2; }
+        else if (!strncmp(expr + i, "Nat.min", 7) && !isalnum((unsigned char)expr[i + 7])) { memcpy(norm + j, "flow_nat_min", 12); j += 12; i += 7; }
+        else if (!strncmp(expr + i, "Nat.max", 7) && !isalnum((unsigned char)expr[i + 7])) { memcpy(norm + j, "flow_nat_max", 12); j += 12; i += 7; }
         else norm[j++] = expr[i++];
     }
     norm[j] = '\0'; emit_norm_lean_slice(out, norm, j);
@@ -149,16 +337,42 @@ void flow_emit_abi_exports(FILE *output, const SemanticIR *ir, const Component *
     uint64_t sla = ir ? ir->sla_latency_ns : 0;
     uint32_t ver = (ir && ir->state_schema_version > 0) ? ir->state_schema_version : 1;
     fprintf(output,
-        "\n#include <stdatomic.h>\n#include <stdint.h>\n#include <string.h>\n"
+        "\n#include <stdatomic.h>\n#include <stdbool.h>\n#include <stdint.h>\n#include <string.h>\n"
         "#define FLOW_INPUT_STRIDE %zu\n#define FLOW_INPUT_ALIGN %zu\n"
         "#define FLOW_SLA_LATENCY_NS UINT64_C(%llu)\n#define FLOW_STATE_SCHEMA_VERSION %u\n"
+        "#ifndef FLOW_LEAN_NAT_OPS_DEFINED\n#define FLOW_LEAN_NAT_OPS_DEFINED\n"
+        "static inline __attribute__((unused)) uint64_t flow_nat_sub(uint64_t a, uint64_t b) { return a >= b ? (a - b) : 0ULL; }\n"
+        "static inline __attribute__((unused)) uint64_t flow_nat_div(uint64_t a, uint64_t b) { return b == 0ULL ? 0ULL : (a / b); }\n"
+        "static inline __attribute__((unused)) uint64_t flow_nat_mod(uint64_t a, uint64_t b) { return b == 0ULL ? a : (a %% b); }\n"
+        "static inline __attribute__((unused)) uint64_t flow_nat_pow(uint64_t base, uint64_t exp) { uint64_t r = 1ULL; while (exp > 0ULL) { if (exp & 1ULL) r *= base; base *= base; exp >>= 1U; } return r; }\n"
+        "static inline __attribute__((unused)) uint64_t flow_nat_min(uint64_t a, uint64_t b) { return a < b ? a : b; }\n"
+        "static inline __attribute__((unused)) uint64_t flow_nat_max(uint64_t a, uint64_t b) { return a > b ? a : b; }\n"
+        "#endif\n"
         "#ifndef FLOW_EXTENT_DESCRIPTOR_DEFINED\n#define FLOW_EXTENT_DESCRIPTOR_DEFINED\n"
         "typedef struct { uint64_t base_offset, byte_length, qsbr_epoch; uint32_t stride_bytes, align_bytes, schema_version, flags; uint64_t reserved[3]; } FlowExtentDescriptor;\n"
         "_Static_assert(sizeof(FlowExtentDescriptor) == 64, \"FlowExtentDescriptor must be 64 bytes\");\n"
         "#endif\n"
         "typedef struct { _Atomic uint64_t active_epoch, qsbr_epoch; uint64_t sla_latency_ns; size_t capacity, stride, align; int context_bound; } flow_abi_qsbr_ctx;\n",
         stride, align, (unsigned long long)sla, ver);
-    if (ir && ir->extern_kernel[0]) {
+    int kernel_emitted = 0;
+    if (ir && ir->lean_function_count > 0) {
+        for (size_t fi = 0; fi < ir->lean_function_count; ++fi) {
+            const FlowLeanFunction *fn = &ir->lean_functions[fi];
+            const char *ret_c = lean_scalar_to_c_type(fn->return_type);
+            int is_kern = (ir->extern_kernel[0] && !strcmp(fn->name, ir->extern_kernel));
+            if (is_kern) kernel_emitted = 1;
+            fprintf(output, "%s%s %s(", is_kern ? "__attribute__((weak)) " : "", ret_c, fn->name);
+            for (size_t pi = 0; pi < fn->param_count; ++pi)
+                fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_scalar_to_c_type(fn->param_types[pi]), fn->param_names[pi]);
+            fprintf(output, ") {\n    ");
+            for (size_t pi = 0; pi < fn->param_count; ++pi)
+                fprintf(output, "(void)%s; ", fn->param_names[pi]);
+            fprintf(output, "\n    return (%s)", ret_c);
+            emit_lean_expr_as_c(output, fn->body);
+            fprintf(output, ";\n}\n");
+        }
+    }
+    if (ir && ir->extern_kernel[0] && !kernel_emitted) {
         if (ir->extern_kernel_body[0]) {
             fprintf(output, "__attribute__((weak)) uint32_t %s(uint64_t baseOff, uint64_t byteLen, uint64_t stride, uint64_t epoch) {\n"
                             "    (void)baseOff; (void)byteLen; (void)stride; (void)epoch;\n    return (uint32_t)", ir->extern_kernel);

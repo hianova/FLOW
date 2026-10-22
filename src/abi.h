@@ -33,13 +33,14 @@ typedef struct { char name[64]; FlowType type; FlowOwnership ownership; char des
 #define FLOW_ABI_MAX_PARAMS 8
 #define FLOW_ABI_MAX_FUNCTIONS 8
 typedef struct { char name[64]; FlowParam params[FLOW_ABI_MAX_PARAMS]; size_t param_count; FlowType return_type; FlowOwnership return_ownership; FlowErrorPolicy error_policy; uint32_t effects; char docstring[256]; } FlowFunctionSignature;
-typedef struct { char component_id[64], module_name[64], version[32]; int thread_safe; size_t max_memory_bytes, function_count; FlowMemoryMode default_memory_mode; FlowControlContract control_contract; FlowViewContract input_view_contract, output_view_contract; FlowFunctionSignature create_fn, destroy_fn, primary_fn, functions[FLOW_ABI_MAX_FUNCTIONS]; } FlowComponentABI;
+typedef struct { char component_id[64], module_name[64], version[32]; int thread_safe; size_t max_memory_bytes, function_count; FlowMemoryMode default_memory_mode; FlowControlContract control_contract; FlowViewContract input_view_contract, output_view_contract; FlowFunctionSignature create_fn, destroy_fn, primary_fn, functions[FLOW_ABI_MAX_FUNCTIONS]; const SemanticIR *ir; } FlowComponentABI;
 int flow_abi_build_for_component(const SemanticIR *ir, const Component *comp, FlowComponentABI *abi);
 int flow_abi_emit_c_header(FILE *output, const FlowComponentABI *abi);
 int flow_abi_emit_rust_adapter(FILE *output, const FlowComponentABI *abi);
 int flow_abi_emit_python_adapter(FILE *output, const FlowComponentABI *abi);
 int flow_abi_emit_polyglot_adapter(FILE *output, const FlowComponentABI *abi, const char *target_lang);
 int flow_abi_emit_lean_adapter(FILE *output, const SemanticIR *ir, const FlowComponentABI *abi, uint64_t genome, size_t capacity, size_t shards);
+int flow_abi_emit_ui_adapter(FILE *output, const SemanticIR *ir, const FlowComponentABI *abi);
 int flow_abi_audit_lean_certificate(const char *lean_source, char *err_msg, size_t err_size);
 int flow_abi_verify_lean_certificate(const char *lean_path, char *err_msg, size_t err_size);
 #endif
