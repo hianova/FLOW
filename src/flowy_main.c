@@ -27,8 +27,19 @@ static int flowy_build_cmd(int argc, char **argv, int and_run) {
     char auto_bin[512] = {0}, temp_c[512] = {0}, cmd[1024]; if (!out_bin) {
         const char *slash = strrchr(spec_file, '/'), *base = slash ? slash + 1 : spec_file, *dot = strrchr(base, '.');
         snprintf(auto_bin, sizeof(auto_bin), "build/%.*s", (int)(dot ? (size_t)(dot - base) : strlen(base)), base); out_bin = auto_bin; } system("mkdir -p build 2>/dev/null");
-    snprintf(temp_c, sizeof(temp_c), "/tmp/flow_%d_%lu.c", (int)getpid(), (unsigned long)time(NULL)); FILE *ft = fopen("./build/flowc", "rb"); if (ft) fclose(ft);
-    snprintf(cmd, sizeof(cmd), "%s \"%s\" -o \"%s\"", ft ? "./build/flowc" : "flowc", spec_file, temp_c);
+    snprintf(temp_c, sizeof(temp_c), "/tmp/flow_%d_%lu.c", (int)getpid(), (unsigned long)time(NULL));
+    char sibling_flowc[512] = {0}; const char *flowc_bin = getenv("FLOWC");
+    if (!flowc_bin || !flowc_bin[0]) {
+        const char * last_slash = (argc > 0 && argv[0]) ? strrchr(argv[0], '/') : NULL;
+        if (last_slash) {
+            snprintf(sibling_flowc, sizeof(sibling_flowc), "%.*s/flowc", (int)(last_slash - argv[0]), argv[0]);
+            FILE *fs = fopen(sibling_flowc, "rb"); if (fs) { fclose(fs); flowc_bin = sibling_flowc; }
+        }
+    }
+    if (!flowc_bin || !flowc_bin[0]) {
+        FILE *ft = fopen("./build/flowc", "rb"); if (ft) { fclose(ft); flowc_bin = "./build/flowc"; } else flowc_bin = "flowc";
+    }
+    snprintf(cmd, sizeof(cmd), "\"%s\" \"%s\" -o \"%s\"", flowc_bin, spec_file, temp_c);
     if (system(cmd) != 0) { fprintf(stderr, "flowy %s: failed to compile %s\n", and_run ? "run" : "build", spec_file); remove(temp_c); return EXIT_FAILURE; }
     const char *cc = getenv("CC"); if (!cc || !cc[0]) cc = "clang";
     snprintf(cmd, sizeof(cmd), "%s -O3 \"%s\" -o \"%s\" -lpthread -lm 2>/dev/null || %s -O3 \"%s\" -o \"%s\" -lm", cc, temp_c, out_bin, cc, temp_c, out_bin);

@@ -1,5 +1,6 @@
 #include "backend.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <math.h>
 static void flow_emit_metadata(FILE *output, const SemanticIR *ir, const Component *c, const SearchResult *s, const VerificationReport *v) {
