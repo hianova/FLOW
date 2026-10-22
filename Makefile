@@ -35,7 +35,7 @@ INCLUDEDIR ?= $(PREFIX)/include/flow
 
 PLUGINS_SO := $(BUILD_DIR)/libflow_embodied.so $(BUILD_DIR)/libflow_swarm.so
 
-.PHONY: all clean test security-test install uninstall fuzz test-build test-run plugins flowy libflow test-cubical-hott
+.PHONY: all clean test security-test install uninstall fuzz test-build test-run test-asan test-tsan plugins flowy libflow test-cubical-hott
 
 all: $(LIBFLOW_A) $(FLOWC) $(FLOWY) plugins
 
@@ -107,6 +107,11 @@ $(BUILD_DIR)/libflow_swarm.so: src/swarm.c | $(BUILD_DIR)
 # Two-Stage Native Makefile Test Pipeline (Native Hermetic Barrier)
 # ==============================================================================
 
+# Tests locate sibling binaries (flowc/flowy) via FLOW_BUILD_DIR so that
+# sanitizer builds (BUILD_DIR=build/asan, build/tsan) are fully self-contained.
+TEST_DEFS := -DFLOW_BUILD_DIR=\"$(BUILD_DIR)\"
+TEST_DEPS := tests/flow_test_kit.h $(FLOWC) $(FLOWY) $(PLUGINS_SO) $(LIBFLOW_A)
+
 # 5 Consolidated Domain Test Suites (Brain, Body, Concurrency, Fvec-Swarm, System)
 TEST_BINARIES := \
 	$(BUILD_DIR)/test-brain \
@@ -119,29 +124,29 @@ TEST_BINARIES := \
 	$(BUILD_DIR)/test-cubical-hott \
 
 
-$(BUILD_DIR)/test-brain: tests/test_brain.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
+$(BUILD_DIR)/test-brain: tests/test_brain.c $(TEST_DEPS) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(TEST_DEFS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
-$(BUILD_DIR)/test-body: tests/test_body.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
+$(BUILD_DIR)/test-body: tests/test_body.c $(TEST_DEPS) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(TEST_DEFS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
-$(BUILD_DIR)/test-concurrency: tests/test_concurrency.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
+$(BUILD_DIR)/test-concurrency: tests/test_concurrency.c $(TEST_DEPS) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(TEST_DEFS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
-$(BUILD_DIR)/test-fvec-swarm: tests/test_fvec_swarm.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
+$(BUILD_DIR)/test-fvec-swarm: tests/test_fvec_swarm.c $(TEST_DEPS) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(TEST_DEFS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
-$(BUILD_DIR)/test-system: tests/test_system.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
+$(BUILD_DIR)/test-system: tests/test_system.c $(TEST_DEPS) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(TEST_DEFS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
-$(BUILD_DIR)/test-refactored-core: tests/test_refactored_core.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
+$(BUILD_DIR)/test-refactored-core: tests/test_refactored_core.c $(TEST_DEPS) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(TEST_DEFS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
-$(BUILD_DIR)/test-geometric-axiom: tests/test_geometric_axiom.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
+$(BUILD_DIR)/test-geometric-axiom: tests/test_geometric_axiom.c $(TEST_DEPS) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(TEST_DEFS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
-$(BUILD_DIR)/test-cubical-hott: tests/test_cubical_hott.c $(FLOWC) $(FLOWY) plugins $(LIBFLOW_A) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
+$(BUILD_DIR)/test-cubical-hott: tests/test_cubical_hott.c $(TEST_DEPS) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(TEST_DEFS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
 
 # Backward-compatible convenience shortcuts to build & execute any domain test
@@ -150,10 +155,21 @@ TEST_NAMES := $(patsubst $(BUILD_DIR)/%,%,$(TEST_BINARIES))
 $(TEST_NAMES): %: $(BUILD_DIR)/%
 	@$<
 
+FUZZ_SECONDS ?= 60
 fuzz: | $(BUILD_DIR)
-	clang -std=c17 -O2 -fsanitize=fuzzer,address,undefined -DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION -Isrc $(SRC_LIB) tests/fuzz-test.c -o $(BUILD_DIR)/fuzzer-engine -lm
-	@echo "Running LLVM libFuzzer for 5 seconds..."
-	$(BUILD_DIR)/fuzzer-engine -max_total_time=5
+	clang -std=c17 -g -O1 -fsanitize=fuzzer,address,undefined -DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION -Isrc -Iplugins $(SRC_LIB) tests/fuzz-test.c -o $(BUILD_DIR)/fuzzer-engine -lm -pthread
+	@echo "Running LLVM libFuzzer for $(FUZZ_SECONDS) seconds..."
+	$(BUILD_DIR)/fuzzer-engine -max_total_time=$(FUZZ_SECONDS)
+
+# Sanitizer test pipelines (self-contained build trees; tests must be green here too).
+SAN_COMMON := -std=c17 -Wall -Wextra -Wpedantic -g -O1 -fno-omit-frame-pointer -Isrc -Iplugins -Itests
+test-asan:
+	@$(MAKE) --no-print-directory BUILD_DIR=build/asan CFLAGS="$(SAN_COMMON) -fsanitize=address,undefined -fno-sanitize-recover=undefined" LDLIBS="-lm -fsanitize=address,undefined" test-build
+	@ASAN_OPTIONS=detect_leaks=0:abort_on_error=0 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 $(MAKE) --no-print-directory BUILD_DIR=build/asan test-run
+
+test-tsan:
+	@$(MAKE) --no-print-directory BUILD_DIR=build/tsan CFLAGS="$(SAN_COMMON) -fsanitize=thread" LDLIBS="-lm -fsanitize=thread" test-build
+	@TSAN_OPTIONS=halt_on_error=1 $(MAKE) --no-print-directory BUILD_DIR=build/tsan test-run
 
 security-test: $(BUILD_DIR)/test-concurrency
 	@$(BUILD_DIR)/test-concurrency
@@ -163,22 +179,24 @@ test-build: $(FLOWC) $(FLOWY) plugins $(TEST_BINARIES)
 
 # Phase 2: Pure Isolated Execution (Hardware Cache & SMT Soundness Protected)
 test-run: $(TEST_BINARIES)
+	@rm -f $(BUILD_DIR)/.failed-suites
 	@echo "=== [1/8] Brain: Bit-Manifold Form, SMT Supreme Court & Algebraic Geometry ==="
-	@$(BUILD_DIR)/test-brain
+	@$(BUILD_DIR)/test-brain || echo test-brain >> $(BUILD_DIR)/.failed-suites
 	@echo "=== [2/8] Body: Physical Substrate, Telemetry, Drivers & Hardware Control ==="
-	@$(BUILD_DIR)/test-body
+	@$(BUILD_DIR)/test-body || echo test-body >> $(BUILD_DIR)/.failed-suites
 	@echo "=== [3/8] Concurrency: QSBR RCU, Live Reload, Zero-TLB & Moving Target Defense ==="
-	@$(BUILD_DIR)/test-concurrency
+	@$(BUILD_DIR)/test-concurrency || echo test-concurrency >> $(BUILD_DIR)/.failed-suites
 	@echo "=== [4/8] Fvec & Swarm: Architectural Memory, Swarm Federation, Neuro-Bridge & Pre-Play ==="
-	@$(BUILD_DIR)/test-fvec-swarm
+	@$(BUILD_DIR)/test-fvec-swarm || echo test-fvec-swarm >> $(BUILD_DIR)/.failed-suites
 	@echo "=== [5/8] System: Compiler Pipeline, Pure .lean Fusion, Plugin ABI & Polyglot Emitter ==="
-	@$(BUILD_DIR)/test-system
+	@$(BUILD_DIR)/test-system || echo test-system >> $(BUILD_DIR)/.failed-suites
 	@echo "=== [6/8] Refactored Core: Thermal Contact-Jet, Quadratic Polyhedral & 64-Node Mesh ==="
-	@$(BUILD_DIR)/test-refactored-core
+	@$(BUILD_DIR)/test-refactored-core || echo test-refactored-core >> $(BUILD_DIR)/.failed-suites
 	@echo "=== [7/8] Geometric Axiom: Unified Fiber Bundle Section (SMT + Polyhedral + BMF + Jet) ==="
-	@$(BUILD_DIR)/test-geometric-axiom
+	@$(BUILD_DIR)/test-geometric-axiom || echo test-geometric-axiom >> $(BUILD_DIR)/.failed-suites
 	@echo "=== [8/8] Cubical HoTT: Discrete Cubical Sets, Kan Fillers & Topos Subobject Classifier ==="
-	@$(BUILD_DIR)/test-cubical-hott
+	@$(BUILD_DIR)/test-cubical-hott || echo test-cubical-hott >> $(BUILD_DIR)/.failed-suites
+	@if [ -s $(BUILD_DIR)/.failed-suites ]; then echo "❌ FAILED SUITES:"; cat $(BUILD_DIR)/.failed-suites; exit 1; fi
 
 test: test-build
 	@$(MAKE) --no-print-directory test-run
@@ -187,4 +205,4 @@ test: test-build
 	@echo "================================================================================"
 
 clean:
-	rm -rf $(BUILD_DIR) /tmp/flow-* /tmp/d_* /tmp/test_*
+	rm -rf $(BUILD_DIR) build/asan build/tsan
