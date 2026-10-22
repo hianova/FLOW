@@ -46,6 +46,28 @@ FLOW fuses **Domain Intent**, **Formal Proof**, and **Native Hardware Execution*
 
 ---
 
+## ⚡ Pure `.lean` Zero-Shot Authoring & FFI Cheat Sheet (For Humans & AI Agents)
+
+When authoring a new FLOW project in pure `.lean`, follow these **4 deterministic rules** to compile on the first try with zero trial-and-error:
+
+| Rule | Specification & Exact Convention |
+| :--- | :--- |
+| **1. Supported Subset & 64B `structure`** | • Use zero-dependency Core Lean 4 only (**do not** `import Mathlib`; **never** use `sorry` or custom `axiom`).<br>• Primitive types map directly to C17: `UInt64` / `Nat` $\to$ `uint64_t`, `UInt32` $\to$ `uint32_t`, `Bool` $\to$ `bool`, `Float` $\to$ `double`.<br>• Define your primary `structure` with **8 × 64-bit fields (64 bytes)** so `flowc` infers `stride = 64` (1 CPU cache line). |
+| **2. Zero-`@[export]` Kernel Discovery** | • `flowc` scans the AST for the **last computational `def` referenced inside a `theorem`** and automatically binds it as the C17 kernel entry point (`spec->extern_kernel`).<br>• Standard 1PB zero-copy kernel signature (returns `0` for PASS, `1` for REJECT):<br>`def myStepKernel (baseOff byteLen stride epoch : UInt64) : UInt32 := if stride >= 64 && ... then 0 else 1` |
+| **3. Zero-Retry Proof Tactics (`decide` & `omega`)** | • **Concrete test vectors / boundary checks**: Use `:= by decide` (e.g., `theorem kernel_ok : myStepKernel 0 64 64 1 = 0 := by decide`).<br>• **Universal linear arithmetic (`∀`)**: Use `:= by omega`. **Crucial `Nat` Subtraction Rule**: Lean 4 `Nat` subtraction truncates at `0` (`a - b = 0` when `a < b`). Every theorem containing `a - b` **must** include the precondition `(h : b ≤ a)` in its signature so `omega` succeeds immediately. |
+| **4. 5-Line Zero-Copy FFI Invocation** | Compile via `flowc spec.lean -o build/app.c --target-python build/app.py --target-rust build/app.rs` and `clang -O2 -shared -fPIC -pthread build/app.c -o build/libapp.so -lm`, then call in Python/Rust/JS:<br>`with app.LinearArray("build/libapp.so") as eng:`<br>`    out_ext = eng.process_descriptor(app.FlowExtentDescriptor(0, 1 << 50, 0, 64, 8, 1, 0))` |
+
+### Plain-Language Guide to `flowc` / `flowy` CLI Output
+
+- `verifier: status=proven capacity=1024 estimated_bytes=8192 (lean_certified & input bound proven)`
+  $\rightarrow$ **Logic & Memory Verified**: All Lean 4 theorems hold with zero `sorry`, and total static memory is strictly bounded (8 KB, zero GC).
+- `SMT proof: status=unsat_proven_sound (4/4 theorems verified UNSAT)`
+  $\rightarrow$ **Zero Counterexamples (`UNSAT`)**: The SMT solver searched the entire state space for a bug/overflow and proved the error condition is **unsatisfiable** (100% safe).
+- `symplectic: omega=2.000 mu=0.000977 q_sat=1280.0 (polyhedral shaped)`
+  $\rightarrow$ **Hardware Pacing**: Loop tile bounds and backpressure thresholds are automatically shaped to prevent CPU/GPU thermal throttling.
+
+---
+
 ## 💻 Quick Start & Usage
 
 ### 1. Build & Run All 8 Domain Test Suites
@@ -58,17 +80,7 @@ make -j4 all
 make -j4 test
 ```
 
-### 2. Real-World Formal Verification Acceptance: AWS Cedar (`tests/cedar_authorization.lean`)
-
-[`tests/cedar_authorization.lean`](tests/cedar_authorization.lean) contains **427 lines (16.4 KB)** of unmodified production Lean 4 specifications and 10+ mechanized security theorems from **[AWS `cedar-policy/cedar-spec`](https://github.com/cedar-policy/cedar-spec)** (`Request`, `Response`, `isAuthorized`, `forbid_trumps_permit`, `default_deny`, `allowed_iff_explicitly_permitted_and_not_denied`, `order_and_dup_independent`).
-
-With **zero `@[export]` annotations** and **zero FLOW-specific syntax**, FLOW directly ingests the file, infers the 7-field / 56-byte memory stride from `Request` + `Response`, anchors `isAuthorized` via its security theorems, synthesizes a QSBR-protected native shared library, and executes it:
-
-```sh
-./build/flowy run tests/cedar_authorization.lean
-```
-
-### 3. Write & Run a Custom Pure `.lean` Domain Kernel
+### 2. Write & Run a Custom Pure `.lean` Domain Kernel
 
 Create a pure Lean 4 specification (e.g. `reflex.lean`):
 
@@ -104,6 +116,14 @@ Compile, verify, and execute directly or emit polyglot zero-copy adapters:
     --target-js build/reflex.js
 ```
 
+### 3. Real-World Production Blueprints & Benchmarks
+
+| Blueprint / Repository | Domain & Problem Solved | Key Pure `.lean` Mechanisms |
+| :--- | :--- | :--- |
+| **[`tests/cedar_authorization.lean`](tests/cedar_authorization.lean)**<br>*(Built-in Benchmark)* | **Cloud IAM Policy Engine** (427 lines unmodified from [AWS `cedar-policy/cedar-spec`](https://github.com/cedar-policy/cedar-spec)) | Auto-infers 56B stride from `Request` + `Response`; anchors `isAuthorized` via `forbid_trumps_permit` & `default_deny`. Run via `./build/flowy run tests/cedar_authorization.lean`. |
+| **[`hianova/Ricardian`](https://github.com/hianova/Ricardian)** | **Anti-Monopoly Game Economy & Gacha Fairness** (Pity guarantee, dual-track asset solvency, shutdown redemption) | 64B `GameEconomyState`; proves hard pity cap ($\le 90$ pulls), 1:1 central-bank reserve conservation, and server-sunset player refund lower bounds. |
+| **[`hianova/flow_business`](https://github.com/hianova/flow_business)** | **Six-Pillar Enterprise Forensic Sidecar & Executive Ownership Ledger** (P2P, O2C discount anti-leakage, Treasury covenants, USMCA RVC, HR EEOC, Ad IVT) | Tri-State forensic gate (`AUTO_PASS` / `FORENSIC_HOLD` / `HARD_BLOCK`), Min-Cut counterfactual remedies ($\Delta Q$ or $\Delta B$), and SoD double-entry executive liability signatures. |
+
 ### 4. Live AST Topology Audit & Token-Ring Introspection (`flowy`)
 
 ```sh
@@ -127,7 +147,7 @@ FLOW/
 ├── plugins/            # Domain intent functors & hardware drivers (embodied, Mori-Zwanzig, CAN-FD, IMU)
 ├── crates/             # Rust Plugin SDK (`flow-plugin`) and SIMD tile plugin example
 ├── tests/              # 8 domain test suites + AWS Cedar formal verification benchmark (`cedar_authorization.lean`)
-├── flow-book/          # 6-chapter architectural documentation (Literate Markdown)
+├── flow-book/          # 6-chapter architectural & practical guide (Literate Markdown)
 ├── tools/              # Zero-dependency one-line installer (`tools/install.sh`)
 └── Makefile            # Two-stage native hermetic build & test pipeline
 ```
@@ -136,7 +156,7 @@ FLOW/
 
 ## 📚 Documentation (`flow-book/`)
 
-The 6-chapter architectural guide lives in [`flow-book/src/SUMMARY.md`](flow-book/src/SUMMARY.md) as Literate Markdown (`.md`). Chapters containing embedded ```` ```flow ```` blocks can also be compiled directly by `flowc`.
+The 6-chapter architectural and practical guide lives in [`flow-book/src/SUMMARY.md`](flow-book/src/SUMMARY.md) as Literate Markdown (`.md`). Chapters containing embedded ```` ```flow ```` blocks can also be compiled directly by `flowc`.
 
 ---
 

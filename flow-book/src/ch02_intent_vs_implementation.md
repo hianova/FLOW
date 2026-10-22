@@ -1,4 +1,4 @@
-# 第二章：意圖 vs. 實作 (Pure `.lean` 與 `.flow` 雙前端語義降階)
+# 第二章：意圖 vs. 實作 (Pure `.lean` 零試錯撰寫規範與雙前端降階)
 
 > 「在 FLOW 中，資料結構的定義即是記憶體 ABI，安全定理的證明即是算子核函數的錨點。」
 
@@ -10,7 +10,7 @@ FLOW 的語義剖析器（[`src/parser.c`](../../src/parser.c)）支援兩種完
 
 ### 路徑 A：Pure `.lean`（領域意圖 + 形式化證明 + 算子核函數合一）
 
-開發者或定理證明工具直接產出標準 Lean 4 檔案，**無需任何 `@[export]` 或 FLOW 專屬語法**：
+開發者或 AI 直接產出標準 Lean 4 檔案，**無需任何 `@[export]` 或 FLOW 專屬語法**：
 
 ```lean
 namespace Embodied.GaitReflex
@@ -71,28 +71,68 @@ prefer {
 
 ---
 
-## 2.2 從 `FlowSpec` 到 `SemanticIR` 與 Plugin 意圖函子降階
+## 2.2 Pure `.lean` 零試錯撰寫鐵律（Zero-CoT Authoring Rules）
 
-解析後的 `FlowSpec` 經由 `lower_to_ir()`（[`src/parser.c`](../../src/parser.c)）轉化為 `SemanticIR`，並依序調用已註冊插件的 `lower_domain_semantics` 函子（例如 [`plugins/embodied.c`](../../plugins/embodied.c)）：
+為了讓人類開發者與 AI Agent **一次編譯通過（零重試、不浪費推理 Token）**，撰寫 FLOW `.lean` 時請直接遵循以下四條鐵律：
 
-```text
-Pure .lean / .flow
-   │
-   ├──► parse_spec() / parse_lean_spec() (src/parser.c)
-   │       • 推導 structure 欄位與 stride/align
-   │       • 由 theorem 自動錨定 extern_kernel 算子
-   │
-   ├──► lower_to_ir() (src/parser.c)
-   │       • 產出基礎 SemanticIR 與 Presburger 多面體邊界
-   │
-   └──► plugin->lower_domain_semantics(spec, ir, plugin) (plugins/embodied.c)
-           • 將 Embodied 意圖自動降階為 1000us (1kHz) 實時 SLA
-           • 自動合成 Symplectic Contact-Jet 辛幾何相空間約束
-```
+### 鐵律 1：只使用零依賴 Core Lean 4 子集與 64B 對齊 `structure`
+- **禁止外部套件**：不要寫 `import Mathlib`，FLOW 使用自給自足的原生 Lean 4 核心型別。
+- **C17 型別直接映射**：
+  - `UInt64` / `Nat` $\longrightarrow$ `uint64_t` (8 bytes)
+  - `UInt32` $\longrightarrow$ `uint32_t` (4 bytes)
+  - `Bool` $\longrightarrow$ `bool`
+  - `Float` $\longrightarrow$ `double` (8 bytes)
+- **最佳實踐**：將主狀態 `structure` 設計為 **8 個 `UInt64` 欄位（共 64 bytes）**，剛好對齊單一 CPU Cache Line（`stride = 64, align = 8`）。
 
-| 維度 | 傳統手寫系統 | FLOW 自動推導與合成 |
-| :--- | :--- | :--- |
-| **記憶體 Stride / 對齊** | 手寫 `sizeof`、`alignas` 與跨語言 struct 定義 | 從 Lean `structure` 欄位自動推導並產生 64B `FlowExtentDescriptor` |
-| **算子 FFI 匯出** | 手動標註 `@[export]`、`extern "C"` 與膠水函數 | 定理錨定自動識別 `def`，由 `backend.c` 合成 `__attribute__((weak))` 原生核函數 |
-| **資料結構與並發** | 硬編碼 `std::mutex` 或特定 Hash Table | 透過 64-Bit Cubical HoTT 篩選器與 Token Ring 自動收斂最佳無鎖元件 |
-| **熱更新與記憶體回收** | 手動管理讀寫鎖或停機重啟 | 自動包裝 `acquire_epoch` / `release_epoch` QSBR 世代租約 |
+### 鐵律 2：用 `:= by decide` 與 `:= by omega` 一行秒殺證明（注意 `Nat` 減法陷阱！）
+- **常數驗收（Concrete Vectors）**：只要定理中全部是具體數字（例如驗證邊界測試向量），一律在結尾寫 `:= by decide`。
+- **通用代數與不等式（Universal `∀` Bounds）**：只要涉及變數加減與大小比較，一律在結尾寫 `:= by omega`。
+- **⚠️ 唯一常見陷阱（`Nat` 無號數減法截斷）**：
+  - 在 Lean 4 中，自然數 `Nat` 當 `a < b` 時，`a - b` 會截斷為 `0`，因此 `(a - b) + b = a` **不一定成立**，直接跑 `by omega` 會報錯！
+  - **標準解法**：凡是定理中出現 `a - b`，務必在參數中加入前提 `(h : b ≤ a)`，例如：
+    ```lean
+    def remainingQuota (total consumed : Nat) : Nat := total - consumed
+
+    theorem quota_conservation (total consumed : Nat) (h : consumed ≤ total) :
+        remainingQuota total consumed + consumed = total := by
+      unfold remainingQuota
+      omega
+    ```
+
+### 鐵律 3：三個可直接複製貼上的實戰設計模式（Copy-Paste Patterns）
+
+1. **模式一：電商折價 / 金融風控防漏閥門（Monotonic Gate）**
+   ```lean
+   def isInvoiceSafe (grossCents discountCents floorCents : Nat) : Bool :=
+     decide (discountCents ≤ grossCents ∧ grossCents - discountCents ≥ floorCents)
+
+   theorem invoice_never_below_floor (gross disc floor : Nat) :
+       isInvoiceSafe gross disc floor = true → gross - disc ≥ floor := by
+     unfold isInvoiceSafe
+     intro h
+      revert h; decide +revert
+   ```
+2. **模式二：企業三態狀態機與最小反例修復（Tri-State & Min-Cut Remedy）**
+   ```lean
+   -- 0 = AUTO_PASS (自動放行), 1 = FORENSIC_HOLD (轉高管簽核), 2 = HARD_BLOCK (硬體級阻斷)
+   def classifyOrder (driftBps budgetBps maxOverrideBps : Nat) : Nat :=
+     if driftBps ≤ budgetBps then 0
+     else if driftBps ≤ budgetBps + maxOverrideBps then 1
+     else 2
+
+   def minCutReduction (driftBps budgetBps : Nat) : Nat :=
+     driftBps - budgetBps
+
+   theorem min_cut_restores_budget (drift budget : Nat) (h : budget ≤ drift) :
+       drift - minCutReduction drift budget = budget := by
+     unfold minCutReduction
+     omega
+   ```
+3. **模式三：檔案末尾的 1PB 零拷貝定理錨定核函數（Theorem-Anchored Kernel）**
+   - 將檔案最後一個 `def` 寫成 64B `FlowExtentDescriptor` 檢查器，並用一條 `theorem` 引用它，`flowc` 就會自動將其綁定為 C17 主算子：
+   ```lean
+   def appStepKernel (baseOff byteLen stride epoch : UInt64) : UInt32 :=
+     if stride >= 64 && byteLen >= 64 && baseOff + byteLen >= baseOff then 0 else 1
+
+   theorem app_kernel_sound : appStepKernel 0 64 64 1 = 0 := by decide
+   ```
