@@ -108,10 +108,21 @@ static void emit_runtime_common(FILE *output, const SemanticIR *ir, const Compon
     {"binary_parser", "static int parse_packet(const unsigned char *packet, size_t length, flow_item *result) {\n    if (length < 4 || packet[0] != 0xF1) return 0;\n    if ((size_t)packet[1] + 2 > length) return 0;\n    result->id = packet[2];\n    result->score = packet[3];\n    return 1;\n}\n\nint main(void) {\n    static const unsigned char packet[] = {0xF1, 0x02, 0x07, 0x2A};\n    flow_item result;\n    if (!flow_verify_input(1)) return EXIT_FAILURE;\n    print_header();\n    if (!parse_packet(packet, sizeof(packet), &result)) {\n        fputs(\"binary parser rejected packet\\n\", stderr);\n        return EXIT_FAILURE;\n    }\n    flow_puts(\"packet_valid\");\n    print_results(&result, 1);\n    return EXIT_SUCCESS;\n}\n"},
     {"state_machine", "typedef enum { STATE_IDLE, STATE_RUNNING, STATE_DONE } flow_state;\n\nstatic flow_state transition(flow_state state, int event) {\n    switch (state) {\n        case STATE_IDLE: return event == 1 ? STATE_RUNNING : STATE_IDLE;\n        case STATE_RUNNING: return event == 2 ? STATE_DONE : STATE_RUNNING;\n        case STATE_DONE: return STATE_DONE;\n    }\n    return STATE_IDLE;\n}\n\nint main(void) {\n    const int events[] = {1, 1, 2, 2};\n    flow_state state = STATE_IDLE;\n    flow_item result = {0, 0};\n    if (!flow_verify_input(sizeof(events) / sizeof(events[0]))) return EXIT_FAILURE;\n    for (size_t i = 0; i < sizeof(events) / sizeof(events[0]); ++i)\n        state = transition(state, events[i]);\n    result.id = (int)state;\n    result.score = (int)state;\n    print_header();\n    flow_printf(\"final_state %d\\n\", result.id);\n    print_results(&result, 1);\n    return state == STATE_DONE ? EXIT_SUCCESS : EXIT_FAILURE;\n}\n"},
 }; static void emit_lean_expr_as_c(FILE *out, const char *expr) {
-    const char *th = strstr(expr, " then "), *el = th ? strstr(th + 6, " else ") : NULL;
-    if (!strncmp(expr, "if ", 3) && th && el) {
-        fprintf(out, "((%.*s) ? (%.*s) : (%s))", (int)(th - (expr + 3)), expr + 3, (int)(el - (th + 6)), th + 6, el + 6);
-    } else fprintf(out, "(%s)", expr);
+    char norm[1024]; size_t j = 0;
+    for (size_t i = 0; expr[i] && j + 4 < sizeof(norm); ) {
+        if (!strncmp(expr + i, "\xe2\x89\xa4", 3)) { norm[j++] = '<'; norm[j++] = '='; i += 3; }
+        else if (!strncmp(expr + i, "\xe2\x89\xa5", 3)) { norm[j++] = '>'; norm[j++] = '='; i += 3; }
+        else if (!strncmp(expr + i, "\xe2\x89\xa0", 3)) { norm[j++] = '!'; norm[j++] = '='; i += 3; }
+        else if (!strncmp(expr + i, "\xe2\x88\xa7", 3)) { norm[j++] = '&'; norm[j++] = '&'; i += 3; }
+        else if (!strncmp(expr + i, "\xe2\x88\xa8", 3)) { norm[j++] = '|'; norm[j++] = '|'; i += 3; }
+        else if (!strncmp(expr + i, "\xc2\xac", 2)) { norm[j++] = '!'; i += 2; }
+        else norm[j++] = expr[i++];
+    }
+    norm[j] = '\0';
+    const char *th = strstr(norm, " then "), *el = th ? strstr(th + 6, " else ") : NULL;
+    if (!strncmp(norm, "if ", 3) && th && el) {
+        fprintf(out, "((%.*s) ? (%.*s) : (%s))", (int)(th - (norm + 3)), norm + 3, (int)(el - (th + 6)), th + 6, el + 6);
+    } else fprintf(out, "(%s)", norm);
 }
 void flow_emit_abi_exports(FILE *output, const SemanticIR *ir, const Component *c, size_t cap) {
     size_t stride = (ir && ir->input_stride_bytes > 0) ? ir->input_stride_bytes : 8;

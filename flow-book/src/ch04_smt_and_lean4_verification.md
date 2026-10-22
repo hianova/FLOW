@@ -64,5 +64,5 @@ with app.LinearArray("build/libapp.so") as engine:
 | 專案與路徑 | 應用領域與解決痛點 | Pure `.lean` 核心定理與機制 |
 | :--- | :--- | :--- |
 | **1. AWS Cedar 權限引擎**<br>[`tests/cedar_authorization.lean`](../../tests/cedar_authorization.lean) | **雲端 IAM 授權防呆**（427 行，直接取自 AWS 官方 `cedar-policy/cedar-spec`，零修改） | 自動從 `Request` + `Response` 推導 56B Stride；由 `forbid_trumps_permit`、`default_deny` 等 10+ 條安全定理自動錨定 `isAuthorized` 算子。 |
-| **2. Ricardian 遊戲反壟斷引擎**<br>[`hianova/Ricardian`](https://github.com/hianova/Ricardian) | **手遊抽卡保底防造假、雙軌道具央行準備金、停服資產贖回保障** | 64B `GameEconomyState`；機械化證明硬保底 $\le 90$ 抽必出（`gacha_hard_pity_guaranteed`）、跨服/拍賣場 1:1 準備金守恆與停服退費下界。 |
+| **2. Ricardian 反壟斷總體經濟引擎**<br>[`hianova/Ricardian`](https://github.com/hianova/Ricardian) | **李嘉圖差額地租、Harberger 自評稅、複式恆等帳本、恆定乘積 AMM、組裝理論、四級流動性走廊、對敲過濾、SEARU 1-Bit 混沌 3-SAT 與卡爾達肖夫 Era 3 躍遷** | 64B `RicardianState`；機械化證明全部 26 條零 `sorry` 總體經濟與反壟斷定理，並自動錨定 `stepRicardian` 算子。 |
 | **3. FLOW Business 企業風控與歸責**<br>[`hianova/flow_business`](https://github.com/hianova/flow_business) | **P2P 採購鬆弛預算、O2C 折價防漏、司庫聯貸防破約、USMCA 原產地 RVC、HR 反歧視與高管簽章歸責** | 三態法醫防斷單（`AUTO_PASS` / `FORENSIC_HOLD` / `HARD_BLOCK`）、最小妥協反例（`min_cut_remediation_restores_polytope`）與職權分離複式責任帳本（SoD）。 |

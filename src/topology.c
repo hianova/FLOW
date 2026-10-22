@@ -114,6 +114,11 @@ int flow_topology_scan_workspace(FlowTopologyGraph *g, const char *src_dir) {
             if (dot) *dot = '\0';
             int idx = find_node_by_name(g, stem);
             if (idx < 0) idx = (int)flow_topology_add_node(g, FLOW_NODE_INTENT_OP, stem, "intent", 0, 3);
+            if (idx >= 0) {
+                char full[512];
+                snprintf(full, sizeof(full), "%s/%s", dir_path, ent->d_name);
+                scan_file_loc_and_includes(g, idx, full);
+            }
             int parser_idx = find_node_by_name(g, "parser");
             if (idx >= 0 && parser_idx >= 0)
                 flow_topology_add_edge(g, (uint32_t)idx, (uint32_t)parser_idx, FLOW_EDGE_USES, 1.0, "parsed_by");
@@ -155,13 +160,13 @@ void flow_topology_audit(const FlowTopologyGraph *graph, FlowTopologyAuditReport
     for (size_t i = 0; i < graph->node_count; ++i) {
         uint32_t l = graph->nodes[i].layer;
         report->total_loc += graph->nodes[i].loc;
-        if (l == 0) report->core_nodes++;
+        if (l == 0 || l == 1) report->core_nodes++;
         else if (l == 2) report->plugin_nodes++;
         else if (l == 3) report->intent_nodes++;
     }
     for (size_t e = 0; e < graph->edge_count; ++e) {
         const FlowTopologyEdge *edge = &graph->edges[e];
-        if (graph->nodes[edge->from_id].layer == 0 && graph->nodes[edge->to_id].layer == 2) {
+        if ((graph->nodes[edge->from_id].layer == 0 || graph->nodes[edge->from_id].layer == 1) && graph->nodes[edge->to_id].layer == 2) {
             report->cross_layer_leaks++;
             if (strlen(report->leak_details) < 400) {
                 char buf[128];

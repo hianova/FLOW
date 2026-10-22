@@ -236,11 +236,12 @@ int flow_abi_emit_lean_adapter(FILE *output, const SemanticIR *ir, const FlowCom
         fprintf(output, "def stateSchemaFields : List StateSchemaField := []\n");
     }
     if (ir && ir->extern_kernel[0]) {
+        const char *kbody = ir->extern_kernel_body[0] ? ir->extern_kernel_body : "if stride > 0 && epoch > 0 && baseOff + byteLen >= baseOff then 0 else 1";
         fprintf(output,
             "@[export %s]\ndef %s (baseOff byteLen stride epoch : UInt64) : UInt32 :=\n"
-            "  if stride > 0 && epoch > 0 && baseOff + byteLen >= baseOff then 0 else 1\n"
-            "theorem kernel_step_certified : %s 0 64 8 1 = 0 := by decide\n",
-            ir->extern_kernel, ir->extern_kernel, ir->extern_kernel);
+            "  %s\n"
+            "theorem kernel_step_certified : %s 0 %zu %zu 1 = 0 := by decide\n",
+            ir->extern_kernel, ir->extern_kernel, kbody, ir->extern_kernel, stride_b, stride_b);
     }
     fprintf(output,
         "end Flow.%s\n"

@@ -81,16 +81,19 @@ static void flowy_print_usage(FILE *out) { fprintf(out, "FLOW 2.0 Living System 
                  "  jet <subcommand>               Phase Space Jet Bundles (.fjet) & Symplectic physics\n"
                  "  fvec <subcommand>              Gene vectors & immune antibody promotion (.fvec)\n"
                  "  topo <subcommand>              Topology graph and continuous living orchestrator\n"
-                 "  test [suite]                   Run domain test suites (brain, body, concurrency, fvec, system, all)\n"); } static int run_test_cmd(int argc, char **argv) {
+                 "  test [suite]                   Run domain test suites (brain, body, concurrency, fvec-swarm, system, refactored-core, geometric-axiom, cubical-hott, all)\n"); } static int run_test_cmd(int argc, char **argv) {
     const char *suite = (argc >= 3) ? argv[2] : "all";
-    if (is_help_flag(suite)) { printf("Usage: flowy test <brain|body|concurrency|fvec|system|all>\n"); return EXIT_SUCCESS; }
-    static const char *const suites[] = {"brain", "body", "concurrency", "fvec-swarm", "system"};
-    static const char *const bins[] = {"./build/test-brain", "./build/test-body", "./build/test-concurrency", "./build/test-fvec-swarm", "./build/test-system"};
-    if (!strcmp(suite, "all")) { for (int i = 0; i < 5; ++i) { printf("▶ Running Suite [%s] (%s)...\n", suites[i], bins[i]); int ret = system(bins[i]);
+    if (is_help_flag(suite)) { printf("Usage: flowy test <brain|body|concurrency|fvec-swarm|system|refactored-core|geometric-axiom|cubical-hott|all>\n"); return EXIT_SUCCESS; }
+    static const char *const suites[] = {"brain", "body", "concurrency", "fvec-swarm", "system", "refactored-core", "geometric-axiom", "cubical-hott"};
+    static const char *const bins[] = {"./build/test-brain", "./build/test-body", "./build/test-concurrency", "./build/test-fvec-swarm", "./build/test-system", "./build/test-refactored-core", "./build/test-geometric-axiom", "./build/test-cubical-hott"};
+    if (!strcmp(suite, "all")) { for (int i = 0; i < 8; ++i) { printf("▶ Running Suite [%s] (%s)...\n", suites[i], bins[i]); int ret = system(bins[i]);
             if (ret != 0) { fprintf(stderr, "❌ Suite [%s] failed with exit code %d\n", suites[i], ret); return EXIT_FAILURE; } }
-        printf("  ✅ ALL 5 DOMAIN TEST SUITES PASSED\n"); return EXIT_SUCCESS; }
-    for (int i = 0; i < 5; ++i) {
-        if (!strcmp(suite, suites[i]) || (!strcmp(suite, "fvec") && !strcmp(suites[i], "fvec-swarm"))) {
+        printf("  ✅ ALL 8 DOMAIN TEST SUITES PASSED\n"); return EXIT_SUCCESS; }
+    for (int i = 0; i < 8; ++i) {
+        if (!strcmp(suite, suites[i]) || (!strcmp(suite, "fvec") && !strcmp(suites[i], "fvec-swarm")) ||
+            (!strcmp(suite, "core") && !strcmp(suites[i], "refactored-core")) ||
+            (!strcmp(suite, "axiom") && !strcmp(suites[i], "geometric-axiom")) ||
+            (!strcmp(suite, "hott") && !strcmp(suites[i], "cubical-hott"))) {
             printf("▶ Running Suite [%s] (%s)...\n", suites[i], bins[i]);
             return (system(bins[i]) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
         }

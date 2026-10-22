@@ -848,6 +848,31 @@ int main(void) {
         FlowComponentABI emb_abi;
         FLOW_ASSERT_TRUE(flow_abi_build_for_component(&emb_ir, emb_sel, &emb_abi));
 
+        /* Verify Lean certificate adapter emits actual extern_kernel_body & stride_b (24) */
+        FILE *emb_lean_fp = tmpfile();
+        FLOW_ASSERT_TRUE(emb_lean_fp != NULL);
+        FLOW_ASSERT_TRUE(flow_abi_emit_lean_adapter(emb_lean_fp, &emb_ir, &emb_abi, 0ULL, 1024, 1));
+        long emb_lean_sz = ftell(emb_lean_fp);
+        rewind(emb_lean_fp);
+        char *emb_lean_buf = (char *)calloc((size_t)emb_lean_sz + 1, 1);
+        FLOW_ASSERT_TRUE(emb_lean_buf != NULL);
+        (void)fread(emb_lean_buf, 1, (size_t)emb_lean_sz, emb_lean_fp);
+        fclose(emb_lean_fp);
+        FLOW_ASSERT_TRUE(strstr(emb_lean_buf, "stride >= 24") != NULL);
+        FLOW_ASSERT_TRUE(strstr(emb_lean_buf, "theorem kernel_step_certified : stepReflex 0 24 24 1 = 0 := by decide") != NULL);
+        free(emb_lean_buf);
+
+        /* Verify Unicode operators (≥, ≤, ≠, ∧, ∨) in extern_kernel_body compile cleanly in C17 */
+        SemanticIR uni_ir = emb_ir;
+        strncpy(uni_ir.extern_kernel_body, "if stride ≥ 24 ∧ epoch ≠ 0 ∧ (0 ≤ baseOff ∨ byteLen ≥ 24) then 0 else 1", sizeof(uni_ir.extern_kernel_body) - 1);
+        FILE *uni_c_fp = fopen("/tmp/flow_uni_lean_dso.c", "w");
+        FLOW_ASSERT_TRUE(uni_c_fp != NULL);
+        FLOW_ASSERT_TRUE(emit_c(uni_c_fp, &uni_ir, emb_sel, NULL, &emb_vrep, 0));
+        fclose(uni_c_fp);
+        FLOW_ASSERT_EQ(system("cc -std=c17 -Wall -Wextra -Werror -O2 -shared -fPIC -DFLOW_SHARED_LIB /tmp/flow_uni_lean_dso.c -o /tmp/libflow_uni_lean_dso.so -lpthread"), 0);
+        remove("/tmp/flow_uni_lean_dso.c");
+        remove("/tmp/libflow_uni_lean_dso.so");
+
         /* Compile emitted C from Pure .lean with ZERO external C glue and run via Python 1PB Extent adapter */
         const char *pure_c = "/tmp/flow_pure_lean_dso.c";
         const char *pure_so = "/tmp/libflow_pure_lean_dso.so";
