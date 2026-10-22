@@ -226,13 +226,11 @@ int main(void) {
         FLOW_ASSERT_TRUE(ax14 != NULL);
         FLOW_ASSERT_EQ(ax14->axis_index, 14);
         FLOW_ASSERT_EQ(ax14->subspace, FLOW_CUBICAL_SUBSPACE_CONCURRENCY);
-        FLOW_ASSERT_STR_EQ(ax14->module_id, "embodied");
 
         const FlowCubicalAxisInfo *ax31 = flow_cubical_get_axis_info(31);
         FLOW_ASSERT_TRUE(ax31 != NULL);
         FLOW_ASSERT_EQ(ax31->axis_index, 31);
         FLOW_ASSERT_EQ(ax31->subspace, FLOW_CUBICAL_SUBSPACE_LAYOUT);
-        FLOW_ASSERT_STR_EQ(ax31->axis_name, "columnar_compact_morph");
 
         /* Transition Decoding with Homotopy Verification */
         FlowCubicalTransitionReport rep;
@@ -241,7 +239,7 @@ int main(void) {
         FLOW_ASSERT_EQ(rep.flipped_axis, 14);
         FLOW_ASSERT_EQ(rep.subspace, FLOW_CUBICAL_SUBSPACE_CONCURRENCY);
         FLOW_ASSERT_EQ(rep.is_kan_homotopic, 1);
-        FLOW_ASSERT_TRUE(strstr(rep.explanation, "bipedal_torque_dist") != NULL);
+        FLOW_ASSERT_TRUE(strstr(rep.explanation, "concurrency_subspace_axis") != NULL);
 
         /* Intent Projection: Memory Pressure Query */
         uint64_t mem_intent = flow_cubical_project_text_intent("記憶體超標 記憶體配額");

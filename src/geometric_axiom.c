@@ -8,7 +8,8 @@
 #include <stdlib.h>
 FlowUnifiedSection *flow_axiom_create(const char *intent) { FlowUnifiedSection *sec = NULL;
     if (posix_memalign((void **)&sec, 64, sizeof(FlowUnifiedSection)) != 0 || !sec) return NULL; if (!flow_axiom_init(sec, intent)) { free(sec); return NULL; } return sec; }
-void flow_axiom_destroy(FlowUnifiedSection *sec) { free(sec); } int flow_axiom_init(FlowUnifiedSection *sec, const char *intent) { if (!sec) return 0;
+void flow_axiom_destroy(FlowUnifiedSection *sec) { free(sec); }
+int flow_axiom_init(FlowUnifiedSection *sec, const char *intent) { if (!sec) return 0;
     memset(sec, 0, sizeof(*sec)); for (size_t i = 0; i < FLOW_AXIOM_DIM; ++i) sec->curvature_spectrum[i] = 1.0; flow_jet_thermal_init_default(&sec->thermal);
     sec->transversality_margin = 1.0; sec->is_transversal = sec->is_compact = 1; sec->optimal_tile_size = 64; sec->optimal_simd_width = 4; sec->total_lattice_points = 4096;
     sec->cubical_sieve = ~0ULL; sec->omega_classifier_bit = 1; flow_axiom_project_bmf(sec);
@@ -40,7 +41,8 @@ int flow_axiom_step(FlowUnifiedSection *sec, double dt, double p_active_watts) {
     if (p_active_watts >= 0.0) th->active_power_w = p_active_watts; th->dtemp_dt = (th->active_power_w - (th->temp_c - th->temp_ambient_c) / th->r_thermal) / th->c_thermal;
     th->temp_c += th->dtemp_dt * dt; sec->s += th->active_power_w * dt;
     if (th->temp_c >= th->temp_throttle_c && !th->is_throttled) { th->throttle_events++; th->is_throttled = 1; } else if (th->temp_c < th->temp_target_c) th->is_throttled = 0;
-    return flow_axiom_project_bmf(sec); } int flow_axiom_from_jet(FlowUnifiedSection *sec, const FlowJet *jet) { if (!sec || !jet) return 0;
+    return flow_axiom_project_bmf(sec); }
+int flow_axiom_from_jet(FlowUnifiedSection *sec, const FlowJet *jet) { if (!sec || !jet) return 0;
     flow_axiom_init(sec, jet->header.trigger_intent); uint32_t eff_dim = jet->header.vector_dim ? jet->header.vector_dim : FLOW_AXIOM_DIM;
     if (eff_dim > FLOW_AXIOM_DIM) eff_dim = FLOW_AXIOM_DIM; memcpy(sec->q, jet->payload.q, eff_dim * sizeof(double)); memcpy(sec->p, jet->payload.p, eff_dim * sizeof(double));
     memcpy(sec->a, jet->payload.a, eff_dim * sizeof(double)); sec->s = jet->payload.s; sec->thermal = jet->payload.thermal;
@@ -50,12 +52,12 @@ int flow_axiom_to_jet(const FlowUnifiedSection *sec, FlowJet *jet_out) { if (!se
     memcpy(jet_out->payload.p, sec->p, FLOW_AXIOM_DIM * sizeof(double)); memcpy(jet_out->payload.a, sec->a, FLOW_AXIOM_DIM * sizeof(double));
     jet_out->payload.s = sec->s; jet_out->payload.thermal = sec->thermal; jet_out->payload.staged_canvas = sec->bmf_canvas; jet_out->payload.proof = sec->proof;
     jet_out->header.hamiltonian_energy = flow_jet_hamiltonian(jet_out); return 1; }
-int flow_axiom_from_polyhedral(FlowUnifiedSection *sec, const FlowPolyhedron *poly) { return flow_axiom_eval_transversality(sec, poly); }
 int flow_axiom_eval_cubical_homotopy(FlowUnifiedSection *sec, uint64_t target_path, uint64_t boundary_filter) { if (!sec) return 0; uint64_t mismatch = 0;
     FlowKanStatus status = flow_kan_check_homotopy(sec->bmf_subspace_mask, target_path, boundary_filter, &mismatch);
     sec->kan_homotopy_status = (uint8_t)status; sec->cubical_sieve = boundary_filter; sec->omega_classifier_bit = (status == FLOW_KAN_FILLED_HOMOTOPIC) ? 1 : 0;
     if (status == FLOW_KAN_FILLED_HOMOTOPIC) { if (sec->transversality_margin < 0.1) sec->transversality_margin = 0.1; sec->is_transversal = 1; } else sec->is_transversal = 0;
-    return (status == FLOW_KAN_FILLED_HOMOTOPIC) ? 1 : 0; } FlowSMTResult flow_axiom_verify_smt(const FlowUnifiedSection *sec, FlowSMTProofAttestation *proof_out) {
+    return (status == FLOW_KAN_FILLED_HOMOTOPIC) ? 1 : 0; }
+FlowSMTResult flow_axiom_verify_smt(const FlowUnifiedSection *sec, FlowSMTProofAttestation *proof_out) {
     if (!sec) return FLOW_SMT_UNKNOWN; bool trans_ok = (sec->transversality_margin > 0.0 && sec->is_transversal);
     bool tile_ok = (sec->optimal_tile_size > 0 && sec->optimal_simd_width > 0 && sec->optimal_simd_width <= sec->optimal_tile_size); bool curvature_ok = true;
     for (size_t i = 0; i < FLOW_AXIOM_DIM; ++i)

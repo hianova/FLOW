@@ -103,10 +103,43 @@ pub struct FlowComponent {
     pub memory_fixed_bytes: usize,
     pub memory_bytes_per_capacity: usize,
     pub reload_capable: i32,
+    pub cubical_type_mask: u64,
 }
 
 unsafe impl Sync for FlowComponent {}
 unsafe impl Send for FlowComponent {}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum FlowLayoutKind {
+    Default = 0,
+    Aos = 1,
+    Soa = 2,
+    Columnar = 3,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct FlowUnit {
+    pub abi_version: u32,
+    pub semantic_schema_hash: u64,
+    pub constraint_hash: u64,
+    pub capability_hash: u64,
+    pub name: *const c_char,
+    pub layout: FlowLayoutKind,
+    pub supports_snapshot_cow: i32,
+    pub init: Option<unsafe extern "C" fn(*mut c_void, *mut *mut c_void) -> i32>,
+    pub run: Option<unsafe extern "C" fn(*mut c_void, *mut c_void, *const c_void, *mut c_void) -> i32>,
+    pub apply: Option<unsafe extern "C" fn(*mut c_void, *mut c_void, *const c_void) -> i32>,
+    pub migrate: Option<unsafe extern "C" fn(*mut c_void, *const c_void, *mut c_void) -> i32>,
+    pub drop: Option<unsafe extern "C" fn(*mut c_void, *mut c_void)>,
+    pub schema: *const c_void,
+}
+
+unsafe impl Sync for FlowUnit {}
+unsafe impl Send for FlowUnit {}
+
+pub const FLOW_RELOAD_ABI_VERSION: u32 = 3;
 
 #[repr(C)]
 pub struct FlowPlugin {
@@ -127,7 +160,19 @@ pub struct FlowPlugin {
     pub evaluate_plan: Option<unsafe extern "C" fn(*const c_void, *const FlowComponent, *const FlowPlanAssignment, *mut FlowPlanMetrics) -> i32>,
     pub verify_plan: Option<unsafe extern "C" fn(*const c_void, *const FlowComponent, *const FlowPlanAssignment, *mut VerificationReport) -> i32>,
     pub benchmark: Option<unsafe extern "C" fn(*const c_void, *const FlowComponent, *const FlowPlanAssignment) -> u64>,
-    pub create_unit: Option<unsafe extern "C" fn(*const c_void, *const c_void, *const FlowComponent, *mut c_void) -> i32>,
+    pub get_mutation_mask: Option<unsafe extern "C" fn(*const c_void, *const FlowComponent, *const FlowPlanDimensionSet) -> u64>,
+    pub preference_mask: Option<unsafe extern "C" fn(*const c_void, *const FlowComponent, *const FlowPlanDimensionSet) -> u64>,
+    pub contract_mask: Option<unsafe extern "C" fn(*const c_void, *const FlowComponent, *const FlowPlanDimensionSet) -> u64>,
+    pub resource_mask: Option<unsafe extern "C" fn(*const c_void, *const FlowComponent, *const FlowPlanDimensionSet, usize) -> u64>,
+    pub environment_mask: Option<unsafe extern "C" fn(*const c_void, *const FlowComponent, *const FlowPlanDimensionSet, *const c_void) -> u64>,
+    pub create_unit: Option<unsafe extern "C" fn(*const c_void, *const c_void, *const FlowComponent, *mut FlowUnit) -> i32>,
+    pub doc_title: *const c_char,
+    pub doc_responsibilities: *const c_char,
+    pub doc_algorithmic_guarantee: *const c_char,
+    pub doc_memory_concurrency_model: *const c_char,
+    pub doc_key_apis: *const c_char,
+    pub doc_layer: u32,
+    pub domain_context: *mut c_void,
 }
 
 unsafe impl Sync for FlowPlugin {}
@@ -142,6 +187,7 @@ pub struct FlowPluginDescriptor {
     pub module_version: *const c_char,
     pub module_hash: u64,
     pub plugin: *const FlowPlugin,
+    pub abi_v2: *const c_void,
     pub dso_handle: *mut c_void,
     pub active_references: AtomicU64,
 }
@@ -165,6 +211,7 @@ macro_rules! declare_flow_plugin {
             module_version: PLUGIN_VER.as_ptr() as *const std::ffi::c_char,
             module_hash: 0x464c4f575f525553, /* "FLOW_RUS" */
             plugin: &PLUGIN_RAW as *const $crate::FlowPlugin,
+            abi_v2: std::ptr::null(),
             dso_handle: std::ptr::null_mut(),
             active_references: std::sync::atomic::AtomicU64::new(0),
         };
@@ -172,6 +219,38 @@ macro_rules! declare_flow_plugin {
         #[no_mangle]
         pub extern "C" fn flow_plugin_entry_v1() -> *const $crate::FlowPluginDescriptor {
             &FLOW_PLUGIN_DESC as *const $crate::FlowPluginDescriptor
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! declare_flow_unit_plugin {
+    (
+        name: $name:expr,
+        init: $init_fn:expr,
+        run: $run_fn:expr,
+        drop: $drop_fn:expr
+    ) => {
+        static UNIT_NAME: &[u8] = concat!($name, "\0").as_bytes();
+        static FLOW_UNIT_INSTANCE: $crate::FlowUnit = $crate::FlowUnit {
+            abi_version: $crate::FLOW_RELOAD_ABI_VERSION,
+            semantic_schema_hash: 0,
+            constraint_hash: 0,
+            capability_hash: 0,
+            name: UNIT_NAME.as_ptr() as *const std::ffi::c_char,
+            layout: $crate::FlowLayoutKind::Default,
+            supports_snapshot_cow: 1,
+            init: Some($init_fn),
+            run: Some($run_fn),
+            apply: None,
+            migrate: None,
+            drop: Some($drop_fn),
+            schema: std::ptr::null(),
+        };
+
+        #[no_mangle]
+        pub extern "C" fn flow_unit_entry_v1() -> *const $crate::FlowUnit {
+            &FLOW_UNIT_INSTANCE as *const $crate::FlowUnit
         }
     };
 }

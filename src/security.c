@@ -8,7 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 static uint64_t flow_security_next(uint64_t *state) { uint64_t v = *state ? *state : UINT64_C(0x9e3779b97f4a7c15);
-    v ^= v << 13; v ^= v >> 7; v ^= v << 17; return (*state = v); } const char *flow_security_outcome_name(FlowSecurityOutcome outcome) {
+    v ^= v << 13; v ^= v >> 7; v ^= v << 17; return (*state = v); }
+const char *flow_security_outcome_name(FlowSecurityOutcome outcome) {
     static const char *const names[] = { "pass", "contract_violation", "memory_violation", "resource_exhaustion", "timeout", "divergence", "incomplete", "physical_breach" };
     return ((unsigned)outcome <= 7) ? names[outcome] : "unknown"; }
 static void flow_security_record_failure(FlowSecurityReport *report, const FlowSecurityCase *sc, FlowSecurityOutcome outcome, const char *message) {
@@ -24,29 +25,29 @@ int flow_security_run(uint64_t seed, uint64_t base_genome, uint32_t genome_bits,
         uint32_t bit = (uint32_t)(flow_security_next(&state) % genome_bits); FlowSecurityCase sc = {seed, base_genome, base_genome ^ (UINT64_C(1) << bit), bit, round};
         message[0] = '\0'; outcome = probe(&sc, userdata, message, sizeof(message)); report->checks++;
         if (outcome != FLOW_SECURITY_PASS) { flow_security_record_failure(report, &sc, outcome, message); return 1; } } return 0; }
-int flow_security_write_attestation(FILE *output, const char *component, const FlowSecurityReport *r) { if (!output || !component || !r) return 0;
-    if (r->failures == 0) fprintf(output, "security_attestation component=%s status=verified seed=%llu genome=0x%016llx bits=%u rounds=%u checks=%zu failures=0\n", component, (unsigned long long)r->seed, (unsigned long long)r->base_genome, r->genome_bits, r->rounds, r->checks);
-    else fprintf(output, "security_attestation component=%s status=rejected seed=%llu genome=0x%016llx bits=%u rounds=%u checks=%zu failures=%zu outcome=%s round=%u bit=%u mutated=0x%016llx message=%s\n", component, (unsigned long long)r->seed, (unsigned long long)r->base_genome, r->genome_bits, r->rounds, r->checks, r->failures, flow_security_outcome_name(r->first_failure), r->first_failure_round, r->first_failure_bit, (unsigned long long)r->first_failure_genome, r->first_failure_message);
-    return ferror(output) == 0; }
 #define SEC_FAIL(code, msg, sz, ...) do { if ((msg) && (sz)) snprintf((msg), (sz), __VA_ARGS__); return (code); } while (0)
 FlowSecurityOutcome flow_security_check_contract_gate(const FlowCompositionSpec *spec, char *msg, size_t sz) {
     if (!spec || !spec->component) SEC_FAIL(FLOW_SECURITY_CONTRACT_VIOLATION, msg, sz, "null spec or component");
     if (spec->ir && !component_compatible(spec->ir, spec->component)) SEC_FAIL(FLOW_SECURITY_CONTRACT_VIOLATION, msg, sz, "component '%s' violates semantic contract invariants", spec->component->id);
-    return FLOW_SECURITY_PASS; } FlowSecurityOutcome flow_security_check_abi_migration_gate(const FlowCompositionSpec *spec, char *msg, size_t sz) {
+    return FLOW_SECURITY_PASS; }
+FlowSecurityOutcome flow_security_check_abi_migration_gate(const FlowCompositionSpec *spec, char *msg, size_t sz) {
     if (!spec || !spec->component) SEC_FAIL(FLOW_SECURITY_DIVERGENCE, msg, sz, "null spec or component");
     if (spec->reload_adapter_enabled && !flow_component_supports_reload(spec->component)) SEC_FAIL(FLOW_SECURITY_DIVERGENCE, msg, sz, "component '%s' does not satisfy reload adapter ABI invariants", spec->component->id);
-    return FLOW_SECURITY_PASS; } FlowSecurityOutcome flow_security_check_ownership_gate(const FlowCompositionSpec *spec, char *msg, size_t sz) {
+    return FLOW_SECURITY_PASS; }
+FlowSecurityOutcome flow_security_check_ownership_gate(const FlowCompositionSpec *spec, char *msg, size_t sz) {
     if (!spec || !spec->component) SEC_FAIL(FLOW_SECURITY_MEMORY_VIOLATION, msg, sz, "null spec or component");
     int ro = spec->read_only_ownership || (spec->ir && spec->ir->fact_mutability_read_only);
     if (ro && spec->concurrency_threads > 1 && (spec->ir && spec->ir->state_shared && !spec->component->supports_read_heavy)) SEC_FAIL(FLOW_SECURITY_MEMORY_VIOLATION, msg, sz, "read-only ownership boundary breached by uncoordinated concurrent writer");
     if (spec->concurrency_threads > 1 && spec->ir && spec->ir->state_shared && !spec->component->supports_shared) SEC_FAIL(FLOW_SECURITY_CONTRACT_VIOLATION, msg, sz, "concurrent execution on unshared state causes race divergence");
-    return FLOW_SECURITY_PASS; } FlowSecurityOutcome flow_security_check_resource_quota_gate(const FlowCompositionSpec *spec, char *msg, size_t sz) {
+    return FLOW_SECURITY_PASS; }
+FlowSecurityOutcome flow_security_check_resource_quota_gate(const FlowCompositionSpec *spec, char *msg, size_t sz) {
     if (!spec || !spec->component) SEC_FAIL(FLOW_SECURITY_RESOURCE_EXHAUSTION, msg, sz, "null spec or component");
     size_t total = spec->component->memory_fixed_bytes + spec->total_composed_bytes + (spec->metrics ? spec->metrics->memory_bytes : 0);
     size_t limit = spec->memory_limit_bytes ? spec->memory_limit_bytes : ((spec->ir && spec->ir->memory_limit_mb > 0) ? (size_t)spec->ir->memory_limit_mb * 1024u * 1024u : 0);
     if (limit > 0 && total > limit) SEC_FAIL(FLOW_SECURITY_RESOURCE_EXHAUSTION, msg, sz, "composed memory (%zu bytes) exceeds quota (%zu bytes)", total, limit);
     if (spec->ir && spec->ir->top_n > 0 && spec->metrics && spec->metrics->capacity > 0 && (size_t)spec->ir->top_n > spec->metrics->capacity) SEC_FAIL(FLOW_SECURITY_RESOURCE_EXHAUSTION, msg, sz, "top_n (%d) exceeds candidate capacity (%zu)", spec->ir->top_n, spec->metrics->capacity);
-    return FLOW_SECURITY_PASS; } FlowSecurityOutcome flow_security_check_physical_barrier_gate(const FlowCompositionSpec *spec, char *msg, size_t sz) {
+    return FLOW_SECURITY_PASS; }
+FlowSecurityOutcome flow_security_check_physical_barrier_gate(const FlowCompositionSpec *spec, char *msg, size_t sz) {
     if (!spec) SEC_FAIL(FLOW_SECURITY_CONTRACT_VIOLATION, msg, sz, "null spec"); if (!spec->jet) return FLOW_SECURITY_PASS; const FlowJet *jet = spec->jet;
     uint32_t dim = jet->header.vector_dim ? jet->header.vector_dim : FLOW_JET_STANDARD_DIM; if (dim > FLOW_JET_MAX_DIM) dim = FLOW_JET_MAX_DIM;
     for (size_t i = 0; i < dim; ++i) {
@@ -61,7 +62,8 @@ FlowSecurityOutcome flow_security_check_jit_wx_gate(const FlowJITCodeBlock *bloc
     if (!write_base || !exec_base) SEC_FAIL(FLOW_SECURITY_MEMORY_VIOLATION, msg, sz, "unmapped jit memory base");
     if (write_base == exec_base) SEC_FAIL(FLOW_SECURITY_MEMORY_VIOLATION, msg, sz, "W^X hard gate violation at 0x%lx", (unsigned long)write_base);
     if (block && (!block->start_ip || !block->code_bytes || block->start_ip < exec_base)) SEC_FAIL(FLOW_SECURITY_MEMORY_VIOLATION, msg, sz, "invalid jit code block pointer");
-    return FLOW_SECURITY_PASS; } FlowSecurityOutcome flow_security_check_transposition_gate(const FlowLayoutMigrationSpec *spec, size_t buffer_bytes, char *msg, size_t sz) {
+    return FLOW_SECURITY_PASS; }
+FlowSecurityOutcome flow_security_check_transposition_gate(const FlowLayoutMigrationSpec *spec, size_t buffer_bytes, char *msg, size_t sz) {
     if (!spec || spec->field_count == 0 || spec->field_count > 8) SEC_FAIL(FLOW_SECURITY_CONTRACT_VIOLATION, msg, sz, "invalid layout migration spec"); size_t struct_size = 0;
     for (size_t f = 0; f < spec->field_count; ++f) { size_t f_sz = spec->field_sizes[f];
         if (f_sz == 0 || f_sz > 256) SEC_FAIL(FLOW_SECURITY_CONTRACT_VIOLATION, msg, sz, "invalid field size %zu", f_sz);
@@ -69,10 +71,12 @@ FlowSecurityOutcome flow_security_check_jit_wx_gate(const FlowJITCodeBlock *bloc
     if (spec->item_count > 0 && struct_size > 0) {
         if (spec->item_count > (SIZE_MAX / struct_size)) SEC_FAIL(FLOW_SECURITY_MEMORY_VIOLATION, msg, sz, "integer overflow in transposition");
         if (buffer_bytes > 0 && spec->item_count * struct_size > buffer_bytes) SEC_FAIL(FLOW_SECURITY_RESOURCE_EXHAUSTION, msg, sz, "transposition bytes exceed buffer"); }
-    return FLOW_SECURITY_PASS; } int flow_jet_attractor_profile_init(FlowJetAttractorProfile *profile, uint32_t dim, double r_q, double r_p, double max_trace) {
+    return FLOW_SECURITY_PASS; }
+int flow_jet_attractor_profile_init(FlowJetAttractorProfile *profile, uint32_t dim, double r_q, double r_p, double max_trace) {
     if (!profile) return 0;
     *profile = (FlowJetAttractorProfile){ .dim = (dim > 0 && dim <= FLOW_JET_ATTRACTOR_MAX_DIM) ? dim : 16, .max_radius_q = r_q > 0.0 ? r_q : 5.0, .max_radius_p = r_p > 0.0 ? r_p : 10.0, .max_koopman_trace = max_trace };
-    return 1; } FlowSecurityOutcome flow_security_check_attractor_anomaly(const FlowJet *jet, const FlowJetAttractorProfile *profile, char *msg, size_t sz) {
+    return 1; }
+FlowSecurityOutcome flow_security_check_attractor_anomaly(const FlowJet *jet, const FlowJetAttractorProfile *profile, char *msg, size_t sz) {
     if (!jet || !profile) SEC_FAIL(FLOW_SECURITY_CONTRACT_VIOLATION, msg, sz, "null jet or profile"); uint32_t dim = jet->header.vector_dim ? jet->header.vector_dim : 16;
     if (dim > profile->dim) dim = profile->dim; if (dim > FLOW_JET_ATTRACTOR_MAX_DIM) dim = FLOW_JET_ATTRACTOR_MAX_DIM;
     double rq2 = profile->max_radius_q > 0.0 ? profile->max_radius_q * profile->max_radius_q : 1.0, rp2 = profile->max_radius_p > 0.0 ? profile->max_radius_p * profile->max_radius_p : 1.0, m_sum = 0.0;
@@ -100,7 +104,8 @@ int flow_security_predict_resource_breach(double current_usage, double consumpti
         if (discr >= 0.0) { double sd = sqrt(discr), t1 = (-v + sd) / a, t2 = (-v - sd) / a; t = (t1 > 0.0 && t2 > 0.0) ? fmin(t1, t2) : (t1 > 0.0 ? t1 : (t2 > 0.0 ? t2 : -1.0)); }
     }
     if (t > 0.0 && (time_horizon_s <= 0.0 || t <= time_horizon_s)) *report = (FlowPredictiveBreachReport){.will_breach = 1, .time_to_breach_s = t, .projected_breach_velocity = v + a * t};
-    return 1; } int flow_security_should_proactive_morph(const FlowPredictiveBreachReport *report, double proactive_lead_time_s) {
+    return 1; }
+int flow_security_should_proactive_morph(const FlowPredictiveBreachReport *report, double proactive_lead_time_s) {
     return (report && report->will_breach && (proactive_lead_time_s <= 0.0 || report->time_to_breach_s <= proactive_lead_time_s)) ? 1 : 0; }
 FlowSecurityOutcome flow_security_check_lean_proof_gate(const FlowCompositionSpec *spec, char *msg, size_t sz) {
     if (!spec || !spec->ir || !spec->component) SEC_FAIL(FLOW_SECURITY_CONTRACT_VIOLATION, msg, sz, "lean proof gate: null spec");
@@ -108,30 +113,13 @@ FlowSecurityOutcome flow_security_check_lean_proof_gate(const FlowCompositionSpe
     if (!spec->ir->fact_deterministic) SEC_FAIL(FLOW_SECURITY_CONTRACT_VIOLATION, msg, sz, "lean proof gate rejected: non-deterministic flow");
     if (spec->ir->input_max_count <= 0) SEC_FAIL(FLOW_SECURITY_CONTRACT_VIOLATION, msg, sz, "lean proof gate rejected: unbounded input");
     if (spec->metrics && spec->metrics->capacity > 0 && spec->metrics->capacity < (size_t)spec->ir->input_max_count) SEC_FAIL(FLOW_SECURITY_CONTRACT_VIOLATION, msg, sz, "lean proof gate rejected: capacity < input_max_count");
-    return FLOW_SECURITY_PASS; } FlowSecurityOutcome flow_security_check_composition_gate(const FlowCompositionSpec *spec, char *msg, size_t sz) {
+    return FLOW_SECURITY_PASS; }
+FlowSecurityOutcome flow_security_check_composition_gate(const FlowCompositionSpec *spec, char *msg, size_t sz) {
     typedef FlowSecurityOutcome (*GateFn)(const FlowCompositionSpec *, char *, size_t);
     static const GateFn gates[] = { flow_security_check_contract_gate, flow_security_check_abi_migration_gate, flow_security_check_ownership_gate, flow_security_check_resource_quota_gate, flow_security_check_physical_barrier_gate };
     for (size_t i = 0; i < 5; ++i) { FlowSecurityOutcome out = gates[i](spec, msg, sz); if (out != FLOW_SECURITY_PASS) return out; }
     if (spec && spec->ir && spec->ir->fact_lean_certified) return flow_security_check_lean_proof_gate(spec, msg, sz); return FLOW_SECURITY_PASS; }
-typedef struct { const FlowCompositionSpec *base_spec; FlowBitSpace space; } CompositionProbeContext;
-static FlowSecurityOutcome composition_probe_fn(const FlowSecurityCase *sc, void *userdata, char *msg, size_t sz) {
-    CompositionProbeContext *ctx = (CompositionProbeContext *)userdata; FlowCompositionSpec mutated_spec = *ctx->base_spec; FlowPlan cand_plan;
-    if (!ctx->space.decode(&ctx->space, sc->mutated_genome, &cand_plan) || !ctx->space.evaluate(&ctx->space, &cand_plan, &cand_plan.eval))
-        SEC_FAIL(FLOW_SECURITY_CONTRACT_VIOLATION, msg, sz, "mutated plan decode/evaluate failed");
-    FlowPlanMetrics mutated_metrics = { .energy = cand_plan.eval.energy, .latency_score = cand_plan.eval.latency_score, .throughput_score = cand_plan.eval.throughput_score, .memory_bytes = cand_plan.eval.memory_bytes, .capacity = cand_plan.eval.capacity };
-    mutated_spec.plan = &cand_plan.assignment; mutated_spec.metrics = &mutated_metrics; return flow_security_check_composition_gate(&mutated_spec, msg, sz); }
-int flow_security_audit_composition(const FlowCompositionSpec *spec, uint64_t seed, uint32_t rounds, FlowSecurityReport *report) { if (!spec || !report) return -1;
-    char message[160] = {0}; FlowSecurityOutcome base_outcome = flow_security_check_composition_gate(spec, message, sizeof(message)); if (base_outcome != FLOW_SECURITY_PASS) {
-        *report = (FlowSecurityReport){.seed = seed, .checks = 1, .failures = 1, .first_failure = base_outcome};
-        snprintf(report->first_failure_message, sizeof(report->first_failure_message), "%s", message); return 1; }
-    CompositionProbeContext ctx = {.base_spec = spec}; uint32_t genome_bits = 0;
-    if (spec->component) { flow_bitspace_init_single(spec->ir, spec->component, &ctx.space); genome_bits = ctx.space.bit_count; }
-    return flow_security_run(seed, UINT64_C(0), genome_bits ? genome_bits : 16, rounds ? rounds : 32, composition_probe_fn, &ctx, report); }
-int flow_security_write_composition_attestation(FILE *output, const FlowCompositionSpec *spec, const FlowSecurityReport *r) { if (!output || !spec || !r) return 0;
-    const char *comp_id = spec->component ? spec->component->id : "unknown";
-    if (r->failures == 0) fprintf(output, "composition_security_attestation component=%s status=verified threads=%zu reload=%d quota_limit=%zu checks=%zu failures=0\n", comp_id, spec->concurrency_threads, spec->reload_adapter_enabled, spec->memory_limit_bytes, r->checks);
-    else fprintf(output, "composition_security_attestation component=%s status=rejected outcome=%s round=%u bit=%u error=\"%s\"\n", comp_id, flow_security_outcome_name(r->first_failure), r->first_failure_round, r->first_failure_bit, r->first_failure_message);
-    return ferror(output) == 0; } uint64_t flow_security_get_safety_mask(const SemanticIR *ir, const Component *comp, const FlowPlanDimensionSet *dims) {
+uint64_t flow_security_get_safety_mask(const SemanticIR *ir, const Component *comp, const FlowPlanDimensionSet *dims) {
     if (!dims || dims->count == 0) return (uint64_t)-1; uint64_t mask = (uint64_t)-1; unsigned shift = 0;
     int forbid_conc = (ir && comp) && ((ir->fact_mutability_read_only && ir->state_shared && !comp->supports_read_heavy) || (!ir->state_shared && !ir->flow_parallelizable) || (ir->state_shared && !comp->supports_shared));
     for (size_t i = 0; i < dims->count; ++i) { const FlowPlanDimension *d = &dims->dimensions[i]; unsigned bits = flow_dimension_bits(d); if (!bits) continue;
@@ -159,12 +147,8 @@ int flow_security_mtd_generate_layout(uint64_t seed, size_t field_count, const s
         size_t jitter = ((size_t)(flow_security_next(&rng) % max_padding_jitter) + align - 1) & ~(align - 1); layout_out->padding_bytes[i] = jitter; cur_off += jitter; }
     layout_out->total_size = (cur_off + max_align - 1) & ~(max_align - 1); layout_out->canary_token = flow_security_next(&rng);
     layout_out->shannon_entropy = flow_security_mtd_calculate_entropy(layout_out); return flow_security_mtd_verify_alignment(layout_out, field_alignments); }
-void flow_security_mtd_report(const FlowMTDLayout *layout, FILE *out) {
-    if (layout && out) fprintf(out, "[MTD Layout] Seed=0x%016llx | Size=%zu | Align=%zu | Entropy=%.3f bits | Canary=0x%016llx\n", (unsigned long long)layout->seed, layout->total_size, layout->required_alignment, layout->shannon_entropy, (unsigned long long)layout->canary_token);
-} uint64_t flow_security_get_compliance_mask(FlowComplianceMode mode, const FlowPlanDimensionSet *dims) {
+uint64_t flow_security_get_compliance_mask(FlowComplianceMode mode, const FlowPlanDimensionSet *dims) {
     if (mode == FLOW_COMPLIANCE_PERMISSIVE_STAGING || !dims || dims->count == 0) return (uint64_t)-1; uint64_t mask = 0; unsigned shift = 0;
     for (size_t i = 0; i < dims->count; ++i) { const FlowPlanDimension *d = &dims->dimensions[i]; unsigned bits = flow_dimension_bits(d); if (!bits) continue;
         uint64_t dim_mask = (bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << bits) - 1); if (!strncmp(d->name, "tuning_", 7)) mask |= (dim_mask << shift); shift += bits; }
-    return mask; } int flow_security_is_mutation_compliant(FlowComplianceMode mode, uint32_t mutated_bit, const FlowPlanDimensionSet *dims) {
-    return (mode == FLOW_COMPLIANCE_PERMISSIVE_STAGING) ? 1 : ((mutated_bit < 64) ? ((flow_security_get_compliance_mask(mode, dims) & (UINT64_C(1) << mutated_bit)) != 0) : 0);
-}
+    return mask; }

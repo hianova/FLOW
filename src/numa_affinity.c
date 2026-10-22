@@ -12,14 +12,12 @@
 #include <pthread/qos.h>
 #include <sys/sysctl.h>
 #include <sys/types.h>
+static int sysctl_u32(const char *name, uint32_t *out) { int v = 0; size_t len = sizeof(v);
+    if (sysctlbyname(name, &v, &len, NULL, 0) == 0 && v > 0) { *out = (uint32_t)v; return 1; } return 0; }
+static void sysctl_sz(const char *name, size_t *out) { size_t v = 0, len = sizeof(v); if (sysctlbyname(name, &v, &len, NULL, 0) == 0 && v > 0) *out = v; }
 #elif defined(__linux__)
 #include <pthread.h>
 #include <sched.h>
-#endif
-#if defined(__APPLE__)
-static int sysctl_u32(const char *name, uint32_t *out) { int v = 0; size_t len = sizeof(v);
-    if (sysctlbyname(name, &v, &len, NULL, 0) == 0 && v > 0) { *out = (uint32_t)v; return 1; } return 0; } static void sysctl_sz(const char *name, size_t *out) {
-    size_t v = 0, len = sizeof(v); if (sysctlbyname(name, &v, &len, NULL, 0) == 0 && v > 0) *out = v; }
 #endif
 int flow_numa_topology_discover(FlowHardwareTopology *topo) { if (!topo) return 0; memset(topo, 0, sizeof(*topo));
     topo->cache_line_size = 64; topo->l1_cache_size = 32768; topo->l2_cache_size = 4194304;
@@ -43,7 +41,8 @@ int flow_numa_topology_discover(FlowHardwareTopology *topo) { if (!topo) return 
 #else
     topo->total_logical_cores = topo->total_physical_cores = topo->performance_cores = 4; topo->numa_node_count = 1; topo->nodes[0].core_count = 4;
 #endif
-    return 1; } int flow_numa_pin_thread(uint32_t core_id) {
+    return 1; }
+int flow_numa_pin_thread(uint32_t core_id) {
 #if defined(__APPLE__)
     (void)core_id; return (pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0) == 0) ? 1 : 0;
 #elif defined(__linux__)
@@ -52,17 +51,8 @@ int flow_numa_topology_discover(FlowHardwareTopology *topo) { if (!topo) return 
 #else
     (void)core_id; return 1;
 #endif
-} int flow_numa_unpin_thread(void) {
-#if defined(__APPLE__)
-    return (pthread_set_qos_class_self_np(QOS_CLASS_DEFAULT, 0) == 0) ? 1 : 0;
-#elif defined(__linux__)
-    cpu_set_t cpuset; CPU_ZERO(&cpuset); long ncpus = sysconf(_SC_NPROCESSORS_ONLN); if (ncpus <= 0) ncpus = 1; for (long i = 0; i < ncpus; ++i) CPU_SET(i, &cpuset);
-    return (pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset) == 0) ? 1 : 0;
-#else
-    return 1;
-#endif
-} void *flow_numa_alloc_local(size_t bytes) { if (!bytes) return NULL; size_t page_size = 4096, aligned_bytes = (bytes + page_size - 1) & ~(page_size - 1);
-    void *ptr = mmap(NULL, aligned_bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0); if (ptr == MAP_FAILED) return NULL;
-    volatile uint8_t *touch = (volatile uint8_t *)ptr; for (size_t offset = 0; offset < aligned_bytes; offset += page_size) touch[offset] = 0; return ptr; }
-void flow_numa_free_local(void *ptr, size_t bytes) { if (!ptr || !bytes) return; size_t page_size = 4096, aligned_bytes = (bytes + page_size - 1) & ~(page_size - 1);
-    munmap(ptr, aligned_bytes); }
+}
+void *flow_numa_alloc_local(size_t bytes) { if (!bytes) return NULL; size_t aligned = (bytes + 4095) & ~(size_t)4095;
+    void *ptr = mmap(NULL, aligned, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0); if (ptr == MAP_FAILED) return NULL;
+    for (size_t off = 0; off < aligned; off += 4096) ((volatile uint8_t *)ptr)[off] = 0; return ptr; }
+void flow_numa_free_local(void *ptr, size_t bytes) { if (ptr && bytes) munmap(ptr, (bytes + 4095) & ~(size_t)4095); }

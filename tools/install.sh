@@ -38,12 +38,12 @@ fi
 
 echo "Building FLOW compiler (flowc) using $CC..."
 mkdir -p "$TMPDIR/build"
-CORE_SRCS=$(find "$SRCDIR/src" -maxdepth 1 -name "*.c" ! -name "flowc.c" ! -name "flowy_main.c")
-"$CC" -std=c17 -Wall -Wextra -Wpedantic -O3 -pthread \
+CORE_SRCS=$(find "$SRCDIR/src" "$SRCDIR/plugins" -name "*.c" ! -name "flowc.c" ! -name "flowy_main.c")
+"$CC" -std=c17 -Wall -Wextra -Wpedantic -O3 -pthread -I"$SRCDIR/src" -I"$SRCDIR/plugins" \
     $CORE_SRCS "$SRCDIR/src/flowc.c" -o "$TMPDIR/build/flowc" -lm
 
 echo "Building FLOW introspective assistant (flowy) using $CC..."
-"$CC" -std=c17 -Wall -Wextra -Wpedantic -O3 -pthread \
+"$CC" -std=c17 -Wall -Wextra -Wpedantic -O3 -pthread -I"$SRCDIR/src" -I"$SRCDIR/plugins" \
     $CORE_SRCS "$SRCDIR/src/flowy_main.c" -o "$TMPDIR/build/flowy" -lm
 
 echo "Installing flowc and flowy to $BINDIR..."

@@ -1,145 +1,30 @@
 #include "driver_imu.h"
-#include "flow_str.h"
 #include "hardware_telemetry.h"
-
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <math.h>
-
 #define FLOW_PI_F 3.14159265358979323846f
-
-void flow_imu_filter_init(FlowIMUAttitudeFilter *filter, float alpha) {
-    if (filter == NULL) return;
-    memset(filter, 0, sizeof(*filter));
-    filter->alpha = (alpha > 0.0f && alpha < 1.0f) ? alpha : 0.98f;
-}
-
-void flow_imu_filter_update(FlowIMUAttitudeFilter *filter, const FlowIMUSample *sample, float dt_seconds) {
-    if (filter == NULL || sample == NULL || dt_seconds <= 0.0f) return;
-
-    /* 1. Calculate roll and pitch from accelerometer gravity vector */
-    float ax = sample->accel_m_s2[0];
-    float ay = sample->accel_m_s2[1];
-    float az = sample->accel_m_s2[2];
-
-    float accel_roll  = atan2f(ay, az);
-    float accel_pitch = atan2f(-ax, sqrtf(ay * ay + az * az));
-
-    /* 2. Gyroscope integration */
-    float gyro_roll_step  = sample->gyro_rad_s[0] * dt_seconds;
-    float gyro_pitch_step = sample->gyro_rad_s[1] * dt_seconds;
-    float gyro_yaw_step   = sample->gyro_rad_s[2] * dt_seconds;
-
-    /* 3. High-frequency complementary filter fusion */
-    filter->roll_rad  = filter->alpha * (filter->roll_rad + gyro_roll_step) + (1.0f - filter->alpha) * accel_roll;
-    filter->pitch_rad = filter->alpha * (filter->pitch_rad + gyro_pitch_step) + (1.0f - filter->alpha) * accel_pitch;
-    filter->yaw_rad  += gyro_yaw_step;
-
-    /* Wrap angles into [-PI, PI] */
-    while (filter->roll_rad > FLOW_PI_F) filter->roll_rad -= 2.0f * FLOW_PI_F;
-    while (filter->roll_rad < -FLOW_PI_F) filter->roll_rad += 2.0f * FLOW_PI_F;
-    while (filter->pitch_rad > FLOW_PI_F) filter->pitch_rad -= 2.0f * FLOW_PI_F;
-    while (filter->pitch_rad < -FLOW_PI_F) filter->pitch_rad += 2.0f * FLOW_PI_F;
-
-    filter->samples_processed++;
-}
-
-/*
- * 3-Function Minimal Driver ABI Implementation
- */
-static int imu_register(void) {
-    return 1;
-}
-
-static int imu_get_bounds(FlowHardwareBounds *bounds_out) {
-    if (bounds_out == NULL) return 0;
-    strncpy(bounds_out->name, "sensor_imu_6dof", sizeof(bounds_out->name) - 1);
-    bounds_out->max_queue_depth = 2048;
-    bounds_out->max_buffer_bytes = 32 * 1024;
-    bounds_out->supports_zero_copy = 1;
-    bounds_out->is_kernel_bypass = 1;
-    bounds_out->genome_bits_required = 6;
-    return 1;
-}
-
-static int imu_execute(const FlowPrimitiveContext *ctx, FlowPrimitiveResult *res_out) {
-    if (ctx == NULL || res_out == NULL) return -1;
-    memset(res_out, 0, sizeof(*res_out));
-
-    uint64_t t_start = flow_hardware_cycles();
-    if (ctx->user_data != NULL && ctx->data_len >= sizeof(FlowIMUSample)) {
-        res_out->bytes_transferred = sizeof(FlowIMUSample);
-        res_out->zero_copy_active = 1;
-        res_out->status_code = 0;
-    } else {
-        res_out->status_code = -1;
-    }
-
-    res_out->latency_cycles = flow_hardware_cycles() - t_start;
-    return res_out->status_code;
-}
-
-static const FlowPrimitiveDriver G_IMU_DRIVER = {
-    .driver_name = "sensor_imu_6dof",
-    .driver_version = "1.2.0",
-    .register_primitive = imu_register,
-    .get_hardware_bounds = imu_get_bounds,
-    .execute_primitive = imu_execute
-};
-
-const FlowPrimitiveDriver *flow_primitive_imu_driver(void) {
-    return &G_IMU_DRIVER;
-}
-
-/*
- * SMT Formal Sensor Range & Attitude Boundedness Theorem
- */
-FlowSMTResult flow_imu_verify_bounds_smt(const FlowIMUSample *sample,
-                                        const FlowIMUAttitudeFilter *filter,
-                                        FlowSMTProofAttestation *proof_out) {
-    if (sample == NULL || filter == NULL) {
-        if (proof_out) proof_out->buffer_bounds_safety = FLOW_SMT_UNKNOWN;
-        return FLOW_SMT_UNKNOWN;
-    }
-
-    /*
-     * Physical sensor saturation limits:
-     * Gyro max range: +/- 2000 deg/s ~= 34.9 rad/s
-     * Accel max range: +/- 16g ~= 156.96 m/s^2
-     * Attitude angle max bounds: +/- PI rad
-     */
-    float gyro_mag = sqrtf(sample->gyro_rad_s[0] * sample->gyro_rad_s[0] +
-                           sample->gyro_rad_s[1] * sample->gyro_rad_s[1] +
-                           sample->gyro_rad_s[2] * sample->gyro_rad_s[2]);
-
-    float accel_mag = sqrtf(sample->accel_m_s2[0] * sample->accel_m_s2[0] +
-                            sample->accel_m_s2[1] * sample->accel_m_s2[1] +
-                            sample->accel_m_s2[2] * sample->accel_m_s2[2]);
-
-    FLOW_SMT_BOX_BUILDER_DECL(builder);
-
-    /* Rule 1: Gyroscope within +/- 2000 deg/s */
-    uint64_t scaled_gyro = (uint64_t)(gyro_mag * 100.0f);
-    FLOW_SMT_BOX_ADD_RULE(builder, "gyro_magnitude", scaled_gyro, 0, 3500,
-                          FLOW_BOX_THEOREM_BUFFER_BOUNDS, "gyroscope reading exceeds sensor saturation range (2000 deg/s)");
-
-    /* Rule 2: Accelerometer within +/- 16g */
-    uint64_t scaled_accel = (uint64_t)(accel_mag * 100.0f);
-    FLOW_SMT_BOX_ADD_RULE(builder, "accel_magnitude", scaled_accel, 0, 16000,
-                          FLOW_BOX_THEOREM_MEMORY_QUOTA, "accelerometer reading exceeds sensor saturation range (16g)");
-
-    /* Rule 3: Roll angle within [-PI, PI] */
-    uint64_t scaled_roll = (uint64_t)(fabsf(filter->roll_rad) * 1000.0f);
-    FLOW_SMT_BOX_ADD_RULE(builder, "attitude_roll_bounded", scaled_roll, 0, 3142,
-                          FLOW_BOX_THEOREM_DETERMINISM, "attitude roll angle diverges beyond [-PI, PI]");
-
-    FlowSMTResult res = FLOW_SMT_BOX_VERIFY(builder, "sensor_imu_6dof", proof_out);
-
-    if (res == FLOW_SMT_PROVEN_UNSAT && proof_out != NULL) {
-        snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                 "SMT IMU SOUND: Accel=%.2fm/s^2, Gyro=%.2frad/s, Roll=%.3frad, Pitch=%.3frad (Zero-Saturation)",
-                 accel_mag, gyro_mag, filter->roll_rad, filter->pitch_rad);
-    }
-    return res;
-}
+void flow_imu_filter_init(FlowIMUAttitudeFilter *f, float a) { if (f) { memset(f, 0, sizeof(*f)); f->alpha = (a > 0.0f && a < 1.0f) ? a : 0.98f; } }
+void flow_imu_filter_update(FlowIMUAttitudeFilter *f, const FlowIMUSample *s, float dt) { if (!f || !s || dt <= 0.0f) return;
+    float ax = s->accel_m_s2[0], ay = s->accel_m_s2[1], az = s->accel_m_s2[2], ar = atan2f(ay, az), ap = atan2f(-ax, sqrtf(ay * ay + az * az));
+    f->roll_rad = f->alpha * (f->roll_rad + s->gyro_rad_s[0] * dt) + (1.0f - f->alpha) * ar;
+    f->pitch_rad = f->alpha * (f->pitch_rad + s->gyro_rad_s[1] * dt) + (1.0f - f->alpha) * ap; f->yaw_rad += s->gyro_rad_s[2] * dt;
+    while (f->roll_rad > FLOW_PI_F) f->roll_rad -= 2.0f * FLOW_PI_F; while (f->roll_rad < -FLOW_PI_F) f->roll_rad += 2.0f * FLOW_PI_F;
+    while (f->pitch_rad > FLOW_PI_F) f->pitch_rad -= 2.0f * FLOW_PI_F; while (f->pitch_rad < -FLOW_PI_F) f->pitch_rad += 2.0f * FLOW_PI_F; f->samples_processed++; }
+static int imu_register(void) { return 1; }
+static int imu_get_bounds(FlowHardwareBounds *b) { if (!b) return 0;
+    *b = (FlowHardwareBounds){ .name = "sensor_imu_6dof", .max_queue_depth = 2048, .max_buffer_bytes = 32768, .supports_zero_copy = 1, .is_kernel_bypass = 1, .genome_bits_required = 6 }; return 1; }
+static int imu_execute(const FlowPrimitiveContext *ctx, FlowPrimitiveResult *res) { if (!ctx || !res) return -1; memset(res, 0, sizeof(*res));
+    uint64_t t0 = flow_hardware_cycles(); if (ctx->user_data && ctx->data_len >= sizeof(FlowIMUSample)) { res->bytes_transferred = sizeof(FlowIMUSample); res->zero_copy_active = 1; res->status_code = 0; }
+    else res->status_code = -1; res->latency_cycles = flow_hardware_cycles() - t0; return res->status_code; }
+static const FlowPrimitiveDriver G_IMU_DRIVER = { "sensor_imu_6dof", "1.2.0", imu_register, imu_get_bounds, imu_execute };
+const FlowPrimitiveDriver *flow_primitive_imu_driver(void) { return &G_IMU_DRIVER; }
+FlowSMTResult flow_imu_verify_bounds_smt(const FlowIMUSample *s, const FlowIMUAttitudeFilter *f, FlowSMTProofAttestation *proof_out) {
+    if (!s || !f) { if (proof_out) proof_out->buffer_bounds_safety = FLOW_SMT_UNKNOWN; return FLOW_SMT_UNKNOWN; }
+    float gm = sqrtf(s->gyro_rad_s[0]*s->gyro_rad_s[0] + s->gyro_rad_s[1]*s->gyro_rad_s[1] + s->gyro_rad_s[2]*s->gyro_rad_s[2]);
+    float am = sqrtf(s->accel_m_s2[0]*s->accel_m_s2[0] + s->accel_m_s2[1]*s->accel_m_s2[1] + s->accel_m_s2[2]*s->accel_m_s2[2]);
+    const FlowBoxConstraint rules[] = {
+        FLOW_SMT_RULE("gyro_magnitude", (uint64_t)(gm * 100.0f), 0, 3500, FLOW_BOX_THEOREM_BUFFER_BOUNDS, "gyroscope reading exceeds sensor saturation range (2000 deg/s)"),
+        FLOW_SMT_RULE("accel_magnitude", (uint64_t)(am * 100.0f), 0, 16000, FLOW_BOX_THEOREM_MEMORY_QUOTA, "accelerometer reading exceeds sensor saturation range (16g)"),
+        FLOW_SMT_RULE("attitude_roll_bounded", (uint64_t)(fabsf(f->roll_rad) * 1000.0f), 0, 3142, FLOW_BOX_THEOREM_DETERMINISM, "attitude roll angle diverges beyond [-PI, PI]") };
+    return FLOW_SMT_VERIFY_RULES("sensor_imu_6dof", proof_out, rules, "SMT IMU SOUND: Accel=%.2fm/s^2, Gyro=%.2frad/s, Roll=%.3frad, Pitch=%.3frad (Zero-Saturation)", am, gm, f->roll_rad, f->pitch_rad); }

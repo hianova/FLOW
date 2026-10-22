@@ -2,7 +2,6 @@
 #include "flowy_cli.h"
 #include "topology.h"
 #include "registry.h"
-#include "benchmark.h"
 #include "orchestrator.h"
 #include "flowy_fvec.h"
 #include "flow_jet.h"
@@ -22,7 +21,7 @@ static int flowy_resolve_and_load_plugin(const char *mod_name) { if (!mod_name |
 static int is_help_flag(const char *s) { return s && (!strcmp(s, "-h") || !strcmp(s, "--help") || !strcmp(s, "help")); }
 static int match_any(const char *cmd, const char *const *list) { for (; *list; ++list) if (!strcmp(cmd, *list)) return 1; return 0; }
 static int flowy_build_cmd(int argc, char **argv, int and_run) {
-    if (argc < 3 || is_help_flag(argv[2])) { printf("Usage: flowy %s <spec.flow> [-o <binary>] [args...]\n", and_run ? "run" : "build"); return (argc < 3) ? EXIT_FAILURE : EXIT_SUCCESS; }
+    if (argc < 3 || is_help_flag(argv[2])) { printf("Usage: flowy %s <spec.flow|spec.lean> [-o <binary>] [args...]\n", and_run ? "run" : "build"); return (argc < 3) ? EXIT_FAILURE : EXIT_SUCCESS; }
     const char *spec_file = argv[2], *out_bin = NULL; int extra_arg_start = argc;
     for (int i = 3; i < argc; ++i) if (!strcmp(argv[i], "-o") && i + 1 < argc) out_bin = argv[++i]; else { extra_arg_start = i; break; }
     char auto_bin[512] = {0}, temp_c[512] = {0}, cmd[1024]; if (!out_bin) {
@@ -48,6 +47,7 @@ static int flowy_build_cmd(int argc, char **argv, int and_run) {
         flowy_resolve_and_load_plugin(mname); const FlowPlugin *mod = flow_registry_lookup(mname); if (mod) flow_plugin_lower_semantics(&spec, &ir, mod); }
     const Component *component = select_component(&ir); if (!component) { flow_ir_cleanup(&ir); return -1; } VerificationReport verification;
     if (!verify_candidate(&ir, component, NULL, &verification)) { fprintf(stderr, "flowy run: formal verification failed: %s\n", verification.message); flow_ir_cleanup(&ir); return EXIT_FAILURE; }
+    if (ir.extern_kernel[0]) { flow_ir_cleanup(&ir); return -1; }
     printf("[Dual-Track: JIT Direct Track] Executing %s (in-memory, 0 disk I/O, SMT UNSAT verified)...\n", ir.flow_name[0] ? ir.flow_name : spec_file);
     int ok = flow_backend_run_in_memory(&ir, component, NULL, &verification, stdout); flow_ir_cleanup(&ir); return ok ? EXIT_SUCCESS : -1; }
 static int flowy_run_cmd(int argc, char **argv) {
@@ -65,7 +65,6 @@ static void flowy_print_usage(FILE *out) { fprintf(out, "FLOW 2.0 Living System 
                  "  build <spec.flow> [-o <bin>]   Build standalone AOT native binary\n"
                  "  why                            Explain real-time scheduling / hardware decision\n"
                  "  audit                          Run formal invariant & layer separation audit\n"
-                 "  audit-mechanisms               Verify zero-overhead dynamic architectural mechanisms\n"
                  "  shell                          Start the autonomic interactive REPL\n"
                  "  inspect <subcommand>           Introspection: ask, why, timeline, bottleneck, audit, doc, topos\n"
                  "  jet <subcommand>               Phase Space Jet Bundles (.fjet) & Symplectic physics\n"
@@ -78,9 +77,14 @@ static void flowy_print_usage(FILE *out) { fprintf(out, "FLOW 2.0 Living System 
     static const char *const bins[] = {"./build/test-brain", "./build/test-body", "./build/test-concurrency", "./build/test-fvec-swarm", "./build/test-system"};
     if (!strcmp(suite, "all")) { for (int i = 0; i < 5; ++i) { printf("▶ Running Suite [%s] (%s)...\n", suites[i], bins[i]); int ret = system(bins[i]);
             if (ret != 0) { fprintf(stderr, "❌ Suite [%s] failed with exit code %d\n", suites[i], ret); return EXIT_FAILURE; } }
-        printf("  ✅ ALL 5 DOMAIN TEST SUITES PASSED\n"); return EXIT_SUCCESS; } for (int i = 0; i < 5; ++i)
-        if (!strcmp(suite, suites[i]) || (!strcmp(suite, "fvec") && !strcmp(suites[i], "fvec-swarm"))) { printf("▶ Running Suite [%s] (%s)...\n", suites[i], bins[i]);
-            return (system(bins[i]) == 0) ? EXIT_SUCCESS : EXIT_FAILURE; } fprintf(stderr, "Unknown test suite: %s\n", suite); return EXIT_FAILURE; }
+        printf("  ✅ ALL 5 DOMAIN TEST SUITES PASSED\n"); return EXIT_SUCCESS; }
+    for (int i = 0; i < 5; ++i) {
+        if (!strcmp(suite, suites[i]) || (!strcmp(suite, "fvec") && !strcmp(suites[i], "fvec-swarm"))) {
+            printf("▶ Running Suite [%s] (%s)...\n", suites[i], bins[i]);
+            return (system(bins[i]) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+        }
+    }
+    fprintf(stderr, "Unknown test suite: %s\n", suite); return EXIT_FAILURE; }
 int main(int argc, char **argv) { if (argc < 2 || is_help_flag(argv[1])) { flowy_print_usage(stdout); return EXIT_SUCCESS; }
     if (!strcmp(argv[1], "-v") || !strcmp(argv[1], "--version") || !strcmp(argv[1], "version")) {
         printf("FLOW System Framework (flowy) v2.5.0 | Bit-Manifold Form (BMF) & Cubical HoTT\n"); return EXIT_SUCCESS; }
@@ -90,11 +94,16 @@ int main(int argc, char **argv) { if (argc < 2 || is_help_flag(argv[1])) { flowy
     static const char *const topo_aliases[] = { "shell","--shell","absorb","--absorb","anneal","--anneal","landscape","--landscape",
         "refactor","--refactor","morph","--morph","what-if","--what-if","whatif","remediate", "--remediate","autopilot","--autopilot","daemon","--daemon",NULL };
     if (match_any(argv[1], topo_aliases)) return cmd_topo_run(argc, argv); flow_registry_init(); flowy_set_language(flowy_detect_system_language());
-    for (int i = 1; i < argc; ++i)
-        if ((!strcmp(argv[i], "--lang") || !strcmp(argv[i], "-l")) && i + 1 < argc) { flowy_set_language(flowy_parse_language(argv[i + 1]));
-            for (int j = i; j + 2 < argc; ++j) argv[j] = argv[j + 2]; argc -= 2; i--; } if (!strcmp(argv[1], "inspect")) {
+    for (int i = 1; i < argc; ++i) {
+        if ((!strcmp(argv[i], "--lang") || !strcmp(argv[i], "-l")) && i + 1 < argc) {
+            flowy_set_language(flowy_parse_language(argv[i + 1]));
+            for (int j = i; j + 2 < argc; ++j) argv[j] = argv[j + 2];
+            argc -= 2; i--;
+        }
+    }
+    if (!strcmp(argv[1], "inspect")) {
         if (argc < 3 || is_help_flag(argv[2])) { cmd_inspect_print_usage(stdout); return EXIT_SUCCESS; } return cmd_inspect_run(argc - 2, argv + 2); }
-    static const char *const inspect_aliases[] = { "audit-mechanisms","--audit-mechanisms","ask","--ask","why","--why","timeline","--timeline",
+    static const char *const inspect_aliases[] = { "ask","--ask","why","--why","timeline","--timeline",
         "explain-decisions","bottleneck","--bottleneck","audit","--audit","doc","--doc","topos","--topos",NULL };
     if (match_any(argv[1], inspect_aliases)) return cmd_inspect_run(argc - 1, argv + 1); if (!strcmp(argv[1], "lang") || !strcmp(argv[1], "language")) {
         if (argc >= 3) { FlowLanguage nl = flowy_parse_language(argv[2]); flowy_set_language(nl); printf("FLOW language switched to: %s\n", flowy_language_name(nl)); }

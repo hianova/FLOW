@@ -23,8 +23,9 @@ static int builtin_compatible(const SemanticIR *ir, const Component *c) { if (!i
     if (c->flow_binding[0] && strcmp(ir->flow_name, c->flow_binding) && !(ir->flow_parallelizable && c->supports_parallelizable)) return 0;
     if (ir->state_shared != c->supports_shared || (ir->state_read_heavy && !c->supports_read_heavy) ||
         (ir->fact_unordered && !c->supports_unordered) || (ir->flow_parallelizable != c->supports_parallelizable)) return 0;
-    for (size_t i = 0; i < ir->declared_constraint_count; ++i)
-        if (strcmp(ir->constraints[i].name, "deterministic") && strcmp(ir->constraints[i].name, "memory")) return 0; return 1; }
+    for (size_t i = 0; i < ir->declared_constraint_count; ++i) { const char *cn = ir->constraints[i].name;
+        if (strcmp(cn, "deterministic") && strcmp(cn, "memory") && strcmp(cn, "sla") && strcmp(cn, "latency") &&
+            strcmp(cn, "lean_certified") && strcmp(cn, "proof_carrying") && strcmp(cn, "no_sorry")) return 0; } return 1; }
 static int builtin_validate_contract(const SemanticIR *ir, const FlowPlugin *p, char *msg, size_t sz) { (void)p; if (msg && sz) msg[0] = '\0'; return ir != NULL; }
 static int builtin_memory_model(const SemanticIR *ir, const Component *c, size_t cap, size_t shards, size_t *est) { (void)ir; if (!est || !c) return 0;
     if (!shards) shards = 1; size_t slots = cap; if (!strcmp(c->id, "sharded_hash")) { if (cap > SIZE_MAX - (shards - 1u)) return 0;

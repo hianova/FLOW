@@ -3,8 +3,8 @@
 #include "security.h"
 #include "smt.h"
 #include "adaptive.h"
+#include "hardware_telemetry.h"
 #include <math.h>
-#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,22 +20,22 @@ uint64_t flow_compute_contract_hash(const SemanticIR *ir) { uint64_t h = FNV64_O
     const int ints[] = { ir->state_shared, ir->state_read_heavy, ir->state_bounded, ir->flow_parallelizable, ir->fact_ordered, ir->fact_unordered, ir->fact_deterministic, ir->fact_range_proven, ir->fact_size_preserved, ir->fact_mutability_read_only };
     for (size_t i = 0; i < 10; ++i) h = hash_bytes(h, &ints[i], sizeof(int)); h = hash_str(h, ir->project_name);
     for (size_t i = 0; i < ir->imported_module_count; ++i) h = hash_str(h, ir->imported_modules[i]);
-    h = hash_bytes(h, &ir->declared_constraint_count, sizeof(ir->declared_constraint_count)); for (size_t i = 0; i < ir->declared_constraint_count; ++i)
-        h = hash_str(hash_str(hash_str(h, ir->constraints[i].name), ir->constraints[i].operator), ir->constraints[i].value); return h; }
+    h = hash_bytes(h, &ir->declared_constraint_count, sizeof(ir->declared_constraint_count));
+    for (size_t i = 0; i < ir->declared_constraint_count; ++i) h = hash_str(hash_str(hash_str(h, ir->constraints[i].name), ir->constraints[i].operator), ir->constraints[i].value);
+    return h; }
 uint64_t flow_bitspace_compute_schema_hash(const SemanticIR *ir, const Component *comp, const FlowPlanDimensionSet *dims) { uint64_t h = flow_compute_contract_hash(ir);
     if (comp) { h = hash_str(hash_str(hash_str(hash_str(h, comp->id), comp->kind), comp->resource), comp->capability);
         h = hash_bytes(hash_bytes(h, &comp->memory_fixed_bytes, sizeof(comp->memory_fixed_bytes)), &comp->memory_bytes_per_capacity, sizeof(comp->memory_bytes_per_capacity));
     } if (dims) { h = hash_bytes(h, &dims->count, sizeof(dims->count)); for (size_t i = 0; i < dims->count; ++i) { const FlowPlanDimension *d = &dims->dimensions[i];
-            h = hash_bytes(hash_bytes(hash_bytes(hash_bytes(hash_str(h, d->name), &d->kind, sizeof(d->kind)), &d->min_val, sizeof(d->min_val)), &d->max_val, sizeof(d->max_val)), &d->step, sizeof(d->step));
-        } } return h; } static unsigned dimension_bits(const FlowPlanDimension *dim) { if (dim->kind == FLOW_DIM_BOOLEAN) return 1;
-    uint64_t step = (dim->kind == FLOW_DIM_EXPONENT || dim->step == 0) ? 1 : dim->step;
-    uint64_t span = dim->max_val >= dim->min_val ? (dim->max_val - dim->min_val) / step : 0; unsigned b = 1; while (((uint64_t)1 << b) <= span && b < 64) ++b; return b; }
+            h = hash_bytes(hash_bytes(hash_bytes(hash_bytes(hash_str(h, d->name), &d->kind, sizeof(d->kind)), &d->min_val, sizeof(d->min_val)), &d->max_val, sizeof(d->max_val)), &d->step, sizeof(d->step)); } } return h; }
+static unsigned dimension_bits(const FlowPlanDimension *dim) { if (dim->kind == FLOW_DIM_BOOLEAN) return 1;
+    uint64_t step = (dim->kind == FLOW_DIM_EXPONENT || dim->step == 0) ? 1 : dim->step, span = dim->max_val >= dim->min_val ? (dim->max_val - dim->min_val) / step : 0;
+    unsigned b = 1; while (((uint64_t)1 << b) <= span && b < 64) ++b; return b; }
 static uint64_t decode_dim_val(const FlowPlanDimension *dim, uint64_t raw) {
     if (dim->kind == FLOW_DIM_EXPONENT) { uint64_t exp = dim->min_val + raw; return (uint64_t)1 << (exp > dim->max_val ? dim->max_val : exp); }
-    if (dim->kind == FLOW_DIM_BOOLEAN) return (raw & 1) ? 1 : 0; uint64_t val = dim->min_val + raw * (dim->step == 0 ? 1 : dim->step);
-    return val > dim->max_val ? dim->max_val : val; } static uint64_t encode_dim_raw(const FlowPlanDimension *d, uint64_t val, int val_is_exp) {
-    if (d->kind == FLOW_DIM_EXPONENT) { if (!val_is_exp) { uint64_t exp = d->min_val; while (((uint64_t)1 << exp) < val && exp < d->max_val) exp++; val = exp; }
-        return val >= d->min_val ? val - d->min_val : 0; }
+    if (dim->kind == FLOW_DIM_BOOLEAN) return (raw & 1) ? 1 : 0; uint64_t val = dim->min_val + raw * (dim->step == 0 ? 1 : dim->step); return val > dim->max_val ? dim->max_val : val; }
+static uint64_t encode_dim_raw(const FlowPlanDimension *d, uint64_t val, int val_is_exp) {
+    if (d->kind == FLOW_DIM_EXPONENT) { if (!val_is_exp) { uint64_t exp = d->min_val; while (((uint64_t)1 << exp) < val && exp < d->max_val) exp++; val = exp; } return val >= d->min_val ? val - d->min_val : 0; }
     return d->kind == FLOW_DIM_BOOLEAN ? (val & 1) : (val >= d->min_val ? (val - d->min_val) / (d->step == 0 ? 1 : d->step) : 0); }
 static int hierarchical_decode(const FlowBitSpace *space, uint64_t genome, FlowPlan *plan) { if (!space || !plan || !space->candidate_count) return 0;
     memset(plan, 0, sizeof(*plan)); size_t cand_idx = 0; uint64_t dim_genome = genome; if (space->selector_bits > 0 && space->candidate_count > 1) {
@@ -44,26 +44,20 @@ static int hierarchical_decode(const FlowBitSpace *space, uint64_t genome, FlowP
     const FlowPlanDimensionSet *dims = &space->candidate_dims[cand_idx]; plan->component = comp; plan->dimension_set = *dims; plan->genome = genome;
     plan->bit_count = space->bit_count; plan->contract_hash = space->contract_hash; plan->schema_hash = flow_bitspace_compute_schema_hash(space->ir, comp, dims);
     plan->assignment.count = dims->count; for (size_t i = 0, shift = 0; i < dims->count; ++i) { unsigned bits = dimension_bits(&dims->dimensions[i]);
-        uint64_t mask = (bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << bits) - 1);
-        plan->assignment.values[i] = decode_dim_val(&dims->dimensions[i], (dim_genome >> shift) & mask); shift += bits; } return 1; }
+        uint64_t mask = (bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << bits) - 1); plan->assignment.values[i] = decode_dim_val(&dims->dimensions[i], (dim_genome >> shift) & mask); shift += bits; } return 1; }
 static int hierarchical_evaluate(const FlowBitSpace *space, const FlowPlan *plan, FlowEvaluation *result) { if (!space || !plan || !result || !plan->component) return 0;
     FlowPlanMetrics m = {0}; if (!flow_component_evaluate(space->ir, plan->component, &plan->assignment, &m)) return 0;
-    *result = (FlowEvaluation){ .energy = m.energy, .latency_score = m.latency_score, .throughput_score = m.throughput_score, .memory_bytes = m.memory_bytes, .capacity = m.capacity, .hard_gate_passed = 1 };
-    return 1; } static int hierarchical_hard_gate_reason(const FlowBitSpace *space, const FlowPlan *plan, const FlowEvaluation *result, FlowGateFailureReason *reason_out) {
+    *result = (FlowEvaluation){ .energy = m.energy, .latency_score = m.latency_score, .throughput_score = m.throughput_score, .memory_bytes = m.memory_bytes, .capacity = m.capacity, .hard_gate_passed = 1 }; return 1; }
+static int hierarchical_hard_gate_reason(const FlowBitSpace *space, const FlowPlan *plan, const FlowEvaluation *result, FlowGateFailureReason *reason_out) {
     #define FAIL(r) do { if (reason_out) *reason_out = (r); return 0; } while (0)
     if (!space || !plan || !result || !plan->component) FAIL(FLOW_GATE_FAIL_MUTATION_INVALID); if (!result->capacity) FAIL(FLOW_GATE_FAIL_DIMENSION_BOUND); if (space->ir) {
         if (!component_compatible(space->ir, plan->component)) FAIL(FLOW_GATE_FAIL_THREAD_AFFINITY);
         if (space->ir->top_n > 0 && result->capacity < (size_t)space->ir->top_n) FAIL(FLOW_GATE_FAIL_DIMENSION_BOUND);
         if (space->ir->memory_limit_mb > 0 && result->memory_bytes > (size_t)space->ir->memory_limit_mb * 1024u * 1024u) FAIL(FLOW_GATE_FAIL_MEMORY_LIMIT);
-        VerificationReport v_report;
-        if (!flow_component_verify_plan(space->ir, plan->component, &plan->assignment, &v_report) || v_report.status == VERIFIER_COMPILE_ERROR) FAIL(FLOW_GATE_FAIL_VERIFIER_UNPROVEN);
-    }
+        VerificationReport v_report; if (!flow_component_verify_plan(space->ir, plan->component, &plan->assignment, &v_report) || v_report.status == VERIFIER_COMPILE_ERROR) FAIL(FLOW_GATE_FAIL_VERIFIER_UNPROVEN); }
     #undef FAIL
     if (reason_out) *reason_out = FLOW_GATE_PASS; return 1; }
 static int hierarchical_hard_gate(const FlowBitSpace *space, const FlowPlan *plan, const FlowEvaluation *result) { return hierarchical_hard_gate_reason(space, plan, result, NULL); }
-const char *flow_gate_failure_name(FlowGateFailureReason reason) {
-    static const char * const names[] = { "passed", "memory_limit", "verifier_unproven", "thread_affinity", "quota_exceeded", "dimension_bound", "reentrancy_contract", "mutation_invalid" };
-    return ((int)reason >= 0 && (int)reason < 8) ? names[reason] : "unknown_constraint"; }
 int flow_mask_canvas_compose(const SemanticIR *ir, const Component *comp, const FlowPlanDimensionSet *dims, const FlowPMUTelemetry *pmu, FlowMaskCanvas *c) { if (!c) return 0;
     memset(c, 0, sizeof(*c)); c->hard_safety_mask = flow_security_get_safety_mask(ir, comp, dims); c->hard_contract_mask = flow_verifier_get_contract_mask(ir, comp, dims);
     c->hard_resource_mask = flow_verifier_get_resource_mask(ir, comp, dims); c->hard_plugin_mask = flow_component_mutation_mask(ir, comp, dims);
@@ -72,17 +66,14 @@ int flow_mask_canvas_compose(const SemanticIR *ir, const Component *comp, const 
     c->domain_preference_mask = flow_component_preference_mask(ir, comp, dims);
     c->dynamic_telemetry_bias = flow_adaptive_telemetry_bias_from_pmu(pmu, (ir && (ir->state_shared || ir->state_read_heavy)), dims);
     c->soft_composite_bias = (c->domain_preference_mask | c->dynamic_telemetry_bias) & c->hard_composite_mask; return 1; }
-void flow_mask_canvas_report(const FlowMaskCanvas *c, FILE *out) {
-    if (c && out) fprintf(out, "Dynamic Mask Canvas Superposition:\n  [Tier 1 Hard Safety]      0x%016llx\n  [Tier 1 Hard Contract]    0x%016llx\n  [Tier 1 Hard Resource]    0x%016llx\n  [Tier 1 Hard Plugin]      0x%016llx\n  [Tier 1 Hard Polytope]    0x%016llx\n  => COMPOSITE HARD MASK    0x%016llx\n  [Tier 2 Dynamic PMU Bias] 0x%016llx\n  [Tier 3 Domain Preference]0x%016llx\n  => COMPOSITE SOFT BIAS    0x%016llx\n",
-        (unsigned long long)c->hard_safety_mask, (unsigned long long)c->hard_contract_mask, (unsigned long long)c->hard_resource_mask, (unsigned long long)c->hard_plugin_mask, (unsigned long long)c->hard_polytope_mask, (unsigned long long)c->hard_composite_mask, (unsigned long long)c->dynamic_telemetry_bias, (unsigned long long)c->domain_preference_mask, (unsigned long long)c->soft_composite_bias);
-} void flow_bmf_subspace_init_registry(FlowBmfSubspaceRegistry *reg) { if (!reg) return; memset(reg, 0, sizeof(*reg)); static const FlowBmfSubspace INIT_SUBS[7] = {
-        {FLOW_BMF_SUBSPACE_GENERIC, "generic_default", "Standard software execution & memory quota manifold", {0}, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_CONTRACT_GATE | FLOW_BMF_SW_RESOURCE_QUOTA | FLOW_BMF_SW_DETERMINISM_INVAR, ~0ULL, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_CONTRACT_GATE | FLOW_BMF_SW_RESOURCE_QUOTA | FLOW_BMF_SW_DETERMINISM_INVAR | FLOW_BMF_SW_NUMA_FIRST_TOUCH | FLOW_BMF_SW_SIMD_VECTORIZED},
-        {FLOW_BMF_SUBSPACE_SMOOTH_FETCH_LATTE, "smooth_fetch_latte", "Anti-spill tilt clamp, gentle grasp, zero-slip friction cone", {[0] = 0.85, [1] = 0.65, [2] = 0.20}, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_ANTI_SPILL_TILT | FLOW_BMF_SW_GRIPPER_FORCE_SAFE | FLOW_BMF_SW_STICK_SLIP_MODE, 0xFFFFULL, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_ANTI_SPILL_TILT | FLOW_BMF_SW_GRIPPER_FORCE_SAFE | FLOW_BMF_SW_STICK_SLIP_MODE | FLOW_BMF_SW_POLYTOPE_FEASIBLE},
-        {FLOW_BMF_SUBSPACE_AGILE_SPRINT, "agile_sprint", "Dynamic ZMP balance, high torque headroom, stick-slip traction", {[0] = 0.15, [1] = 0.90, [2] = 0.80}, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_ZMP_BALANCE | FLOW_BMF_SW_STICK_SLIP_MODE | FLOW_BMF_SW_IMU_ZERO_SAT, 0xFFFFULL, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_ZMP_BALANCE | FLOW_BMF_SW_STICK_SLIP_MODE | FLOW_BMF_SW_IMU_ZERO_SAT | FLOW_BMF_SW_POLYTOPE_FEASIBLE},
-        {FLOW_BMF_SUBSPACE_COLLABORATIVE_HOLD, "collaborative_hold", "Dual-robot rigid distance sync invariant, internal stress ceiling", {[0] = 0.40, [1] = 0.30, [3] = 0.85}, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_COOP_SYNC_LOCK | FLOW_BMF_SW_GRIPPER_FORCE_SAFE, 0xFFFFULL, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_COOP_SYNC_LOCK | FLOW_BMF_SW_GRIPPER_FORCE_SAFE | FLOW_BMF_SW_POLYTOPE_FEASIBLE},
-        {FLOW_BMF_SUBSPACE_EMERGENCY_PROTECT, "emergency_protect", "Emergency CAN priority halt, Moreau critical touchdown dissipation", {[4] = 0.95, [5] = 0.90}, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_EMERGENCY_HALT | FLOW_BMF_SW_IMPACT_DAMPING, 0xFFULL, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_EMERGENCY_HALT | FLOW_BMF_SW_IMPACT_DAMPING},
-        {FLOW_BMF_SUBSPACE_HFT_LATENCY, "hft_latency", "Zero-copy wire parsing, AVX-512 SIMD, local NUMA pinning", {[6] = 0.90, [7] = 0.85}, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_DETERMINISM_INVAR | FLOW_BMF_SW_NUMA_FIRST_TOUCH | FLOW_BMF_SW_SIMD_VECTORIZED, 0xFFFFFFFFULL, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_DETERMINISM_INVAR | FLOW_BMF_SW_NUMA_FIRST_TOUCH | FLOW_BMF_SW_SIMD_VECTORIZED | FLOW_BMF_SW_QSBR_EPOCH_ADVANCE},
-        {FLOW_BMF_SUBSPACE_QUIESCENT_IOT, "quiescent_iot", "Ultra-low thermal dissipation, quiescent clock, memory freeze", {[8] = 0.90}, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_THERMAL_THROTTLE, 0xFFULL, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_THERMAL_THROTTLE}
+void flow_bmf_subspace_init_registry(FlowBmfSubspaceRegistry *reg) { if (!reg) return; memset(reg, 0, sizeof(*reg)); static const FlowBmfSubspace INIT_SUBS[7] = {
+        {FLOW_BMF_SUBSPACE_GENERIC, "generic_default", "Standard software execution", {0}, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_CONTRACT_GATE | FLOW_BMF_SW_RESOURCE_QUOTA | FLOW_BMF_SW_DETERMINISM_INVAR, ~0ULL, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_CONTRACT_GATE | FLOW_BMF_SW_RESOURCE_QUOTA | FLOW_BMF_SW_DETERMINISM_INVAR | FLOW_BMF_SW_NUMA_FIRST_TOUCH | FLOW_BMF_SW_SIMD_VECTORIZED},
+        {FLOW_BMF_SUBSPACE_SMOOTH_FETCH_LATTE, "smooth_fetch_latte", "Anti-spill tilt clamp", {[0] = 0.85, [1] = 0.65, [2] = 0.20}, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_ANTI_SPILL_TILT | FLOW_BMF_SW_GRIPPER_FORCE_SAFE | FLOW_BMF_SW_STICK_SLIP_MODE, 0xFFFFULL, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_ANTI_SPILL_TILT | FLOW_BMF_SW_GRIPPER_FORCE_SAFE | FLOW_BMF_SW_STICK_SLIP_MODE | FLOW_BMF_SW_POLYTOPE_FEASIBLE},
+        {FLOW_BMF_SUBSPACE_AGILE_SPRINT, "agile_sprint", "Dynamic ZMP balance", {[0] = 0.15, [1] = 0.90, [2] = 0.80}, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_ZMP_BALANCE | FLOW_BMF_SW_STICK_SLIP_MODE | FLOW_BMF_SW_IMU_ZERO_SAT, 0xFFFFULL, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_ZMP_BALANCE | FLOW_BMF_SW_STICK_SLIP_MODE | FLOW_BMF_SW_IMU_ZERO_SAT | FLOW_BMF_SW_POLYTOPE_FEASIBLE},
+        {FLOW_BMF_SUBSPACE_COLLABORATIVE_HOLD, "collaborative_hold", "Dual-robot sync lock", {[0] = 0.40, [1] = 0.30, [3] = 0.85}, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_COOP_SYNC_LOCK | FLOW_BMF_SW_GRIPPER_FORCE_SAFE, 0xFFFFULL, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_COOP_SYNC_LOCK | FLOW_BMF_SW_GRIPPER_FORCE_SAFE | FLOW_BMF_SW_POLYTOPE_FEASIBLE},
+        {FLOW_BMF_SUBSPACE_EMERGENCY_PROTECT, "emergency_protect", "Emergency CAN halt", {[4] = 0.95, [5] = 0.90}, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_EMERGENCY_HALT | FLOW_BMF_SW_IMPACT_DAMPING, 0xFFULL, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_EMERGENCY_HALT | FLOW_BMF_SW_IMPACT_DAMPING},
+        {FLOW_BMF_SUBSPACE_HFT_LATENCY, "hft_latency", "Zero-copy HFT", {[6] = 0.90, [7] = 0.85}, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_DETERMINISM_INVAR | FLOW_BMF_SW_NUMA_FIRST_TOUCH | FLOW_BMF_SW_SIMD_VECTORIZED, 0xFFFFFFFFULL, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_DETERMINISM_INVAR | FLOW_BMF_SW_NUMA_FIRST_TOUCH | FLOW_BMF_SW_SIMD_VECTORIZED | FLOW_BMF_SW_QSBR_EPOCH_ADVANCE},
+        {FLOW_BMF_SUBSPACE_QUIESCENT_IOT, "quiescent_iot", "Ultra-low thermal", {[8] = 0.90}, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_THERMAL_THROTTLE, 0xFFULL, FLOW_BMF_SW_HARD_SAFETY | FLOW_BMF_SW_THERMAL_THROTTLE}
     }; memcpy(reg->subspaces, INIT_SUBS, sizeof(INIT_SUBS)); reg->subspace_count = 7; reg->is_initialized = 1; }
 const FlowBmfSubspace *flow_bmf_subspace_lookup(const FlowBmfSubspaceRegistry *reg, uint32_t subspace_id) { if (!reg) return NULL;
     for (size_t i = 0; i < reg->subspace_count; ++i) if (reg->subspaces[i].subspace_id == subspace_id) return &reg->subspaces[i]; return &reg->subspaces[0]; }
@@ -92,15 +83,13 @@ uint32_t flow_bmf_subspace_index_from_features(const FlowBmfSubspaceRegistry *re
         for (size_t d = 0; d < check_dim; ++d) { double diff = features[d] - reg->subspaces[i].centroid[d]; dist_sq += diff * diff; }
         if (dist_sq < best_dist_sq) { best_dist_sq = dist_sq; best_subspace = reg->subspaces[i].subspace_id; } } return best_subspace; }
 void flow_bmf_canvas_init_from_subspace(FlowBmf1BitCanvas *canvas, const FlowBmfSubspace *s) {
-    if (canvas) flow_bmf_canvas_init(canvas, s ? s->subspace_id : FLOW_BMF_SUBSPACE_GENERIC, s ? s->invariant_mask : FLOW_BMF_SW_HARD_SAFETY, s ? s->malleable_mask : ~0ULL, s ? s->default_switches : FLOW_BMF_SW_HARD_SAFETY);
-}
+    if (canvas) flow_bmf_canvas_init(canvas, s ? s->subspace_id : FLOW_BMF_SUBSPACE_GENERIC, s ? s->invariant_mask : FLOW_BMF_SW_HARD_SAFETY, s ? s->malleable_mask : ~0ULL, s ? s->default_switches : FLOW_BMF_SW_HARD_SAFETY); }
 int flow_bmf_canvas_adjudicate_smt(FlowBmf1BitCanvas *c) { return c ? (c->is_adjudicated_sound = ((c->switchboard_bits & c->invariant_mask) == c->invariant_mask) ? 1 : 0) : 0; }
 void flow_bmf_canvas_to_mask_canvas(const FlowBmf1BitCanvas *c, FlowMaskCanvas *out) {
-    if (c && out) *out = (FlowMaskCanvas){ .hard_safety_mask = c->invariant_mask ? c->invariant_mask : ~0ULL, .hard_composite_mask = c->switchboard_bits, .dynamic_telemetry_bias = c->dynamic_bias, .soft_composite_bias = c->dynamic_bias };
-} void flow_bmf_canvas_from_mask_canvas(const FlowMaskCanvas *m, uint32_t subspace_id, FlowBmf1BitCanvas *out) { if (!out) return;
-    uint64_t inv = m ? m->hard_safety_mask : FLOW_BMF_SW_HARD_SAFETY; flow_bmf_canvas_init(out, subspace_id, inv, ~0ULL, m ? m->hard_composite_mask : inv);
-    if (m) out->dynamic_bias = m->dynamic_telemetry_bias; } static uint32_t calc_bits_for_dims(const FlowPlanDimensionSet *dims) { uint32_t total = 0;
-    for (size_t i = 0; i < dims->count; ++i) total += dimension_bits(&dims->dimensions[i]); return total > 0 ? total : 1; }
+    if (c && out) *out = (FlowMaskCanvas){ .hard_safety_mask = c->invariant_mask ? c->invariant_mask : ~0ULL, .hard_composite_mask = c->switchboard_bits, .dynamic_telemetry_bias = c->dynamic_bias, .soft_composite_bias = c->dynamic_bias }; }
+void flow_bmf_canvas_from_mask_canvas(const FlowMaskCanvas *m, uint32_t subspace_id, FlowBmf1BitCanvas *out) { if (!out) return;
+    uint64_t inv = m ? m->hard_safety_mask : FLOW_BMF_SW_HARD_SAFETY; flow_bmf_canvas_init(out, subspace_id, inv, ~0ULL, m ? m->hard_composite_mask : inv); if (m) out->dynamic_bias = m->dynamic_telemetry_bias; }
+static uint32_t calc_bits_for_dims(const FlowPlanDimensionSet *dims) { uint32_t total = 0; for (size_t i = 0; i < dims->count; ++i) total += dimension_bits(&dims->dimensions[i]); return total > 0 ? total : 1; }
 static int finish_bitspace_init(FlowBitSpace *space, uint32_t max_dim_bits) { size_t comp_count = space->candidate_count; space->selector_bits = 0;
     if (comp_count > 1) { space->selector_bits = 1; while (((size_t)1 << space->selector_bits) < comp_count && space->selector_bits < 16) space->selector_bits++; }
     space->bit_count = space->selector_bits + max_dim_bits; if (!space->bit_count) space->bit_count = 1; if (space->bit_count > 64) space->bit_count = 64;
@@ -125,44 +114,24 @@ int flow_bitspace_init_for_ir(const SemanticIR *ir, FlowBitSpace *space) { if (!
         if (space->candidate_bits[i] > max_dim_bits) max_dim_bits = space->candidate_bits[i];
         flow_mask_canvas_compose(ir, c, &space->candidate_dims[i], NULL, &space->candidate_canvases[i]);
         space->candidate_masks[i] = space->candidate_canvases[i].hard_composite_mask; } return finish_bitspace_init(space, max_dim_bits); }
-static uint64_t xorshift64(uint64_t *state) { uint64_t x = *state ? *state : UINT64_C(0x9e3779b97f4a7c15); x ^= x << 13; x ^= x >> 7; x ^= x << 17; return (*state = x); }
 void flow_genome_init(FlowGenome *g, uint32_t total_bits) { if (!g) return; memset(g, 0, sizeof(*g));
     g->total_bits = (total_bits > 0 && total_bits <= (FLOW_GENOME_MAX_WORDS * 64)) ? total_bits : 64; g->active_words = (g->total_bits + 63) / 64;
     if (!g->active_words) g->active_words = 1; if (g->active_words > FLOW_GENOME_MAX_WORDS) g->active_words = FLOW_GENOME_MAX_WORDS; }
-void flow_genome_from_u64(FlowGenome *g, uint64_t val, uint32_t total_bits) { flow_genome_init(g, total_bits); if (g) g->words[0] = val; }
-uint64_t flow_genome_to_u64(const FlowGenome *g) { return g ? g->words[0] : 0; }
-int flow_genome_get_bit(const FlowGenome *g, uint32_t bit_idx) { return (!g || bit_idx >= g->total_bits || bit_idx / 64 >= FLOW_GENOME_MAX_WORDS) ? 0 : (int)((g->words[bit_idx / 64] >> (bit_idx % 64)) & 1); }
-void flow_genome_set_bit(FlowGenome *g, uint32_t bit_idx, int val) { if (!g || bit_idx >= g->total_bits || bit_idx / 64 >= FLOW_GENOME_MAX_WORDS) return;
-    if (val) g->words[bit_idx / 64] |= (UINT64_C(1) << (bit_idx % 64)); else g->words[bit_idx / 64] &= ~(UINT64_C(1) << (bit_idx % 64)); }
 void flow_genome_flip_bit(FlowGenome *g, uint32_t bit_idx) { if (g && bit_idx < g->total_bits && bit_idx / 64 < FLOW_GENOME_MAX_WORDS) g->words[bit_idx / 64] ^= (UINT64_C(1) << (bit_idx % 64)); }
 void flow_genome_mutate_1bit(FlowGenome *g, uint64_t *rng_state, uint32_t *mutated_bit_out) { if (!g || !g->total_bits) return;
-    uint32_t bit_idx = (uint32_t)(xorshift64(rng_state) % (uint64_t)g->total_bits); flow_genome_flip_bit(g, bit_idx); if (mutated_bit_out) *mutated_bit_out = bit_idx; }
-void flow_linkage_map_init(FlowGeneLinkageMap *map) { if (map) memset(map, 0, sizeof(*map)); }
-int flow_linkage_map_add_group(FlowGeneLinkageMap *map, const uint32_t *bits, size_t count, const char *rationale) {
-    if (!map || !bits || !count || count > FLOW_MAX_LINKED_BITS || map->group_count >= FLOW_MAX_LINKAGE_GROUPS) return 0;
-    FlowGeneLinkageGroup *grp = &map->groups[map->group_count++]; grp->bit_count = count; memcpy(grp->bit_indices, bits, count * sizeof(uint32_t));
-    if (rationale) strncpy(grp->rationale, rationale, sizeof(grp->rationale) - 1); return 1; }
-void flow_genome_mutate_with_linkage(FlowGenome *g, const FlowGeneLinkageMap *linkage, uint64_t *rng_state, uint32_t *primary_bit_out, size_t *linked_flips_out) {
-    if (!g || !g->total_bits) return; uint32_t bit_idx = (uint32_t)(xorshift64(rng_state) % (uint64_t)g->total_bits);
-    flow_genome_flip_bit(g, bit_idx); if (primary_bit_out) *primary_bit_out = bit_idx; size_t flips = 1; if (linkage) {
-        for (size_t grp_idx = 0; grp_idx < linkage->group_count; ++grp_idx) { const FlowGeneLinkageGroup *grp = &linkage->groups[grp_idx]; int is_member = 0;
-            for (size_t i = 0; i < grp->bit_count; ++i) if (grp->bit_indices[i] == bit_idx) { is_member = 1; break; }
-            if (is_member) { for (size_t i = 0; i < grp->bit_count; ++i) if (grp->bit_indices[i] != bit_idx) { flow_genome_flip_bit(g, grp->bit_indices[i]); flips++; } break; }
-        } } if (linked_flips_out) *linked_flips_out = flips; }
-int flow_genome_equals(const FlowGenome *a, const FlowGenome *b) { return (a && b && a->total_bits == b->total_bits) ? (memcmp(a->words, b->words, a->active_words * sizeof(uint64_t)) == 0) : 0; }
+    uint32_t bit_idx = (uint32_t)(flow_prng_next(rng_state) % (uint64_t)g->total_bits); flow_genome_flip_bit(g, bit_idx); if (mutated_bit_out) *mutated_bit_out = bit_idx; }
 uint64_t flow_bitspace_mutate_1bit_superposed(const FlowBitSpace *space, uint64_t genome, const FlowMaskCanvas *canvas, double bias_weight, uint64_t *rng_state, uint32_t *mutated_bit_out) {
     uint32_t bits = (space && space->bit_count > 0) ? (space->bit_count > 64 ? 64 : space->bit_count) : 16;
     uint64_t hard_mask = (canvas && canvas->hard_composite_mask) ? canvas->hard_composite_mask : ((space && space->env_mask) ? space->env_mask : (uint64_t)-1);
-    if (space && space->env_mask) hard_mask &= space->env_mask; uint64_t soft_bias = (canvas ? canvas->soft_composite_bias : 0) & hard_mask, rnd = xorshift64(rng_state);
+    if (space && space->env_mask) hard_mask &= space->env_mask; uint64_t soft_bias = (canvas ? canvas->soft_composite_bias : 0) & hard_mask, rnd = flow_prng_next(rng_state);
     if (bias_weight > 0.0 && soft_bias != 0) { uint32_t soft_indices[64]; size_t soft_count = 0;
         for (uint32_t b = 0; b < bits; ++b) if (soft_bias & (UINT64_C(1) << b)) soft_indices[soft_count++] = b;
         if (soft_count > 0 && (uint32_t)(rnd & 0xFFFF) < (uint32_t)(bias_weight * 65536.0)) { uint32_t chosen_bit = soft_indices[(rnd >> 16) % soft_count];
             if (mutated_bit_out) *mutated_bit_out = chosen_bit; return genome ^ (UINT64_C(1) << chosen_bit); } } uint32_t bit = (uint32_t)((rnd >> 16) % bits);
     if ((UINT64_C(1) << bit) & hard_mask) { if (mutated_bit_out) *mutated_bit_out = bit; return genome ^ (UINT64_C(1) << bit); }
     if (mutated_bit_out) *mutated_bit_out = 0xFFFFFFFF; return genome; }
-uint64_t flow_bitspace_mutate_1bit_masked(const FlowBitSpace *space, uint64_t genome, uint64_t env_mask, uint64_t *rng_state, uint32_t *mutated_bit_out) {
-    FlowMaskCanvas canvas = {.hard_composite_mask = env_mask}; return flow_bitspace_mutate_1bit_superposed(space, genome, &canvas, 0.0, rng_state, mutated_bit_out); }
-uint64_t flow_bitspace_mutate_1bit(const FlowBitSpace *space, uint64_t genome, uint64_t *rng_state, uint32_t *mutated_bit_out) { return flow_bitspace_mutate_1bit_masked(space, genome, (uint64_t)-1, rng_state, mutated_bit_out); }
+uint64_t flow_bitspace_mutate_1bit(const FlowBitSpace *space, uint64_t genome, uint64_t *rng_state, uint32_t *mutated_bit_out) {
+    FlowMaskCanvas canvas = {.hard_composite_mask = (uint64_t)-1}; return flow_bitspace_mutate_1bit_superposed(space, genome, &canvas, 0.0, rng_state, mutated_bit_out); }
 static void pareto_update_bitspace(FlowBitSearchResult *res, const FlowPlan *plan) { if (!res || !plan || !plan->eval.hard_gate_passed) return;
     double lat = plan->eval.latency_score, mem = (double)plan->eval.memory_bytes;
     if (!res->pareto_count) { res->pareto_points[0] = *plan; res->pareto_count = 1; res->best_latency = lat; res->best_memory = mem; return; }
@@ -187,8 +156,8 @@ static uint64_t encode_candidate_heuristic(const FlowBitSpace *space, size_t can
             } else if ((!strcmp(d->name, "threads") || !strcmp(d->name, "shards")) && d->kind == FLOW_DIM_EXPONENT) {
                 uint64_t exp = (!strcmp(d->name, "threads") && space->ir->flow_parallelizable) ? 2 : (space->ir->state_shared ? 4 : 0);
                 val = exp < d->min_val ? d->min_val : (exp > d->max_val ? d->max_val : exp); val_is_exp = 1; } }
-        uint64_t mask = (bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << bits) - 1); genome |= (encode_dim_raw(d, val, val_is_exp) & mask) << shift; shift += bits; }
-    return genome; } uint64_t flow_bitspace_default_genome(const FlowBitSpace *space) { if (!space || !space->candidate_count) return 0; size_t cand_idx = 0; if (space->ir) {
+        uint64_t mask = (bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << bits) - 1); genome |= (encode_dim_raw(d, val, val_is_exp) & mask) << shift; shift += bits; } return genome; }
+uint64_t flow_bitspace_default_genome(const FlowBitSpace *space) { if (!space || !space->candidate_count) return 0; size_t cand_idx = 0; if (space->ir) {
         const Component *heur = select_component(space->ir);
         if (heur) for (size_t c = 0; c < space->candidate_count; ++c) if (space->candidates[c] == heur) { cand_idx = c; break; } }
     return encode_candidate_heuristic(space, cand_idx, 1); }
@@ -208,7 +177,8 @@ int flow_bitspace_search(const FlowBitSpace *space, size_t iterations, uint32_t 
     if (best_plan.eval.hard_gate_passed) pareto_update_bitspace(result_out, &best_plan); result_out->best_plan = best_plan;
     if (result_out->best_latency > 0.0) result_out->latency_regret_percent = ((best_plan.eval.latency_score - result_out->best_latency) / result_out->best_latency) * 100.0;
     if (result_out->best_memory > 0.0) result_out->memory_regret_percent = (((double)best_plan.eval.memory_bytes - result_out->best_memory) / result_out->best_memory) * 100.0;
-    return best_plan.eval.hard_gate_passed ? 1 : 0; } int flow_plan_to_artifact(const FlowPlan *plan, const SemanticIR *ir, uint32_t seed, FlowPlanArtifact *art) {
+    return best_plan.eval.hard_gate_passed ? 1 : 0; }
+int flow_plan_to_artifact(const FlowPlan *plan, const SemanticIR *ir, uint32_t seed, FlowPlanArtifact *art) {
     if (!plan || !art) return 0; memset(art, 0, sizeof(*art)); if (ir) strncpy(art->flow_name, ir->flow_name, sizeof(art->flow_name) - 1); if (plan->component) {
         strncpy(art->component_id, plan->component->id, sizeof(art->component_id) - 1); const FlowPlugin *plugin = flow_component_plugin(plan->component);
         if (plugin) { strncpy(art->module_name, plugin->name, sizeof(art->module_name) - 1); strncpy(art->module_version, plugin->version, sizeof(art->module_version) - 1); }
@@ -218,23 +188,19 @@ int flow_bitspace_search(const FlowBitSpace *space, size_t iterations, uint32_t 
     snprintf(art->attestation_msg, sizeof(art->attestation_msg), "schema_hash=%llu genome=0x%016llx energy=%.4f", (unsigned long long)art->plan_schema_hash, (unsigned long long)art->genome, art->metrics.energy);
     double cap_d = (double)(plan->eval.capacity > 0 ? plan->eval.capacity : (ir && ir->input_max_count > 0 ? ir->input_max_count : 64));
     art->jet_omega = fmax(0.1, sqrt(cap_d) / 16.0); art->jet_barrier_mu = 1.0 / cap_d; art->jet_q_saturation = 1.25 * cap_d; return 1; }
-int flow_artifact_to_plan(const FlowPlanArtifact *art, const FlowBitSpace *space, FlowPlan *plan) { if (!art || !plan) return 0; memset(plan, 0, sizeof(*plan));
-    if (space && space->decode(space, art->genome, plan)) return 1; plan->genome = art->genome; plan->bit_count = art->bit_count; plan->schema_hash = art->plan_schema_hash;
-    plan->contract_hash = art->contract_hash; plan->dimension_set = art->dimensions; plan->assignment = art->plan; plan->eval = art->metrics;
-    if (space) for (size_t i = 0; i < space->candidate_count; ++i) if (!strcmp(space->candidates[i]->id, art->component_id)) { plan->component = space->candidates[i]; break; }
-    return 1; } int flow_plan_artifact_save(FILE *output, const FlowPlanArtifact *art) { if (!output || !art) return 0;
+int flow_plan_artifact_save(FILE *output, const FlowPlanArtifact *art) { if (!output || !art) return 0;
     fprintf(output, "# Flow Plan Artifact (FLOW_PLAN_V1)\nflow=%s\nmodule=%s\nmodule_version=%s\ncomponent=%s\ncontract_hash=%llu\nplan_schema_hash=%llu\nseed=%u\nbit_count=%u\ngenome=0x%016llx\ndimension_count=%zu\n",
             art->flow_name, art->module_name, art->module_version, art->component_id, (unsigned long long)art->contract_hash, (unsigned long long)art->plan_schema_hash, art->seed, art->bit_count, (unsigned long long)art->genome, art->dimensions.count);
     for (size_t i = 0; i < art->dimensions.count && i < art->plan.count; ++i) { const FlowPlanDimension *d = &art->dimensions.dimensions[i];
-        fprintf(output, "dim.%s=%llu\ndim_kind.%s=%d\ndim_min.%s=%llu\ndim_max.%s=%llu\ndim_step.%s=%llu\n", d->name, (unsigned long long)art->plan.values[i], d->name, (int)d->kind, d->name, (unsigned long long)d->min_val, d->name, (unsigned long long)d->max_val, d->name, (unsigned long long)d->step);
-    }
+        fprintf(output, "dim.%s=%llu\ndim_kind.%s=%d\ndim_min.%s=%llu\ndim_max.%s=%llu\ndim_step.%s=%llu\n", d->name, (unsigned long long)art->plan.values[i], d->name, (int)d->kind, d->name, (unsigned long long)d->min_val, d->name, (unsigned long long)d->max_val, d->name, (unsigned long long)d->step); }
     fprintf(output, "metric.energy=%.6f\nmetric.latency=%.6f\nmetric.throughput=%.6f\nmetric.memory_bytes=%zu\nmetric.capacity=%zu\nmetric.benchmark_ns=%llu\nverification_status=%s\nattestation=%s\njet.omega=%.6f\njet.barrier_mu=%.8f\njet.q_saturation=%.6f\n",
             art->metrics.energy, art->metrics.latency_score, art->metrics.throughput_score, art->metrics.memory_bytes, art->metrics.capacity, (unsigned long long)art->metrics.benchmark_ns, art->verification_status, art->attestation_msg, art->jet_omega, art->jet_barrier_mu, art->jet_q_saturation);
-    return ferror(output) == 0; } static FlowPlanDimension *find_or_add_dim(FlowPlanArtifact *art, const char *dname, int create, size_t *idx_out) {
+    return ferror(output) == 0; }
+static FlowPlanDimension *find_or_add_dim(FlowPlanArtifact *art, const char *dname, int create, size_t *idx_out) {
     for (size_t i = 0; i < art->dimensions.count; ++i) if (!strcmp(art->dimensions.dimensions[i].name, dname)) { if (idx_out) *idx_out = i; return &art->dimensions.dimensions[i]; }
     if (create && art->dimensions.count < 16) { size_t idx = art->dimensions.count++; art->plan.count = art->dimensions.count;
-        strncpy(art->dimensions.dimensions[idx].name, dname, sizeof(art->dimensions.dimensions[idx].name) - 1); if (idx_out) *idx_out = idx;
-        return &art->dimensions.dimensions[idx]; } return NULL; } int flow_plan_artifact_load(FILE *input, FlowPlanArtifact *art) {
+        strncpy(art->dimensions.dimensions[idx].name, dname, sizeof(art->dimensions.dimensions[idx].name) - 1); if (idx_out) *idx_out = idx; return &art->dimensions.dimensions[idx]; } return NULL; }
+int flow_plan_artifact_load(FILE *input, FlowPlanArtifact *art) {
     char line[256]; if (!input || !art) return 0; memset(art, 0, sizeof(*art)); while (fgets(line, sizeof(line), input)) { char *eq = strchr(line, '='); if (!eq) continue;
         *eq = '\0'; char *key = line, *val = eq + 1; val[strcspn(val, "\r\n")] = '\0'; FlowPlanDimension *d; size_t idx = 0;
         if (!strcmp(key, "flow")) strncpy(art->flow_name, val, sizeof(art->flow_name) - 1);
@@ -271,18 +237,8 @@ int flow_artifact_validate(const FlowPlanArtifact *art, const SemanticIR *ir, co
     const FlowPlugin *plugin = flow_component_plugin(comp);
     if (plugin && art->module_version[0] && strcmp(plugin->version, art->module_version)) VERR("module '%s' version mismatch (expected %s, got %s)", plugin->name, plugin->version, art->module_version);
     if (art->plan_schema_hash) { uint64_t exp_schema = flow_bitspace_compute_schema_hash(ir, comp, &art->dimensions);
-        if (exp_schema != art->plan_schema_hash) VERR("plan schema hash mismatch (expected %llu, got %llu)", (unsigned long long)exp_schema, (unsigned long long)art->plan_schema_hash);
-    } VerificationReport report;
-    if (!flow_component_verify_plan(ir, comp, &art->plan, &report) || report.status == VERIFIER_COMPILE_ERROR) VERR("hard gate verification failed: %s", report.message);
+        if (exp_schema != art->plan_schema_hash) VERR("plan schema hash mismatch (expected %llu, got %llu)", (unsigned long long)exp_schema, (unsigned long long)art->plan_schema_hash); }
+    VerificationReport report; if (!flow_component_verify_plan(ir, comp, &art->plan, &report) || report.status == VERIFIER_COMPILE_ERROR) VERR("hard gate verification failed: %s", report.message);
     #undef VERR
-    return 1; } const char *flow_plan_tactic_name(FlowPlanTactic tactic) { static const char * const names[] = {"speed", "balanced", "memory"};
-    return ((int)tactic >= 0 && (int)tactic < 3) ? names[tactic] : "unknown"; }
-int flow_bitspace_extract_ensemble(const FlowBitSearchResult *search_res, FlowPlanEnsemble *ensemble_out) {
-    if (!search_res || !ensemble_out || !search_res->best_plan.component) return 0;
-    *ensemble_out = (FlowPlanEnsemble){ .count = 3, .available = {1, 1, 1}, .tactics = {search_res->best_plan, search_res->best_plan, search_res->best_plan} };
-    if (search_res->pareto_count > 0) { size_t s_idx = 0, b_idx = 0, m_idx = 0; for (size_t i = 1; i < search_res->pareto_count; ++i) {
-            const FlowPlan *p = &search_res->pareto_points[i]; if (p->eval.latency_score < search_res->pareto_points[s_idx].eval.latency_score) s_idx = i;
-            if (p->eval.energy < search_res->pareto_points[b_idx].eval.energy) b_idx = i;
-            if (p->eval.memory_bytes < search_res->pareto_points[m_idx].eval.memory_bytes) m_idx = i; }
-        ensemble_out->tactics[FLOW_TACTIC_SPEED] = search_res->pareto_points[s_idx]; ensemble_out->tactics[FLOW_TACTIC_BALANCED] = search_res->pareto_points[b_idx];
-        ensemble_out->tactics[FLOW_TACTIC_MEMORY] = search_res->pareto_points[m_idx]; } return 1; }
+    return 1; }
+const char *flow_plan_tactic_name(FlowPlanTactic tactic) { static const char * const names[] = {"speed", "balanced", "memory"}; return ((int)tactic >= 0 && (int)tactic < 3) ? names[tactic] : "unknown"; }

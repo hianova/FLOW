@@ -2,9 +2,6 @@
 *.plist
 build/
 target/
-generated/
-work/mp4parse-rust-bench/target/
-work/retired/*/target/
 *.o
 *.so
 *.dylib

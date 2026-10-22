@@ -4,11 +4,6 @@
 #include "orchestrator.h"
 #include "audit.h"
 #include <stdio.h>
-#ifndef FLOW_LANG_ENUM_DEFINED
-#define FLOW_LANG_ENUM_DEFINED
-typedef enum { FLOW_LANG_ZH = 0, FLOW_LANG_EN = 1
-} FlowLanguage;
-#endif
 void flowy_set_language(FlowLanguage lang); FlowLanguage flowy_get_language(void); FlowLanguage flowy_detect_system_language(void);
 FlowLanguage flowy_parse_language(const char *lang_str); const char *flowy_language_name(FlowLanguage lang);
 void flowy_print_answer(const FlowyIntrospectiveAnswer *answer, FILE *out); void flowy_print_decision_explanation(const FlowDecisionEvent *event, FILE *out);

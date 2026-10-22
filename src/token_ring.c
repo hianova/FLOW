@@ -30,11 +30,11 @@ static int stage_polytope_handler(FlowTokenRing *ring, FlowToken *token, FlowMas
     canvas->hard_polytope_mask = token->attention_mask = flow_polyhedron_project_mask(&poly, &ring->active_space.candidate_dims[0], 64);
     token->dynamic_bias = canvas->dynamic_telemetry_bias; token->energy = ring->lyapunov_energy > 0 ? ring->lyapunov_energy : 100.0;
     if (!canvas->hard_composite_mask) { ring->state = FLOW_RING_UNSAT; snprintf(ring->status_message, sizeof(ring->status_message), "UNSAT: Polytope projection produced null manifold intersection"); return 0; }
-    return 1; } static int stage_anneal_handler(FlowTokenRing *ring, FlowToken *token, FlowMaskCanvas *canvas) {
+    return 1; }
+static int stage_anneal_handler(FlowTokenRing *ring, FlowToken *token, FlowMaskCanvas *canvas) {
     if (!ring || !token || !canvas || !ring->active_ir || !ring->active_space.candidate_count) return 0; FlowPlan best_plan = {0};
     if (!flow_polyhedral_solve_plan(ring->active_ir, &ring->active_space, &best_plan)) {
-        ring->state = FLOW_RING_UNSAT; snprintf(ring->status_message, sizeof(ring->status_message), "UNSAT: Polyhedral analytical synthesis found no feasible plan"); return 0;
-    }
+        ring->state = FLOW_RING_UNSAT; snprintf(ring->status_message, sizeof(ring->status_message), "UNSAT: Polyhedral analytical synthesis found no feasible plan"); return 0; }
     ring->ensemble = (FlowPlanEnsemble){ .count = FLOW_TACTIC_COUNT, .available = {1, 1, 1}, .tactics = { [FLOW_TACTIC_SPEED] = best_plan, [FLOW_TACTIC_BALANCED] = best_plan, [FLOW_TACTIC_MEMORY] = best_plan } };
     ring->ensemble.tactics[FLOW_TACTIC_SPEED].eval.latency_score *= 0.8;
     if (best_plan.eval.memory_bytes > 4096) ring->ensemble.tactics[FLOW_TACTIC_MEMORY].eval.memory_bytes /= 2; ring->active_genome = best_plan.genome;
@@ -48,13 +48,15 @@ static int stage_synthesis_handler(FlowTokenRing *ring, FlowToken *token, FlowMa
     if (!ring || !token || !canvas || !ring->active_ir || !ring->best_search.component) return 0; VerificationReport v_report = {0};
     int ok = verify_candidate(ring->active_ir, ring->best_search.component, &ring->best_search, &v_report);
     token->energy = ring->best_search.energy; token->attention_mask = canvas->hard_composite_mask; if (!ok) token->attention_mask &= ~(1ULL << (ring->active_genome & 63));
-    return 1; } static int stage_attractor_handler(FlowTokenRing *ring, FlowToken *token, FlowMaskCanvas *canvas) { if (!ring || !token || !canvas) return 0;
+    return 1; }
+static int stage_attractor_handler(FlowTokenRing *ring, FlowToken *token, FlowMaskCanvas *canvas) { if (!ring || !token || !canvas) return 0;
     token->energy = ring->lyapunov_energy; token->attention_mask = canvas->hard_composite_mask;
     if (!canvas->hard_composite_mask) { ring->state = FLOW_RING_UNSAT; snprintf(ring->status_message, sizeof(ring->status_message), "UNSAT: Manifold collapsed to null space"); return 1; }
     double delta = fabs(ring->lyapunov_energy - ring->prev_energy); ring->lyapunov_delta_e = delta;
     if (ring->cycle_count >= 1 && (delta < 1e-5 || ring->best_search.component)) { ring->state = FLOW_RING_ATTRACTOR_REACHED; ring->attractor_converged = 1;
         snprintf(ring->status_message, sizeof(ring->status_message), "Attractor reached: cycle=%llu, energy=%.2f, Delta E=%.6f, SMT verified UNSAT=%d/4", (unsigned long long)ring->cycle_count, ring->lyapunov_energy, delta, flow_smt_count_unsat(&ring->smt_proof));
-    } return 1; } int flow_token_ring_init(FlowTokenRing *ring, SemanticIR *ir) { if (!ring) return 0; memset(ring, 0, sizeof(*ring));
+    } return 1; }
+int flow_token_ring_init(FlowTokenRing *ring, SemanticIR *ir) { if (!ring) return 0; memset(ring, 0, sizeof(*ring));
     ring->active_ir = ir; ring->state = FLOW_RING_INIT; ring->rng_state = 0x853c49e6748fea9bULL; ring->anneal_iterations = 100; ring->rng_seed = 42;
     ring->wavefront_epoch = ring->quiescent_generation = 1; if (ir) { flow_bitspace_init_for_ir(ir, &ring->active_space);
         if (ring->active_space.candidate_count > 0) flow_mask_canvas_compose(ir, ring->active_space.candidates[0], &ring->active_space.candidate_dims[0], NULL, &ring->active_canvas);
@@ -78,17 +80,12 @@ int flow_token_ring_step(FlowTokenRing *ring) { if (!ring || !ring->token_count 
     ring->active_genome = flow_token_ring_attention_project(&ring->active_canvas, tok->attention_mask, tok->dynamic_bias, ring->active_genome);
     if (tok->energy > 0) { ring->lyapunov_delta_e = fabs(tok->energy - ring->lyapunov_energy); ring->prev_energy = ring->lyapunov_energy; ring->lyapunov_energy = tok->energy; }
     ring->wavefront_epoch++; ring->current_token_idx = (ring->current_token_idx + 1) % ring->token_count; ring->step_count++;
-    if (ring->current_token_idx == 0) { ring->cycle_count++; ring->quiescent_generation++; if (ring->bound_arena) flow_bump_qsbr_quiescent_fold(ring->bound_arena); } return 1;
-} FlowTokenRingState flow_token_ring_run_to_attractor(FlowTokenRing *ring, size_t max_cycles) { if (!ring) return FLOW_RING_UNSAT;
+    if (ring->current_token_idx == 0) { ring->cycle_count++; ring->quiescent_generation++; if (ring->bound_arena) flow_bump_qsbr_quiescent_fold(ring->bound_arena); } return 1; }
+FlowTokenRingState flow_token_ring_run_to_attractor(FlowTokenRing *ring, size_t max_cycles) { if (!ring) return FLOW_RING_UNSAT;
     size_t limit = max_cycles ? max_cycles : FLOW_TOKEN_RING_DEFAULT_MAX_CYCLES;
     while (ring->state == FLOW_RING_CIRCULATING && ring->cycle_count < limit) if (!flow_token_ring_step(ring)) break;
     if (ring->state == FLOW_RING_CIRCULATING) { ring->state = FLOW_RING_EXHAUSTED; snprintf(ring->status_message, sizeof(ring->status_message), "Exhausted maximum cycle limit (%zu cycles) without fixed point", limit); }
-    return ring->state; } int flow_token_ring_is_converged(const FlowTokenRing *ring) { return ring && ring->state == FLOW_RING_ATTRACTOR_REACHED; }
-const char *flow_token_ring_state_name(FlowTokenRingState state) {
-    static const char * const names[] = {"init", "circulating", "attractor_reached", "unsat_conflict", "cycle_exhausted"};
-    return ((int)state >= 0 && (int)state <= 4) ? names[state] : "unknown_state"; } const char *flow_token_stage_name(FlowTokenStage stage) {
-    static const char * const names[] = {"ingest", "polytope", "anneal", "smt_proof", "synthesis", "attractor", "custom"};
-    return ((int)stage >= 0 && (int)stage <= 6) ? names[stage] : "unknown_stage"; }
+    return ring->state; }
 int flow_subspace_decompose_canonical(FlowSubspaceDecomposition *decomp, const SemanticIR *ir) { if (!decomp) return 0; memset(decomp, 0, sizeof(*decomp));
     long cpus = sysconf(_SC_NPROCESSORS_ONLN); cpus = cpus < 1 ? 4 : (cpus > 64 ? 64 : cpus);
     uint64_t max_items = (ir && ir->input_max_count > 0) ? (uint64_t)ir->input_max_count : 4096ULL;
@@ -131,7 +128,8 @@ int flow_wavefront_ring_init(FlowWavefrontRing *ring, SemanticIR *ir, size_t num
         if (ring->active_space.candidate_count > 0) flow_mask_canvas_compose(ir, ring->active_space.candidates[0], &ring->active_space.candidate_dims[0], NULL, &ring->global_canvas);
     } ring->wavefront_epoch = ring->quiescent_generation = 1;
     snprintf(ring->status_message, sizeof(ring->status_message), "Wavefront Ring initialized: %zu slots, %zu workers, %zu orthogonal subspaces", ring->slot_count, ring->worker_count, ring->decomp.subspace_count);
-    return 1; } int flow_wavefront_ring_step_parallel(FlowWavefrontRing *ring) { if (!ring || ring->state != FLOW_RING_CIRCULATING) return 0;
+    return 1; }
+int flow_wavefront_ring_step_parallel(FlowWavefrontRing *ring) { if (!ring || ring->state != FLOW_RING_CIRCULATING) return 0;
     size_t num_workers = ring->worker_count > ring->decomp.subspace_count ? ring->decomp.subspace_count : ring->worker_count; if (!num_workers) return 0;
     FlowPhysicalProbe probe; flow_hardware_probe_start(&probe); pthread_t threads[FLOW_WAVEFRONT_MAX_WORKERS]; FlowWavefrontWorkerTask tasks[FLOW_WAVEFRONT_MAX_WORKERS];
     uint64_t thread_slices[FLOW_WAVEFRONT_MAX_WORKERS] = {0}, subspace_masks[FLOW_WAVEFRONT_MAX_WORKERS] = {0}; for (size_t i = 0; i < num_workers; ++i) {
@@ -148,12 +146,8 @@ int flow_wavefront_ring_init(FlowWavefrontRing *ring, SemanticIR *ir, size_t num
         ring->state = FLOW_RING_ATTRACTOR_REACHED; ring->attractor_converged = true;
         snprintf(ring->status_message, sizeof(ring->status_message), "Wavefront Attractor reached: cycle=%llu, energy=%.4f, Delta E=%.6f, cycles=%llu, uJ=%.1f (Lattice Genome=0x%016llx)",
                  (unsigned long long)ring->wave_cycle_count, ring->global_lyapunov_energy, ring->lyapunov_delta_e, (unsigned long long)ring->total_cycles, ring->total_energy_uj, (unsigned long long)ring->global_lattice_genome);
-    } return 1; } FlowTokenRingState flow_wavefront_ring_run_to_attractor(FlowWavefrontRing *ring, size_t max_cycles) { if (!ring) return FLOW_RING_UNSAT;
-    size_t limit = max_cycles ? max_cycles : FLOW_TOKEN_RING_DEFAULT_MAX_CYCLES;
-    while (ring->state == FLOW_RING_CIRCULATING && ring->wave_cycle_count < limit) if (!flow_wavefront_ring_step_parallel(ring)) break;
-    if (ring->state == FLOW_RING_CIRCULATING) { ring->state = FLOW_RING_EXHAUSTED; snprintf(ring->status_message, sizeof(ring->status_message), "Wavefront exhausted maximum cycle limit (%zu cycles)", limit); }
-    return ring->state; } void flow_wavefront_ring_destroy(FlowWavefrontRing *ring) { if (ring) ring->state = FLOW_RING_INIT; }
-int flow_token_ring_bind_arena(FlowTokenRing *ring, FlowBumpQsbrArena *arena) { return (ring && arena) ? (ring->bound_arena = arena, 1) : 0; }
+    } return 1; }
+void flow_wavefront_ring_destroy(FlowWavefrontRing *ring) { if (ring) ring->state = FLOW_RING_INIT; }
 int flow_wavefront_ring_bind_arena(FlowWavefrontRing *ring, FlowBumpQsbrArena *arena) { return (ring && arena) ? (ring->bound_arena = arena, 1) : 0; }
 FlowSMTResult flow_wavefront_verify_temporal_safety_smt(const FlowWavefrontRing *ring, FlowSMTProofAttestation *proof_out) {
     size_t sz = sizeof(FlowBmf1BitCanvas), al = _Alignof(FlowBmf1BitCanvas), slot_al = _Alignof(FlowWavefrontSlot); const FlowBoxConstraint rules[] = {

@@ -5,7 +5,6 @@ fn main() {
         .file("src/adaptive.c")
         .file("src/audit.c")
         .file("src/backend.c")
-        .file("src/benchmark.c")
         .file("src/bitspace.c")
         .file("src/builtin_plugin.c")
         .file("src/cubical_hott.c")

@@ -1,12 +1,23 @@
-# 第四章：形式化最高法院 — SMT 四大定理與 Lean 4 自舉證明
+# 第四章：Pure `.lean` 三層無縫融合與 AWS Cedar 真實世界驗證
 
-在任何機器碼或跨語言標頭發出之前，FLOW 的形式化驗證層（`src/smt.c`, `src/abi.c`, `src/security.c`）強制執行兩道數學守門：
+FLOW 將 `.lean` 提升為 **「領域意圖 + 數學證明 + 算子核函數」三位一體的單一真實來源（Single Source of Truth）**：
 
-1. **SMT QF_BV / QF_LIA 四大安全定理**：
-   - `theorem1_buffer_bounds_safety`：輸入上限嚴格小於或等於容器容量（$\text{inputMaxCount} \le \text{Capacity}$）。
-   - `theorem2_memory_quota_bound`：總配置位元組不逾越硬性配額（$\text{AllocatedBytes} \le \text{MemoryLimit}$）。
-   - `theorem3_shard_non_aliasing`：並發分片索引彼此正交無競爭。
-   - `theorem4_functional_determinism`：相同輸入必產生唯一決定論輸出。
-2. **Lean 4 自舉反射證書（`--target-lean`）**：
-   - 自動輸出包含 10 項定理（`by decide` / `by rfl`）的 `.lean` 證書，內建非空前提見證（`non_vacuous_precondition_witness`）、雙軌規格/執行同構證明（`dual_track_exec_mirror_isomorphic`），以及零拷貝 `@&` 借用 FFI 與量綱新類型（`flow_pct_vol_t`, `flow_point_vol_t`）。
-   - 內建稽核器（`flow_abi_audit_lean_certificate`）嚴格拒絕任何 `sorry`、`admit` 或自訂 `axiom`。
+## 4.1 三層自動推導機制
+
+1. **零 `@[export]` 之定理錨定算子推導 ([`src/parser.c`](../../src/parser.c))**：
+   - 開發者只需撰寫標準 Lean 4 的 `structure`（資料型別）、`def`（純計算函數）與 `theorem`（安全邊界證明）。
+   - 解析器支援跨行 `/- ... -/` 區塊註解剝離、`public`/`private` 修飾詞與通用代數資料型別（ADT）8-byte ABI 對齊，自動從 `structure` 推導 `stride`、`align` 與熱重載欄位，並將被 `theorem` 引用驗證的 `def` 自動綁定為 `extern_kernel`，於 [`src/backend.c`](../../src/backend.c) 合成帶有 `__attribute__((weak))` 的原生 C 核函數。
+2. **Plugin 領域意圖函子降階 ([`plugins/embodied.c`](../../plugins/embodied.c))**：
+   - 當 `.lean` 宣告 `namespace Embodied.*` 與 `theorem zmp_torque_safe` 時，`EMBODIED_PLUGIN` 自動透過 `lower_domain_semantics` 展開 1kHz 實時迴圈 SLA、辛幾何（Symplectic Jet）相空間約束與 ZMP 穩定多邊形遮罩。
+3. **SMT QF_LIA 四大定理與零 `sorry` 鐵門 ([`src/smt.c`](../../src/smt.c), [`src/abi.c`](../../src/abi.c))**：
+   - 強制檢驗緩衝區邊界（`buffer_bounds`）、記憶體配額（`memory_quota`）、分片正交（`shard_isolation`）與決定論（`determinism`），並嚴格拒絕任何含 `sorry` 或自訂 `axiom` 之輸入。
+
+---
+
+## 4.2 工業級驗收基準：AWS Cedar (`tests/cedar_authorization.lean`)
+
+在 [`tests/cedar_authorization.lean`](../../tests/cedar_authorization.lean)（427 行 / 16.4 KB）中，我們直接引入了 **AWS Cedar (`cedar-policy/cedar-spec`)** 官方形式化驗證專案的核心授權規格與安全證明（完全未加任何 `@[export]` 或 FLOW 專屬語法）：
+
+- **原生資料結構**：`public structure Request`（4 欄位：`principal`, `action`, `resource`, `context`）與 `public structure Response`（3 欄位：`decision`, `determiningPolicies`, `erroringPolicies`），由 FLOW 自動推導出 `state_field_count = 7`、`input_stride_bytes = 56`、`input_align_bytes = 8`。
+- **定理錨定算子**：由 `forbid_trumps_permit`、`default_deny`、`allowed_iff_explicitly_permitted_and_not_denied`、`order_and_dup_independent` 等 10+ 條機械化定理自動錨定 `public def isAuthorized` 為系統核心算子。
+- **單行指令直通執行**：透過 `./build/flowy run tests/cedar_authorization.lean`，直接完成證明審計、C + QSBR 動態庫合成與 1PB 零拷貝 `FlowExtentDescriptor` 驗證（涵蓋於 `tests/test_system.c` Stage 11c）。

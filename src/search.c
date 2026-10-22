@@ -1,13 +1,14 @@
 /* one chaotic 1-bit mutation */
 #include "search.h"
-#include "benchmark.h"
 #include "bitspace.h"
 #include "polyhedral.h"
 #include <string.h>
 #include <unistd.h>
 uint64_t flow_plan_get_value(const FlowPlanDimensionSet *dims, const FlowPlanAssignment *plan, const char *name, uint64_t default_val) {
-    if (!dims || !plan || !name) return default_val; for (size_t i = 0; i < dims->count && i < plan->count; ++i)
-        if (!strcmp(dims->dimensions[i].name, name)) return plan->values[i]; return default_val; }
+    if (!dims || !plan || !name) return default_val;
+    for (size_t i = 0; i < dims->count && i < plan->count; ++i)
+        if (!strcmp(dims->dimensions[i].name, name)) return plan->values[i];
+    return default_val; }
 FlowTuning flow_default_tuning(const SemanticIR *ir, const Component *comp) { (void)ir; (void)comp;
     return (FlowTuning){.buffer_bytes = 16384, .initial_capacity = 4, .growth_percent = 150, .batch_size = 16384, .arena_bytes = 0}; }
 int flow_polyhedral_solve_plan(const SemanticIR *ir, const FlowBitSpace *space, FlowPlan *plan_out) { if (!ir || !plan_out) return 0; memset(plan_out, 0, sizeof(*plan_out));
@@ -48,17 +49,8 @@ SearchResult search_best(const SemanticIR *ir, size_t iterations, uint32_t seed,
         #define OVR(f) if (profile->tuning.f) result.tuning.f = profile->tuning.f
         OVR(buffer_bytes); OVR(initial_capacity); OVR(growth_percent); OVR(batch_size); OVR(arena_bytes);
         #undef OVR
-    } return result; } int flow_search_result_to_artifact(const SemanticIR *ir, const SearchResult *result, FlowPlanArtifact *art) { if (!ir || !result || !art) return 0;
-    memset(art, 0, sizeof(*art)); strncpy(art->flow_name, ir->flow_name, sizeof(art->flow_name) - 1); if (result->component) {
-        strncpy(art->component_id, result->component->id, sizeof(art->component_id) - 1); const FlowPlugin *plugin = flow_component_plugin(result->component);
-        if (plugin) { strncpy(art->module_name, plugin->name, sizeof(art->module_name) - 1); strncpy(art->module_version, plugin->version, sizeof(art->module_version) - 1); }
-    } art->contract_hash = flow_compute_contract_hash(ir); art->plan_schema_hash = flow_bitspace_compute_schema_hash(ir, result->component, &result->dimension_set);
-    art->seed = result->seed; art->bit_count = result->dimension_set.count; art->genome = result->genome;
-    art->dimensions = result->dimension_set; art->plan = result->assignment;
-    art->metrics = (FlowEvaluation){ .energy = result->energy, .latency_score = result->metrics.latency_score, .throughput_score = result->metrics.throughput_score, .memory_bytes = result->metrics.memory_bytes, .capacity = result->metrics.capacity, .benchmark_ns = result->benchmark_ns };
-    strncpy(art->verification_status, "verified", sizeof(art->verification_status) - 1);
-    snprintf(art->attestation_msg, sizeof(art->attestation_msg), "schema_hash=%llu genome=0x%016llx", (unsigned long long)art->plan_schema_hash, (unsigned long long)art->genome);
-    return 1; } int flow_artifact_to_profile_seed(const FlowPlanArtifact *art, ProfileSeed *seed_out) { if (!art || !seed_out) return 0; *seed_out = (ProfileSeed){
+    } return result; }
+int flow_artifact_to_profile_seed(const FlowPlanArtifact *art, ProfileSeed *seed_out) { if (!art || !seed_out) return 0; *seed_out = (ProfileSeed){
         .available = 1, .capacity = art->metrics.capacity, .benchmark_ns = art->metrics.benchmark_ns, .assignment = art->plan, .tuning = {
             .buffer_bytes = flow_plan_get_value(&art->dimensions, &art->plan, "buffer_bytes", 16384),
             .initial_capacity = flow_plan_get_value(&art->dimensions, &art->plan, "initial_capacity", 4),

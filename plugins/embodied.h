@@ -1,299 +1,35 @@
 #ifndef FLOW_EMBODIED_H
 #define FLOW_EMBODIED_H
-
 #include "flow.h"
-#include "bitspace.h"
-#include "reload.h"
-#include "smt.h"
-#include "bitmanifold.h"
-
+#include "plugin.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
-
 #define FLOW_MAX_JOINTS 16
 #define FLOW_SUPPORT_POLYGON_VERTICES 8
-
-/* ========================================================================= */
-/* 1. Micro-Physics Simulation Safety Gate (Sim-to-Real Verifier)            */
-/* ========================================================================= */
-
 typedef struct {
-    double joint_angles[FLOW_MAX_JOINTS];       /* rad */
-    double joint_velocities[FLOW_MAX_JOINTS];   /* rad/s */
-    double joint_torques[FLOW_MAX_JOINTS];      /* N*m */
-    double max_torque_limit[FLOW_MAX_JOINTS];   /* N*m max physical rating */
+    double joint_angles[FLOW_MAX_JOINTS];
+    double joint_velocities[FLOW_MAX_JOINTS];
+    double joint_torques[FLOW_MAX_JOINTS];
+    double max_torque_limit[FLOW_MAX_JOINTS];
     size_t joint_count;
-    double center_of_mass[3];                   /* [x, y, z] meters */
-    double zmp_position[2];                     /* [x, y] zero moment point */
+    double center_of_mass[3];
+    double zmp_position[2];
     double support_polygon[FLOW_SUPPORT_POLYGON_VERTICES][2];
     size_t support_vertex_count;
     double mass_kg;
     double dt_seconds;
 } FlowRigidBodyState;
-
 typedef struct {
     FlowRigidBodyState current_state;
-    double max_angular_accel;                   /* rad/s^2 */
-    double friction_coefficient;                /* mu */
+    double max_angular_accel;
+    double friction_coefficient;
     uint64_t simulated_steps_total;
     uint64_t violations_prevented_total;
 } FlowPhysicsEngine;
-
 int flow_physics_init(FlowPhysicsEngine *engine, size_t joint_count, double mass_kg);
 int flow_physics_simulate_step(FlowPhysicsEngine *engine, const double *applied_torques);
 bool flow_physics_is_zmp_stable(const FlowRigidBodyState *state);
 bool flow_physics_is_torque_safe(const FlowRigidBodyState *state, const double *candidate_torques);
-uint64_t flow_physics_get_safety_mask(const FlowPhysicsEngine *engine,
-                                      const FlowPlanDimensionSet *dims);
-
-/* ========================================================================= */
-/* 2. Dual-Rate Frequency Separation (Spinal Reflex vs Cortical Reconfig)    */
-/* ========================================================================= */
-
-typedef struct {
-    double kp[FLOW_MAX_JOINTS];
-    double kd[FLOW_MAX_JOINTS];
-    double ki[FLOW_MAX_JOINTS];
-    double integral_error[FLOW_MAX_JOINTS];
-    double prev_error[FLOW_MAX_JOINTS];
-    double feedforward_torque[FLOW_MAX_JOINTS];
-} FlowSpinalReflexUnit;
-
-typedef enum {
-    FLOW_GAIT_IDLE = 0,
-    FLOW_GAIT_FLAT_WALK = 1,
-    FLOW_GAIT_STAIR_CLIMB = 2,
-    FLOW_GAIT_ROUGH_TERRAIN = 3,
-    FLOW_GAIT_EMERGENCY_BRACE = 4
-} FlowCorticalGaitMode;
-
-typedef struct {
-    FlowSpinalReflexUnit spinal;               /* 1kHz ~ 10kHz ultra-fast reflex loop */
-    FlowCorticalGaitMode cortical_mode;        /* 1Hz ~ 10Hz macro JIT reconfig */
-    double transition_alpha;                   /* Smooth trajectory interpolation [0.0 .. 1.0] */
-    uint64_t spinal_ticks_total;
-    uint64_t cortical_swaps_total;
-    const FlowUnit *current_cortical_unit;
-} FlowDualRateController;
-
-int flow_dual_rate_init(FlowDualRateController *ctrl, size_t joint_count);
-int flow_dual_rate_spinal_tick(FlowDualRateController *ctrl,
-                              const double *target_angles,
-                              const double *current_angles,
-                              const double *current_vels,
-                              double *output_torques,
-                              double dt);
-int flow_dual_rate_cortical_reconfigure(FlowDualRateController *ctrl,
-                                        FlowCorticalGaitMode new_mode,
-                                        const FlowUnit *new_unit);
-
-/* ========================================================================= */
-/* 3. Sensor Fusion & Kalman Filter Mask Canvas                              */
-/* ========================================================================= */
-
-typedef struct {
-    double state_estimate;                     /* True filtered value */
-    double error_covariance;                   /* P */
-    double process_noise_q;                    /* Q */
-    double measurement_noise_r;                /* R */
-    double kalman_gain_k;                      /* K */
-} FlowKalmanFilter1D;
-
-typedef struct {
-    FlowKalmanFilter1D pitch_filter;
-    FlowKalmanFilter1D roll_filter;
-    FlowKalmanFilter1D accel_z_filter;
-    double raw_vibration_noise_level;
-    double sensor_confidence;                  /* [0.0 .. 1.0] */
-    uint64_t updates_total;
-    uint64_t rejected_noise_spikes;
-} FlowSensorFusion;
-
-int flow_sensor_fusion_init(FlowSensorFusion *fusion);
-int flow_sensor_fusion_update_imu(FlowSensorFusion *fusion,
-                                  double raw_pitch,
-                                  double raw_roll,
-                                  double raw_accel_z,
-                                  double *clean_pitch_out,
-                                  double *clean_roll_out,
-                                  double *clean_accel_z_out);
-uint64_t flow_sensor_fusion_get_clean_mask(const FlowSensorFusion *fusion,
-                                           const FlowPlanDimensionSet *dims);
-
-/* ========================================================================= */
-/* 4. Thermodynamic Energy Throttling & Event-Driven Wakeup                  */
-/* ========================================================================= */
-
-typedef struct {
-    double current_battery_percent;            /* 0.0 .. 100.0 */
-    double edge_chip_temp_celsius;             /* e.g. Nvidia Jetson temperature */
-    double thermal_throttle_limit_celsius;     /* e.g. 85.0 C */
-    double current_power_draw_watts;
-    double steady_state_mass_baseline_kg;
-    double disturbance_threshold_kg;           /* e.g. 5.0 kg surprise load */
-    bool is_chaotic_engine_sleeping;
-    uint64_t sleep_cycles_total;
-    uint64_t shock_wakeups_total;
-} FlowThermalEnergyGovernor;
-
-int flow_energy_governor_init(FlowThermalEnergyGovernor *gov,
-                              double mass_baseline_kg,
-                              double disturbance_threshold_kg);
-bool flow_energy_governor_check_wakeup(FlowThermalEnergyGovernor *gov,
-                                       double observed_mass_kg,
-                                       double external_impact_force_n);
-double flow_energy_governor_compute_objective_penalty(const FlowThermalEnergyGovernor *gov,
-                                                      double base_latency_score,
-                                                      double compute_energy_joules);
-
-/* ========================================================================= */
-/* 5. Phase-Lag & Dead-Time Smith Predictor (CAN/EtherCAT Jitter Compensator)*/
-/* ========================================================================= */
-
-#define FLOW_SMITH_MAX_DELAY_STEPS 32
-
-typedef struct {
-    double delay_seconds;                      /* e.g. 0.003s (3ms bus latency) */
-    size_t delay_steps;                        /* e.g. 3 steps at 1kHz */
-    double history_torques[FLOW_SMITH_MAX_DELAY_STEPS][FLOW_MAX_JOINTS];
-    double history_angles[FLOW_SMITH_MAX_DELAY_STEPS][FLOW_MAX_JOINTS];
-    size_t head_idx;
-    size_t joint_count;
-    double damping_gain;
-    uint64_t phase_corrections_total;
-} FlowSmithPredictor;
-
-int flow_smith_predictor_init(FlowSmithPredictor *sp, size_t joint_count, double delay_seconds, double dt);
-int flow_smith_predictor_push_and_predict(FlowSmithPredictor *sp,
-                                          const double *delayed_angles,
-                                          const double *applied_torques,
-                                          double *predicted_future_angles_out,
-                                          double *predicted_future_vels_out,
-                                          double dt);
-bool flow_physics_is_future_state_safe(FlowPhysicsEngine *engine,
-                                       const FlowSmithPredictor *predictor,
-                                       const double *delayed_angles,
-                                       const double *candidate_torques,
-                                       double dt);
-
-/* ========================================================================= */
-/* 6. Embodied Multi-Agent Swarm Fleet (1kHz Reflex & SMT Collision Polytope)*/
-/* ========================================================================= */
-
-#define FLOW_FLEET_MAX_ROBOTS 16
-
-typedef enum {
-    FLOW_FLEET_ROLE_IDLE = 0,
-    FLOW_FLEET_ROLE_SCOUT = 1,       /* High sensor bandwidth, agile exploration */
-    FLOW_FLEET_ROLE_CARRIER = 2,     /* Heavy payload transport, high torque */
-    FLOW_FLEET_ROLE_RELAY = 3,       /* Mesh communication anchor */
-    FLOW_FLEET_ROLE_ACTUATOR = 4     /* Precise manipulation / docking */
-} FlowFleetRole;
-
-typedef struct {
-    uint8_t robot_id;
-    FlowFleetRole role;
-    double position[3];              /* [x, y, z] in meters */
-    double velocity[3];              /* [vx, vy, vz] in m/s */
-    double bounding_radius;          /* Collision bounding sphere radius in meters */
-    uint16_t battery_permille;       /* 0..1000 (e.g. 850 = 85.0%) */
-    uint16_t motor_temp_celsius;     /* Motor winding temperature */
-    int is_active;
-} FlowFleetRobot;
-
-typedef struct {
-    FlowFleetRobot robots[FLOW_FLEET_MAX_ROBOTS];
-    size_t robot_count;
-    double min_safety_margin_m;      /* Minimum inter-robot clearance in meters (e.g. 0.5m) */
-    uint64_t total_1khz_ticks;
-    uint64_t total_collision_avoidance_interventions;
-    uint64_t total_role_reassignments;
-} FlowFleetSwarm;
-
-int flow_fleet_init(FlowFleetSwarm *fleet, double min_safety_margin_m);
-int flow_fleet_register_robot(FlowFleetSwarm *fleet,
-                              uint8_t robot_id,
-                              FlowFleetRole role,
-                              double bounding_radius,
-                              const double initial_pos[3]);
-
-int flow_fleet_update_telemetry(FlowFleetSwarm *fleet,
-                                uint8_t robot_id,
-                                const double pos[3],
-                                const double vel[3],
-                                uint16_t battery_permille,
-                                uint16_t motor_temp_celsius);
-
-/* 1kHz Spinal Fleet Step: Computes pairwise velocities and applies repulsive vectors if within safety margin */
-int flow_fleet_step_1khz_tick(FlowFleetSwarm *fleet, double dt_sec);
-
-/* 1-Bit Chaotic Dynamic Role Reassignment: Automatically shifts role when battery < 20% or motor temp > 80C */
-int flow_fleet_adapt_roles_bmf(FlowFleetSwarm *fleet, uint64_t bmf_seed);
-
-/* SMT Formal Spatial Separation & Collision-Avoidance Polytope Theorem */
-FlowSMTResult flow_fleet_verify_collision_smt(const FlowFleetSwarm *fleet, FlowSMTProofAttestation *proof_out);
-
-/* ========================================================================= */
-/* 7. Embodied 64-Bit Coordinate Subspace Slicing & Mask Superposition (BMF) */
-/* ========================================================================= */
-
-#define FLOW_EMBODIED_OFF_GAIT       0
-#define FLOW_EMBODIED_LEN_GAIT       4
-#define FLOW_EMBODIED_OFF_TORQUE     4
-#define FLOW_EMBODIED_LEN_TORQUE     8
-#define FLOW_EMBODIED_OFF_SENSOR    12
-#define FLOW_EMBODIED_LEN_SENSOR     6
-#define FLOW_EMBODIED_OFF_THERMAL   18
-#define FLOW_EMBODIED_LEN_THERMAL    6
-#define FLOW_EMBODIED_OFF_SMITH     24
-#define FLOW_EMBODIED_LEN_SMITH      8
-#define FLOW_EMBODIED_OFF_FLEET     32
-#define FLOW_EMBODIED_LEN_FLEET     16
-#define FLOW_EMBODIED_OFF_SURVIVAL  48
-#define FLOW_EMBODIED_LEN_SURVIVAL  16
-
-typedef struct {
-    FlowCorticalGaitMode gait_mode;
-    uint8_t torque_gain_scale;       /* 0..255 -> 0%..100% */
-    uint8_t sensor_confidence;       /* 0..63 */
-    uint8_t thermal_throttle_level;  /* 0..63 */
-    uint8_t smith_delay_steps;       /* 0..32 */
-    uint16_t fleet_clearance_mm;     /* e.g. 500 = 0.5m */
-    uint16_t survival_flags;         /* Bit 0: Double-bind detected; Bit 1: Static brace active */
-} FlowEmbodiedCoordinate;
-
-/* 64-Bit Subspace Genome Encoding & Decoding */
-int flow_embodied_encode_genome(const FlowEmbodiedCoordinate *coord, uint64_t *genome_out);
-int flow_embodied_decode_genome(uint64_t genome, FlowEmbodiedCoordinate *coord_out);
-
-/* Multi-Sensory Mask Canvas Hypergeometric Superposition */
-typedef struct {
-    uint64_t zmp_mask;
-    uint64_t kalman_mask;
-    uint64_t thermal_mask;
-    uint64_t fleet_mask;
-    uint64_t superposed_mask;
-    uint64_t dynamic_bias;
-    int is_double_bind;              /* 1 if superposed_mask == 0 (all control options blocked) */
-} FlowEmbodiedCanvas;
-
-int flow_embodied_superpose_safety_canvas(const FlowPhysicsEngine *phys,
-                                         const FlowSensorFusion *fusion,
-                                         const FlowThermalEnergyGovernor *gov,
-                                         const FlowFleetSwarm *fleet,
-                                         FlowEmbodiedCanvas *canvas_out);
-
-/* Token Ring Discrete Attention Integration (Lyapunov Attractor Convergence) */
-int flow_embodied_step_token_ring(FlowEmbodiedCanvas *canvas,
-                                  uint64_t *current_genome_inout,
-                                  uint64_t *rng_state_inout,
-                                  uint32_t *mutated_bit_out);
-
-/* Formal SMT Multi-Sensory Safety Polytope Verification */
-FlowSMTResult flow_embodied_verify_smt(const FlowRigidBodyState *state,
-                                      const FlowThermalEnergyGovernor *gov,
-                                      const FlowFleetSwarm *fleet,
-                                      FlowSMTProofAttestation *proof_out);
-
+const FlowPluginDescriptor *flow_embodied_entry_v1(void);
 #endif

@@ -150,7 +150,7 @@ int main(void) {
     FLOW_STAGE_BEGIN(5, "Speculative Gene Pre-Staging Vault: Zero-Coldstart Atomic Architecture Swap");
     {
         /* Ensure canonical .fvec repository directory is ready */
-        const char *test_vault_dir = ".flow/vecs";
+        const char *test_vault_dir = "/tmp/flow_test_prestage_vecs";
         flow_fvec_seed_canonical_files(test_vault_dir);
 
         FlowFvecPreStagingVault vault;

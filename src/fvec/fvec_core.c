@@ -2,7 +2,6 @@
 #include "../flow_jet.h"
 #include "../registry.h"
 #include "../flow_smt_dsl.h"
-#include "../swarm.h"
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
@@ -14,7 +13,8 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
-static uint32_t s_crc32_table[256]; static int s_crc32_table_computed = 0; uint32_t flow_fvec_crc32(const void *data, size_t length) { if (!s_crc32_table_computed) {
+static uint32_t s_crc32_table[256]; static int s_crc32_table_computed = 0;
+uint32_t flow_fvec_crc32(const void *data, size_t length) { if (!s_crc32_table_computed) {
         for (uint32_t i = 0; i < 256; i++) { uint32_t c = i; for (int j = 0; j < 8; j++) c = (c & 1) ? (0xEDB88320L ^ (c >> 1)) : (c >> 1); s_crc32_table[i] = c; }
         s_crc32_table_computed = 1; } const uint8_t *p = (const uint8_t *)data; uint32_t crc = 0xFFFFFFFFL;
     for (size_t i = 0; i < length; i++) crc = s_crc32_table[(crc ^ p[i]) & 0xFF] ^ (crc >> 8); return crc ^ 0xFFFFFFFFL; }
@@ -23,18 +23,23 @@ void flow_fvec_embed_prompt(const char *prompt, double *out_features) { if (!out
         {"hft", 0, 0.95}, {"latency", 0, 0.90}, {"lockfree", 1, 0.95}, {"ring", 1, 0.85}, {"memory", 2, 0.95}, {"oom", 2, 0.95}, {"tiny", 2, 0.85}, {"ram", 2, 0.85},
         {"serverless", 3, 0.95}, {"coldstart", 3, 0.90}, {"burst", 3, 0.85}, {"io", 4, 0.90},
         {"ddos", 5, 0.95}, {"slowloris", 5, 0.95}, {"antibody", 5, 0.90}, {"immune", 5, 0.85}, {"iot", 6, 0.95}, {"sleep", 6, 0.90}, {"power", 6, 0.85}, {"sensor", 6, 0.85},
-        {"hash", 7, 0.90}, {"parallel", 8, 0.90}, {"simd", 9, 0.90}, {"smt", 10, 0.85} }; for (size_t i = 0; i < sizeof(rules) / sizeof(rules[0]); ++i)
-        if (strcasestr(prompt, rules[i].kw)) out_features[rules[i].idx] += rules[i].w; double norm = 0.0;
+        {"hash", 7, 0.90}, {"parallel", 8, 0.90}, {"simd", 9, 0.90}, {"smt", 10, 0.85} };
+    for (size_t i = 0; i < sizeof(rules) / sizeof(rules[0]); ++i)
+        if (strcasestr(prompt, rules[i].kw)) out_features[rules[i].idx] += rules[i].w;
+    double norm = 0.0;
     for (size_t i = 0; i < FLOW_VAULT_DIM; ++i) norm += out_features[i] * out_features[i]; norm = sqrt(norm);
-    if (norm > 1e-12) for (size_t i = 0; i < FLOW_VAULT_DIM; ++i) out_features[i] /= norm; } double flow_fvec_cosine_similarity(const double *a, const double *b, size_t dim) {
+    if (norm > 1e-12) for (size_t i = 0; i < FLOW_VAULT_DIM; ++i) out_features[i] /= norm; }
+double flow_fvec_cosine_similarity(const double *a, const double *b, size_t dim) {
     if (!a || !b || !dim) return 0.0; double dot = 0.0, na = 0.0, nb = 0.0; for (size_t i = 0; i < dim; ++i) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
-    return (na > 1e-12 && nb > 1e-12) ? (dot / (sqrt(na) * sqrt(nb))) : 0.0; } int flow_fvec_header_serialize(const FlowVecHeader *hdr, char *out_buf, size_t buf_size) {
+    return (na > 1e-12 && nb > 1e-12) ? (dot / (sqrt(na) * sqrt(nb))) : 0.0; }
+int flow_fvec_header_serialize(const FlowVecHeader *hdr, char *out_buf, size_t buf_size) {
     if (!hdr || !out_buf || buf_size < FLOW_FVEC_HEADER_SIZE) return 0; memset(out_buf, 0, buf_size); int w = snprintf(out_buf, FLOW_FVEC_HEADER_SIZE,
         "FVEC_V1\nid=%s\nname=%s\norigin_hardware=%s\ntrigger_intent=%s\ncategory=%s\ncomponent_id=%s\nsmt_signature=%s\nenergy_score=%.4f\ncreated_at_unix=%llu\nvector_dim=%u\npayload_size=%u\nconfidence_score=%u\nlast_reinforced_unix=%llu\nis_auto_promoted=%u\ncontent_hash=%s\ndescription=%s\n",
         hdr->id, hdr->name, hdr->origin_hardware, hdr->trigger_intent, hdr->category, hdr->component_id, hdr->smt_signature, hdr->energy_score, (unsigned long long)hdr->created_at_unix,
         hdr->vector_dim ? hdr->vector_dim : (uint32_t)FLOW_VAULT_DIM, (uint32_t)sizeof(FlowVecPayload), hdr->confidence_score ? hdr->confidence_score : 1,
         (unsigned long long)(hdr->last_reinforced_unix ? hdr->last_reinforced_unix : hdr->created_at_unix), (unsigned int)hdr->is_auto_promoted, hdr->content_hash[0] ? hdr->content_hash : "0000000000000000", hdr->description);
-    return (w > 0 && w < FLOW_FVEC_HEADER_SIZE); } int flow_fvec_header_deserialize(const char *in_buf, size_t buf_size, FlowVecHeader *hdr_out) {
+    return (w > 0 && w < FLOW_FVEC_HEADER_SIZE); }
+int flow_fvec_header_deserialize(const char *in_buf, size_t buf_size, FlowVecHeader *hdr_out) {
     if (!in_buf || !hdr_out || buf_size < FLOW_FVEC_HEADER_SIZE || strncmp(in_buf, "FVEC_V1", 7) != 0) return 0; memset(hdr_out, 0, sizeof(*hdr_out));
     strncpy(hdr_out->magic, "FVEC_V1", sizeof(hdr_out->magic) - 1); char buf_copy[FLOW_FVEC_HEADER_SIZE + 1];
     memcpy(buf_copy, in_buf, FLOW_FVEC_HEADER_SIZE); buf_copy[FLOW_FVEC_HEADER_SIZE] = '\0'; for (char *line = strtok(buf_copy, "\n"); line; line = strtok(NULL, "\n")) {
@@ -64,22 +69,20 @@ int flow_fvec_read_file(const char *filepath, FlowVecHeader *hdr_out, FlowVecPay
               fread(payload_out, 1, sizeof(FlowVecPayload), f) == sizeof(FlowVecPayload)); fclose(f); if (!ok) return 0;
     strncpy(hdr_out->filepath, filepath, sizeof(hdr_out->filepath) - 1); return payload_out->crc32 == flow_fvec_crc32(payload_out, offsetof(FlowVecPayload, crc32)); }
 void flow_fvec_store_init(FlowVecStore *store, const char *dir_path) { if (!store) return; memset(store, 0, sizeof(*store));
-    strncpy(store->root_dir, (dir_path && dir_path[0]) ? dir_path : FLOW_FVEC_DEFAULT_DIR, sizeof(store->root_dir) - 1); } int flow_fvec_store_scan(FlowVecStore *store) {
+    strncpy(store->root_dir, (dir_path && dir_path[0]) ? dir_path : FLOW_FVEC_DEFAULT_DIR, sizeof(store->root_dir) - 1); }
+int flow_fvec_store_scan(FlowVecStore *store) {
     if (!store) return 0; store->count = 0; DIR *d = opendir(store->root_dir); if (!d) return 0; struct dirent *dir; while ((dir = readdir(d)) != NULL) {
         if (dir->d_name[0] == '.') continue; size_t len = strlen(dir->d_name);
         if (len > 5 && !strcmp(dir->d_name + len - 5, ".fvec") && store->count < FLOW_FVEC_MAX_ENTRIES) {
             char full_path[512]; snprintf(full_path, sizeof(full_path), "%s/%s", store->root_dir, dir->d_name); FlowVecRecord *rec = &store->records[store->count];
             if (flow_fvec_read_file(full_path, &rec->header, &rec->payload)) store->count++; } } closedir(d); return (int)store->count; }
-const FlowVecRecord *flow_fvec_store_lookup_by_id(const FlowVecStore *store, const char *id) { if (!store || !id) return NULL; for (size_t i = 0; i < store->count; ++i)
-        if (!strcmp(store->records[i].header.id, id) || strstr(store->records[i].header.filepath, id)) return &store->records[i]; return NULL; }
+const FlowVecRecord *flow_fvec_store_lookup_by_id(const FlowVecStore *store, const char *id) { if (!store || !id) return NULL;
+    for (size_t i = 0; i < store->count; ++i) if (!strcmp(store->records[i].header.id, id) || strstr(store->records[i].header.filepath, id)) return &store->records[i];
+    return NULL; }
 int flow_fvec_store_query(const FlowVecStore *store, const char *natural_query, size_t *best_idx_out, double *best_sim_out) {
     if (!store || !natural_query || !store->count) return 0; double q[FLOW_VAULT_DIM], best_sim = -1.0; size_t best_idx = 0; flow_fvec_embed_prompt(natural_query, q);
     for (size_t i = 0; i < store->count; ++i) { double sim = flow_fvec_cosine_similarity(q, store->records[i].payload.features, FLOW_VAULT_DIM);
         if (sim > best_sim) { best_sim = sim; best_idx = i; } } if (best_idx_out) *best_idx_out = best_idx; if (best_sim_out) *best_sim_out = best_sim; return 1; }
-size_t flow_fvec_store_find_by_intent(const FlowVecStore *store, const char *kw, const FlowVecRecord **out_records, size_t max_results) {
-    if (!store || !kw || !out_records || !max_results) return 0; size_t found = 0; for (size_t i = 0; i < store->count && found < max_results; ++i) {
-        const FlowVecHeader *h = &store->records[i].header;
-        if (strcasestr(h->trigger_intent, kw) || strcasestr(h->name, kw) || strcasestr(h->id, kw)) out_records[found++] = &store->records[i]; } return found; }
 int flow_fvec_remediate_check(const FlowVecStore *store, double ram_pressure_pct, double cache_miss_rate,
                               const FlowVecRecord **recommended_record_out, double *confidence_out, char *diagnosis_out, size_t max_diag_len) {
     if (!store || !recommended_record_out) return 0; int is_ram = (ram_pressure_pct >= 90.0), is_cache = (!is_ram && cache_miss_rate >= 0.15);
@@ -88,16 +91,18 @@ int flow_fvec_remediate_check(const FlowVecStore *store, double ram_pressure_pct
                          : (strstr(h->trigger_intent, "LATENCY_FIRST") || strstr(h->trigger_intent, "HFT_TRADING") != NULL); if (hit) {
             *recommended_record_out = &store->records[i]; if (confidence_out) *confidence_out = is_ram ? 0.94 : 0.96;
             if (diagnosis_out && max_diag_len > 0) snprintf(diagnosis_out, max_diag_len, "Crisis Remediation matched '%s' (RAM=%.1f%%, Miss=%.1f%%)", h->filepath, ram_pressure_pct, cache_miss_rate * 100.0);
-            return 1; } } return 0; } void flow_fvec_inspect(const FlowVecHeader *hdr, const FlowVecPayload *payload, FILE *out) {
+            return 1; } } return 0; }
+void flow_fvec_inspect(const FlowVecHeader *hdr, const FlowVecPayload *payload, FILE *out) {
     if (hdr && payload && out) fprintf(out, "[.fvec] %s (%s) | Intent: %s | HW: %s | Comp: %s | SMT: %s | Energy: %.2f | Genome: 0x%016llx | CRC32: 0x%08x\n",
-        hdr->id, hdr->name, hdr->trigger_intent, hdr->origin_hardware, hdr->component_id, hdr->smt_signature, hdr->energy_score, (unsigned long long)payload->pure_genome, payload->crc32);
-} void flow_fvec_store_print_summary(const FlowVecStore *store, FILE *out) { if (!store || !out) return;
+        hdr->id, hdr->name, hdr->trigger_intent, hdr->origin_hardware, hdr->component_id, hdr->smt_signature, hdr->energy_score, (unsigned long long)payload->pure_genome, payload->crc32); }
+void flow_fvec_store_print_summary(const FlowVecStore *store, FILE *out) { if (!store || !out) return;
     fprintf(out, "FLOW Gene Vault (%zu Models in '%s'):\n", store->count, store->root_dir); for (size_t i = 0; i < store->count; ++i) {
         const FlowVecHeader *h = &store->records[i].header;
-        fprintf(out, "  [%02zu] %s %-28s | %-16s | Conf:%u | E:%.2f | SMT:%s\n", i + 1, h->is_auto_promoted ? "[AUTO]" : "[FACT]", h->id, h->trigger_intent, h->confidence_score ? h->confidence_score : 1, h->energy_score, h->smt_signature);
-    } } static int ensure_dir_exists(const char *dir) { struct stat st; if (stat(dir, &st) == 0) return S_ISDIR(st.st_mode);
+        fprintf(out, "  [%02zu] %s %-28s | %-16s | Conf:%u | E:%.2f | SMT:%s\n", i + 1, h->is_auto_promoted ? "[AUTO]" : "[FACT]", h->id, h->trigger_intent, h->confidence_score ? h->confidence_score : 1, h->energy_score, h->smt_signature); } }
+static int ensure_dir_exists(const char *dir) { struct stat st; if (stat(dir, &st) == 0) return S_ISDIR(st.st_mode);
     char tmp[256] = {0}; strncpy(tmp, dir, sizeof(tmp) - 1); for (char *p = (tmp[0] == '/' ? tmp + 1 : tmp); *p; p++) if (*p == '/') { *p = '\0'; mkdir(tmp, 0755); *p = '/'; }
-    return mkdir(tmp, 0755) == 0 || errno == EEXIST; } int flow_fvec_seed_canonical_files(const char *target_dir) {
+    return mkdir(tmp, 0755) == 0 || errno == EEXIST; }
+int flow_fvec_seed_canonical_files(const char *target_dir) {
     const char *dir = (target_dir && target_dir[0]) ? target_dir : FLOW_FVEC_DEFAULT_DIR; if (!ensure_dir_exists(dir)) return 0;
     static const struct { const char *id, *name, *file, *hw, *intent, *cat, *comp; uint64_t genome, mask, bias; double energy; } seeds[] = {
         {"vec_hft_lockfree_trading", "HFT Ultra-Low-Latency Ring", "hft_ultra_low_latency.fvec", "x86_avx2, L1=64K, Cores=64", "HFT_TRADING", "HFT", "bounded_queue", 0x0502ULL, 0xFFFFULL, 0x0502ULL, 12.4},
@@ -106,7 +111,7 @@ int flow_fvec_remediate_check(const FlowVecStore *store, double ram_pressure_pct
         {"vec_antibody_slowloris_409", "Slowloris DDoS Immune Antibody", "slowloris_immune_antibody.fvec", "fleet_cluster_node_edge", "DDoS_DEFENSE", "IMMUNE", "bounded_queue", 0x0708ULL, 0x7FFFULL, 0x0708ULL, 9.8},
         {"vec_iot_embedded_sensor", "IoT Quiescent Sensor Pipeline", "iot_quiescent_sleep.fvec", "arm_cortex_m4, RAM=64KB", "LOW_POWER_QUIESCENT", "GENERAL", "bounded_queue", 0x0011ULL, 0x00FFULL, 0x0011ULL, 6.5}
     }; int seeded = 0; for (size_t i = 0; i < sizeof(seeds) / sizeof(seeds[0]); ++i) {
-        FlowVecHeader hdr = { .magic = FLOW_FVEC_MAGIC, .energy_score = seeds[i].energy, .created_at_unix = (uint64_t)time(NULL), .last_reinforced_unix = (uint64_t)time(NULL), .vector_dim = FLOW_VAULT_DIM, .payload_size = sizeof(FlowVecPayload), .confidence_score = 10 };
+        FlowVecHeader hdr = { .magic = FLOW_FVEC_MAGIC, .energy_score = seeds[i].energy, .created_at_unix = 1700000000ULL, .last_reinforced_unix = 1700000000ULL, .vector_dim = FLOW_VAULT_DIM, .payload_size = sizeof(FlowVecPayload), .confidence_score = 10 };
         FlowVecPayload payload = { .pure_genome = seeds[i].genome, .hard_composite_mask = seeds[i].mask, .soft_composite_bias = seeds[i].bias };
         strncpy(hdr.id, seeds[i].id, sizeof(hdr.id) - 1); strncpy(hdr.name, seeds[i].name, sizeof(hdr.name) - 1);
         strncpy(hdr.origin_hardware, seeds[i].hw, sizeof(hdr.origin_hardware) - 1); strncpy(hdr.trigger_intent, seeds[i].intent, sizeof(hdr.trigger_intent) - 1);
@@ -138,29 +143,6 @@ size_t flow_fvec_store_evict_senescent(FlowVecStore *store, uint64_t now_unix, u
             if (r->header.filepath[0]) unlink(r->header.filepath);
             if (evicted_files_out && evicted < max_evictions) strncpy(evicted_files_out[evicted], r->header.filepath, 255); evicted++;
         } else { if (write_idx != i) store->records[write_idx] = *r; write_idx++; } } store->count = write_idx; return evicted; }
-void flow_immune_promoter_init(FlowImmunePromoter *p, uint64_t threshold) {
-    if (p) { memset(p, 0, sizeof(*p)); p->promotion_threshold = threshold ? threshold : FLOW_DEFAULT_IMMUNE_PROMOTION_THRESHOLD; } }
-void flow_immune_promoter_set_active(FlowImmunePromoter *p, uint64_t genome, uint64_t hard_mask, uint64_t soft_bias,
-                                     const FlowSMTProofAttestation *proof, const char *component_id, const char *intent, const char *hardware, double energy) { if (!p) return;
-    p->active_genome = genome; p->active_mask = hard_mask; p->active_soft_bias = soft_bias; if (proof) p->active_proof = *proof;
-    strncpy(p->active_component_id, component_id ? component_id : "bounded_queue", sizeof(p->active_component_id) - 1);
-    strncpy(p->trigger_intent, intent ? intent : "ONLINE_IMMUNE_SURVIVAL", sizeof(p->trigger_intent) - 1);
-    strncpy(p->origin_hardware, hardware ? hardware : "x86_avx2", sizeof(p->origin_hardware) - 1);
-    p->active_energy = energy; p->healthy_requests_count = 0; p->anomaly_count = 0; p->is_promoted = false; }
-int flow_immune_promoter_record_request(FlowImmunePromoter *p, int is_healthy, int smt_sound) { if (!p) return 0;
-    if (!is_healthy || !smt_sound) { p->anomaly_count++; p->healthy_requests_count = 0; return 0; } return (++p->healthy_requests_count >= p->promotion_threshold); }
-int flow_immune_promoter_check_and_promote(FlowImmunePromoter *p, const char *target_dir, char *promoted_path_out,
-                                           size_t max_path_len, uint32_t *new_confidence_out, uint8_t lymph_packet_out[9]) {
-    if (!p || p->anomaly_count > 0 || p->healthy_requests_count < p->promotion_threshold) return 0;
-    uint64_t hash = flow_fvec_compute_content_hash(p->active_genome, p->active_mask, p->active_soft_bias, &p->active_proof);
-    FlowVecHeader hdr = { .magic = FLOW_FVEC_MAGIC, .category = "IMMUNE", .smt_signature = "BUFFER_UNSAT:MEM_UNSAT:SHARD_UNSAT:DET_UNSAT", .energy_score = p->active_energy };
-    FlowVecPayload pl = { .pure_genome = p->active_genome, .hard_composite_mask = p->active_mask, .soft_composite_bias = p->active_soft_bias, .proof = p->active_proof };
-    snprintf(hdr.id, sizeof(hdr.id), "auto_%016llx", (unsigned long long)hash);
-    snprintf(hdr.name, sizeof(hdr.name), "Auto-Promoted Immune Antibody (%s)", p->active_component_id);
-    strncpy(hdr.origin_hardware, p->origin_hardware, sizeof(hdr.origin_hardware) - 1); strncpy(hdr.trigger_intent, p->trigger_intent, sizeof(hdr.trigger_intent) - 1);
-    strncpy(hdr.component_id, p->active_component_id, sizeof(hdr.component_id) - 1); flow_fvec_embed_prompt(p->trigger_intent, pl.features);
-    if (!flow_fvec_promote_or_strengthen(target_dir, &hdr, &pl, hash, promoted_path_out, max_path_len, new_confidence_out)) return 0;
-    if (lymph_packet_out) flow_swarm_lymphatic_encode(hash, lymph_packet_out); p->is_promoted = true; return 1; }
 int flow_fvec_prestaging_init(FlowFvecPreStagingVault *v) { return v ? (memset(v, 0, sizeof(*v)), 1) : 0; }
 int flow_fvec_prestaging_register(FlowFvecPreStagingVault *v, const char *fvec_file_path, const char *trigger_condition) {
     if (!v || !fvec_file_path || !trigger_condition || v->slot_count >= FLOW_FVEC_MAX_PRESTAGED) return 0; FlowFvecPreStagingSlot *slot = &v->slots[v->slot_count];

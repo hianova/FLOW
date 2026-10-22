@@ -1,13 +1,17 @@
 #ifndef FLOW_H
 #define FLOW_H
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #define FLOW_LINE 512
 #define FLOW_NAME 64
 #define FLOW_NODE_MAX 32
 #define FLOW_SAMPLE_MAX 32
 #define FLOW_CONSTRAINT_MAX 32
-typedef struct { char name[FLOW_NAME]; } FlowNode; typedef struct { int id; int score; } FlowSample; typedef enum { FLOW_FACT_SHARED_STATE, FLOW_FACT_COLLECTION,
+#define FLOW_FIELD_MAX 16
+typedef struct { char name[FLOW_NAME]; } FlowNode; typedef struct { int id; int score; } FlowSample;
+typedef struct { char name[FLOW_NAME]; size_t size_bytes; uint32_t flags; } FlowFieldSpec;
+typedef enum { FLOW_FACT_SHARED_STATE, FLOW_FACT_COLLECTION,
     FLOW_FACT_TRANSFORM, FLOW_FACT_PARALLELIZABLE, FLOW_FACT_ORDERED, FLOW_FACT_BOUNDED, FLOW_FACT_CAPABILITY, FLOW_FACT_CONSTRAINT, FLOW_FACT_HOLE, FLOW_FACT_RANGE,
     FLOW_FACT_SIZE, FLOW_FACT_MUTABILITY, FLOW_FACT_DETERMINISM, FLOW_FACT_LEAN_CERTIFIED
 } FlowFactKind; typedef struct { FlowFactKind kind; char detail[FLOW_NAME]; } FlowFact; typedef struct { char name[FLOW_NAME]; char operator[FLOW_NAME]; char value[FLOW_NAME];
@@ -45,6 +49,14 @@ typedef struct { char name[FLOW_NAME]; } FlowNode; typedef struct { int id; int 
     char project_name[FLOW_NAME]; \
     char imported_modules[8][FLOW_NAME]; \
     size_t imported_module_count; \
+    size_t input_stride_bytes; \
+    size_t input_align_bytes; \
+    uint32_t state_schema_version; \
+    FlowFieldSpec state_fields[FLOW_FIELD_MAX]; \
+    size_t state_field_count; \
+    uint64_t sla_latency_ns; \
+    char extern_kernel[FLOW_NAME]; \
+    char extern_kernel_body[FLOW_LINE]; \
     FlowJetSpec jet; \
     FlowThermalSpec thermal;
 typedef struct { FLOW_SPEC_CORE_FIELDS

@@ -14,19 +14,19 @@ int flow_hardware_telemetry_init(void) {
 #else
     g_timer_freq_hz = 1000000000ULL;
 #endif
-    g_rapl_available = (access(g_rapl_path, R_OK) == 0); return 1; } uint64_t flow_hardware_timer_frequency_hz(void) { if (!g_timer_freq_hz) flow_hardware_telemetry_init();
-    return g_timer_freq_hz; } double flow_hardware_energy_uj(void) { if (g_rapl_available) { FILE *f = fopen(g_rapl_path, "r"); if (f) { unsigned long long uj = 0;
-            if (fscanf(f, "%llu", &uj) == 1) { fclose(f); return (double)uj; } fclose(f); } }
+    g_rapl_available = (access(g_rapl_path, R_OK) == 0); return 1; }
+uint64_t flow_hardware_timer_frequency_hz(void) { if (!g_timer_freq_hz) flow_hardware_telemetry_init(); return g_timer_freq_hz; }
+double flow_hardware_energy_uj(void) { if (g_rapl_available) { FILE *f = fopen(g_rapl_path, "r"); if (f) { unsigned long long uj = 0;
+        if (fscanf(f, "%llu", &uj) == 1) { fclose(f); return (double)uj; } fclose(f); } }
     uint64_t cycles = flow_hardware_cycles(), freq = flow_hardware_timer_frequency_hz(); return ((freq > 0) ? (double)cycles / (double)freq : 0.0) * 5.0 * 1000000.0; }
 void flow_hardware_probe_start(FlowPhysicalProbe *probe) { if (!probe) return; memset(probe, 0, sizeof(*probe)); probe->start_cycles = flow_hardware_cycles();
-    probe->start_energy_uj = flow_hardware_energy_uj(); } void flow_hardware_probe_stop(FlowPhysicalProbe *probe) { if (!probe) return;
+    probe->start_energy_uj = flow_hardware_energy_uj(); }
+void flow_hardware_probe_stop(FlowPhysicalProbe *probe) { if (!probe) return;
     probe->end_cycles = flow_hardware_cycles(); probe->end_energy_uj = flow_hardware_energy_uj();
     probe->elapsed_cycles = (probe->end_cycles >= probe->start_cycles) ? (probe->end_cycles - probe->start_cycles) : 0; uint64_t freq = flow_hardware_timer_frequency_hz();
     probe->elapsed_nanoseconds = (freq > 0) ? ((double)probe->elapsed_cycles * 1e9 / (double)freq) : (double)probe->elapsed_cycles;
     probe->dissipated_energy_uj = (probe->end_energy_uj >= probe->start_energy_uj) ? (probe->end_energy_uj - probe->start_energy_uj) : 0.0;
     probe->physical_power_watts = (probe->elapsed_nanoseconds > 0.0) ? (probe->dissipated_energy_uj / (probe->elapsed_nanoseconds / 1000.0)) : 0.0; }
-double flow_hardware_lyapunov_metric(const FlowPhysicalProbe *probe, double constraint_energy) { if (!probe) return constraint_energy;
-    return constraint_energy + 0.1 * ((double)probe->elapsed_cycles / 10000.0) + 0.05 * (probe->dissipated_energy_uj / 1000.0); }
 void flow_hardware_probe_update_thermal(const FlowPhysicalProbe *probe, FlowThermalState *thermal, double dt_sec) { if (!probe || !thermal) return;
     if (thermal->c_thermal <= 0.0) flow_jet_thermal_init_default(thermal); thermal->active_power_w = probe->physical_power_watts > 0.0 ? probe->physical_power_watts : 5.0;
     if (dt_sec > 0.0) { double q_diss = (thermal->temp_c - thermal->temp_ambient_c) / thermal->r_thermal;

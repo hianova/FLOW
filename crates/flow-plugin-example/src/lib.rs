@@ -26,6 +26,7 @@ static COMPONENTS: [FlowComponent; 1] = [FlowComponent {
     memory_fixed_bytes: 512,
     memory_bytes_per_capacity: 4,
     reload_capable: 1,
+    cubical_type_mask: 0,
 }];
 
 unsafe extern "C" fn rust_plugin_compatible(_ir: *const c_void, _comp: *const FlowComponent) -> i32 {
@@ -122,6 +123,38 @@ unsafe extern "C" fn rust_plugin_emit(_out: *mut c_void, _ir: *const c_void, _co
     1
 }
 
+unsafe extern "C" fn rust_unit_init(_host: *mut c_void, state_out: *mut *mut c_void) -> i32 {
+    if state_out.is_null() {
+        return -1;
+    }
+    *state_out = Box::into_raw(Box::new(0u64)) as *mut c_void;
+    0
+}
+
+unsafe extern "C" fn rust_unit_run(_host: *mut c_void, state: *mut c_void, input: *const c_void, output: *mut c_void) -> i32 {
+    if !state.is_null() {
+        let counter = &mut *(state as *mut u64);
+        *counter = counter.wrapping_add(1);
+    }
+    if !input.is_null() && !output.is_null() {
+        ptr::copy_nonoverlapping(input as *const u8, output as *mut u8, 8);
+    }
+    0
+}
+
+unsafe extern "C" fn rust_unit_drop(_host: *mut c_void, state: *mut c_void) {
+    if !state.is_null() {
+        let _ = Box::from_raw(state as *mut u64);
+    }
+}
+
+declare_flow_unit_plugin!(
+    name: "rust_simd_tile_unit",
+    init: rust_unit_init,
+    run: rust_unit_run,
+    drop: rust_unit_drop
+);
+
 declare_flow_plugin!(name: "rust_simd_plugin", version: "1.0.0", FlowPlugin {
     name: b"rust_simd_plugin\0".as_ptr() as *const c_char,
     version: b"1.0.0\0".as_ptr() as *const c_char,
@@ -140,5 +173,17 @@ declare_flow_plugin!(name: "rust_simd_plugin", version: "1.0.0", FlowPlugin {
     evaluate_plan: Some(rust_plugin_evaluate_plan),
     verify_plan: Some(rust_plugin_verify_plan),
     benchmark: None,
+    get_mutation_mask: None,
+    preference_mask: None,
+    contract_mask: None,
+    resource_mask: None,
+    environment_mask: None,
     create_unit: None,
+    doc_title: ptr::null(),
+    doc_responsibilities: ptr::null(),
+    doc_algorithmic_guarantee: ptr::null(),
+    doc_memory_concurrency_model: ptr::null(),
+    doc_key_apis: ptr::null(),
+    doc_layer: 1,
+    domain_context: ptr::null_mut(),
 });

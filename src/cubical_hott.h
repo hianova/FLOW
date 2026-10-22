@@ -31,8 +31,7 @@ static inline FlowDeMorganInterval flow_demorgan_or(FlowDeMorganInterval a, Flow
 static inline uint64_t flow_demorgan_word_not(uint64_t w) { return ~w; } static inline uint64_t flow_demorgan_word_and(uint64_t w1, uint64_t w2) { return w1 & w2; }
 static inline uint64_t flow_demorgan_word_or(uint64_t w1, uint64_t w2) { return w1 | w2; } typedef struct { uint64_t arrows; uint32_t dimension;
     uint8_t is_closed, reserved[3]; } FlowCubicalSieve; uint64_t flow_cubical_face_proj(uint64_t sieve, uint32_t dim_k, uint8_t endpoint);
-uint64_t flow_cubical_degeneracy(uint64_t sieve, uint32_t dim_k); static inline uint64_t flow_cubical_sieve_intersection(uint64_t s1, uint64_t s2) { return s1 & s2; }
-static inline uint64_t flow_cubical_sieve_union(uint64_t s1, uint64_t s2) { return s1 | s2; }
+uint64_t flow_cubical_degeneracy(uint64_t sieve, uint32_t dim_k);
 static inline bool flow_cubical_sieve_is_covering(uint64_t sieve, uint64_t target_basis) { return (sieve & target_basis) == target_basis; } typedef enum {
     FLOW_KAN_FILLED_HOMOTOPIC       = 0, FLOW_KAN_OBSTRUCTED_SINGULARITY = 1
 } FlowKanStatus; typedef struct { uint64_t mask_p, mask_q, boundary_filter, mismatch_mask; FlowKanStatus status; } FlowKanBox;
