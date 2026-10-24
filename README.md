@@ -36,13 +36,18 @@ FLOW fuses **Domain Intent**, **Formal Proof**, and **Native Hardware Execution*
 
 ## ✨ Why FLOW? (Core Architectural Pillars & Cost-Benefit)
 
-| Dimension | Traditional Systems / FFI Stack | FLOW Pure `.lean` Fusion |
+| Dimension | Traditional Systems / FFI Stack | FLOW Pure `.lean` × `.flow` Fusion |
 | :--- | :--- | :--- |
-| **Source of Truth** | Separate YAML config + C/Rust kernel + Python/JS FFI bindings + unit tests | **1 Pure `.lean` file** (`structure` + `def` + `theorem`) |
-| **FFI Boilerplate** | Manual `@[export]`, `extern "C"`, struct marshaling & alignment padding | **Zero `@[export]`** — theorem-anchored operator discovery & native `structure` stride inference |
-| **Correctness Guarantee** | Runtime assertions, fuzzing, or detached proofs | **Zero-`sorry` Lean 4 proof** + **QF_LIA 4-Theorem SMT Gate** (`buffer_bounds`, `memory_quota`, `shard_isolation`, `determinism`) |
-| **Concurrency & Hot-Swap** | Manual mutexes / RW-locks or process restarts | Automatic **64B cache-line-aligned QSBR** epoch lease (`< 100ns` hot-swap) |
-| **Polyglot Interop** | Per-language wrapper maintenance | Single-command 64B `FlowExtentDescriptor` zero-copy emission for C, Rust, Python, JS, CUDA, MATLAB & Julia |
+| **Source of Truth** | Separate YAML config + C/Rust kernel + Python/JS FFI bindings + unit tests | **Pure `.lean`** (`What`: Math, `structure`, `def`, `theorem`) + Optional **`.flow` Manifest** (`Where & How`: `@quota`, `@embodied`, `@reload`, `@patchbay`) |
+| **FFI & NaN Safety** | Manual `@[export]`, `extern "C"`, struct marshaling & hand-written `isfinite()` guards | **Zero `@[export]` & Auto `isfinite()` Firewall** — compiler emits `#[repr(C)]` / `ctypes.Structure`, `flow_quantize`/`flow_dequantize`, and named `FlowJetView` lenses (`view.q->hipPitch`) |
+| **Correctness & Real-Time Gate** | Runtime assertions, GC pauses, or detached proofs | **Zero-`sorry` Lean 4 proof** + **`Lean-RT` Zero-GC Gate** (rejects `List`, `Array`, closures, recursion) + **QF_LIA 4-Theorem SMT Gate** (including compositional `@patchbay` WCET & wire stride proofs) |
+| **Concurrency & Hot-Swap** | Manual mutexes / RW-locks, unverified migrations, or process restarts | Automatic **64B cache-line-aligned QSBR** epoch lease (`< 100ns` hot-swap), **Theorem-Verified State Migration** (`StateV1 -> StateV2`), and `mlock` pre-faulted arena with `-4` WCET latch |
+| **Polyglot Interop** | Per-language wrapper maintenance | Single-command 64B `FlowExtentDescriptor` & typed `structure` zero-copy emission for C, Rust, Python, JS, CUDA, MATLAB & Julia |
+
+### 🧭 `.lean` (What: Pure Math) × `.flow` (Where & How: Hardware Manifest)
+
+- **90% of applications (Pure Compute / Policy / Pricing / Ledger)**: Write **1 file (`app.lean`)**. `flowc` enforces the **`Lean-RT` Zero-GC Subset**, flattens nested `structure`s with natural C ABI alignment, lowers scalar and struct-to-struct `def`s to C17 with automatic `isfinite()` sanitization, and anchors the primary operator from your `theorem`.
+- **10% of applications (Real-Time Embodied Robotics / Multi-Stage `@patchbay` / Hot-Reload Migration)**: Pair your pure math [`plugins/embodied.lean`](plugins/embodied.lean) with a declarative runtime manifest [`plugins/embodied.flow`](plugins/embodied.flow) using `bind`, `@quota`, `@embodied`, `@reload` (`from_schema` $\to$ `to_schema`), and `@patchbay` (`stage` / `wire`) — zero C/FFI glue required.
 
 ---
 
@@ -52,10 +57,10 @@ When authoring a new FLOW project in pure `.lean`, follow these **4 deterministi
 
 | Rule | Specification & Exact Convention |
 | :--- | :--- |
-| **1. Supported Subset & 64B `structure`** | • Use zero-dependency Core Lean 4 only (**do not** `import Mathlib`; **never** use `sorry` or custom `axiom`).<br>• Primitive types map directly to C17: `UInt64` / `Nat` $\to$ `uint64_t`, `UInt32` $\to$ `uint32_t`, `Bool` $\to$ `bool`, `Float` $\to$ `double`.<br>• Define your primary `structure` with **8 × 64-bit fields (64 bytes)** so `flowc` infers `stride = 64` (1 CPU cache line). |
-| **2. Zero-`@[export]` Kernel & Full Scalar `def` Lowering** | • `flowc` scans the AST for the **last computational `def` referenced inside a `theorem`** (`spec->extern_kernel`) AND automatically lowers **all** pure scalar `def` functions (`Nat`, `UInt64`, `UInt32`, `Bool`, `Float`) into exported C17 functions (with Lean 4 saturating subtraction `flow_nat_sub` and safe division `flow_nat_div`), binding them + `STATE_FIELDS`, `LEAN_FUNCTIONS`, and `LEAN_THEOREMS` across C, Rust, Python, JS, and `--target-ui`.<br>• Standard 1PB zero-copy kernel signature (returns `0` for PASS, `1` for REJECT):<br>`def myStepKernel (baseOff byteLen stride epoch : UInt64) : UInt32 := if stride >= 64 && ... then 0 else 1` |
-| **3. Zero-Retry Proof Tactics (`decide` & `omega`)** | • **Concrete test vectors / boundary checks**: Use `:= by decide` (e.g., `theorem kernel_ok : myStepKernel 0 64 64 1 = 0 := by decide`).<br>• **Universal linear arithmetic (`∀`)**: Use `:= by omega`. **Crucial `Nat` Subtraction Rule**: Lean 4 `Nat` subtraction truncates at `0` (`a - b = 0` when `a < b`). Every theorem containing `a - b` **must** include the precondition `(h : b ≤ a)` in its signature so `omega` succeeds immediately. |
-| **4. 5-Line Zero-Copy FFI & Schema-Driven UI** | Compile via `flowc spec.lean -o build/app.c --target-python build/app.py --target-rust build/app.rs --target-ui build/app_ui.html` (or launch live via `flowy ui spec.lean`), then call any Lean `def` or extent in Python/Rust/JS:<br>`with app.LinearArray("build/libapp.so") as eng:`<br>`    out_ext = eng.process_descriptor(app.FlowExtentDescriptor(0, 1 << 50, 0, 64, 8, 1, 0))` |
+| **1. `Lean-RT` Zero-GC Subset & Nested `structure`** | • Use zero-dependency Core Lean 4 only (**do not** `import Mathlib`; **never** use `sorry`, custom `axiom`, `List`, `Array`, `String`, closures `fun x =>`, or recursive functions/inductives).<br>• Primitive types map directly to C17: `UInt64` / `Nat` $\to$ `uint64_t`, `UInt32` $\to$ `uint32_t`, `Bool` $\to$ `bool`, `Float` $\to$ `double`. Finite `inductive` enums map to `uint32_t`, and nested `structure`s flatten automatically (`a.b.c` $\to$ `a.b_c`).<br>• Built-in hardware codec intrinsics `flow_quantize (val scale offset min_q max_q)` and `flow_dequantize (q scale offset)` lower directly to branchless C17 helpers. |
+| **2. Zero-`@[export]` Kernel, Scalar & Struct `def` Lowering** | • `flowc` scans the AST for the **last computational `def` referenced inside a `theorem`** (`spec->extern_kernel`) AND automatically lowers **all** pure scalar `def`s and struct-to-struct `def`s (`def f (s : InStruct) : OutStruct := { ... }`) into exported C17 functions (with `flow_nat_sub`, `flow_nat_div`, and `isfinite()` field sanitization), emitting typed `ctypes.Structure` (Python) and `#[repr(C)] pub struct` (Rust).<br>• Standard 1PB zero-copy kernel signature (returns `0` for PASS, `1` for REJECT):<br>`def myStepKernel (baseOff byteLen stride epoch : UInt64) : UInt32 := if stride >= 64 && ... then 0 else 1` |
+| **3. Zero-Retry Proof Tactics (`decide` & `omega`)** | • **Concrete test vectors / boundary checks**: Use `:= by decide` (e.g., `theorem kernel_ok : myStepKernel 0 64 64 1 = 0 := by decide`).<br>• **Universal linear arithmetic (`∀`) & State Migration Conservation**: Use `:= by omega` (e.g., `theorem conserve (s : StateV1) : (migrateV1ToV2 s).accum = s.accum := by rfl`). **Crucial `Nat` Subtraction Rule**: Lean 4 `Nat` subtraction truncates at `0` (`a - b = 0` when `a < b`). Every theorem containing `a - b` **must** include `(h : b ≤ a)` in its signature. |
+| **4. 5-Line Zero-Copy FFI, `@patchbay` & Schema-Driven UI** | Compile via `flowc spec.lean -o build/app.c --target-python build/app.py --target-rust build/app.rs --target-ui build/app_ui.html` (or launch live via `flowy ui spec.lean`), then call any Lean `def`, `migrate_state`, `run_patchbay`, or extent in Python/Rust/JS:<br>`with app.LinearArray("build/libapp.so") as eng:`<br>`    out_ext = eng.process_descriptor(app.FlowExtentDescriptor(0, 1 << 50, 0, 64, 8, 1, 0))` |
 
 ### Plain-Language Guide to `flowc` / `flowy` CLI Output
 
@@ -73,7 +78,7 @@ When authoring a new FLOW project in pure `.lean`, follow these **4 deterministi
 ### 1. Build & Run All 8 Domain Test Suites
 
 ```sh
-# Build libflow.a, flowc, flowy, and domain plugins (libflow_embodied.so, libflow_swarm.so)
+# Build libflow.a, flowc, flowy, and domain plugins (libflow_embodied.so)
 make -j4 all
 
 # Run all 8 native domain test suites (Brain, Body, Concurrency, Fvec-Swarm, System, Core, Axiom, HoTT)
@@ -101,24 +106,39 @@ theorem zmp_torque_safe : stepReflex 0 24 24 1 = 0 := by decide
 end Embodied.GaitReflex
 ```
 
-Compile, verify, and execute directly or emit polyglot zero-copy adapters and schema-driven Control Plane UI:
+Compile, verify, and execute directly or emit polyglot zero-copy adapters and the algorithmic Control Plane UI:
 
 ```sh
 # Directly verify, synthesize C + QSBR wrapper, and execute via flowy
 ./build/flowy run reflex.lean
 
-# Synthesize and serve the schema-driven HTML5 Control Plane & SoD Ledger UI (or --selftest)
+# One-command Multi-Language SDK Bundle: builds build/libreflex.so + build/reflex.h + build/reflex_abi.py + build/flow_reflex.m
+./build/flowy build --shared reflex.lean
+
+# Synthesize and serve the Algorithmic Control Plane (2D Skyline Bin-Packing + Sugiyama DAG + Watchdog E-Stop + Compliance Certificate Export)
 ./build/flowy ui reflex.lean --selftest
 
-# Emit C header, Rust, Python, CUDA, JS, HTML5 UI, and Lean 4 reflection certificate
+# Or manually emit individual targets (C header with FlowStatusCode, Rust, Python, IR-driven MATLAB, CUDA, JS, UI, and Lean 4 certificate)
 ./build/flowc reflex.lean -o build/reflex.c \
     --target-c-header build/reflex.h \
     --target-rust build/reflex.rs \
     --target-python build/reflex.py \
+    --target-matlab build/flow_reflex.m \
     --target-cuda build/reflex.cuh \
     --target-js build/reflex.js \
     --target-ui build/reflex_ui.html
 ```
+
+### 3. Six-Persona Application-Layer Experience
+
+| Persona | Primary Entrypoint | Key Capabilities |
+| :--- | :--- | :--- |
+| **C / Firmware Engineer** | `flowc --target-c-header` / `flowy build --shared` | Standard C17 `typedef struct`/`enum`, `FlowStatusCode` (`FLOW_OK = 0` .. `FLOW_ERR_WATCHDOG_ESTOP = -4`), `flow_quantize`/`flow_dequantize`, `flow_<id>_run_patchbay`, `flow_<id>_reset_watchdog` |
+| **Python / AI Engineer** | `flowy build --shared` $\to$ `import <stem>_abi` | Zero-copy `ctypes.Structure` auto-marshaling (accepts `dict`/`tuple`/`Structure`), `run_patchbay`, `migrate_state`, `trip_watchdog_for_test` & `reset_watchdog` |
+| **MATLAB Control Engineer** | `flowc --target-matlab` / `flowy build --shared` | Full IR-driven Handle Class (`flow_<id>.m`) with all `.lean` operators, enum constants, `runPatchbay`, `migrateState`, `tripWatchdog` & `resetWatchdog` |
+| **Blue-Collar Field Tech** | `flowy ui <spec>` (Panel 0 & Panel 1) | Sugiyama zero-crossing `@patchbay` DAG with per-stage WCET budget bars, live `WATCHDOG: NOMINAL` / `E-STOP LATCHED (-4)` indicator, and `Trip E-Stop` / `Reset Watchdog` buttons |
+| **White-Collar Risk / Compliance** | `flowy ui <spec>` (Panel 2 & Panel 3) | 2D Skyline bin-packed operator cards with `FORMAL SAFETY GATE` & `✓ theorem` badges, enum dropdowns, nested struct inputs, SoD dual-signature ledger & `Export Audit JSON` |
+| **Executive / CTO** | `./build/flowy audit` & `Export Compliance Certificate` | 1-second architectural & SMT soundness audit (`Leaks: 0 | Modularity: 1.00 | SMT: QF_LIA SOUND`) + one-click JSON Compliance Certificate & SoD Liability Ledger download |
 
 ### 3. Real-World Production Blueprints & Benchmarks
 

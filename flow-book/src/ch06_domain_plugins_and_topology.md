@@ -4,14 +4,16 @@
 
 ---
 
-## 6.1 雙層插件架構 (`src/plugin.h`, `src/primitive.h`, `plugins/`)
+## 6.1 15 模組正交核心與插件架構 (`src/plugin.h`, `plugins/`)
 
-為維持核心引擎（`src/`）的純潔性，所有特定硬體與領域知識皆透過嚴格的插件介面隔離：
+為維持核心引擎（`src/` 15 個正交模組家族）的純潔性，所有特定硬體與領域知識皆透過嚴格的插件介面（`plugins/` 3 個正交模組）隔離：
 
-- **高階語義函子插件（`FlowPlugin`）**：
-  實作 `lower_domain_semantics(spec, ir, plugin)`，例如 [`plugins/embodied.c`](../../plugins/embodied.c) 將 `.lean` 中的 `namespace Embodied.*` 自動降階為 1000Hz 控制迴圈與 ZMP 穩定約束。
-- **極簡 3-函數硬體原語驅動（`FlowPrimitiveDriver`）**：
-  僅需實作 `register_primitive`、`get_hardware_bounds`、`execute_primitive` 三個函數，即可掛載如 SocketCAN/CAN-FD（[`plugins/driver_can.c`](../../plugins/driver_can.c)）或 1000Hz IMU 濾波器（[`plugins/driver_imu.c`](../../plugins/driver_imu.c)）。
+- **高階語義函子插件（`FlowPlugin` + `FLOW_DEFINE_PLUGIN_DESCRIPTOR`）**：
+  實作 `lower_domain_semantics(spec, ir, plugin)`，例如 [`plugins/embodied.c`](../../plugins/embodied.c) 配合 [`plugins/embodied.lean`](../../plugins/embodied.lean) 與 [`plugins/embodied.flow`](../../plugins/embodied.flow) 將領域意圖降階為 1000Hz 控制迴圈、`fallback emergency_stop` 硬即時看門狗與 ZMP 穩定約束，並透過一行 `FLOW_DEFINE_PLUGIN_DESCRIPTOR` 自動完成靜態與 DSO 雙模式註冊。
+- **極簡宣告式硬體原語驅動（`FlowPrimitiveDriver` + `FLOW_DEFINE_PRIMITIVE_DRIVER`）**：
+  僅需提供單一 `execute` 函數並呼叫一行 `FLOW_DEFINE_PRIMITIVE_DRIVER(...)`，即可零樣板掛載 SocketCAN/CAN-FD（[`plugins/driver_can.c`](../../plugins/driver_can.c)）或 1000Hz IMU 濾波器（[`plugins/driver_imu.c`](../../plugins/driver_imu.c)）。
+- **具名相空間視圖（`FLOW_JET_DEFINE_NAMED_VIEW`）與多語 SDK 一鍵封裝（`flowy build --shared`）**：
+  將 `FlowJet` 的 `q[] / p[] / a[]` 直接映射為具名 C 結構指標（如 `view.q->hipPitch`），並透過 `./build/flowy build --shared <spec>` 一鍵產出包含 `FlowStatusCode` 與 `reset_watchdog` 的 `.so`、`.h`、Python `_abi.py` 與完整 IR 驅動的 MATLAB `flow_<id>.m`。
 
 ---
 

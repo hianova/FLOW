@@ -46,7 +46,7 @@ static int builtin_enumerate_dimensions(const SemanticIR *ir, const Component *c
 static int builtin_evaluate_plan(const SemanticIR *ir, const Component *c, const FlowPlanAssignment *plan, FlowPlanMetrics *m) { if (!m || !c || !plan) return 0;
     size_t cap = plan->count > 0 ? (size_t)plan->values[0] : (size_t)ir->input_max_count, thr = plan->count > 1 ? (size_t)plan->values[1] : 1, shd = plan->count > 2 ? (size_t)plan->values[2] : 1, est = 0;
     if (!cap) cap = 1; if (!thr) thr = 1; if (!shd) shd = 1; (void)builtin_memory_model(ir, c, cap, shd, &est);
-    double t_cap = (ir && ir->input_max_count > 0 && ir->input_max_count < 4096) ? (double)ir->input_max_count : 4096.0;
+    double t_cap = (ir && ir->input_max_count > 0) ? (double)ir->input_max_count : 4096.0;
     double d_cap = ((double)cap < t_cap) ? ((t_cap - (double)cap) * 50.0) : (((double)cap - t_cap) * 0.1);
     double d_thr = fabs((double)thr - (double)builtin_target_threads(ir)) * 20.0, d_shd = fabs((double)shd - ((ir && ir->state_shared) ? 16.0 : 1.0)) * 50.0;
     *m = (FlowPlanMetrics){ .capacity = cap, .threads = thr, .shards = shd, .memory_bytes = est, .latency_score = (double)c->latency_score, .throughput_score = (double)thr * (11.0 - (double)c->latency_score), .energy = (double)est / 1024.0 + (double)c->latency_score * 2.0 + d_cap + d_thr + d_shd };

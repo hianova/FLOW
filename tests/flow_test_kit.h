@@ -163,7 +163,7 @@ typedef struct {
  * calling a verifier, so a verifier that never writes proof_out cannot pass
  * FLOW_ASSERT_SMT_SOUND by accident (FLOW_SMT_PROVEN_UNSAT == 0).
  */
-#define FLOW_SMT_PROOF_POISON(proof) memset(&(proof), 0xA5, sizeof(proof))
+#define FLOW_SMT_PROOF_POISON(proof_ptr) memset((proof_ptr), 0xA5, sizeof(*(proof_ptr)))
 
 #define FLOW_ASSERT_STR_EQ(a, b) \
     do { \

@@ -36,38 +36,45 @@ end Embodied.GaitReflex
 
 ---
 
-### 路徑 B：宣告式 `.flow`（管線拓樸與硬體邊界合約）
+### 路徑 B：宣告式 `.flow` 硬體與執行期清單（Where & How：90% 純 `.lean` vs. 10% `.lean` + `.flow`）
 
-對於純資料流管線配置，使用者也可撰寫輕量的 `.flow` 區塊（或嵌入於 Markdown 的 ```` ```flow ```` 區塊中）：
+對於 90% 的純演算法、金融定價與權限引擎，**單一 `.lean` 檔案即為全部**；而當系統需要綁定實體感測器驅動（IMU / SocketCAN）、嚴格微秒級 SLA 預算或自訂 QSBR 熱重載策略時，只需撰寫宣告式 `.flow` 清單（如 [`plugins/embodied.flow`](../../plugins/embodied.flow)），透過 `bind` 直接吸收 `.lean` 的純數學核心，徹底分離 **What（數學定律）** 與 **Where & How（硬體拓樸與執行期約束）**：
 
 ```flow
-project realtime_ranking
+project embodied_reflex
+bind "plugins/embodied.lean"
 
-input user_scores {
-    max_count 4096
-    stride 64
-    align 64
-}
-
-state score_table {
-    shared
-    read_heavy
-    bounded
-}
-
-flow ranking_pipeline {
-    user_scores -> sort -> top
-}
-
-require {
+@quota {
     deterministic
-    memory < 64mb
+    lean_certified
+    deadline 200us
+    arena 64kb
+    memory < 16mb
+    fallback emergency_stop
 }
 
-prefer {
-    latency
+@embodied {
+    frequency 1khz
+    symplectic
+    max_drift 0.5%
+    zmp_margin 0.02
+    ingress sensor_imu_6dof
+    egress socketcan_fd
+    coordinates [hipPitch, hipRoll, kneePitch, anklePitch, ankleRoll, torsoYaw, comX, comY]
+}
+
+@reload {
+    schema_version 2
+    qsbr_timeout 5ms
+    migrate embodiedStepKernel
 }
 ```
+
+此外，`@reload` 支援跨結構形式化狀態遷移（`from_schema StateV1`、`to_schema StateV2` 與 `migrate migrateV1ToV2`），而當多個實時 `.lean` 模組（例如感測器濾波、步態反射、扭矩限幅）需串接為零拷貝流水線時，可在 `.flow` 中使用 `@patchbay` 區塊宣告拓樸與各階段 WCET 預算：
+- `stage <name> bind "<lean_path>" fn <fn_name> in <InStruct> out <OutStruct> wcet <time>`
+- `wire <stage_1> -> <stage_2> -> <stage_3>`
+
+`flowc` 會在編譯期自動驗證相鄰階段之 `OutStruct == InStruct` 與 byte stride 一致性、以 AST 指令成本模型推導靜態 WCET 下界，並由 SMT 證明總和延遲 $\sum \text{wcet}_i \le \text{deadline}$。同時，在將 `.lean` 的 `Float` 函數與結構轉換函數降階為 C17 時，會**自動注入 `!isfinite()` NaN/Inf 防火牆**與具名相空間視圖 `FlowJetView_<flow_name>`（`view.q->hipPitch`）。
 
 ---
 
@@ -75,14 +82,17 @@ prefer {
 
 為了讓人類開發者與 AI Agent **一次編譯通過（零重試、不浪費推理 Token）**，撰寫 FLOW `.lean` 時請直接遵循以下四條鐵律：
 
-### 鐵律 1：只使用零依賴 Core Lean 4 子集與 64B 對齊 `structure`
-- **禁止外部套件**：不要寫 `import Mathlib`，FLOW 使用自給自足的原生 Lean 4 核心型別。
-- **C17 型別直接映射**：
+### 鐵律 1：遵守 `Lean-RT` 零 GC 實時子集、巢狀 `structure` 展平與硬體編解碼內建函數
+- **禁止外部套件與動態配置（`Lean-RT` Zero-GC Gate）**：不要寫 `import Mathlib`，且嚴格禁止 `List`、`Array`、`ByteArray`、`String`、高階閉包（`fun x =>`）、自遞迴函數或遞迴 `inductive` 型別。這確保所有算子皆為 O(1) 堆疊記憶體與零 GC 暫停。
+- **C17 型別直接映射與巢狀 `structure` / 有限 `inductive` 支援**：
   - `UInt64` / `Nat` $\longrightarrow$ `uint64_t` (8 bytes)
   - `UInt32` $\longrightarrow$ `uint32_t` (4 bytes)
   - `Bool` $\longrightarrow$ `bool`
   - `Float` $\longrightarrow$ `double` (8 bytes)
-- **最佳實踐**：將主狀態 `structure` 設計為 **8 個 `UInt64` 欄位（共 64 bytes）**，剛好對齊單一 CPU Cache Line（`stride = 64, align = 8`）。
+  - 有限列舉 `inductive Mode | Idle | Torque` $\longrightarrow$ `uint32_t` (`0, 1, ...`)
+  - 巢狀 `structure`（如 `GaitFrame` 內含 `ImuSample`）與鏈式欄位存取（`f.imu.ax`）會自動展平為自然對齊之 C ABI 結構（`f.imu_ax`），並自動產生對應的 Python `ctypes.Structure` 與 Rust `#[repr(C)] pub struct`。
+- **硬體量化與反量化內建函數**：直接呼叫 `flow_quantize val scale offset min_q max_q`（`Float -> UInt64`）與 `flow_dequantize q scale offset`（`UInt64 -> Float`），`flowc` 會自動降階為無分支飽和 C17 硬體轉換指令。
+- **最佳實踐**：將主狀態 `structure` 設計為 **8 個 `UInt64`/`Float` 欄位（共 64 bytes）**，剛好對齊單一 CPU Cache Line（`stride = 64, align = 8`）。
 
 ### 鐵律 2：用 `:= by decide` 與 `:= by omega` 一行秒殺證明（注意 `Nat` 減法陷阱！）
 - **常數驗收（Concrete Vectors）**：只要定理中全部是具體數字（例如驗證邊界測試向量），一律在結尾寫 `:= by decide`。

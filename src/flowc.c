@@ -1,7 +1,6 @@
 #include "backend.h"
 #include "flow.h"
 #include "registry.h"
-#include "search.h"
 #include "bitspace.h"
 #include "abi.h"
 #include "smt.h"
@@ -12,10 +11,6 @@
 #include <string.h>
 #include <time.h>
 #include <math.h>
-static int resolve_and_load_plugin(const char *mod_name) { if (!mod_name || !mod_name[0]) return 0; if (flow_registry_lookup(mod_name)) return 1;
-    const char *base = strncmp(mod_name, "flow.", 5) == 0 ? mod_name + 5 : mod_name; static const char *const PATS[6] = {
-        "build/libflow_%s.so", "build/libflow_%s.dylib", "libflow_%s.so", "libflow_%s.dylib", "build/lib%s.so", "build/lib%s.dylib" }; char path[256], err_msg[256] = {0};
-    for (int i = 0; i < 6; ++i) { snprintf(path, sizeof(path), PATS[i], base); if (flow_registry_load_dso(path, err_msg, sizeof(err_msg))) return 1; } return 0; }
 static void flowc_print_usage(FILE *out) { fprintf(out, "FLOW Modern Declarative Compiler (flowc) v2.5.0\n"
         "Usage: flowc <input.flow> [-o <output.c>] [options]\n"
         "  -o <output.c>            Target C source path (default: <input>.c)\n"
@@ -26,7 +21,7 @@ static void flowc_print_usage(FILE *out) { fprintf(out, "FLOW Modern Declarative
         "  --seed <N>               Deterministic PRNG seed\n"
         "  --component <id>         Manually pin component implementation\n"
         "  --target-rust/python/c-header/lean/llvm-ir/mlir/ui <file>\n"); } static int validate_and_lower_module(const char *mod_name, const FlowSpec *spec, SemanticIR *ir) {
-    resolve_and_load_plugin(mod_name); const FlowPlugin *module = flow_registry_lookup(mod_name); char err_msg[128] = {0};
+    flow_registry_resolve_plugin(mod_name); const FlowPlugin *module = flow_registry_lookup(mod_name); char err_msg[128] = {0};
     if (!module) { fprintf(stderr, "flowc: imported domain module '%s' not registered\n", mod_name); return 0; } flow_plugin_lower_semantics(spec, ir, module);
     if (!flow_component_validate_contract(ir, module, err_msg, sizeof(err_msg))) {
         fprintf(stderr, "flowc: module '%s' contract validation failed: %s\n", mod_name, err_msg[0] ? err_msg : "invalid domain contract"); return 0; } return 1; }
@@ -109,18 +104,42 @@ int flowc_main(int argc, char **argv) { const char *input_path = NULL, *output_p
     }
     if (use_reload_adapter && !flow_component_supports_reload(component)) { fprintf(stderr, "flowc: --reload-adapter is not supported by component '%s'\n", component->id); flow_ir_cleanup(&ir); return EXIT_FAILURE; }
     if (!verify_candidate(&ir, component, use_search ? &search : NULL, &verification)) { fprintf(stderr, "flowc: verifier: %s\n", verification.message); flow_ir_cleanup(&ir); return EXIT_FAILURE; }
+    FlowSMTProofAttestation proof = {0}; FlowPlanMetrics smt_m = search.metrics;
+    if (!smt_m.capacity) smt_m.capacity = verification.capacity > 0 ? verification.capacity : (size_t)(ir.input_max_count > 0 ? ir.input_max_count : 4096);
+    if (!smt_m.shards) smt_m.shards = (use_search && search.shards > 0) ? (size_t)search.shards : 1;
+    if (!smt_m.threads) smt_m.threads = (use_search && search.threads > 0) ? (size_t)search.threads : 1;
+    if (!smt_m.memory_bytes && verification.estimated_bytes > 0) smt_m.memory_bytes = verification.estimated_bytes;
+    int smt_ok = flow_smt_verify(&ir, component, use_search ? &search.assignment : NULL, &smt_m, &proof);
+    FlowSMTResult status = (!smt_ok || proof.buffer_bounds_safety == FLOW_SMT_VIOLATION_SAT || proof.memory_quota_bound == FLOW_SMT_VIOLATION_SAT || proof.shard_non_aliasing == FLOW_SMT_VIOLATION_SAT || proof.determinism_invariant == FLOW_SMT_VIOLATION_SAT) ? FLOW_SMT_VIOLATION_SAT : ((proof.buffer_bounds_safety != FLOW_SMT_PROVEN_UNSAT || proof.memory_quota_bound != FLOW_SMT_PROVEN_UNSAT || proof.shard_non_aliasing != FLOW_SMT_PROVEN_UNSAT || proof.determinism_invariant != FLOW_SMT_PROVEN_UNSAT) ? FLOW_SMT_UNKNOWN : FLOW_SMT_PROVEN_UNSAT);
+    if (status != FLOW_SMT_PROVEN_UNSAT) {
+        fprintf(stderr, "flowc: SMT proof failed: status=%s (%s)\n", flow_smt_result_name(status), proof.proof_summary);
+        flow_ir_cleanup(&ir); return EXIT_FAILURE;
+    }
     FILE *output = fopen(output_path, "w");
     if (!output) { fprintf(stderr, "flowc: cannot write %s: %s\n", output_path, strerror(errno)); flow_ir_cleanup(&ir); return EXIT_FAILURE; }
     int generated_ok = emit_c(output, &ir, component, use_search ? &search : NULL, &verification, use_reload_adapter);
     if (fclose(output) != 0 || !generated_ok) { fprintf(stderr, "flowc: failed to generate %s\n", output_path); flow_ir_cleanup(&ir); return EXIT_FAILURE; }
     if (profile_out && use_search) { FILE *pf = fopen(profile_out, "w");
         if (!pf) { fprintf(stderr, "flowc: cannot write profile %s: %s\n", profile_out, strerror(errno)); flow_ir_cleanup(&ir); return EXIT_FAILURE; }
-        if (strstr(profile_out, ".fvec")) { fclose(pf); FlowVecHeader hdr = {
+        if (strstr(profile_out, ".fvec")) { fclose(pf);
+            FlowBitSpace fvec_space; uint64_t hard_mask = UINT64_MAX, soft_bias = 0;
+            if (flow_bitspace_init_for_ir(&ir, &fvec_space) && fvec_space.global_canvas.hard_composite_mask) {
+                hard_mask = fvec_space.global_canvas.hard_composite_mask;
+                soft_bias = fvec_space.global_canvas.soft_composite_bias;
+            }
+            FlowVecHeader hdr = {
                 .magic = "FVEC_V1", .origin_hardware = "x86_avx2, L1=64K, Cores=64", .trigger_intent = "UNIVERSAL_LOCK", .category = "UNIVERSAL_LOCK",
-                .smt_signature = "BUFFER_UNSAT:MEM_UNSAT:SHARD_UNSAT:DET_UNSAT", .energy_score = search.energy, .created_at_unix = (uint64_t)time(NULL),
-                .vector_dim = 16, .payload_size = sizeof(FlowVecPayload) }; snprintf(hdr.id, sizeof(hdr.id), "lock_%s", ir.flow_name);
+                .energy_score = search.energy, .created_at_unix = (uint64_t)time(NULL),
+                .vector_dim = FLOW_VAULT_DIM, .payload_size = sizeof(FlowVecPayload) };
+            snprintf(hdr.smt_signature, sizeof(hdr.smt_signature), "%s:%s:%s:%s",
+                     proof.buffer_bounds_safety == FLOW_SMT_PROVEN_UNSAT ? "BUFFER_UNSAT" : "BUFFER_SAT",
+                     proof.memory_quota_bound == FLOW_SMT_PROVEN_UNSAT ? "MEM_UNSAT" : "MEM_SAT",
+                     proof.shard_non_aliasing == FLOW_SMT_PROVEN_UNSAT ? "SHARD_UNSAT" : "SHARD_SAT",
+                     proof.determinism_invariant == FLOW_SMT_PROVEN_UNSAT ? "DET_UNSAT" : "DET_SAT");
+            snprintf(hdr.id, sizeof(hdr.id), "lock_%s", ir.flow_name);
             snprintf(hdr.name, sizeof(hdr.name), "Universal Lockfile [%s]", ir.flow_name); snprintf(hdr.component_id, sizeof(hdr.component_id), "%s", component->id);
-            FlowVecPayload payload = { .pure_genome = search.genome, .hard_composite_mask = UINT64_MAX, .proof = {FLOW_SMT_PROVEN_UNSAT, FLOW_SMT_PROVEN_UNSAT, FLOW_SMT_PROVEN_UNSAT, FLOW_SMT_PROVEN_UNSAT, "UNIVERSAL_LOCK_PROVEN"} };
+            FlowVecPayload payload = { .pure_genome = search.genome & hard_mask, .hard_composite_mask = hard_mask, .soft_composite_bias = soft_bias, .proof = proof };
+            flow_fvec_embed_prompt(ir.flow_name, payload.features);
             payload.crc32 = flow_fvec_crc32(&payload, sizeof(payload) - sizeof(uint32_t)); flow_fvec_write_file(profile_out, &hdr, &payload);
         } else if (strstr(profile_out, ".flowplan") || strstr(profile_out, ".lock")) { FlowBitSpace space; flow_bitspace_init_for_ir(&ir, &space);
             FlowPlan plan; space.decode(&space, search.genome, &plan); FlowPlanArtifact artifact; flow_plan_to_artifact(&plan, &ir, seed, &artifact);
@@ -161,10 +180,7 @@ int flowc_main(int argc, char **argv) { const char *input_path = NULL, *output_p
         EMIT_TARGET(target_mlir, "target-mlir", flow_emit_mlir(fp, &ir, component, use_search ? &search : NULL, &verification));
         EMIT_TARGET(target_llvm_ir, "target-llvm-ir", flow_emit_llvm_ir(fp, &ir, component, use_search ? &search : NULL, &verification));
         #undef EMIT_TARGET
-    } FlowSMTProofAttestation proof; FlowPlanMetrics smt_m = search.metrics;
-    if (!smt_m.capacity) smt_m.capacity = (size_t)(ir.input_max_count > 0 ? ir.input_max_count : 4096); if (!smt_m.shards) smt_m.shards = 1;
-    flow_smt_verify(&ir, component, &search.assignment, &smt_m, &proof);
-    FlowSMTResult status = (proof.buffer_bounds_safety == FLOW_SMT_VIOLATION_SAT || proof.memory_quota_bound == FLOW_SMT_VIOLATION_SAT || proof.shard_non_aliasing == FLOW_SMT_VIOLATION_SAT || proof.determinism_invariant == FLOW_SMT_VIOLATION_SAT) ? FLOW_SMT_VIOLATION_SAT : ((proof.buffer_bounds_safety == FLOW_SMT_UNKNOWN || proof.determinism_invariant == FLOW_SMT_UNKNOWN) ? FLOW_SMT_UNKNOWN : FLOW_SMT_PROVEN_UNSAT);
+    }
     printf("  SMT proof: status=%s (%s)\n", flow_smt_result_name(status), proof.proof_summary); flow_ir_cleanup(&ir); return EXIT_SUCCESS; }
 #ifndef FLOWC_NO_MAIN
 int main(int argc, char **argv) { return flowc_main(argc, argv); }

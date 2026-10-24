@@ -4,15 +4,26 @@
 #include "smt.h"
 #include "flowy.h"
 #include "jit.h"
-#include "adaptive.h"
 #include "abi.h"
 #include "backend.h"
 #include "reload.h"
 #include "security.h"
+#include "flow_jet.h"
+#include "topology.h"
+#include "cubical_hott.h"
+#include "hardware_telemetry.h"
+#include "token_ring.h"
+#include "flowy_fvec.h"
 
+#include <dlfcn.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+
+typedef struct { double hipPitch, hipRoll, kneePitch, anklePitch, ankleRoll, torsoYaw, comX, comY; } TestEmbodiedCoords;
+FLOW_JET_DEFINE_NAMED_VIEW(TestEmbodiedJetView, TestEmbodiedCoords)
 
 static int unit_zero_init(void *host, void **state_out) {
     (void)host;
@@ -1005,6 +1016,9 @@ int main(void) {
             "def canApprove\n"
             "    (creator : Nat) (approver : Nat) (tier : Nat) (deficit : Nat) : Bool :=\n"
             "  creator != 0 && approver != 0 && creator != approver && deficit <= tierLimit tier\n"
+            "def signedDelta (a : Int) (b : Int) : Int := a - b\n"
+            "def bitPrec (a : UInt64) (b : UInt64) (c : UInt64) : UInt64 := a ||| b &&& c\n"
+            "def powRightAssoc (x : Nat) : Nat := x ^ 3 ^ 2\n"
             "def stepLedgerKernel (baseOff : UInt64) (byteLen : UInt64) (stride : UInt64) (epoch : UInt64) : UInt32 :=\n"
             "  if stride >= 24 && epoch > 0 && baseOff + byteLen >= baseOff then 0 else 1\n"
             "theorem deficit_zero_when_within_budget : slackDeficit 20 30 60 = 0 := by decide\n"
@@ -1023,7 +1037,7 @@ int main(void) {
         FLOW_ASSERT_TRUE(parse_spec(sl_fp, &s_spec));
         fclose(sl_fp);
 
-        FLOW_ASSERT_EQ(s_spec.lean_function_count, 6);
+        FLOW_ASSERT_EQ(s_spec.lean_function_count, 9);
         FLOW_ASSERT_EQ(s_spec.lean_theorem_count, 2);
         FLOW_ASSERT_STR_EQ(s_spec.lean_functions[0].name, "totalDrift");
         FLOW_ASSERT_STR_EQ(s_spec.lean_functions[1].name, "slackDeficit");
@@ -1058,7 +1072,7 @@ int main(void) {
         FLOW_ASSERT_TRUE(flow_abi_emit_python_adapter(spy_fp, &s_abi));
         fputs("\nif __name__ == '__main__':\n"
               "    with LinearArray('/tmp/libflow_test_scalar.so') as eng:\n"
-              "        assert len(eng.LEAN_FUNCTIONS) == 6\n"
+              "        assert len(eng.LEAN_FUNCTIONS) == 9\n"
               "        assert len(eng.LEAN_THEOREMS) == 2\n"
               "        assert eng.totalDrift(120, 80) == 200\n"
               "        assert eng.slackDeficit(20, 30, 60) == 0\n"
@@ -1067,11 +1081,91 @@ int main(void) {
               "        assert eng.safeRatio(100, 0) == 0 and eng.safeRatio(100, 4) == 25\n"
               "        assert eng.canApprove(10, 20, 2, 250) is True\n"
               "        assert eng.canApprove(10, 10, 2, 250) is False\n"
-              "        assert eng.canApprove(-5, 20, 2, 250) is False\n", spy_fp);
+              "        assert eng.signedDelta(3, 10) == -7\n"
+              "        assert eng.bitPrec(1, 6, 3) == (1 | (6 & 3))\n"
+              "        assert eng.powRightAssoc(2) == 512\n"
+              "        try:\n"
+              "            eng.canApprove(-5, 20, 2, 250)\n"
+              "            assert False, 'Expected ValueError for negative Nat'\n"
+              "        except ValueError:\n"
+              "            pass\n"
+              "        bad_ext = FlowExtentDescriptor(base_offset=0, byte_length=64, stride_bytes=8, align_bytes=8)\n"
+              "        try:\n"
+              "            eng.process_descriptor(bad_ext)\n"
+              "            assert False, 'Expected RuntimeError from failing extern_kernel'\n"
+              "        except RuntimeError:\n"
+              "            pass\n", spy_fp);
         fclose(spy_fp);
 
         FLOW_ASSERT_EQ(system("python3 /tmp/flow_test_scalar.py"), 0);
         FLOW_ASSERT_EQ(system("./build/flowy ui /tmp/flow_test_scalar.lean --selftest >/dev/null"), 0);
+
+        /* Verify Lean theorem evaluator rejects false theorems and comment-evaded certificates (V5, L1-L3) */
+        const char *false_lean =
+            "namespace Flow.FalseTest\n"
+            "structure BadState where\n"
+            "  x : UInt64\n"
+            "def addOne (a : Nat) : Nat := a + 1\n"
+            "theorem bogus_claim : addOne 1 = 3 := by decide\n"
+            "end Flow.FalseTest\n";
+        FILE *fl_fp = fopen("/tmp/flow_false_thm.lean", "w");
+        FLOW_ASSERT_TRUE(fl_fp != NULL);
+        fputs(false_lean, fl_fp);
+        fclose(fl_fp);
+        fl_fp = fopen("/tmp/flow_false_thm.lean", "r");
+        FLOW_ASSERT_TRUE(fl_fp != NULL);
+        FlowSpec f_spec;
+        memset(&f_spec, 0, sizeof(f_spec));
+        FLOW_ASSERT_FALSE(parse_spec(fl_fp, &f_spec));
+        fclose(fl_fp);
+        FLOW_ASSERT_NE(system("./build/flowc /tmp/flow_false_thm.lean >/dev/null 2>&1"), 0);
+        remove("/tmp/flow_false_thm.lean");
+
+        /* Verify parameterized false decide and omega theorems are rejected (L1) */
+        FILE *bad_param_fp = tmpfile();
+        FLOW_ASSERT_TRUE(bad_param_fp != NULL);
+        fputs("namespace Flow.BadParam\ndef idNat (x : Nat) : Nat := x\ntheorem bad_param (x : Nat) : idNat x = 1 := by decide\nend Flow.BadParam\n", bad_param_fp);
+        rewind(bad_param_fp);
+        FlowSpec bp_spec;
+        memset(&bp_spec, 0, sizeof(bp_spec));
+        FLOW_ASSERT_FALSE(parse_spec(bad_param_fp, &bp_spec));
+        fclose(bad_param_fp);
+
+        FILE *bad_omega_fp = tmpfile();
+        FLOW_ASSERT_TRUE(bad_omega_fp != NULL);
+        fputs("namespace Flow.BadOmega\ntheorem bad_omega (a : Nat) (b : Nat) (h : b <= a) : a - b = a + 1 := by omega\nend Flow.BadOmega\n", bad_omega_fp);
+        rewind(bad_omega_fp);
+        FlowSpec bo_spec;
+        memset(&bo_spec, 0, sizeof(bo_spec));
+        FLOW_ASSERT_FALSE(parse_spec(bad_omega_fp, &bo_spec));
+        fclose(bad_omega_fp);
+
+        /* Verify flow_registry_load_dso rejects non-ELF/Mach-O and world-writable DSOs (E7) */
+        const char *fake_dso = "/tmp/flow_fake_header_test.so";
+        FILE *fk_fp = fopen(fake_dso, "wb");
+        FLOW_ASSERT_TRUE(fk_fp != NULL);
+        fputs("NOT_AN_ELF_OR_MACHO_BINARY", fk_fp);
+        fclose(fk_fp);
+        char dso_err[256] = {0};
+        FLOW_ASSERT_FALSE(flow_registry_load_dso(fake_dso, dso_err, sizeof(dso_err)));
+        FLOW_ASSERT_TRUE(strstr(dso_err, "header") != NULL || strstr(dso_err, "world-writable") != NULL);
+        remove(fake_dso);
+
+        const char *comment_cheat_lean =
+            "-- structure ExtentDescriptor where\n"
+            "/- theorem theorem7_pb_extent_monotonic_step\n"
+            "   theorem theorem8_qsbr_epoch_lease_safety\n"
+            "   theorem theorem9_neutral_stride_align\n"
+            "   theorem theorem10_pb_extent_inductive_steps\n"
+            "   theorem state_preservation_locked_margin -/\n";
+        const char *cheat_path = "/tmp/flow_cheat_cert.lean";
+        FILE *ch_fp = fopen(cheat_path, "w");
+        FLOW_ASSERT_TRUE(ch_fp != NULL);
+        fputs(comment_cheat_lean, ch_fp);
+        fclose(ch_fp);
+        char cheat_err[256] = {0};
+        FLOW_ASSERT_FALSE(flow_abi_audit_lean_certificate(cheat_path, cheat_err, sizeof(cheat_err)));
+        remove(cheat_path);
 
         remove(s_lean_path);
         remove("/tmp/flow_test_scalar.c");
@@ -1085,6 +1179,1180 @@ int main(void) {
         flow_ir_cleanup(&s_ir);
 
         printf("  ✓ Stage 12 Passed: Full .lean scalar def C17 lowering, theorem registry & schema-driven UI verified.\n\n");
+    }
+
+    /* =========================================================================
+     * STAGE 13: .lean (What) x .flow (Where & How) Manifest, Named FlowJet Views & Auto NaN Firewall
+     * ========================================================================= */
+    FLOW_STAGE_BEGIN(13, ".lean x .flow Manifest Boundary, Named FlowJet Views & Auto NaN/Inf Firewall");
+    {
+        /* 1. Parse plugins/embodied.flow (which binds plugins/embodied.lean and declares @quota, @embodied, @reload) */
+        FILE *ef_fp = fopen("plugins/embodied.flow", "r");
+        FLOW_ASSERT_TRUE(ef_fp != NULL);
+        FlowSpec ef_spec;
+        memset(&ef_spec, 0, sizeof(ef_spec));
+        FLOW_ASSERT_TRUE(parse_spec(ef_fp, &ef_spec));
+        fclose(ef_fp);
+
+        FLOW_ASSERT_STR_EQ(ef_spec.project_name, "embodied_reflex");
+        FLOW_ASSERT_STR_EQ(ef_spec.flow_name, "embodied_reflex");
+        FLOW_ASSERT_STR_EQ(ef_spec.kernel_source_lean, "plugins/embodied.lean");
+        FLOW_ASSERT_STR_EQ(ef_spec.domain_name, "embodied");
+        FLOW_ASSERT_STR_EQ(ef_spec.plugin_name, "flow.embodied");
+        FLOW_ASSERT_STR_EQ(ef_spec.contract_name, "zmp_torque_safe");
+        FLOW_ASSERT_STR_EQ(ef_spec.fallback_policy, "emergency_stop");
+        FLOW_ASSERT_EQ(ef_spec.sla_latency_ns, 200000ULL);
+        FLOW_ASSERT_EQ(ef_spec.arena_limit_bytes, 65536u);
+        FLOW_ASSERT_EQ(ef_spec.memory_limit_mb, 16);
+        FLOW_ASSERT_EQ(ef_spec.state_schema_version, 2u);
+        FLOW_ASSERT_EQ(ef_spec.qsbr_timeout_ns, 5000000ULL);
+        FLOW_ASSERT_STR_EQ(ef_spec.migrate_fn, "embodiedStepKernel");
+        FLOW_ASSERT_STR_EQ(ef_spec.ingress_driver, "sensor_imu_6dof");
+        FLOW_ASSERT_STR_EQ(ef_spec.egress_driver, "socketcan_fd");
+        FLOW_ASSERT_EQ(ef_spec.jet.enabled, 1);
+        FLOW_ASSERT_EQ(ef_spec.jet.symplectic, 1);
+        FLOW_ASSERT_EQ((int)ef_spec.jet.frequency_hz, 1000);
+        FLOW_ASSERT_EQ(ef_spec.jet_coord_count, 8u);
+        FLOW_ASSERT_STR_EQ(ef_spec.jet_coord_names[0], "hipPitch");
+        FLOW_ASSERT_STR_EQ(ef_spec.jet_coord_names[7], "comY");
+        FLOW_ASSERT_EQ(ef_spec.state_field_count, 8u);
+        FLOW_ASSERT_EQ(ef_spec.input_stride_bytes, 64u);
+        FLOW_ASSERT_EQ(ef_spec.lean_function_count, 7u);
+        FLOW_ASSERT_EQ(ef_spec.lean_theorem_count, 2u);
+        FLOW_ASSERT_STR_EQ(ef_spec.extern_kernel, "embodiedStepKernel");
+        FLOW_ASSERT_EQ(system("./build/flowc plugins/embodied.flow -o /tmp/flow_cli_embodied_out.c >/dev/null"), 0);
+        remove("/tmp/flow_cli_embodied_out.c");
+
+        /* Edge cases: reject invalid bind path and malformed @quota/@embodied/@reload units & keys */
+        static const char *const bad_manifests[] = {
+            "project bad_bind\nbind \"nonexistent_file_xyz.lean\"\n",
+            "project bad_arena\n@quota {\n  arena 64bogus\n}\n",
+            "project bad_deadline\n@quota {\n  deadline 200bogus\n}\n",
+            "project bad_freq\n@embodied {\n  frequency 1000bogus\n}\n",
+            "project bad_ver\n@reload {\n  schema_version 0\n}\n",
+            "project bad_qsbr\n@reload {\n  qsbr_timeout -5ms\n}\n",
+            "project bad_reload_key\n@reload {\n  unknown_key 42\n}\n"
+        };
+        for (size_t bi = 0; bi < sizeof(bad_manifests) / sizeof(bad_manifests[0]); ++bi) {
+            FILE *bm_fp = tmpfile();
+            FLOW_ASSERT_TRUE(bm_fp != NULL);
+            fputs(bad_manifests[bi], bm_fp);
+            rewind(bm_fp);
+            FlowSpec bm_spec;
+            memset(&bm_spec, 0, sizeof(bm_spec));
+            FLOW_ASSERT_FALSE(parse_spec(bm_fp, &bm_spec));
+            fclose(bm_fp);
+        }
+
+        /* Verify pre-bind manifest preservation, relative bind from /tmp, multi-line coordinates, and < / space-separated units */
+        const char *tmp_rel_lean = "/tmp/flow_stage13_rel_math.lean";
+        const char *tmp_rel_flow = "/tmp/flow_stage13_rel_manifest.flow";
+        FILE *trl_fp = fopen(tmp_rel_lean, "w");
+        FLOW_ASSERT_TRUE(trl_fp != NULL);
+        fputs("structure RelState where\n"
+              "  alpha : Float\n"
+              "  beta : Float\n"
+              "def controlLaw (q : Float) (dq : Float) : Float :=\n"
+              "  let kp : Float := 10.0 in\n"
+              "  let kd : Float := 2.0\n"
+              "  -kp * q - kd * dq\n"
+              "def overflowProduct (a : Float) (b : Float) : Float := a * b\n", trl_fp);
+        fclose(trl_fp);
+
+        FILE *trf_fp = fopen(tmp_rel_flow, "w");
+        FLOW_ASSERT_TRUE(trf_fp != NULL);
+        fputs("project pre_bind_test\n"
+              "domain embodied\n"
+              "@quota {\n"
+              "  deadline < 250 us\n"
+              "  arena < 32 kb\n"
+              "  memory < 8 mb\n"
+              "}\n"
+              "@embodied {\n"
+              "  ingress \"sensor_imu_6dof\"\n"
+              "  egress \"socketcan_fd\"\n"
+              "  frequency 500 hz\n"
+              "  symplectic true\n"
+              "  coordinates [\n"
+              "    alpha,\n"
+              "    beta,\n"
+              "    gamma\n"
+              "  ]\n"
+              "}\n"
+              "@reload {\n"
+              "  schema_version 3\n"
+              "  qsbr_timeout < 4 ms\n"
+              "  migrate controlLaw\n"
+              "}\n"
+              "bind \"flow_stage13_rel_math.lean\"\n"
+              "flow pre_bind_reflex {\n"
+              "  use plugin \"flow.embodied\"\n"
+              "}\n", trf_fp);
+        fclose(trf_fp);
+
+        trf_fp = fopen(tmp_rel_flow, "r");
+        FLOW_ASSERT_TRUE(trf_fp != NULL);
+        FlowSpec rel_spec;
+        memset(&rel_spec, 0, sizeof(rel_spec));
+        FLOW_ASSERT_TRUE(parse_spec(trf_fp, &rel_spec));
+        fclose(trf_fp);
+        FLOW_ASSERT_STR_EQ(rel_spec.project_name, "pre_bind_test");
+        FLOW_ASSERT_STR_EQ(rel_spec.flow_name, "pre_bind_reflex");
+        FLOW_ASSERT_EQ(rel_spec.sla_latency_ns, 250000ULL);
+        FLOW_ASSERT_EQ(rel_spec.arena_limit_bytes, 32768u);
+        FLOW_ASSERT_EQ(rel_spec.memory_limit_mb, 8);
+        FLOW_ASSERT_EQ(rel_spec.state_schema_version, 3u);
+        FLOW_ASSERT_EQ(rel_spec.qsbr_timeout_ns, 4000000ULL);
+        FLOW_ASSERT_EQ(rel_spec.jet_coord_count, 3u);
+        FLOW_ASSERT_STR_EQ(rel_spec.jet_coord_names[2], "gamma");
+        FLOW_ASSERT_EQ(rel_spec.lean_function_count, 2u);
+
+        /* Compile non-4-arg Float .lean (controlLaw + overflowProduct) to DSO and verify ABI + post-return isfinite guard */
+        SemanticIR rel_ir;
+        memset(&rel_ir, 0, sizeof(rel_ir));
+        lower_to_ir(&rel_spec, &rel_ir);
+        const FlowPlugin *emb_mod = flow_registry_lookup("flow.embodied");
+        FLOW_ASSERT_TRUE(emb_mod != NULL);
+        flow_plugin_lower_semantics(&rel_spec, &rel_ir, emb_mod);
+        const Component *rel_comp = select_component(&rel_ir);
+        FLOW_ASSERT_TRUE(rel_comp != NULL);
+        SearchResult rel_sr = search_best(&rel_ir, 8, 42, 0, NULL);
+        FLOW_ASSERT_EQ(rel_sr.tuning.arena_bytes, 32768u);
+        VerificationReport rel_vrep;
+        FLOW_ASSERT_TRUE(verify_candidate(&rel_ir, rel_comp, &rel_sr, &rel_vrep));
+        FlowComponentABI rel_abi;
+        FLOW_ASSERT_TRUE(flow_abi_build_for_component(&rel_ir, rel_comp, &rel_abi));
+
+        FILE *rel_c_fp = fopen("/tmp/flow_stage13_rel.c", "w");
+        FLOW_ASSERT_TRUE(rel_c_fp != NULL);
+        FLOW_ASSERT_TRUE(emit_c(rel_c_fp, &rel_ir, rel_comp, &rel_sr, &rel_vrep, 0));
+        fclose(rel_c_fp);
+        FLOW_ASSERT_EQ(system("cc -std=c17 -Wall -Wextra -Werror -O2 -shared -fPIC -DFLOW_SHARED_LIB /tmp/flow_stage13_rel.c -o /tmp/libflow_stage13_rel.so -lpthread"), 0);
+
+        FILE *rel_py_fp = fopen("/tmp/flow_stage13_rel.py", "w");
+        FLOW_ASSERT_TRUE(rel_py_fp != NULL);
+        FLOW_ASSERT_TRUE(flow_abi_emit_python_adapter(rel_py_fp, &rel_abi));
+        fputs("\nif __name__ == '__main__':\n"
+              "    with EmbodiedController('/tmp/libflow_stage13_rel.so') as eng:\n"
+              "        assert abs(eng.controlLaw(0.5, 1.0) - (-7.0)) < 1e-6\n"
+              "        assert eng.controlLaw(float('nan'), 1.0) == 0.0\n"
+              "        assert eng.overflowProduct(1e308, 1e308) == 0.0\n"
+              "        ok_ext = FlowExtentDescriptor(base_offset=0, byte_length=64, stride_bytes=16, align_bytes=8)\n"
+              "        out_ext = eng.process_descriptor(ok_ext)\n"
+              "        assert out_ext.base_offset == 64 and out_ext.schema_version == 3\n"
+              "        over_arena = FlowExtentDescriptor(base_offset=0, byte_length=65536, stride_bytes=16, align_bytes=8)\n"
+              "        try:\n"
+              "            eng.process_descriptor(over_arena)\n"
+              "            assert False, 'Expected arena quota violation'\n"
+              "        except RuntimeError:\n"
+              "            pass\n", rel_py_fp);
+        fclose(rel_py_fp);
+        FLOW_ASSERT_EQ(system("python3 /tmp/flow_stage13_rel.py"), 0);
+
+        remove(tmp_rel_lean);
+        remove(tmp_rel_flow);
+        remove("/tmp/flow_stage13_rel.c");
+        remove("/tmp/libflow_stage13_rel.so");
+        remove("/tmp/flow_stage13_rel.py");
+        flow_ir_cleanup(&rel_ir);
+
+        /* 2. Lower plugins/embodied.flow to SemanticIR, emit C17, verify manifest defines & named FlowJetView */
+        SemanticIR ef_ir;
+        memset(&ef_ir, 0, sizeof(ef_ir));
+        lower_to_ir(&ef_spec, &ef_ir);
+        flow_plugin_lower_semantics(&ef_spec, &ef_ir, emb_mod);
+
+        const Component *ef_comp = select_component(&ef_ir);
+        FLOW_ASSERT_TRUE(ef_comp != NULL);
+        FLOW_ASSERT_STR_EQ(ef_comp->id, "embodied_controller");
+        VerificationReport ef_vrep;
+        FLOW_ASSERT_TRUE(verify_candidate(&ef_ir, ef_comp, NULL, &ef_vrep));
+        FlowComponentABI ef_abi;
+        FLOW_ASSERT_TRUE(flow_abi_build_for_component(&ef_ir, ef_comp, &ef_abi));
+
+        const char *ef_c_path = "/tmp/flow_test_embodied_manifest.c";
+        const char *ef_so_path = "/tmp/libflow_test_embodied_manifest.so";
+        const char *ef_py_path = "/tmp/flow_test_embodied_manifest.py";
+        FILE *efc_fp = fopen(ef_c_path, "w");
+        FLOW_ASSERT_TRUE(efc_fp != NULL);
+        FLOW_ASSERT_TRUE(emit_c(efc_fp, &ef_ir, ef_comp, NULL, &ef_vrep, 0));
+        fclose(efc_fp);
+
+        FILE *ef_rd = fopen(ef_c_path, "r");
+        FLOW_ASSERT_TRUE(ef_rd != NULL);
+        fseek(ef_rd, 0, SEEK_END);
+        long ef_sz = ftell(ef_rd);
+        rewind(ef_rd);
+        char *ef_c_buf = (char *)calloc((size_t)ef_sz + 1, 1);
+        FLOW_ASSERT_TRUE(ef_c_buf != NULL);
+        (void)fread(ef_c_buf, 1, (size_t)ef_sz, ef_rd);
+        fclose(ef_rd);
+
+        FLOW_ASSERT_TRUE(strstr(ef_c_buf, "#define FLOW_MANIFEST_SLA_NS UINT64_C(200000)") != NULL);
+        FLOW_ASSERT_TRUE(strstr(ef_c_buf, "#define FLOW_MANIFEST_ARENA_BYTES 65536") != NULL);
+        FLOW_ASSERT_TRUE(strstr(ef_c_buf, "#define FLOW_MANIFEST_QSBR_TIMEOUT_NS UINT64_C(5000000)") != NULL);
+        FLOW_ASSERT_TRUE(strstr(ef_c_buf, "#define FLOW_MANIFEST_INGRESS_DRIVER \"sensor_imu_6dof\"") != NULL);
+        FLOW_ASSERT_TRUE(strstr(ef_c_buf, "#define FLOW_MANIFEST_EGRESS_DRIVER \"socketcan_fd\"") != NULL);
+        FLOW_ASSERT_TRUE(strstr(ef_c_buf, "#define FLOW_MANIFEST_MIGRATE_FN embodiedStepKernel") != NULL);
+        FLOW_ASSERT_TRUE(strstr(ef_c_buf, "FlowCoords_embodied_reflex") != NULL);
+        FLOW_ASSERT_TRUE(strstr(ef_c_buf, "FlowJetView_embodied_reflex") != NULL);
+        FLOW_ASSERT_TRUE(strstr(ef_c_buf, "!isfinite(torque)") != NULL);
+        free(ef_c_buf);
+
+        /* 3. Compile emitted C17 into shared library & verify automatic NaN/Inf firewall in Python */
+        FLOW_ASSERT_EQ(system("cc -std=c17 -Wall -Wextra -Werror -O2 -shared -fPIC -DFLOW_SHARED_LIB /tmp/flow_test_embodied_manifest.c -o /tmp/libflow_test_embodied_manifest.so -lpthread"), 0);
+
+        FILE *efpy_fp = fopen(ef_py_path, "w");
+        FLOW_ASSERT_TRUE(efpy_fp != NULL);
+        FLOW_ASSERT_TRUE(flow_abi_emit_python_adapter(efpy_fp, &ef_abi));
+        fputs("\nif __name__ == '__main__':\n"
+              "    with EmbodiedController('/tmp/libflow_test_embodied_manifest.so') as eng:\n"
+              "        assert eng.isTorqueWithinLimit(45.0, 80.0) is True\n"
+              "        assert eng.isTorqueWithinLimit(95.0, 80.0) is False\n"
+              "        assert eng.isTorqueWithinLimit(float('nan'), 80.0) is False\n"
+              "        assert eng.isTorqueWithinLimit(45.0, float('inf')) is False\n"
+              "        assert abs(eng.dampedAngularAccel(10.0, 2.0, 50.0) - 39.6) < 1e-6\n"
+              "        assert eng.dampedAngularAccel(float('nan'), 2.0, 50.0) == 0.0\n"
+              "        assert eng.dampedAngularAccel(10.0, float('-inf'), 50.0) == 0.0\n"
+              "        assert abs(eng.pdReflexLaw(0.5, 1.0, 20.0, 2.0) - (-12.0)) < 1e-6\n"
+              "        assert eng.pdReflexLaw(float('nan'), 1.0, 20.0, 2.0) == 0.0\n", efpy_fp);
+        fclose(efpy_fp);
+
+        FLOW_ASSERT_EQ(system("python3 /tmp/flow_test_embodied_manifest.py"), 0);
+        remove(ef_c_path);
+        remove(ef_so_path);
+        remove(ef_py_path);
+        flow_ir_cleanup(&ef_ir);
+
+        /* 4. Verify FLOW_JET_DEFINE_NAMED_VIEW and flow_jet_sanitize_finite on FlowJet */
+        FlowJet jet;
+        FLOW_ASSERT_TRUE(flow_jet_init(&jet, "jet_embodied_test", "Embodied Named View Jet"));
+        TestEmbodiedJetView view = TestEmbodiedJetView_bind(&jet);
+        FLOW_ASSERT_TRUE(view.q != NULL && view.p != NULL && view.a != NULL);
+        view.q->hipPitch = 0.25;
+        view.q->comY = -0.05;
+        view.p->kneePitch = 1.5;
+        FLOW_ASSERT_TRUE(fabs(jet.payload.q[0] - 0.25) < 1e-9);
+        FLOW_ASSERT_TRUE(fabs(jet.payload.q[7] - (-0.05)) < 1e-9);
+        FLOW_ASSERT_TRUE(fabs(jet.payload.p[2] - 1.5) < 1e-9);
+
+        view.q->hipRoll = NAN;
+        jet.payload.s = INFINITY;
+        FLOW_ASSERT_TRUE(flow_jet_sanitize_finite(&jet));
+        FLOW_ASSERT_TRUE(isfinite(view.q->hipRoll) && view.q->hipRoll == 0.0);
+        FLOW_ASSERT_TRUE(isfinite(jet.payload.s) && jet.payload.s == 0.0);
+
+        printf("  ✓ Stage 13 Passed: .lean x .flow manifest boundary, named FlowJet views & auto NaN/Inf firewall verified.\n\n");
+    }
+
+    /* =========================================================================
+     * STAGE 14: LEAN-RT ZERO-GC GATE, NESTED STRUCTURES, HARDWARE CODEC
+     *           INTRINSICS, VERIFIED HOT-RELOAD MIGRATION & @PATCHBAY
+     * ========================================================================= */
+    FLOW_STAGE_BEGIN(14, "Lean-RT Zero-GC Gate, Verified State Migration & @patchbay Composition");
+    {
+        const FlowPlugin *emb_mod = flow_registry_lookup("flow.embodied");
+        FLOW_ASSERT_TRUE(emb_mod != NULL);
+
+        /* 1. Lean-RT Zero-GC Compile-Time Gate: reject List, Array, ByteArray, ++, closures, recursion, recursive inductive */
+        static const char *const forbidden_lean_snippets[] = {
+            "def bad_list (x : List UInt64) : UInt64 := 0\n",
+            "structure BadArr where\n  xs : Array Float\ndef f (x : UInt64) : UInt64 := x\n",
+            "def bad_ba (x : ByteArray) : UInt64 := 0\n",
+            "def bad_cat (a : UInt64) (b : UInt64) : UInt64 := a ++ b\n",
+            "def bad_closure (y : UInt64) : UInt64 := (fun x => x + 1) y\n",
+            "def bad_rec (n : UInt64) : UInt64 := if n == 0 then 0 else bad_rec (n - 1)\n",
+            "inductive BadTree where\n  | leaf : BadTree\n  | node : BadTree -> BadTree\ndef f (x : UInt64) : UInt64 := x\n"
+        };
+        for (size_t fi = 0; fi < sizeof(forbidden_lean_snippets) / sizeof(forbidden_lean_snippets[0]); ++fi) {
+            const char *bad_lpath = "/tmp/flow_stage14_bad_rt.lean";
+            const char *bad_fpath = "/tmp/flow_stage14_bad_rt.flow";
+            FILE *lf = fopen(bad_lpath, "w");
+            FLOW_ASSERT_TRUE(lf != NULL);
+            fputs(forbidden_lean_snippets[fi], lf);
+            fclose(lf);
+            FILE *ff = fopen(bad_fpath, "w");
+            FLOW_ASSERT_TRUE(ff != NULL);
+            fprintf(ff, "project bad_rt_%zu\nbind \"%s\"\n", fi, bad_lpath);
+            fclose(ff);
+            FILE *rf = fopen(bad_fpath, "r");
+            FLOW_ASSERT_TRUE(rf != NULL);
+            FlowSpec bad_spec;
+            memset(&bad_spec, 0, sizeof(bad_spec));
+            FLOW_ASSERT_TRUE(!parse_spec(rf, &bad_spec));
+            fclose(rf);
+            remove(bad_lpath);
+            remove(bad_fpath);
+        }
+
+        /* 2. Nested structure flattening, finite inductive enum, flow_quantize/flow_dequantize & C17/Rust/Python ctypes.Structure */
+        const char *nest_lean = "/tmp/flow_stage14_nested.lean";
+        const char *nest_flow = "/tmp/flow_stage14_nested.flow";
+        FILE *nlf = fopen(nest_lean, "w");
+        FLOW_ASSERT_TRUE(nlf != NULL);
+        fputs(
+            "namespace Flow.Stage14Nested\n"
+            "inductive ControlMode where\n"
+            "  | idle\n"
+            "  | track\n"
+            "  | fault\n"
+            "structure Vec2 where\n"
+            "  x : Float\n"
+            "  y : Float\n"
+            "structure Vel2 where\n"
+            "  vx : Float\n"
+            "  vy : Float\n"
+            "structure PoseFrame where\n"
+            "  pos : Vec2\n"
+            "  vel : Vel2\n"
+            "  ticks : UInt64\n"
+            "def step_pose (p : PoseFrame) : PoseFrame :=\n"
+            "  { pos := { x := p.pos.x + p.vel.vx * 0.5, y := p.pos.y + p.vel.vy * 0.5 }, vel := { vx := p.vel.vx, vy := p.vel.vy }, ticks := p.ticks + 1 }\n"
+            "def encode_torque (t : Float) : UInt64 := flow_quantize t (-80.0) 80.0 16\n"
+            "def decode_torque (q : UInt64) : Float := flow_dequantize q (-80.0) 80.0 16\n"
+            "def mode_scale (m : ControlMode) (v : UInt64) : UInt64 :=\n"
+            "  match m with\n"
+            "  | idle => 0\n"
+            "  | track => v * 2\n"
+            "  | fault => 1\n"
+            "theorem step_pose_ticks_monotonic (p : PoseFrame) : (step_pose p).ticks > p.ticks := by decide\n"
+            "theorem step_pose_pos_x_sound (p : PoseFrame) : (step_pose p).pos.x = p.pos.x + p.vel.vx * 0.5 := by rfl\n"
+            "theorem mode_scale_track_sound (v : UInt64) : mode_scale ControlMode.track v = v * 2 := by rfl\n"
+            "theorem quantize_zero_midpoint (x : UInt64) : encode_torque 0.0 == 32768 := by decide\n"
+            "end Flow.Stage14Nested\n", nlf);
+        fclose(nlf);
+
+        /* Negative check: false theorem over match and false float scaling theorem must be refuted */
+        {
+            char err_buf[256] = {0};
+            FLOW_ASSERT_TRUE(!flow_verify_lean_theorems(
+                "inductive ControlMode where | idle | track | fault\n"
+                "def mode_scale (m : ControlMode) (v : UInt64) : UInt64 := match m with | idle => 0 | track => v * 2 | fault => 1\n"
+                "theorem bad_match_thm (v : UInt64) : mode_scale ControlMode.track v == 999 := by decide\n",
+                err_buf, sizeof(err_buf)));
+            FLOW_ASSERT_TRUE(!flow_verify_lean_theorems(
+                "structure SensorRaw where\n  pos : Float\n  seq : UInt64\n"
+                "def half_pos (r : SensorRaw) : SensorRaw := { pos := r.pos * 0.5, seq := r.seq }\n"
+                "theorem bad_float_rfl (r : SensorRaw) : (half_pos r).pos = r.pos := by rfl\n",
+                err_buf, sizeof(err_buf)));
+        }
+
+        FILE *nff = fopen(nest_flow, "w");
+        FLOW_ASSERT_TRUE(nff != NULL);
+        fprintf(nff,
+            "project stage14_nested\n"
+            "bind \"%s\"\n"
+            "@quota {\n"
+            "  deadline: 250us\n"
+            "  arena: 64kb\n"
+            "  fallback: emergency_stop\n"
+            "}\n", nest_lean);
+        fclose(nff);
+
+        FILE *nrf = fopen(nest_flow, "r");
+        FLOW_ASSERT_TRUE(nrf != NULL);
+        FlowSpec nest_spec;
+        memset(&nest_spec, 0, sizeof(nest_spec));
+        FLOW_ASSERT_TRUE(parse_spec(nrf, &nest_spec));
+        fclose(nrf);
+
+        FLOW_ASSERT_EQ(nest_spec.lean_enum_count, 1u);
+        FLOW_ASSERT_STR_EQ(nest_spec.lean_enums[0].name, "ControlMode");
+        FLOW_ASSERT_EQ(nest_spec.lean_enums[0].variant_count, 3u);
+        FLOW_ASSERT_EQ(nest_spec.lean_struct_count, 3u);
+        FLOW_ASSERT_STR_EQ(nest_spec.lean_structs[2].name, "PoseFrame");
+        FLOW_ASSERT_EQ(nest_spec.lean_structs[2].field_count, 5u);
+        FLOW_ASSERT_STR_EQ(nest_spec.lean_structs[2].fields[0].name, "pos_x");
+        FLOW_ASSERT_STR_EQ(nest_spec.lean_structs[2].fields[1].name, "pos_y");
+        FLOW_ASSERT_STR_EQ(nest_spec.lean_structs[2].fields[2].name, "vel_vx");
+        FLOW_ASSERT_STR_EQ(nest_spec.lean_structs[2].fields[3].name, "vel_vy");
+        FLOW_ASSERT_STR_EQ(nest_spec.lean_structs[2].fields[4].name, "ticks");
+        FLOW_ASSERT_EQ(nest_spec.lean_structs[2].byte_size, 40u);
+        FLOW_ASSERT_EQ(nest_spec.lean_function_count, 4u);
+        FLOW_ASSERT_EQ(nest_spec.lean_functions[0].is_struct_transform, 1);
+        FLOW_ASSERT_TRUE(nest_spec.lean_functions[0].estimated_wcet_ns > 0);
+
+        SemanticIR nest_ir;
+        memset(&nest_ir, 0, sizeof(nest_ir));
+        lower_to_ir(&nest_spec, &nest_ir);
+        flow_plugin_lower_semantics(&nest_spec, &nest_ir, emb_mod);
+        const Component *nest_comp = select_component(&nest_ir);
+        FLOW_ASSERT_TRUE(nest_comp != NULL);
+        VerificationReport nest_vrep;
+        FLOW_ASSERT_TRUE(verify_candidate(&nest_ir, nest_comp, NULL, &nest_vrep));
+        FlowComponentABI nest_abi;
+        FLOW_ASSERT_TRUE(flow_abi_build_for_component(&nest_ir, nest_comp, &nest_abi));
+
+        FILE *nh_fp = fopen("/tmp/flow_stage14_nested.h", "w");
+        FLOW_ASSERT_TRUE(nh_fp != NULL);
+        FLOW_ASSERT_TRUE(flow_abi_emit_c_header(nh_fp, &nest_abi));
+        fclose(nh_fp);
+
+        FILE *nrs_fp = fopen("/tmp/flow_stage14_nested.rs", "w");
+        FLOW_ASSERT_TRUE(nrs_fp != NULL);
+        FLOW_ASSERT_TRUE(flow_abi_emit_rust_adapter(nrs_fp, &nest_abi));
+        fclose(nrs_fp);
+
+        /* Verify Rust adapter contains #[repr(C)] pub struct PoseFrame */
+        FILE *nrs_rd = fopen("/tmp/flow_stage14_nested.rs", "r");
+        FLOW_ASSERT_TRUE(nrs_rd != NULL);
+        char rs_buf[4096] = {0};
+        (void)fread(rs_buf, 1, sizeof(rs_buf) - 1, nrs_rd);
+        fclose(nrs_rd);
+        FLOW_ASSERT_TRUE(strstr(rs_buf, "pub struct PoseFrame") != NULL);
+        FLOW_ASSERT_TRUE(strstr(rs_buf, "pub pos_x: f64") != NULL);
+
+        FILE *nc_fp = fopen("/tmp/flow_stage14_nested.c", "w");
+        FLOW_ASSERT_TRUE(nc_fp != NULL);
+        FLOW_ASSERT_TRUE(emit_c(nc_fp, &nest_ir, nest_comp, NULL, &nest_vrep, 0));
+        fclose(nc_fp);
+        FLOW_ASSERT_EQ(system("cc -std=c17 -Wall -Wextra -Werror -O2 -shared -fPIC -DFLOW_SHARED_LIB /tmp/flow_stage14_nested.c -o /tmp/libflow_stage14_nested.so -lpthread"), 0);
+
+        FILE *npy_fp = fopen("/tmp/flow_stage14_nested.py", "w");
+        FLOW_ASSERT_TRUE(npy_fp != NULL);
+        FLOW_ASSERT_TRUE(flow_abi_emit_python_adapter(npy_fp, &nest_abi));
+        fputs("\nif __name__ == '__main__':\n"
+              "    with EmbodiedController('/tmp/libflow_stage14_nested.so') as eng:\n"
+              "        pf = PoseFrame(pos_x=1.0, pos_y=2.0, vel_vx=4.0, vel_vy=-2.0, ticks=10)\n"
+              "        out = eng.step_pose(pf)\n"
+              "        assert abs(out.pos_x - 3.0) < 1e-9\n"
+              "        assert abs(out.pos_y - 1.0) < 1e-9\n"
+              "        assert out.ticks == 11\n"
+              "        pf_nan = PoseFrame(pos_x=float('nan'), pos_y=2.0, vel_vx=4.0, vel_vy=float('inf'), ticks=5)\n"
+              "        out_nan = eng.step_pose(pf_nan)\n"
+              "        assert abs(out_nan.pos_x - 2.0) < 1e-9\n"
+              "        assert abs(out_nan.pos_y - 2.0) < 1e-9\n"
+              "        assert out_nan.ticks == 6\n"
+              "        q0 = eng.encode_torque(0.0)\n"
+              "        assert q0 == 32768\n"
+              "        q25 = eng.encode_torque(25.0)\n"
+              "        d25 = eng.decode_torque(q25)\n"
+              "        assert abs(d25 - 25.0) < 0.01\n"
+              "        assert eng.mode_scale(track, 21) == 42\n"
+              "        assert eng.mode_scale(idle, 21) == 0\n", npy_fp);
+        fclose(npy_fp);
+        FLOW_ASSERT_EQ(system("python3 /tmp/flow_stage14_nested.py"), 0);
+
+        remove(nest_lean);
+        remove(nest_flow);
+        remove("/tmp/flow_stage14_nested.h");
+        remove("/tmp/flow_stage14_nested.rs");
+        remove("/tmp/flow_stage14_nested.c");
+        remove("/tmp/libflow_stage14_nested.so");
+        remove("/tmp/flow_stage14_nested.py");
+        flow_ir_cleanup(&nest_ir);
+
+        /* 3. Verified Hot-Reload State Migration (StateV1 -> StateV2): negative false theorem & positive proof + runtime migration */
+        const char *bad_mig_lean = "/tmp/flow_stage14_bad_mig.lean";
+        const char *bad_mig_flow = "/tmp/flow_stage14_bad_mig.flow";
+        FILE *bml = fopen(bad_mig_lean, "w");
+        FLOW_ASSERT_TRUE(bml != NULL);
+        fputs(
+            "structure StateV1 where\n"
+            "  balanceA : UInt64\n"
+            "  balanceB : UInt64\n"
+            "  epoch : UInt64\n"
+            "structure StateV2 where\n"
+            "  balanceA : UInt64\n"
+            "  balanceB : UInt64\n"
+            "  totalBalance : UInt64\n"
+            "  epoch : UInt64\n"
+            "  riskTier : UInt32\n"
+            "def migrateV1ToV2 (s : StateV1) : StateV2 :=\n"
+            "  { balanceA := s.balanceA, balanceB := s.balanceB, totalBalance := s.balanceA + s.balanceB, epoch := s.epoch + 1, riskTier := 1 }\n"
+            "theorem migration_preserves_balance (s : StateV1) : (migrateV1ToV2 s).totalBalance = s.balanceA := by rfl\n", bml);
+        fclose(bml);
+        FILE *bmf = fopen(bad_mig_flow, "w");
+        FLOW_ASSERT_TRUE(bmf != NULL);
+        fprintf(bmf, "project bad_mig\nbind \"%s\"\n", bad_mig_lean);
+        fclose(bmf);
+        FILE *bmr = fopen(bad_mig_flow, "r");
+        FLOW_ASSERT_TRUE(bmr != NULL);
+        FlowSpec bad_mig_spec;
+        memset(&bad_mig_spec, 0, sizeof(bad_mig_spec));
+        FLOW_ASSERT_TRUE(!parse_spec(bmr, &bad_mig_spec));
+        fclose(bmr);
+        remove(bad_mig_lean);
+        remove(bad_mig_flow);
+
+        const char *mig_lean = "/tmp/flow_stage14_mig.lean";
+        const char *mig_flow = "/tmp/flow_stage14_mig.flow";
+        FILE *mlf = fopen(mig_lean, "w");
+        FLOW_ASSERT_TRUE(mlf != NULL);
+        fputs(
+            "namespace Flow.Stage14Migrate\n"
+            "structure StateV1 where\n"
+            "  balanceA : UInt64\n"
+            "  balanceB : UInt64\n"
+            "  epoch : UInt64\n"
+            "structure StateV2 where\n"
+            "  balanceA : UInt64\n"
+            "  balanceB : UInt64\n"
+            "  totalBalance : UInt64\n"
+            "  epoch : UInt64\n"
+            "  riskTier : UInt32\n"
+            "def migrateV1ToV2 (s : StateV1) : StateV2 :=\n"
+            "  let tot := s.balanceA + s.balanceB\n"
+            "  { balanceA := s.balanceA, balanceB := s.balanceB, totalBalance := tot, epoch := s.epoch + 1, riskTier := 1 }\n"
+            "theorem migration_preserves_balance (s : StateV1) : (migrateV1ToV2 s).totalBalance = s.balanceA + s.balanceB := by rfl\n"
+            "theorem migration_advances_epoch (s : StateV1) : (migrateV1ToV2 s).epoch = s.epoch + 1 := by rfl\n"
+            "theorem migration_sets_risk_tier (s : StateV1) : (migrateV1ToV2 s).riskTier == 1 := by decide\n"
+            "end Flow.Stage14Migrate\n", mlf);
+        fclose(mlf);
+
+        FILE *mff = fopen(mig_flow, "w");
+        FLOW_ASSERT_TRUE(mff != NULL);
+        fprintf(mff,
+            "project stage14_migrate\n"
+            "bind \"%s\"\n"
+            "@reload {\n"
+            "  schema_version: 2\n"
+            "  from_schema: StateV1\n"
+            "  to_schema: StateV2\n"
+            "  migrate: migrateV1ToV2\n"
+            "  qsbr_timeout: 5ms\n"
+            "}\n", mig_lean);
+        fclose(mff);
+
+        FILE *mrf = fopen(mig_flow, "r");
+        FLOW_ASSERT_TRUE(mrf != NULL);
+        FlowSpec mig_spec;
+        memset(&mig_spec, 0, sizeof(mig_spec));
+        FLOW_ASSERT_TRUE(parse_spec(mrf, &mig_spec));
+        fclose(mrf);
+
+        FLOW_ASSERT_STR_EQ(mig_spec.reload_from_schema, "StateV1");
+        FLOW_ASSERT_STR_EQ(mig_spec.reload_to_schema, "StateV2");
+        FLOW_ASSERT_STR_EQ(mig_spec.migrate_fn, "migrateV1ToV2");
+        FLOW_ASSERT_EQ(mig_spec.lean_theorem_count, 3u);
+
+        SemanticIR mig_ir;
+        memset(&mig_ir, 0, sizeof(mig_ir));
+        lower_to_ir(&mig_spec, &mig_ir);
+        flow_plugin_lower_semantics(&mig_spec, &mig_ir, emb_mod);
+        const Component *mig_comp = select_component(&mig_ir);
+        FLOW_ASSERT_TRUE(mig_comp != NULL);
+        VerificationReport mig_vrep;
+        FLOW_ASSERT_TRUE(verify_candidate(&mig_ir, mig_comp, NULL, &mig_vrep));
+        FlowComponentABI mig_abi;
+        FLOW_ASSERT_TRUE(flow_abi_build_for_component(&mig_ir, mig_comp, &mig_abi));
+
+        FILE *mc_fp = fopen("/tmp/flow_stage14_mig.c", "w");
+        FLOW_ASSERT_TRUE(mc_fp != NULL);
+        FLOW_ASSERT_TRUE(emit_c(mc_fp, &mig_ir, mig_comp, NULL, &mig_vrep, 0));
+        fclose(mc_fp);
+        FLOW_ASSERT_EQ(system("cc -std=c17 -Wall -Wextra -Werror -O2 -shared -fPIC -DFLOW_SHARED_LIB /tmp/flow_stage14_mig.c -o /tmp/libflow_stage14_mig.so -lpthread"), 0);
+
+        /* Verify C17 migration shim via dlopen AND live FlowReloadContext hot-swap */
+        typedef struct { uint64_t balanceA; uint64_t balanceB; uint64_t epoch; } TestStateV1;
+        typedef struct { uint64_t balanceA; uint64_t balanceB; uint64_t totalBalance; uint64_t epoch; uint32_t riskTier; } TestStateV2;
+        typedef int32_t (*migrate_buf_fn_t)(const void *, size_t, void *, size_t);
+        typedef int (*migrate_unit_fn_t)(void *, const void *, void *);
+
+        void *mig_dl = dlopen("/tmp/libflow_stage14_mig.so", RTLD_NOW);
+        FLOW_ASSERT_TRUE(mig_dl != NULL);
+        void *sym_mbuf = dlsym(mig_dl, "flow_embodied_controller_migrate_buffer");
+        void *sym_munit = dlsym(mig_dl, "flow_embodied_controller_migrate_unit");
+        FLOW_ASSERT_TRUE(sym_mbuf != NULL && sym_munit != NULL);
+        migrate_buf_fn_t fn_mbuf = NULL;
+        migrate_unit_fn_t fn_munit = NULL;
+        memcpy(&fn_mbuf, &sym_mbuf, sizeof(fn_mbuf));
+        memcpy(&fn_munit, &sym_munit, sizeof(fn_munit));
+
+        TestStateV1 s1 = { .balanceA = 42ULL, .balanceB = 58ULL, .epoch = 9ULL };
+        TestStateV2 s2 = {0};
+        FLOW_ASSERT_EQ(fn_mbuf(&s1, sizeof(s1), &s2, sizeof(s2)), 0);
+        FLOW_ASSERT_EQ(s2.balanceA, 42ULL);
+        FLOW_ASSERT_EQ(s2.balanceB, 58ULL);
+        FLOW_ASSERT_EQ(s2.totalBalance, 100ULL);
+        FLOW_ASSERT_EQ(s2.epoch, 10ULL);
+        FLOW_ASSERT_EQ(s2.riskTier, 1u);
+        /* Buffer too small must return -1 */
+        FLOW_ASSERT_EQ(fn_mbuf(&s1, 4, &s2, sizeof(s2)), -1);
+
+        /* Wire fn_munit into FlowReloadContext and hot-swap V1 -> V2 */
+        FlowReloadContext *rctx = flow_reload_create(NULL);
+        FLOW_ASSERT_TRUE(rctx != NULL);
+        TestStateV1 *heap_v1 = (TestStateV1 *)calloc(1, sizeof(TestStateV1));
+        TestStateV2 *heap_v2 = (TestStateV2 *)calloc(1, sizeof(TestStateV2));
+        FLOW_ASSERT_TRUE(heap_v1 != NULL && heap_v2 != NULL);
+        *heap_v1 = (TestStateV1){ .balanceA = 120ULL, .balanceB = 80ULL, .epoch = 5ULL };
+        FlowUnit u_v1 = {
+            .abi_version = FLOW_RELOAD_ABI_VERSION,
+            .constraint_hash = 0xABCDULL,
+            .capability_hash = 0x1234ULL,
+            .semantic_schema_hash = 0x9999ULL,
+            .name = "state_v1",
+            .run = unit_zero_run,
+            .drop = unit_zero_drop
+        };
+        FlowUnit u_v2 = u_v1;
+        u_v2.name = "state_v2";
+        u_v2.migrate = fn_munit;
+        FLOW_ASSERT_EQ(flow_reload_publish(rctx, &u_v1, heap_v1), FLOW_RELOAD_OK);
+        FLOW_ASSERT_EQ(flow_reload_publish(rctx, &u_v2, heap_v2), FLOW_RELOAD_OK);
+        FLOW_ASSERT_EQ(heap_v2->balanceA, 120ULL);
+        FLOW_ASSERT_EQ(heap_v2->balanceB, 80ULL);
+        FLOW_ASSERT_EQ(heap_v2->totalBalance, 200ULL);
+        FLOW_ASSERT_EQ(heap_v2->epoch, 6ULL);
+        FLOW_ASSERT_EQ(heap_v2->riskTier, 1u);
+        FLOW_ASSERT_EQ(flow_reload_destroy(rctx), FLOW_RELOAD_OK);
+        dlclose(mig_dl);
+
+        /* Verify Python migrate_state method */
+        FILE *mpy_fp = fopen("/tmp/flow_stage14_mig.py", "w");
+        FLOW_ASSERT_TRUE(mpy_fp != NULL);
+        FLOW_ASSERT_TRUE(flow_abi_emit_python_adapter(mpy_fp, &mig_abi));
+        fputs("\nif __name__ == '__main__':\n"
+              "    with EmbodiedController('/tmp/libflow_stage14_mig.so') as eng:\n"
+              "        v1 = StateV1(balanceA=120, balanceB=80, epoch=5)\n"
+              "        v2 = eng.migrate_state(v1)\n"
+              "        assert v2.balanceA == 120 and v2.balanceB == 80 and v2.totalBalance == 200\n"
+              "        assert v2.epoch == 6 and v2.riskTier == 1\n", mpy_fp);
+        fclose(mpy_fp);
+        FLOW_ASSERT_EQ(system("python3 /tmp/flow_stage14_mig.py"), 0);
+
+        remove(mig_lean);
+        remove(mig_flow);
+        remove("/tmp/flow_stage14_mig.c");
+        remove("/tmp/libflow_stage14_mig.so");
+        remove("/tmp/flow_stage14_mig.py");
+        flow_ir_cleanup(&mig_ir);
+
+        /* 4. Multi-Lean @patchbay Zero-Copy Composition, Compositional SMT Proofs & Watchdog Emergency-Stop Latch */
+        /* Verify chained multi-stage struct-transform theorem unfolding (positive & negative) */
+        {
+            char err_buf[256] = {0};
+            FLOW_ASSERT_TRUE(flow_verify_lean_theorems(
+                "structure S1 where\n  seq : UInt64\n"
+                "structure S2 where\n  seq : UInt64\n"
+                "structure S3 where\n  seq : UInt64\n"
+                "def stg1 (a : S1) : S2 := { seq := a.seq + 1 }\n"
+                "def stg2 (b : S2) : S3 := { seq := b.seq + 2 }\n"
+                "theorem chain_ok (x : S1) : (stg2 (stg1 x)).seq = x.seq + 3 := by rfl\n",
+                err_buf, sizeof(err_buf)));
+            FLOW_ASSERT_TRUE(!flow_verify_lean_theorems(
+                "structure S1 where\n  seq : UInt64\n"
+                "structure S2 where\n  seq : UInt64\n"
+                "structure S3 where\n  seq : UInt64\n"
+                "def stg1 (a : S1) : S2 := { seq := a.seq + 1 }\n"
+                "def stg2 (b : S2) : S3 := { seq := b.seq + 2 }\n"
+                "theorem chain_bad (x : S1) : (stg2 (stg1 x)).seq = x.seq + 99 := by rfl\n",
+                err_buf, sizeof(err_buf)));
+        }
+        const char *pb_s1_lean = "/tmp/flow_stage14_pb_filter.lean";
+        const char *pb_s2_lean = "/tmp/flow_stage14_pb_ik.lean";
+        const char *pb_s3_lean = "/tmp/flow_stage14_pb_safety.lean";
+        const char *pb_bad_lean = "/tmp/flow_stage14_pb_bad.lean";
+
+        FILE *f_s1 = fopen(pb_s1_lean, "w");
+        FLOW_ASSERT_TRUE(f_s1 != NULL);
+        fputs(
+            "structure SensorRaw where\n"
+            "  pos : Float\n"
+            "  vel : Float\n"
+            "  seq : UInt64\n"
+            "structure FilteredReading where\n"
+            "  pos : Float\n"
+            "  vel : Float\n"
+            "  seq : UInt64\n"
+            "def filter_stage (raw : SensorRaw) : FilteredReading :=\n"
+            "  { pos := raw.pos * 0.5, vel := raw.vel * 0.5, seq := raw.seq + 1 }\n"
+            "theorem filter_seq_inc (raw : SensorRaw) : (filter_stage raw).seq > raw.seq := by decide\n", f_s1);
+        fclose(f_s1);
+
+        FILE *f_s2 = fopen(pb_s2_lean, "w");
+        FLOW_ASSERT_TRUE(f_s2 != NULL);
+        fputs(
+            "structure FilteredReading where\n"
+            "  pos : Float\n"
+            "  vel : Float\n"
+            "  seq : UInt64\n"
+            "structure JointTarget where\n"
+            "  torque : Float\n"
+            "  damping : Float\n"
+            "  seq : UInt64\n"
+            "def ik_stage (flt : FilteredReading) : JointTarget :=\n"
+            "  { torque := flt.pos * 10.0 + flt.vel * 2.0, damping := flt.vel * 0.25, seq := flt.seq }\n", f_s2);
+        fclose(f_s2);
+
+        FILE *f_s3 = fopen(pb_s3_lean, "w");
+        FLOW_ASSERT_TRUE(f_s3 != NULL);
+        fputs(
+            "structure JointTarget where\n"
+            "  torque : Float\n"
+            "  damping : Float\n"
+            "  seq : UInt64\n"
+            "structure ActuatorCmd where\n"
+            "  clamped_torque : Float\n"
+            "  pwm_code : UInt64\n"
+            "  seq : UInt64\n"
+            "def safety_stage (jt : JointTarget) : ActuatorCmd :=\n"
+            "  { clamped_torque := if jt.torque > 50.0 then 50.0 else jt.torque, pwm_code := flow_quantize jt.torque (-80.0) 80.0 16, seq := jt.seq }\n", f_s3);
+        fclose(f_s3);
+
+        FILE *f_bad = fopen(pb_bad_lean, "w");
+        FLOW_ASSERT_TRUE(f_bad != NULL);
+        fputs(
+            "structure WrongSchema where\n"
+            "  only_one : UInt64\n"
+            "structure ActuatorCmd where\n"
+            "  clamped_torque : Float\n"
+            "  pwm_code : UInt64\n"
+            "  seq : UInt64\n"
+            "def bad_stage (w : WrongSchema) : ActuatorCmd :=\n"
+            "  { clamped_torque := 0.0, pwm_code := w.only_one, seq := 0 }\n", f_bad);
+        fclose(f_bad);
+
+        /* 4a. Negative: understated stage WCET (wcet 1ns < ast_wcet_ns) rejected by parser */
+        const char *pb_under_flow = "/tmp/flow_stage14_pb_under.flow";
+        FILE *f_under = fopen(pb_under_flow, "w");
+        FLOW_ASSERT_TRUE(f_under != NULL);
+        fprintf(f_under,
+            "project pb_under\n"
+            "@patchbay {\n"
+            "  stage filter bind \"%s\" fn filter_stage in SensorRaw out FilteredReading wcet 1ns\n"
+            "}\n", pb_s1_lean);
+        fclose(f_under);
+        FILE *r_under = fopen(pb_under_flow, "r");
+        FLOW_ASSERT_TRUE(r_under != NULL);
+        FlowSpec pb_under_spec;
+        memset(&pb_under_spec, 0, sizeof(pb_under_spec));
+        FLOW_ASSERT_TRUE(!parse_spec(r_under, &pb_under_spec));
+        fclose(r_under);
+        remove(pb_under_flow);
+
+        /* 4b. Negative: incompatible wire schema/stride rejected by parser */
+        const char *pb_mis_flow = "/tmp/flow_stage14_pb_mis.flow";
+        FILE *f_mis = fopen(pb_mis_flow, "w");
+        FLOW_ASSERT_TRUE(f_mis != NULL);
+        fprintf(f_mis,
+            "project pb_mis\n"
+            "@patchbay {\n"
+            "  stage filter bind \"%s\" fn filter_stage in SensorRaw out FilteredReading\n"
+            "  stage bad bind \"%s\" fn bad_stage in WrongSchema out ActuatorCmd\n"
+            "  wire filter -> bad\n"
+            "}\n", pb_s1_lean, pb_bad_lean);
+        fclose(f_mis);
+        FILE *r_mis = fopen(pb_mis_flow, "r");
+        FLOW_ASSERT_TRUE(r_mis != NULL);
+        FlowSpec pb_mis_spec;
+        memset(&pb_mis_spec, 0, sizeof(pb_mis_spec));
+        FLOW_ASSERT_TRUE(!parse_spec(r_mis, &pb_mis_spec));
+        fclose(r_mis);
+        remove(pb_mis_flow);
+
+        /* 4c. Valid 3-stage @patchbay pipeline */
+        const char *pb_ok_flow = "/tmp/flow_stage14_pb_ok.flow";
+        FILE *f_ok = fopen(pb_ok_flow, "w");
+        FLOW_ASSERT_TRUE(f_ok != NULL);
+        fprintf(f_ok,
+            "project stage14_patchbay\n"
+            "@quota {\n"
+            "  deadline: 500us\n"
+            "  arena: 64kb\n"
+            "  fallback: emergency_stop\n"
+            "}\n"
+            "@patchbay {\n"
+            "  stage filter bind \"%s\" fn filter_stage in SensorRaw out FilteredReading wcet 100us\n"
+            "  stage ik bind \"%s\" fn ik_stage in FilteredReading out JointTarget wcet 150us\n"
+            "  stage safety bind \"%s\" fn safety_stage in JointTarget out ActuatorCmd wcet 100us\n"
+            "  wire filter -> ik -> safety\n"
+            "}\n", pb_s1_lean, pb_s2_lean, pb_s3_lean);
+        fclose(f_ok);
+
+        FILE *r_ok = fopen(pb_ok_flow, "r");
+        FLOW_ASSERT_TRUE(r_ok != NULL);
+        FlowSpec pb_spec;
+        memset(&pb_spec, 0, sizeof(pb_spec));
+        FLOW_ASSERT_TRUE(parse_spec(r_ok, &pb_spec));
+        fclose(r_ok);
+
+        FLOW_ASSERT_EQ(pb_spec.patchbay_stage_count, 3u);
+        FLOW_ASSERT_EQ(pb_spec.patchbay_stages[0].in_bytes, 24u);
+        FLOW_ASSERT_EQ(pb_spec.patchbay_stages[0].out_bytes, 24u);
+        FLOW_ASSERT_EQ(pb_spec.patchbay_stages[1].in_bytes, 24u);
+        FLOW_ASSERT_EQ(pb_spec.patchbay_stages[1].out_bytes, 24u);
+        FLOW_ASSERT_EQ(pb_spec.patchbay_stages[2].in_bytes, 24u);
+        FLOW_ASSERT_EQ(pb_spec.patchbay_stages[2].out_bytes, 24u);
+        FLOW_ASSERT_TRUE(pb_spec.patchbay_stages[0].ast_wcet_ns > 0);
+        FLOW_ASSERT_TRUE(pb_spec.patchbay_stages[1].ast_wcet_ns > 0);
+        FLOW_ASSERT_TRUE(pb_spec.patchbay_stages[2].ast_wcet_ns > 0);
+
+        SemanticIR pb_ir;
+        memset(&pb_ir, 0, sizeof(pb_ir));
+        lower_to_ir(&pb_spec, &pb_ir);
+        flow_plugin_lower_semantics(&pb_spec, &pb_ir, emb_mod);
+        const Component *pb_comp = select_component(&pb_ir);
+        FLOW_ASSERT_TRUE(pb_comp != NULL);
+        VerificationReport pb_vrep;
+        FLOW_ASSERT_TRUE(verify_candidate(&pb_ir, pb_comp, NULL, &pb_vrep));
+        FlowSMTProofAttestation pb_proof;
+        FLOW_ASSERT_TRUE(flow_smt_verify(&pb_ir, pb_comp, NULL, NULL, &pb_proof));
+        FLOW_ASSERT_EQ(pb_proof.shard_non_aliasing, FLOW_SMT_PROVEN_UNSAT);
+        FLOW_ASSERT_EQ(pb_proof.determinism_invariant, FLOW_SMT_PROVEN_UNSAT);
+
+        /* Verify SMT detects WCET deadline overrun (sum(wcet) = 600us > 500us) and wire mismatch */
+        SemanticIR pb_over_ir = pb_ir;
+        pb_over_ir.patchbay_stages[0].wcet_ns = 200000ULL;
+        pb_over_ir.patchbay_stages[1].wcet_ns = 200000ULL;
+        pb_over_ir.patchbay_stages[2].wcet_ns = 200000ULL;
+        VerificationReport pb_over_vrep;
+        FLOW_ASSERT_TRUE(!verify_candidate(&pb_over_ir, pb_comp, NULL, &pb_over_vrep));
+        FLOW_ASSERT_EQ(pb_over_vrep.status, VERIFIER_COMPILE_ERROR);
+        FlowSMTProofAttestation pb_over_proof;
+        FLOW_ASSERT_TRUE(!flow_smt_verify(&pb_over_ir, pb_comp, NULL, NULL, &pb_over_proof));
+        FLOW_ASSERT_EQ(pb_over_proof.determinism_invariant, FLOW_SMT_VIOLATION_SAT);
+
+        SemanticIR pb_alias_ir = pb_ir;
+        pb_alias_ir.patchbay_stages[1].in_bytes = 16u;
+        FlowSMTProofAttestation pb_alias_proof;
+        FLOW_ASSERT_TRUE(!flow_smt_verify(&pb_alias_ir, pb_comp, NULL, NULL, &pb_alias_proof));
+        FLOW_ASSERT_EQ(pb_alias_proof.shard_non_aliasing, FLOW_SMT_VIOLATION_SAT);
+
+        /* Compile C17 shared library and test zero-copy run_patchbay + emergency_stop latch in C & Python */
+        FlowComponentABI pb_abi;
+        FLOW_ASSERT_TRUE(flow_abi_build_for_component(&pb_ir, pb_comp, &pb_abi));
+        FILE *pbc_fp = fopen("/tmp/flow_stage14_pb.c", "w");
+        FLOW_ASSERT_TRUE(pbc_fp != NULL);
+        FLOW_ASSERT_TRUE(emit_c(pbc_fp, &pb_ir, pb_comp, NULL, &pb_vrep, 0));
+        fclose(pbc_fp);
+        FLOW_ASSERT_EQ(system("cc -std=c17 -Wall -Wextra -Werror -O2 -shared -fPIC -DFLOW_SHARED_LIB /tmp/flow_stage14_pb.c -o /tmp/libflow_stage14_pb.so -lpthread"), 0);
+
+        FILE *pbpy_fp = fopen("/tmp/flow_stage14_pb.py", "w");
+        FLOW_ASSERT_TRUE(pbpy_fp != NULL);
+        FLOW_ASSERT_TRUE(flow_abi_emit_python_adapter(pbpy_fp, &pb_abi));
+        fputs("\nif __name__ == '__main__':\n"
+              "    with EmbodiedController('/tmp/libflow_stage14_pb.so') as eng:\n"
+              "        raw = SensorRaw(pos=4.0, vel=2.0, seq=99)\n"
+              "        cmd = eng.run_patchbay(raw)\n"
+              "        # filter: pos=2.0, vel=1.0, seq=100 -> ik: torque=22.0, damping=0.25, seq=100 -> safety: clamped=22.0\n"
+              "        assert abs(cmd.clamped_torque - 22.0) < 1e-9\n"
+              "        assert cmd.seq == 100\n"
+              "        assert cmd.pwm_code > 32768\n"
+              "        # Below SLA (100us <= 500us): watchdog does not trip\n"
+              "        assert eng.trip_watchdog_for_test(100000) == 0\n"
+              "        cmd2 = eng.run_patchbay(SensorRaw(pos=20.0, vel=0.0, seq=1))\n"
+              "        assert abs(cmd2.clamped_torque - 50.0) < 1e-9\n"
+              "        assert cmd2.seq == 2\n"
+              "        # Breach SLA (600us > 500us): emergency_stop latches -4 permanently\n"
+              "        assert eng.trip_watchdog_for_test(600000) == -4\n"
+              "        try:\n"
+              "            eng.run_patchbay(raw)\n"
+              "            assert False, 'Expected RuntimeError(-4) after emergency_stop latch'\n"
+              "        except RuntimeError as e:\n"
+              "            assert '-4' in str(e)\n", pbpy_fp);
+        fclose(pbpy_fp);
+        FLOW_ASSERT_EQ(system("python3 /tmp/flow_stage14_pb.py"), 0);
+
+        /* Also verify live runtime SLA breach inside flow_<id>_run_patchbay when sla_latency_ns == 1ns */
+        SemanticIR pb_tight_ir = pb_ir;
+        pb_tight_ir.sla_latency_ns = 1ULL;
+        FILE *pbt_fp = fopen("/tmp/flow_stage14_pb_tight.c", "w");
+        FLOW_ASSERT_TRUE(pbt_fp != NULL);
+        FLOW_ASSERT_TRUE(emit_c(pbt_fp, &pb_tight_ir, pb_comp, NULL, &pb_vrep, 0));
+        fclose(pbt_fp);
+        FLOW_ASSERT_EQ(system("cc -std=c17 -Wall -Wextra -Werror -O2 -shared -fPIC -DFLOW_SHARED_LIB /tmp/flow_stage14_pb_tight.c -o /tmp/libflow_stage14_pb_tight.so -lpthread"), 0);
+        void *pbt_dl = dlopen("/tmp/libflow_stage14_pb_tight.so", RTLD_NOW);
+        FLOW_ASSERT_TRUE(pbt_dl != NULL);
+        typedef void *(*pb_create_fn_t)(void);
+        typedef void (*pb_destroy_fn_t)(void *);
+        typedef struct { double pos, vel; uint64_t seq; } C_SensorRaw;
+        typedef struct { double clamped_torque; uint64_t pwm_code, seq; } C_ActuatorCmd;
+        typedef int32_t (*pb_run_fn_t)(void *, const C_SensorRaw *, C_ActuatorCmd *);
+        pb_create_fn_t fn_pbt_create = NULL;
+        pb_destroy_fn_t fn_pbt_destroy = NULL;
+        pb_run_fn_t fn_pbt_run = NULL;
+        void *s_cr = dlsym(pbt_dl, "flow_embodied_controller_create");
+        void *s_de = dlsym(pbt_dl, "flow_embodied_controller_destroy");
+        void *s_rn = dlsym(pbt_dl, "flow_embodied_controller_run_patchbay");
+        FLOW_ASSERT_TRUE(s_cr != NULL && s_de != NULL && s_rn != NULL);
+        memcpy(&fn_pbt_create, &s_cr, sizeof(fn_pbt_create));
+        memcpy(&fn_pbt_destroy, &s_de, sizeof(fn_pbt_destroy));
+        memcpy(&fn_pbt_run, &s_rn, sizeof(fn_pbt_run));
+        void *pbt_h = fn_pbt_create();
+        FLOW_ASSERT_TRUE(pbt_h != NULL);
+        C_SensorRaw c_in = { 4.0, 2.0, 1ULL };
+        C_ActuatorCmd c_out = { 0.0, 0ULL, 0ULL };
+        FLOW_ASSERT_EQ(fn_pbt_run(pbt_h, &c_in, &c_out), -4);
+        FLOW_ASSERT_EQ(fn_pbt_run(pbt_h, &c_in, &c_out), -4);
+        fn_pbt_destroy(pbt_h);
+        dlclose(pbt_dl);
+        remove("/tmp/flow_stage14_pb_tight.c");
+        remove("/tmp/libflow_stage14_pb_tight.so");
+
+        remove(pb_s1_lean);
+        remove(pb_s2_lean);
+        remove(pb_s3_lean);
+        remove(pb_bad_lean);
+        remove(pb_ok_flow);
+        remove("/tmp/flow_stage14_pb.c");
+        remove("/tmp/libflow_stage14_pb.so");
+        remove("/tmp/flow_stage14_pb.py");
+        flow_ir_cleanup(&pb_ir);
+
+        printf("  ✓ Stage 14 Passed: Lean-RT zero-GC gate, nested structs, flow_quantize/dequantize, verified state migration & @patchbay composition verified.\n\n");
+    }
+
+    /* ========================================================================= */
+    /* STAGE 16: 15-Module Flat Consolidation, Boilerplate Elimination (B1-B6)   */
+    /*           & Symbolic Constants Integrity (M1-M7)                          */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(16, "15-Module Flat Consolidation, Boilerplate Elimination (B1-B6), Symbolic Constants (M1-M7) & Algorithmic UI Layout Engine");
+    {
+        /* 1. 15-Module Flat Consolidation & Topology Audit */
+        FLOW_ASSERT_TRUE(access("src/fvec", F_OK) != 0);
+        FLOW_ASSERT_TRUE(access("src/jet", F_OK) != 0);
+        FLOW_ASSERT_TRUE(access("src/topo", F_OK) != 0);
+        FLOW_ASSERT_TRUE(access("src/inspect", F_OK) != 0);
+
+        FlowTopologyGraph cgraph;
+        flow_topology_build_codebase_graph(&cgraph);
+        FlowTopologyAuditReport creport;
+        flow_topology_audit(&cgraph, &creport);
+        FLOW_ASSERT_EQ(creport.cross_layer_leaks, 0u);
+        FLOW_ASSERT_TRUE(fabs(creport.modularity_score - 1.0) < 1e-9);
+
+        /* 2. Unified Boilerplate Helpers (B1-B5) */
+        const char *crc_msg = "FLOW_ORTHOGONAL_2026";
+        uint32_t crc_base = flow_crc32_ieee(crc_msg, 20);
+        FLOW_ASSERT_EQ(crc_base, flow_fvec_crc32(crc_msg, 20));
+        FLOW_ASSERT_EQ(crc_base, flow_jet_crc32(crc_msg, 20));
+
+        FlowThermalState th1;
+        flow_jet_thermal_init_default(&th1);
+        FLOW_ASSERT_TRUE(flow_thermal_state_step(&th1, 65.0, 0.1));
+        FlowJet j_th;
+        FLOW_ASSERT_TRUE(flow_jet_init(&j_th, "stage16_th", "Stage 16 Thermal"));
+        FLOW_ASSERT_TRUE(flow_jet_thermal_step(&j_th, 65.0, 0.1));
+        FLOW_ASSERT_TRUE(fabs(th1.temp_c - j_th.payload.thermal.temp_c) < 1e-12);
+
+        double q1[2] = { 1.0, -0.5 }, p1[2] = { 0.2, 0.4 }, a1[2] = { 0.0, 0.0 };
+        FlowJet j_sym;
+        FLOW_ASSERT_TRUE(flow_jet_init_extended(&j_sym, "stage16_sym", "Stage 16 Symplectic", 2, 2, 2));
+        j_sym.payload.q[0] = q1[0]; j_sym.payload.q[1] = q1[1];
+        j_sym.payload.p[0] = p1[0]; j_sym.payload.p[1] = p1[1];
+        j_sym.payload.a[0] = a1[0]; j_sym.payload.a[1] = a1[1];
+        flow_verlet_step_harmonic(2, q1, p1, a1, j_sym.payload.curvature_spectrum, 0.01);
+        FLOW_ASSERT_TRUE(flow_jet_symplectic_step(&j_sym, 0.01));
+        FLOW_ASSERT_TRUE(fabs(q1[0] - j_sym.payload.q[0]) < 1e-12);
+        FLOW_ASSERT_TRUE(fabs(p1[1] - j_sym.payload.p[1]) < 1e-12);
+
+        FLOW_ASSERT_TRUE(flow_registry_resolve_plugin("flow.embodied"));
+        FlowTokenRing tr;
+        FLOW_ASSERT_TRUE(flow_token_ring_converge_default(&tr, NULL, "stage16_verify"));
+        FLOW_ASSERT_EQ(tr.state, FLOW_RING_ATTRACTOR_REACHED);
+
+        /* 3. Symbolic Constants Integrity (M1-M7) & flow_cubical_sieve_from_ir consistency */
+        FLOW_ASSERT_EQ((uint32_t)FLOW_SIEVE_BIT_EXTENT_ALIGN, 5u);
+        FLOW_ASSERT_EQ((uint32_t)FLOW_SIEVE_BIT_PARALLEL, 8u);
+        FLOW_ASSERT_EQ((uint32_t)FLOW_SIEVE_BIT_LEAN_CERTIFIED, 62u);
+        FLOW_ASSERT_EQ((uint64_t)FLOW_WCET_ALU_OP_NS, 5ULL);
+        FLOW_ASSERT_EQ((uint64_t)FLOW_WCET_COMPLEX_OP_NS, 25ULL);
+        FLOW_ASSERT_STR_EQ(FLOW_FVEC_MAGIC, "FVEC_V1");
+        {
+            SemanticIR sieve_ir;
+            memset(&sieve_ir, 0, sizeof(sieve_ir));
+            sieve_ir.flow_parallelizable = 1;
+            sieve_ir.state_shared = 1;
+            sieve_ir.state_read_heavy = 1;
+            sieve_ir.fact_unordered = 1;
+            sieve_ir.state_bounded = 1;
+            sieve_ir.fact_deterministic = 1;
+            sieve_ir.fact_lean_certified = 1;
+            FlowCubicalTypeSieve ts = flow_cubical_sieve_from_ir(&sieve_ir);
+            FLOW_ASSERT_TRUE((ts.mask & (1ULL << FLOW_SIEVE_BIT_PARALLEL)) != 0);
+            FLOW_ASSERT_TRUE((ts.mask & (1ULL << FLOW_SIEVE_BIT_SHARED_STATE)) != 0);
+            FLOW_ASSERT_TRUE((ts.mask & (1ULL << FLOW_SIEVE_BIT_READ_HEAVY)) != 0);
+            FLOW_ASSERT_TRUE((ts.mask & (1ULL << FLOW_SIEVE_BIT_UNORDERED)) != 0);
+            FLOW_ASSERT_TRUE((ts.mask & (1ULL << FLOW_SIEVE_BIT_BOUNDED_RANGE)) != 0);
+            FLOW_ASSERT_TRUE((ts.mask & (1ULL << FLOW_SIEVE_BIT_DETERMINISTIC)) != 0);
+            FLOW_ASSERT_TRUE((ts.mask & (1ULL << FLOW_SIEVE_BIT_LEAN_CERTIFIED)) != 0);
+        }
+
+        /* 4. Algorithmic UI Layout Engine (B6): 2D Skyline Bin-Packing, Sugiyama DAG & Type-Directed Controls */
+        const char *s16_lean = "/tmp/flow_stage16_ui.lean";
+        FILE *fx_fp = fopen(s16_lean, "w");
+        FLOW_ASSERT_TRUE(fx_fp != NULL);
+        fputs(
+            "namespace Flow.Stage16UI\n"
+            "inductive BarrierRegime where\n"
+            "  | Continuous\n"
+            "  | DiscreteWindow\n"
+            "structure FXQuote where\n"
+            "  spot : Float\n"
+            "  barrier : Float\n"
+            "def check_barrier_breach (spot : Float) (barrier : Float) : Bool :=\n"
+            "  spot >= barrier\n"
+            "def scale_by_regime (r : BarrierRegime) (v : UInt64) : UInt64 :=\n"
+            "  match r with\n"
+            "  | Continuous => v * 2\n"
+            "  | DiscreteWindow => v\n"
+            "def step_quote (q : FXQuote) : FXQuote :=\n"
+            "  { spot := q.spot + 1.0, barrier := q.barrier }\n"
+            "theorem check_barrier_breach_sound (x : Float) : check_barrier_breach 120.0 100.0 == true := by decide\n"
+            "end Flow.Stage16UI\n", fx_fp);
+        fclose(fx_fp);
+
+        FILE *fx_rd = fopen(s16_lean, "r");
+        FLOW_ASSERT_TRUE(fx_rd != NULL);
+        FlowSpec fx_spec;
+        memset(&fx_spec, 0, sizeof(fx_spec));
+        strncpy(fx_spec.kernel_source_lean, s16_lean, sizeof(fx_spec.kernel_source_lean) - 1);
+        FLOW_ASSERT_TRUE(parse_spec(fx_rd, &fx_spec));
+        fclose(fx_rd);
+
+        /* Also verify flowy ui --selftest succeeds on a spec with struct-taking functions! */
+        {
+            char ui_cmd[512];
+            snprintf(ui_cmd, sizeof(ui_cmd), "%s/flowy ui %s --selftest", FLOW_BUILD_DIR, s16_lean);
+            FLOW_ASSERT_EQ(system(ui_cmd), 0);
+        }
+        remove(s16_lean);
+
+        SemanticIR fx_ir;
+        memset(&fx_ir, 0, sizeof(fx_ir));
+        lower_to_ir(&fx_spec, &fx_ir);
+        for (size_t s = 0; s < FLOW_PATCHBAY_STAGE_MAX; ++s) {
+            snprintf(fx_ir.patchbay_stages[s].stage_name, 63, "stage_%zu", s);
+            strncpy(fx_ir.patchbay_stages[s].fn_name, (s == 0) ? "check_barrier_breach" : "step_quote", 63);
+            strncpy(fx_ir.patchbay_stages[s].in_struct, "FXQuote", 63);
+            strncpy(fx_ir.patchbay_stages[s].out_struct, (s == 0) ? "Bool" : "FXQuote", 63);
+            fx_ir.patchbay_stages[s].wcet_ns = 250ULL;
+            fx_ir.patchbay_stages[s].ast_wcet_ns = 25ULL;
+        }
+        fx_ir.patchbay_stage_count = FLOW_PATCHBAY_STAGE_MAX;
+
+        const Component *fx_comp = select_component(&fx_ir);
+        FLOW_ASSERT_TRUE(fx_comp != NULL);
+        FlowComponentABI fx_abi;
+        FLOW_ASSERT_TRUE(flow_abi_build_for_component(&fx_ir, fx_comp, &fx_abi));
+
+        const char *ui_html_path = "/tmp/flow_stage16_ui.html";
+        FILE *ui_fp = fopen(ui_html_path, "w");
+        FLOW_ASSERT_TRUE(ui_fp != NULL);
+        FLOW_ASSERT_TRUE(flow_abi_emit_ui_adapter(ui_fp, &fx_ir, &fx_abi));
+        fclose(ui_fp);
+
+        FILE *ui_rd = fopen(ui_html_path, "r");
+        FLOW_ASSERT_TRUE(ui_rd != NULL);
+        fseek(ui_rd, 0, SEEK_END);
+        long ui_len = ftell(ui_rd);
+        fseek(ui_rd, 0, SEEK_SET);
+        FLOW_ASSERT_TRUE(ui_len > 1024);
+        char *ui_buf = (char *)calloc((size_t)ui_len + 1, 1);
+        FLOW_ASSERT_TRUE(ui_buf != NULL);
+        FLOW_ASSERT_EQ(fread(ui_buf, 1, (size_t)ui_len, ui_rd), (size_t)ui_len);
+        fclose(ui_rd);
+
+        FLOW_ASSERT_TRUE(strstr(ui_buf, "lean_structs: [") != NULL);
+        FLOW_ASSERT_TRUE(strstr(ui_buf, "lean_enums: [") != NULL);
+        FLOW_ASSERT_TRUE(strstr(ui_buf, "patchbay_stages: [") != NULL);
+        FLOW_ASSERT_TRUE(strstr(ui_buf, "computeSkylineLayout") != NULL);
+        FLOW_ASSERT_TRUE(strstr(ui_buf, "<svg id=\"sugiyama-dag\"") != NULL);
+        FLOW_ASSERT_TRUE(strstr(ui_buf, "renderSugiyamaDag") != NULL);
+        FLOW_ASSERT_TRUE(strstr(ui_buf, "FORMAL SAFETY GATE") != NULL);
+        FLOW_ASSERT_TRUE(strstr(ui_buf, "<select") != NULL);
+        FLOW_ASSERT_TRUE(strstr(ui_buf, "struct-group") != NULL);
+        FLOW_ASSERT_TRUE(strstr(ui_buf, "margin-top:auto") != NULL);
+        FLOW_ASSERT_TRUE(strstr(ui_buf, "controlWatchdog") != NULL);
+        FLOW_ASSERT_TRUE(strstr(ui_buf, "exportComplianceCertificate") != NULL);
+        FLOW_ASSERT_TRUE(strstr(ui_buf, "wd-badge") != NULL);
+
+        /* 5. Stage 17: Six-Persona Application-Layer Last-Mile Closure (MATLAB IR Adapter, FlowStatusCode, Watchdog Reset & flowy build --shared) */
+        const char *m_path = "/tmp/flow_stage17_fx.m";
+        FILE *m_fp = fopen(m_path, "w");
+        FLOW_ASSERT_TRUE(m_fp != NULL);
+        FLOW_ASSERT_TRUE(flow_abi_emit_polyglot_adapter(m_fp, &fx_abi, "matlab"));
+        fclose(m_fp);
+
+        FILE *m_rd = fopen(m_path, "r");
+        FLOW_ASSERT_TRUE(m_rd != NULL);
+        fseek(m_rd, 0, SEEK_END);
+        long m_len = ftell(m_rd);
+        fseek(m_rd, 0, SEEK_SET);
+        char *m_buf = (char *)calloc((size_t)m_len + 1, 1);
+        FLOW_ASSERT_TRUE(m_buf != NULL);
+        FLOW_ASSERT_EQ(fread(m_buf, 1, (size_t)m_len, m_rd), (size_t)m_len);
+        fclose(m_rd);
+        remove(m_path);
+
+        FLOW_ASSERT_TRUE(strstr(m_buf, "FLOW_OK = int32(0);") != NULL);
+        FLOW_ASSERT_TRUE(strstr(m_buf, "FLOW_ERR_WATCHDOG_ESTOP = int32(-4);") != NULL);
+        FLOW_ASSERT_TRUE(strstr(m_buf, "Continuous = uint32(0);") != NULL);
+        FLOW_ASSERT_TRUE(strstr(m_buf, "DiscreteWindow = uint32(1);") != NULL);
+        FLOW_ASSERT_TRUE(strstr(m_buf, "LEAN_FUNCTIONS = {") != NULL);
+        FLOW_ASSERT_TRUE(strstr(m_buf, "PATCHBAY_STAGES = {") != NULL);
+        FLOW_ASSERT_TRUE(strstr(m_buf, "function rc = resetWatchdog(obj)") != NULL);
+        FLOW_ASSERT_TRUE(strstr(m_buf, "function cnt = breachCount(obj)") != NULL);
+        FLOW_ASSERT_TRUE(strstr(m_buf, "function outFrame = runPatchbay(obj, inFrame)") != NULL);
+        FLOW_ASSERT_TRUE(strstr(m_buf, "function res = check_barrier_breach(obj, spot, barrier)") != NULL);
+        FLOW_ASSERT_TRUE(strstr(m_buf, "function res = scale_by_regime(obj, r, v)") != NULL);
+        FLOW_ASSERT_TRUE(strstr(m_buf, "function res = step_quote(obj, q)") != NULL);
+        free(m_buf);
+
+        /* Test flowy build --shared one-command SDK bundle + Watchdog Trip/Reset round-trip */
+        const char *s17_lean = "/tmp/flow_stage17_sdk.lean";
+        FILE *s17_fp = fopen(s17_lean, "w");
+        FLOW_ASSERT_TRUE(s17_fp != NULL);
+        fputs(
+            "namespace Embodied.Stage17SDK\n"
+            "structure JointCmd where\n"
+            "  torque_nm : Float\n"
+            "  seq       : UInt64\n"
+            "def clamp_torque (t : Float) (lim : Float) : Float :=\n"
+            "  if t > lim then lim else t\n"
+            "theorem clamp_torque_sound : clamp_torque 120.0 80.0 == 80.0 := by decide\n"
+            "end Embodied.Stage17SDK\n", s17_fp);
+        fclose(s17_fp);
+
+        {
+            char sh_cmd[512];
+            snprintf(sh_cmd, sizeof(sh_cmd), "%s/flowy build --shared %s >/dev/null", FLOW_BUILD_DIR, s17_lean);
+            FLOW_ASSERT_EQ(system(sh_cmd), 0);
+            FLOW_ASSERT_EQ(access("build/libflow_stage17_sdk.so", F_OK), 0);
+            FLOW_ASSERT_EQ(access("build/flow_stage17_sdk.h", F_OK), 0);
+            FLOW_ASSERT_EQ(access("build/flow_stage17_sdk_abi.py", F_OK), 0);
+            FLOW_ASSERT_EQ(access("build/flow_flow_stage17_sdk.m", F_OK), 0);
+
+            /* Verify FlowStatusCode enum in generated .h */
+            FILE *h_rd = fopen("build/flow_stage17_sdk.h", "r");
+            FLOW_ASSERT_TRUE(h_rd != NULL);
+            char h_buf[4096] = {0};
+            (void)fread(h_buf, 1, sizeof(h_buf) - 1, h_rd);
+            fclose(h_rd);
+            FLOW_ASSERT_TRUE(strstr(h_buf, "FLOW_ERR_WATCHDOG_ESTOP = -4") != NULL);
+            FLOW_ASSERT_TRUE(strstr(h_buf, "_reset_watchdog(") != NULL);
+            FLOW_ASSERT_TRUE(strstr(h_buf, "_watchdog_breach_count(") != NULL);
+
+            /* Verify Python SDK Watchdog trip -> breach_count -> reset recovery */
+            const char *py_verify =
+                "python3 -c \""
+                "import sys; sys.path.insert(0, 'build'); "
+                "import flow_stage17_sdk_abi as sdk; "
+                "assert sdk.FLOW_OK == 0 and sdk.FLOW_ERR_WATCHDOG_ESTOP == -4; "
+                "eng = sdk.EmbodiedController('build/libflow_stage17_sdk.so'); "
+                "assert abs(eng.clamp_torque(120.0, 80.0) - 80.0) < 1e-9; "
+                "assert eng.watchdog_breach_count() == 0; "
+                "assert eng.trip_watchdog_for_test(10**9) == sdk.FLOW_ERR_WATCHDOG_ESTOP; "
+                "assert eng.watchdog_breach_count() == 1; "
+                "assert eng.reset_watchdog() == sdk.FLOW_OK; "
+                "w = eng.step_words([0, 64, 1]); assert w[0] == 64; "
+                "eng.close()\"";
+            FLOW_ASSERT_EQ(system(py_verify), 0);
+
+            remove("build/libflow_stage17_sdk.so");
+            remove("build/flow_stage17_sdk.h");
+            remove("build/flow_stage17_sdk_abi.py");
+            remove("build/flow_flow_stage17_sdk.m");
+        }
+        remove(s17_lean);
+
+        free(ui_buf);
+        remove(ui_html_path);
+        flow_ir_cleanup(&fx_ir);
+
+        printf("  ✓ Stage 16 & 17 Passed: 15-module flat consolidation, unified boilerplate (B1-B6), symbolic constants (M1-M7), Algorithmic UI & Six-Persona Last-Mile SDK verified.\n\n");
     }
 
     FLOW_TEST_SUITE_END();

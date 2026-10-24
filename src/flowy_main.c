@@ -1,61 +1,104 @@
 #include "flowy.h"
-#include "flowy_cli.h"
 #include "topology.h"
 #include "registry.h"
-#include "orchestrator.h"
 #include "flowy_fvec.h"
 #include "flow_jet.h"
 #include "backend.h"
-#include "cmd_dispatch.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
-static int flowy_resolve_and_load_plugin(const char *mod_name) { if (!mod_name || !mod_name[0]) return 0; if (flow_registry_lookup(mod_name)) return 1;
-    const char *base = (!strncmp(mod_name, "flow.", 5)) ? mod_name + 5 : mod_name;
-    static const char *const fmts[] = {"build/libflow_%s.so", "build/libflow_%s.dylib", "libflow_%s.so", "libflow_%s.dylib", "build/lib%s.so", "build/lib%s.dylib"};
-    char path[256], err[256] = {0};
-    for (size_t i = 0; i < 6; ++i) { snprintf(path, sizeof(path), fmts[i], base); if (flow_registry_load_dso(path, err, sizeof(err))) return 1; } return 0; }
+static int run_argv_sync(char *const argv[]) {
+    pid_t pid = fork();
+    if (pid < 0) return EXIT_FAILURE;
+    if (pid == 0) { execvp(argv[0], argv); _exit(127); }
+    int st = 0;
+    if (waitpid(pid, &st, 0) < 0) return EXIT_FAILURE;
+    return WIFEXITED(st) ? WEXITSTATUS(st) : EXIT_FAILURE;
+}
 static int is_help_flag(const char *s) { return s && (!strcmp(s, "-h") || !strcmp(s, "--help") || !strcmp(s, "help")); }
 static int match_any(const char *cmd, const char *const *list) { for (; *list; ++list) if (!strcmp(cmd, *list)) return 1; return 0; }
 static int flowy_build_cmd(int argc, char **argv, int and_run) {
-    if (argc < 3 || is_help_flag(argv[2])) { printf("Usage: flowy %s <spec.flow|spec.lean> [-o <binary>] [args...]\n", and_run ? "run" : "build"); return (argc < 3) ? EXIT_FAILURE : EXIT_SUCCESS; }
-    const char *spec_file = argv[2], *out_bin = NULL; int extra_arg_start = argc;
-    for (int i = 3; i < argc; ++i) if (!strcmp(argv[i], "-o") && i + 1 < argc) out_bin = argv[++i]; else { extra_arg_start = i; break; }
-    char auto_bin[512] = {0}, temp_c[512] = {0}, cmd[1024]; if (!out_bin) {
-        const char *slash = strrchr(spec_file, '/'), *base = slash ? slash + 1 : spec_file, *dot = strrchr(base, '.');
-        snprintf(auto_bin, sizeof(auto_bin), "build/%.*s", (int)(dot ? (size_t)(dot - base) : strlen(base)), base); out_bin = auto_bin; } system("mkdir -p build 2>/dev/null");
+    if (argc < 3 || is_help_flag(argv[2])) { printf("Usage: flowy %s [--shared] <spec.flow|spec.lean> [-o <binary|so>] [args...]\n", and_run ? "run" : "build"); return (argc < 3) ? EXIT_FAILURE : EXIT_SUCCESS; }
+    const char *spec_file = NULL, *out_bin = NULL; int extra_arg_start = argc, is_shared = 0;
+    for (int i = 2; i < argc; ++i) {
+        if (!strcmp(argv[i], "--shared") || !strcmp(argv[i], "--sdk")) is_shared = 1;
+        else if (!strcmp(argv[i], "-o") && i + 1 < argc) out_bin = argv[++i];
+        else if (!spec_file && argv[i][0] != '-') spec_file = argv[i];
+        else { extra_arg_start = i; break; }
+    }
+    if (!spec_file) { fprintf(stderr, "flowy %s: missing specification file\n", and_run ? "run" : "build"); return EXIT_FAILURE; }
+    const char *slash = strrchr(spec_file, '/'), *base = slash ? slash + 1 : spec_file, *dot = strrchr(base, '.');
+    char stem[128] = {0}; snprintf(stem, sizeof(stem), "%.*s", (int)(dot ? (size_t)(dot - base) : strlen(base)), base);
+    char auto_bin[512] = {0}, temp_c[512] = {0};
+    if (!out_bin) {
+        if (is_shared) snprintf(auto_bin, sizeof(auto_bin), "build/lib%s.so", stem);
+        else snprintf(auto_bin, sizeof(auto_bin), "build/%s", stem);
+        out_bin = auto_bin;
+    }
+    (void)mkdir("build", 0755);
     snprintf(temp_c, sizeof(temp_c), "/tmp/flow_%d_%lu.c", (int)getpid(), (unsigned long)time(NULL));
-    char sibling_flowc[512] = {0}; const char *flowc_bin = getenv("FLOWC");
-    if (!flowc_bin || !flowc_bin[0]) {
-        const char * last_slash = (argc > 0 && argv[0]) ? strrchr(argv[0], '/') : NULL;
-        if (last_slash) {
-            snprintf(sibling_flowc, sizeof(sibling_flowc), "%.*s/flowc", (int)(last_slash - argv[0]), argv[0]);
-            FILE *fs = fopen(sibling_flowc, "rb"); if (fs) { fclose(fs); flowc_bin = sibling_flowc; }
-        }
+    char sibling_flowc[512] = {0};
+    const char *flowc_bin = flowy_resolve_flowc_bin(argc > 0 ? argv[0] : NULL, sibling_flowc, sizeof(sibling_flowc));
+    char h_path[256] = {0}, py_path[256] = {0}, m_path[256] = {0};
+    if (is_shared) {
+        snprintf(h_path, sizeof(h_path), "build/%s.h", stem);
+        snprintf(py_path, sizeof(py_path), "build/%s_abi.py", stem);
+        snprintf(m_path, sizeof(m_path), "build/flow_%s.m", stem);
+        char *fc_sh_argv[] = {(char *)flowc_bin, (char *)spec_file, "-o", temp_c, "--target-c-header", h_path, "--target-python", py_path, "--target-matlab", m_path, NULL};
+        if (run_argv_sync(fc_sh_argv) != 0) { fprintf(stderr, "flowy build --shared: failed to compile %s\n", spec_file); remove(temp_c); return EXIT_FAILURE; }
+    } else {
+        char *fc_argv[] = {(char *)flowc_bin, (char *)spec_file, "-o", temp_c, NULL};
+        if (run_argv_sync(fc_argv) != 0) { fprintf(stderr, "flowy %s: failed to compile %s\n", and_run ? "run" : "build", spec_file); remove(temp_c); return EXIT_FAILURE; }
     }
-    if (!flowc_bin || !flowc_bin[0]) {
-        FILE *ft = fopen("./build/flowc", "rb"); if (ft) { fclose(ft); flowc_bin = "./build/flowc"; } else flowc_bin = "flowc";
-    }
-    snprintf(cmd, sizeof(cmd), "\"%s\" \"%s\" -o \"%s\"", flowc_bin, spec_file, temp_c);
-    if (system(cmd) != 0) { fprintf(stderr, "flowy %s: failed to compile %s\n", and_run ? "run" : "build", spec_file); remove(temp_c); return EXIT_FAILURE; }
     const char *cc = getenv("CC"); if (!cc || !cc[0]) cc = "clang";
-    snprintf(cmd, sizeof(cmd), "%s -O3 \"%s\" -o \"%s\" -lpthread -lm 2>/dev/null || %s -O3 \"%s\" -o \"%s\" -lm", cc, temp_c, out_bin, cc, temp_c, out_bin);
-    int ret = system(cmd); remove(temp_c);
+    int ret = 0;
+    if (is_shared) {
+        char *cc_sh1[] = {(char *)cc, "-std=c17", "-O3", "-shared", "-fPIC", "-DFLOW_SHARED_LIB", "-pthread", temp_c, "-o", (char *)out_bin, "-lm", NULL};
+        ret = run_argv_sync(cc_sh1);
+        if (ret != 0) {
+            char *cc_sh2[] = {(char *)cc, "-std=c17", "-O3", "-shared", "-fPIC", "-DFLOW_SHARED_LIB", temp_c, "-o", (char *)out_bin, "-lm", NULL};
+            ret = run_argv_sync(cc_sh2);
+        }
+        remove(temp_c);
+        if (ret != 0) { fprintf(stderr, "flowy build --shared: failed to generate %s\n", out_bin); return EXIT_FAILURE; }
+        printf("  ✓ [FLOW SDK Bundle] Built %s + %s + %s + %s\n", out_bin, h_path, py_path, m_path);
+        return EXIT_SUCCESS;
+    }
+    char *cc_argv1[] = {(char *)cc, "-O3", temp_c, "-o", (char *)out_bin, "-lpthread", "-lm", NULL};
+    ret = run_argv_sync(cc_argv1);
+    if (ret != 0) {
+        char *cc_argv2[] = {(char *)cc, "-O3", temp_c, "-o", (char *)out_bin, "-lm", NULL};
+        ret = run_argv_sync(cc_argv2);
+    }
+    remove(temp_c);
     if (ret != 0) { fprintf(stderr, "flowy %s: failed to generate binary %s\n", and_run ? "run" : "build", out_bin); return EXIT_FAILURE; }
-    printf("  ✓ [Dual-Track: AOT Track] Built %s (SMT formally verified, standalone native binary)\n", out_bin); if (and_run) { char run_cmd[2048];
-        int pos = snprintf(run_cmd, sizeof(run_cmd), "%s%s", (out_bin[0] == '/' || (out_bin[0] == '.' && out_bin[1] == '/')) ? "" : "./", out_bin);
-        for (int i = extra_arg_start; i < argc; ++i) pos += snprintf(run_cmd + pos, sizeof(run_cmd) - pos, " \"%s\"", argv[i]);
-        printf("▶ [Dual-Track: AOT Track] Executing %s:\n", run_cmd); return system(run_cmd); } return EXIT_SUCCESS; } static int flowy_run_jit_direct(const char *spec_file) {
+    printf("  ✓ [Dual-Track: AOT Track] Built %s (SMT formally verified, standalone native binary)\n", out_bin);
+    if (and_run) {
+        char exec_path[512];
+        snprintf(exec_path, sizeof(exec_path), "%s%s", (out_bin[0] == '/' || (out_bin[0] == '.' && out_bin[1] == '/')) ? "" : "./", out_bin);
+        char *run_argv[128]; int r_argc = 0;
+        run_argv[r_argc++] = exec_path;
+        for (int i = extra_arg_start; i < argc && r_argc < 127; ++i) run_argv[r_argc++] = argv[i];
+        run_argv[r_argc] = NULL;
+        printf("▶ [Dual-Track: AOT Track] Executing %s:\n", exec_path);
+        int run_rc = run_argv_sync(run_argv);
+        return (run_rc == 0) ? EXIT_SUCCESS : run_rc;
+    }
+    return EXIT_SUCCESS;
+}
+static int flowy_run_jit_direct(const char *spec_file) {
     flow_registry_init(); FILE *input = fopen(spec_file, "r");
     if (!input) { fprintf(stderr, "flowy run: cannot open spec file '%s': %s\n", spec_file, strerror(errno)); return EXIT_FAILURE; } FlowSpec spec;
     if (!parse_spec(input, &spec)) { fprintf(stderr, "flowy run: failed to parse spec %s\n", spec_file); fclose(input); return EXIT_FAILURE; } fclose(input);
     SemanticIR ir; lower_to_ir(&spec, &ir); if (ir.imported_module_count > 0) { for (size_t m = 0; m < ir.imported_module_count; ++m) {
-            flowy_resolve_and_load_plugin(ir.imported_modules[m]); const FlowPlugin *mod = flow_registry_lookup(ir.imported_modules[m]);
+            flow_registry_resolve_plugin(ir.imported_modules[m]); const FlowPlugin *mod = flow_registry_lookup(ir.imported_modules[m]);
             if (mod) flow_plugin_lower_semantics(&spec, &ir, mod); } } else { const char *mname = spec.plugin_name[0] ? spec.plugin_name : "builtin";
-        flowy_resolve_and_load_plugin(mname); const FlowPlugin *mod = flow_registry_lookup(mname); if (mod) flow_plugin_lower_semantics(&spec, &ir, mod); }
+        flow_registry_resolve_plugin(mname); const FlowPlugin *mod = flow_registry_lookup(mname); if (mod) flow_plugin_lower_semantics(&spec, &ir, mod); }
     const Component *component = select_component(&ir); if (!component) { flow_ir_cleanup(&ir); return -1; } VerificationReport verification;
     if (!verify_candidate(&ir, component, NULL, &verification)) { fprintf(stderr, "flowy run: formal verification failed: %s\n", verification.message); flow_ir_cleanup(&ir); return EXIT_FAILURE; }
     if (ir.extern_kernel[0]) { flow_ir_cleanup(&ir); return -1; }
@@ -70,6 +113,13 @@ static int flowy_run_cmd(int argc, char **argv) {
         for (int i = 2; i < argc && aot_argc < 127; ++i) if (strcmp(argv[i], "--aot") != 0) aot_argv[aot_argc++] = argv[i]; aot_argv[aot_argc] = NULL;
         return flowy_build_cmd(aot_argc, aot_argv, 1); } int ret = flowy_run_jit_direct(spec_file);
     if (ret == -1) { printf("[Dual-Track: Fallback] Custom external plugin link required; falling back to AOT...\n"); return flowy_build_cmd(argc, argv, 1); } return ret; }
+static int is_safe_path_str(const char *s) {
+    if (!s || !s[0]) return 0;
+    for (const char *p = s; *p; ++p) {
+        if (*p == '"' || *p == '\'' || *p == '`' || *p == '$' || *p == ';' || *p == '|' || *p == '&' || *p == '\n' || *p == '\r') return 0;
+    }
+    return 1;
+}
 static int flowy_ui_cmd(int argc, char **argv) {
     if (argc < 3 || is_help_flag(argv[2])) {
         printf("Usage: flowy ui <spec.lean|spec.flow> [--port <port>] [--selftest]\n");
@@ -81,47 +131,51 @@ static int flowy_ui_cmd(int argc, char **argv) {
         else if (!strcmp(argv[i], "--selftest")) selftest = 1;
         else if (argv[i][0] != '-' && !spec_file) spec_file = argv[i];
     }
-    if (!spec_file) { fprintf(stderr, "flowy ui: missing specification file\n"); return EXIT_FAILURE; }
+    if (!spec_file || !is_safe_path_str(spec_file)) { fprintf(stderr, "flowy ui: missing or unsafe specification file path\n"); return EXIT_FAILURE; }
     const char *slash = strrchr(spec_file, '/'), *base = slash ? slash + 1 : spec_file, *dot = strrchr(base, '.');
     char stem[128] = {0}; snprintf(stem, sizeof(stem), "%.*s", (int)(dot ? (size_t)(dot - base) : strlen(base)), base);
-    system("mkdir -p build 2>/dev/null");
-    char sibling_flowc[512] = {0}; const char *flowc_bin = getenv("FLOWC");
-    if (!flowc_bin || !flowc_bin[0]) {
-        const char *last_slash = (argc > 0 && argv[0]) ? strrchr(argv[0], '/') : NULL;
-        if (last_slash) {
-            snprintf(sibling_flowc, sizeof(sibling_flowc), "%.*s/flowc", (int)(last_slash - argv[0]), argv[0]);
-            FILE *fs = fopen(sibling_flowc, "rb"); if (fs) { fclose(fs); flowc_bin = sibling_flowc; }
-        }
+    for (char *p = stem; *p; ++p) {
+        if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') || *p == '_' || *p == '-')) *p = '_';
     }
-    if (!flowc_bin || !flowc_bin[0]) {
-        FILE *ft = fopen("./build/flowc", "rb"); if (ft) { fclose(ft); flowc_bin = "./build/flowc"; } else flowc_bin = "flowc";
-    }
-    char c_path[256], py_path[256], ui_path[256], so_path[256], cmd[4096];
+    (void)mkdir("build", 0755);
+    char sibling_flowc[512] = {0};
+    const char *flowc_bin = flowy_resolve_flowc_bin(argc > 0 ? argv[0] : NULL, sibling_flowc, sizeof(sibling_flowc));
+    char c_path[256], py_path[256], ui_path[256], so_path[256], selftest_str[16], port_str[16];
     snprintf(c_path, sizeof(c_path), "build/%s_ui.c", stem);
     snprintf(py_path, sizeof(py_path), "build/%s_ui_abi.py", stem);
     snprintf(ui_path, sizeof(ui_path), "build/%s_ui.html", stem);
     snprintf(so_path, sizeof(so_path), "build/lib%s_ui.so", stem);
-    snprintf(cmd, sizeof(cmd), "\"%s\" \"%s\" -o \"%s\" --target-python \"%s\" --target-ui \"%s\"", flowc_bin, spec_file, c_path, py_path, ui_path);
-    if (system(cmd) != 0) { fprintf(stderr, "flowy ui: failed to compile %s\n", spec_file); return EXIT_FAILURE; }
+    snprintf(selftest_str, sizeof(selftest_str), "%d", selftest);
+    snprintf(port_str, sizeof(port_str), "%d", port);
+    char *fc_argv[] = {(char *)flowc_bin, (char *)spec_file, "-o", c_path, "--target-python", py_path, "--target-ui", ui_path, NULL};
+    if (run_argv_sync(fc_argv) != 0) { fprintf(stderr, "flowy ui: failed to compile %s\n", spec_file); return EXIT_FAILURE; }
     const char *cc = getenv("CC"); if (!cc || !cc[0]) cc = "clang";
-    snprintf(cmd, sizeof(cmd), "%s -std=c17 -O2 -shared -fPIC -DFLOW_SHARED_LIB -pthread \"%s\" -o \"%s\" -lm 2>/dev/null || %s -std=c17 -O2 -shared -fPIC -DFLOW_SHARED_LIB \"%s\" -o \"%s\" -lm", cc, c_path, so_path, cc, c_path, so_path);
-    if (system(cmd) != 0) { fprintf(stderr, "flowy ui: failed to build shared library %s\n", so_path); return EXIT_FAILURE; }
-    snprintf(cmd, sizeof(cmd),
-        "python3 -B -c \""
-        "import sys, json, importlib.util, http.server\n"
-        "spec = importlib.util.spec_from_file_location('uimod', '%s')\n"
+    char *cc_argv1[] = {(char *)cc, "-std=c17", "-O2", "-shared", "-fPIC", "-DFLOW_SHARED_LIB", "-pthread", c_path, "-o", so_path, "-lm", NULL};
+    if (run_argv_sync(cc_argv1) != 0) {
+        char *cc_argv2[] = {(char *)cc, "-std=c17", "-O2", "-shared", "-fPIC", "-DFLOW_SHARED_LIB", c_path, "-o", so_path, "-lm", NULL};
+        if (run_argv_sync(cc_argv2) != 0) { fprintf(stderr, "flowy ui: failed to build shared library %s\n", so_path); return EXIT_FAILURE; }
+    }
+    static const char *const py_script =
+        "import sys, json, ctypes, importlib.util, http.server\n"
+        "py_p, so_p, ui_p, selftest, port = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5])\n"
+        "spec = importlib.util.spec_from_file_location('uimod', py_p)\n"
         "mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)\n"
         "cls = next(v for v in vars(mod).values() if isinstance(v, type) and hasattr(v, 'LEAN_FUNCTIONS'))\n"
-        "eng = cls('%s')\n"
-        "ui_html = open('%s', 'r', encoding='utf-8').read()\n"
+        "eng = cls(so_p)\n"
+        "ui_html = open(ui_p, 'r', encoding='utf-8').read()\n"
         "assert 'FLOW_SCHEMA' in ui_html\n"
-        "if %d:\n"
+        "def _ser(v):\n"
+        "    return {k: getattr(v, k) for k, _ in v._fields_} if isinstance(v, ctypes.Structure) else v\n"
+        "if selftest:\n"
         "    w = eng.step_words([0, 64, 1])\n"
         "    for fn in eng.LEAN_FUNCTIONS:\n"
-        "        res = eng.call_lean(fn['name'], *([10]*len(fn['params'])))\n"
+        "        res = _ser(eng.call_lean(fn['name'], *([10]*len(fn['params']))))\n"
+        "    assert eng.reset_watchdog() == 0\n"
+        "    assert eng.watchdog_breach_count() >= 0\n"
         "    print(f'  ✓ [FLOW Schema-Driven UI & C17 Bridge] Self-test passed (fields={len(eng.STATE_FIELDS)}, fns={len(eng.LEAN_FUNCTIONS)}, theorems={len(eng.LEAN_THEOREMS)})')\n"
         "    eng.close(); sys.exit(0)\n"
         "ledger = []\n"
+        "wd_latched = False\n"
         "fn_names = {f['name'] for f in eng.LEAN_FUNCTIONS}\n"
         "class H(http.server.BaseHTTPRequestHandler):\n"
         "    def log_message(self, *a): pass\n"
@@ -130,23 +184,31 @@ static int flowy_ui_cmd(int argc, char **argv) {
         "        self.send_header('Content-Type', 'application/json'); self.send_header('Content-Length', str(len(b))); self.end_headers(); self.wfile.write(b)\n"
         "    def do_GET(self):\n"
         "        if self.path == '/api/schema': return self._json({'ok':True,'state_fields':eng.STATE_FIELDS,'lean_functions':list(eng.LEAN_FUNCTIONS),'lean_theorems':eng.LEAN_THEOREMS,'ledger':ledger})\n"
+        "        if self.path == '/api/certificate':\n"
+        "            return self._json({'ok':True,'component':cls.__name__,'state_fields':eng.STATE_FIELDS,'lean_functions':list(eng.LEAN_FUNCTIONS),'lean_theorems':eng.LEAN_THEOREMS,'watchdog':{'estop_latched':wd_latched,'breach_count':eng.watchdog_breach_count()},'sod_audit_ledger':ledger})\n"
         "        b = ui_html.encode('utf-8'); self.send_response(200); self.send_header('Content-Type','text/html; charset=utf-8'); self.send_header('Content-Length',str(len(b))); self.end_headers(); self.wfile.write(b)\n"
         "    def do_POST(self):\n"
+        "        global wd_latched\n"
         "        ln = int(self.headers.get('Content-Length', '0'))\n"
         "        body = json.loads(self.rfile.read(ln).decode('utf-8') or '{}')\n"
         "        try:\n"
-        "            if self.path == '/api/call': return self._json({'ok':True,'fn':body['fn'],'result':eng.call_lean(body['fn'], *body.get('args',[]))})\n"
+        "            if self.path == '/api/call': return self._json({'ok':True,'fn':body['fn'],'result':_ser(eng.call_lean(body['fn'], *body.get('args',[])))})\n"
         "            if self.path == '/api/step': return self._json({'ok':True,'words':eng.step_words(body.get('words',[]))})\n"
+        "            if self.path == '/api/watchdog':\n"
+        "                act = body.get('action', 'reset')\n"
+        "                rc = eng.trip_watchdog_for_test(10**9) if act == 'trip' else eng.reset_watchdog()\n"
+        "                wd_latched = (rc == -4 or act == 'trip')\n"
+        "                return self._json({'ok':True,'status':rc,'estop_latched':wd_latched,'breach_count':eng.watchdog_breach_count()})\n"
         "            if self.path == '/api/ledger':\n"
         "                sod = (body.get('auth',0) != body.get('exec',0) and body.get('auth',0) > 0 and body.get('exec',0) > 0)\n"
-        "                res = eng.call_lean(body['fn'], *body.get('args',[])) if body.get('fn') in fn_names else True\n"
+        "                res = _ser(eng.call_lean(body['fn'], *body.get('args',[]))) if body.get('fn') in fn_names else True\n"
         "                ent = {'seq':len(ledger)+1,'fn':body.get('fn',''),'sod_ok':sod,'result':res}\n"
         "                ledger.append(ent); return self._json({'ok':True,**ent})\n"
         "        except Exception as e: return self._json({'ok':False,'error':str(e)}, 400)\n"
-        "print('▶ FLOW Schema-Driven Control Plane listening on http://127.0.0.1:%d')\n"
-        "http.server.ThreadingHTTPServer(('127.0.0.1', %d), H).serve_forever()\n\"",
-        py_path, so_path, ui_path, selftest, port, port);
-    return system(cmd) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+        "print(f'▶ FLOW Schema-Driven Control Plane listening on http://127.0.0.1:{port}')\n"
+        "http.server.ThreadingHTTPServer(('127.0.0.1', port), H).serve_forever()\n";
+    char *py_argv[] = {"python3", "-B", "-c", (char *)py_script, py_path, so_path, ui_path, selftest_str, port_str, NULL};
+    return run_argv_sync(py_argv) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 static void flowy_print_usage(FILE *out) { fprintf(out, "FLOW 2.0 Living System & Declarative Toolchain (flowy) v2.5.0\nUsage: flowy <command> [options...]\n\n"
                  "Primary Commands:\n"
@@ -165,7 +227,7 @@ static void flowy_print_usage(FILE *out) { fprintf(out, "FLOW 2.0 Living System 
     if (is_help_flag(suite)) { printf("Usage: flowy test <brain|body|concurrency|fvec-swarm|system|refactored-core|geometric-axiom|cubical-hott|all>\n"); return EXIT_SUCCESS; }
     static const char *const suites[] = {"brain", "body", "concurrency", "fvec-swarm", "system", "refactored-core", "geometric-axiom", "cubical-hott"};
     static const char *const bins[] = {"./build/test-brain", "./build/test-body", "./build/test-concurrency", "./build/test-fvec-swarm", "./build/test-system", "./build/test-refactored-core", "./build/test-geometric-axiom", "./build/test-cubical-hott"};
-    if (!strcmp(suite, "all")) { for (int i = 0; i < 8; ++i) { printf("▶ Running Suite [%s] (%s)...\n", suites[i], bins[i]); int ret = system(bins[i]);
+    if (!strcmp(suite, "all")) { for (int i = 0; i < 8; ++i) { printf("▶ Running Suite [%s] (%s)...\n", suites[i], bins[i]); char *t_argv[] = {(char *)bins[i], NULL}; int ret = run_argv_sync(t_argv);
             if (ret != 0) { fprintf(stderr, "❌ Suite [%s] failed with exit code %d\n", suites[i], ret); return EXIT_FAILURE; } }
         printf("  ✅ ALL 8 DOMAIN TEST SUITES PASSED\n"); return EXIT_SUCCESS; }
     for (int i = 0; i < 8; ++i) {
@@ -174,7 +236,8 @@ static void flowy_print_usage(FILE *out) { fprintf(out, "FLOW 2.0 Living System 
             (!strcmp(suite, "axiom") && !strcmp(suites[i], "geometric-axiom")) ||
             (!strcmp(suite, "hott") && !strcmp(suites[i], "cubical-hott"))) {
             printf("▶ Running Suite [%s] (%s)...\n", suites[i], bins[i]);
-            return (system(bins[i]) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+            char *t_argv[] = {(char *)bins[i], NULL};
+            return (run_argv_sync(t_argv) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
         }
     }
     fprintf(stderr, "Unknown test suite: %s\n", suite); return EXIT_FAILURE; }
@@ -204,7 +267,7 @@ int main(int argc, char **argv) { if (argc < 2 || is_help_flag(argv[1])) { flowy
         else printf("Active FLOW language: %s\n", flowy_language_name(flowy_get_language())); return EXIT_SUCCESS; }
     if (!strcmp(argv[1], "fvec") || !strcmp(argv[1], "--fvec")) {
         if (argc < 3 || is_help_flag(argv[2])) { cmd_fvec_print_usage(stdout); return argc < 3 ? EXIT_FAILURE : EXIT_SUCCESS; } return cmd_fvec_run(argc - 1, argv + 1); }
-    static const char *const fvec_aliases[] = {"rag","prompt","--rag","vault","--vault","hippocampus","antibody","--antibody","immune","query","--query","hub","--hub",NULL};
+    static const char *const fvec_aliases[] = {"rag","prompt","--rag","vault","--vault","hippocampus","antibody","--antibody","immune","query","--query","search","--search","hub","--hub",NULL};
     if (match_any(argv[1], fvec_aliases)) return cmd_fvec_run(argc - 1, argv + 1); if (!strcmp(argv[1], "jet") || !strcmp(argv[1], "--jet")) {
         if (argc < 3 || is_help_flag(argv[2])) { cmd_jet_print_usage(argc < 3 ? stderr : stdout); return argc < 3 ? EXIT_FAILURE : EXIT_SUCCESS; }
         return cmd_jet_run(argc - 2, argv + 2); } fprintf(stderr, "Unknown command: %s\n\n", argv[1]); flowy_print_usage(stderr); return EXIT_FAILURE; }

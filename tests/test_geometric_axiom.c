@@ -1,5 +1,5 @@
 #include "flow_test_kit.h"
-#include "geometric_axiom.h"
+#include "cubical_hott.h"
 #include "flow_jet.h"
 
 #include <stdio.h>
@@ -106,11 +106,18 @@ int main(void) {
 
         double initial_temp = sec->thermal.temp_c;
         double dt = 0.001; /* 1ms */
+        sec->q[0] = 1.0;
+        sec->p[0] = 0.5;
+        double e0 = 0.5 * (sec->p[0] * sec->p[0] + sec->curvature_spectrum[0] * sec->q[0] * sec->q[0]);
 
         for (int step = 0; step < 500; ++step) {
             flow_axiom_step(sec, dt, 7.5); /* 7.5W load */
         }
+        double e1 = 0.5 * (sec->p[0] * sec->p[0] + sec->curvature_spectrum[0] * sec->q[0] * sec->q[0]);
 
+        FLOW_ASSERT_FLOAT_NEAR(e1, e0, 1e-4);
+        FLOW_ASSERT_TRUE(fabs(sec->q[0] - 1.0) > 0.05);
+        FLOW_ASSERT_TRUE(fabs(sec->p[0] - 0.5) > 0.05);
         FLOW_ASSERT_TRUE(sec->thermal.temp_c > initial_temp);
         FLOW_ASSERT_TRUE(sec->s > 0.0);
         FLOW_ASSERT_TRUE(sec->bmf_subspace_mask != 0ULL);
@@ -128,8 +135,11 @@ int main(void) {
     {
         FlowUnifiedSection *src_sec = flow_axiom_create("MORPH_SOURCE");
         FLOW_ASSERT_TRUE(src_sec != NULL);
-        src_sec->q[0] = 42.0;
-        src_sec->p[0] = 3.14;
+        for (size_t i = 0; i < FLOW_AXIOM_DIM; ++i) {
+            src_sec->q[i] = 42.0 + (double)i * 0.5;
+            src_sec->p[i] = 3.14 - (double)i * 0.25;
+            src_sec->a[i] = 0.1 * (double)i;
+        }
         src_sec->s = 99.9;
 
         /* Morph Section -> Jet */
@@ -137,19 +147,24 @@ int main(void) {
         int ok = flow_axiom_to_jet(src_sec, &target_jet);
         FLOW_ASSERT_EQ(ok, 1);
         FLOW_ASSERT_FLOAT_EQ(target_jet.payload.q[0], 42.0, 1e-4);
+        FLOW_ASSERT_FLOAT_EQ(target_jet.payload.q[63], 42.0 + 63.0 * 0.5, 1e-4);
         FLOW_ASSERT_FLOAT_EQ(target_jet.payload.p[0], 3.14, 1e-4);
+        FLOW_ASSERT_FLOAT_EQ(target_jet.payload.p[63], 3.14 - 63.0 * 0.25, 1e-4);
         FLOW_ASSERT_FLOAT_EQ(target_jet.payload.s, 99.9, 1e-4);
 
-        /* Morph Jet -> Section */
+        /* Morph Jet -> Section across all 64 dimensions (kills Mutation #10) */
         FlowUnifiedSection *roundtrip_sec = flow_axiom_create("MORPH_TARGET");
         FLOW_ASSERT_TRUE(roundtrip_sec != NULL);
         ok = flow_axiom_from_jet(roundtrip_sec, &target_jet);
         FLOW_ASSERT_EQ(ok, 1);
-        FLOW_ASSERT_FLOAT_EQ(roundtrip_sec->q[0], 42.0, 1e-4);
-        FLOW_ASSERT_FLOAT_EQ(roundtrip_sec->p[0], 3.14, 1e-4);
+        for (size_t i = 0; i < FLOW_AXIOM_DIM; ++i) {
+            FLOW_ASSERT_FLOAT_EQ(roundtrip_sec->q[i], src_sec->q[i], 1e-6);
+            FLOW_ASSERT_FLOAT_EQ(roundtrip_sec->p[i], src_sec->p[i], 1e-6);
+            FLOW_ASSERT_FLOAT_EQ(roundtrip_sec->a[i], src_sec->a[i], 1e-6);
+        }
         FLOW_ASSERT_FLOAT_EQ(roundtrip_sec->s, 99.9, 1e-4);
 
-        printf("    * Morphism verified: Section <-> Jet preserves all coordinates, momentum & thermal action\n");
+        printf("    * Morphism verified: Section <-> Jet preserves all 64 coordinates, momentum & thermal action\n");
         flow_axiom_destroy(src_sec);
         flow_axiom_destroy(roundtrip_sec);
     }
@@ -163,6 +178,7 @@ int main(void) {
         FLOW_ASSERT_TRUE(sec != NULL);
 
         FlowSMTProofAttestation proof;
+        FLOW_SMT_PROOF_POISON(&proof);
         FlowSMTResult res = flow_axiom_verify_smt(sec, &proof);
         FLOW_ASSERT_EQ(res, FLOW_SMT_PROVEN_UNSAT);
         FLOW_ASSERT_EQ(proof.buffer_bounds_safety, FLOW_SMT_PROVEN_UNSAT);
@@ -170,6 +186,12 @@ int main(void) {
         FLOW_ASSERT_EQ(proof.shard_non_aliasing, FLOW_SMT_PROVEN_UNSAT);
         FLOW_ASSERT_EQ(proof.determinism_invariant, FLOW_SMT_PROVEN_UNSAT);
         FLOW_ASSERT_TRUE(strstr(proof.proof_summary, "AXIOM ZERO-DEFECT UNSAT") != NULL);
+
+        /* Negative test: non-positive curvature must trigger FLOW_SMT_VIOLATION_SAT */
+        sec->curvature_spectrum[7] = -1.0;
+        FlowSMTProofAttestation bad_proof;
+        FLOW_SMT_PROOF_POISON(&bad_proof);
+        FLOW_ASSERT_EQ(flow_axiom_verify_smt(sec, &bad_proof), FLOW_SMT_VIOLATION_SAT);
 
         printf("    * Formal Verification: %s\n", proof.proof_summary);
         flow_axiom_destroy(sec);

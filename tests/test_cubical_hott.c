@@ -1,6 +1,5 @@
 #include "flow_test_kit.h"
 #include "cubical_hott.h"
-#include "geometric_axiom.h"
 #include "flow_jet.h"
 
 #include <stdio.h>
@@ -249,6 +248,27 @@ int main(void) {
         /* Intent Projection: Concurrency Query */
         uint64_t rcu_intent = flow_cubical_project_text_intent("QSBR 無鎖並發 執行緒");
         FLOW_ASSERT_TRUE((rcu_intent & flow_cubical_get_module_mask("reload")) != 0ULL);
+
+        /* Case-insensitive English Intent Projection across all 5 subspaces (kills Mutation #7) */
+        uint64_t m_mem = flow_cubical_project_text_intent("MEMORY LAYOUT JIT");
+        uint64_t m_con = flow_cubical_project_text_intent("QSBR CONCURRENCY SWARM");
+        uint64_t m_sim = flow_cubical_project_text_intent("SIMD POLYHEDRAL TILE");
+        uint64_t m_phy = flow_cubical_project_text_intent("ZMP EMBODIED JET");
+        uint64_t m_smt = flow_cubical_project_text_intent("SMT LEAN PROOF");
+        FLOW_ASSERT_NE(m_mem, 1ULL);
+        FLOW_ASSERT_NE(m_mem, ~0ULL);
+        FLOW_ASSERT_NE(m_con, 1ULL);
+        FLOW_ASSERT_NE(m_sim, 1ULL);
+        FLOW_ASSERT_NE(m_phy, 1ULL);
+        FLOW_ASSERT_NE(m_smt, 1ULL);
+        FLOW_ASSERT_NE(m_mem, m_con);
+        FLOW_ASSERT_NE(m_sim, m_phy);
+
+        /* Negative SMT check on obstructed Kan open box */
+        FlowCubicalSieve bad_sieve = { .arrows = ~0ULL, .dimension = 64, .is_closed = 1 };
+        FlowSMTProofAttestation bad_proof;
+        FLOW_SMT_PROOF_POISON(&bad_proof);
+        FLOW_ASSERT_EQ(flow_cubical_verify_smt(&bad_sieve, 0x1ULL, 0x0ULL, 0x1ULL, &bad_proof), FLOW_SMT_VIOLATION_SAT);
 
         printf("    * 64-Axis Basis Dictionary, Homotopic 1-Cell Decoder & Intent Projection 100%% SOUND\n");
     }

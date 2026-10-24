@@ -1,4 +1,6 @@
 #include "bitspace.h"
+#include "backend.h"
+#include "abi.h"
 #include "flow.h"
 #include "registry.h"
 #include "smt.h"
@@ -25,21 +27,39 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     if (!mem) return 0;
 
     FlowSpec spec;
-    if (parse_spec(mem, &spec)) {
+    memset(&spec, 0, sizeof(spec));
+    int parsed = parse_spec(mem, &spec);
+    if (parsed) {
         SemanticIR ir;
+        memset(&ir, 0, sizeof(ir));
         lower_to_ir(&spec, &ir);
+        FUZZ_CHECK(ir.input_max_count >= 0);
 
         FlowBitSpace space;
         if (flow_bitspace_init_for_ir(&ir, &space)) {
             FlowBitSearchResult search_res;
-            /* Run bounded 1-bit mutation search on fuzzed IR */
+            memset(&search_res, 0, sizeof(search_res));
             flow_bitspace_search(&space, 10, 42, 0, NULL, &search_res);
+            FUZZ_CHECK(search_res.heatmap.total_mutations <= 64);
 
             if (search_res.best_plan.component != NULL) {
                 FlowPlanArtifact artifact;
                 flow_plan_to_artifact(&search_res.best_plan, &ir, 42, &artifact);
-                char val_err[128];
-                flow_artifact_validate(&artifact, &ir, &space, val_err, sizeof(val_err));
+                char val_err[128] = {0};
+                (void)flow_artifact_validate(&artifact, &ir, &space, val_err, sizeof(val_err));
+
+                FILE *sink = tmpfile();
+                if (sink) {
+                    SearchResult sres;
+                    memset(&sres, 0, sizeof(sres));
+                    flow_plan_to_search_result(&search_res.best_plan, &ir, 42, &sres);
+                    VerificationReport vrep;
+                    memset(&vrep, 0, sizeof(vrep));
+                    if (verify_candidate(&ir, search_res.best_plan.component, &sres, &vrep)) {
+                        (void)emit_c(sink, &ir, search_res.best_plan.component, &sres, &vrep, 0);
+                    }
+                    fclose(sink);
+                }
             }
         }
         flow_ir_cleanup(&ir);
@@ -62,38 +82,42 @@ static uint64_t fuzz_prng(uint64_t *state) {
 int main(int argc, char **argv) {
     LLVMFuzzerInitialize(&argc, &argv);
 
-    /* 1. Corpus of valid, malformed, pathological and boundary inputs */
+    /* 1. Corpus of valid, malformed, pathological and boundary inputs (.flow & .lean) */
     const char *corpus[] = {
-        /* Valid project manifests */
-        "project test\ninput s { max_count 10 }\nflow t { s -> out }\nimport builtin\nrequire { deterministic }\n",
-        "input s { max_count 100 }\nflow t { s -> top(5) }\nimport builtin\n",
-        "input s { max_count 10 }\nflow t { s -> parallel -> out }\nimport builtin\nrequire { memory < 16mb }\nprefer { throughput }\n",
+        /* Valid multi-line .flow manifests */
+        "project test\ninput s {\n  max_count 10\n}\nflow t {\n  s -> out\n}\nimport builtin\nrequire {\n  deterministic\n}\n",
+        "input s {\n  max_count 100\n}\nflow t {\n  s -> top(5)\n}\nimport builtin\n",
+        "input s {\n  max_count 10\n}\nflow t {\n  s -> parallel -> out\n}\nimport builtin\nrequire {\n  memory < 16mb\n}\nprefer {\n  throughput\n}\n",
+
+        /* Valid and malformed .lean specifications */
+        "structure ReflexState where\n  pos : UInt64\n  vel : UInt64\n\ndef stepKernel (pos : UInt64) (vel : UInt64) : UInt64 :=\n  if pos + vel > 100 then 0 else 1\n\ntheorem step_safe : stepKernel 10 20 = 1 := by decide\n",
+        "def badSub (a : Nat) (b : Nat) : Nat :=\n  a - b\ntheorem sub_zero : badSub 3 10 = 0 := by decide\n",
 
         /* Truncated & unclosed blocks */
         "project",
         "project {\n",
-        "input s {",
-        "flow t { s ->",
-        "require {",
-        "prefer {",
-        "import",
+        "input s {\n",
+        "flow t {\n  s ->\n",
+        "require {\n",
+        "prefer {\n",
+        "import\n",
 
         /* Malformed values & boundaries */
-        "input s { max_count -1 }\n",
-        "input s { max_count 0 }\n",
-        "input s { max_count 99999999999999999999999999999 }\n",
-        "require { memory < -1mb }\n",
-        "require { memory < 0mb }\n",
-        "require { memory < 999999999999mb }\n",
-        "flow t { s -> top(-5) }\n",
-        "flow t { s -> top(abc) }\n",
+        "input s {\n  max_count -1\n}\n",
+        "input s {\n  max_count 0\n}\n",
+        "input s {\n  max_count 99999999999999999999999999999\n}\n",
+        "require {\n  memory < -1mb\n}\n",
+        "require {\n  memory < 0mb\n}\n",
+        "require {\n  memory < 999999999999mb\n}\n",
+        "flow t {\n  s -> top(-5)\n}\n",
+        "flow t {\n  s -> top(abc)\n}\n",
 
         /* Binary & null-byte junk */
         "\x00\x00\x00\x00",
         "\xff\xff\xfe\xfe\x12\x34\x56\x78",
         "project \x00 test\n",
         "\x7f\x45\x4c\x46\x02\x01\x01\x00", /* ELF magic */
-        "require { \x80\x81\x82\x83\x84\x85\x86\x87 }\n",
+        "require {\n  \x80\x81\x82\x83\x84\x85\x86\x87\n}\n",
         "import missing_plugin_that_does_not_exist_in_registry\n",
     };
 

@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <stdatomic.h>
 #define FLOW_DIMENSION_MAX 16
 #define FLOW_DIM_NAME_MAX 32
@@ -53,4 +54,49 @@ typedef struct FlowPluginABI { size_t (*get_genome_bit_size)(void); uint64_t (*g
 typedef const FlowPluginABI *(*FlowPluginABIv2EntryFn)(void);
 typedef struct FlowPluginDescriptor { uint32_t abi_major, abi_minor; size_t descriptor_size; const char *module_name, *module_version; uint64_t module_hash; const FlowPlugin *plugin; const FlowPluginABI *abi_v2; void *dso_handle; _Atomic uint64_t active_references; } FlowPluginDescriptor;
 typedef const FlowPluginDescriptor *(*FlowPluginEntryFn)(void);
+#ifdef FLOW_PLUGIN_DSO
+#define FLOW_DEFINE_PLUGIN_DSO_ENTRY_(DescVar) \
+    const FlowPluginDescriptor *flow_plugin_entry_v1(void) { return &(DescVar); }
+#else
+#define FLOW_DEFINE_PLUGIN_DSO_ENTRY_(DescVar)
+#endif
+#define FLOW_DEFINE_PLUGIN_DESCRIPTOR(DescVar, ModName, ModVer, ModHash, PluginPtr, AbiV2Ptr) \
+    static const FlowPluginDescriptor DescVar = { \
+        .abi_major = FLOW_PLUGIN_ABI_MAJOR, .abi_minor = FLOW_PLUGIN_ABI_MINOR, \
+        .descriptor_size = sizeof(FlowPluginDescriptor), .module_name = (ModName), \
+        .module_version = (ModVer), .module_hash = (ModHash), \
+        .plugin = (PluginPtr), .abi_v2 = (AbiV2Ptr) \
+    }; \
+    FLOW_DEFINE_PLUGIN_DSO_ENTRY_(DescVar)
+#define FLOW_PRIMITIVE_NAME_MAX 64
+#define FLOW_PRIMITIVE_VERSION_MAX 32
+#define FLOW_MAX_PRIMITIVE_DRIVERS 16
+typedef struct { char name[FLOW_PRIMITIVE_NAME_MAX]; uint64_t max_queue_depth, max_buffer_bytes; uint32_t supports_zero_copy, is_kernel_bypass, genome_bits_required; } FlowHardwareBounds;
+typedef struct { uint64_t active_genome; void *user_data; size_t data_len; uint64_t flags; } FlowPrimitiveContext;
+typedef struct { int status_code; size_t bytes_transferred; uint64_t latency_cycles; int zero_copy_active; } FlowPrimitiveResult;
+typedef struct FlowPrimitiveDriver { char driver_name[FLOW_PRIMITIVE_NAME_MAX], driver_version[FLOW_PRIMITIVE_VERSION_MAX];
+    int (*register_primitive)(void); int (*get_hardware_bounds)(FlowHardwareBounds *bounds_out); int (*execute_primitive)(const FlowPrimitiveContext *ctx, FlowPrimitiveResult *res_out); } FlowPrimitiveDriver;
+typedef struct { size_t count; const FlowPrimitiveDriver *drivers[FLOW_MAX_PRIMITIVE_DRIVERS]; } FlowPrimitiveRegistry;
+static inline void flow_primitive_registry_init(FlowPrimitiveRegistry *reg) { if (reg) memset(reg, 0, sizeof(*reg)); }
+static inline int flow_primitive_register(FlowPrimitiveRegistry *reg, const FlowPrimitiveDriver *driver) { if (!reg || !driver || reg->count >= FLOW_MAX_PRIMITIVE_DRIVERS) return 0;
+    if (driver->register_primitive && !driver->register_primitive()) return 0; reg->drivers[reg->count++] = driver; return 1; }
+static inline const FlowPrimitiveDriver *flow_primitive_lookup(const FlowPrimitiveRegistry *reg, const char *name) { if (!reg || !name) return NULL;
+    for (size_t i = 0; i < reg->count; ++i) if (reg->drivers[i] && !strcmp(reg->drivers[i]->driver_name, name)) return reg->drivers[i]; return NULL; }
+static inline size_t flow_primitive_count(const FlowPrimitiveRegistry *reg) { return reg ? reg->count : 0; }
+#ifndef FLOW_DEFINE_PRIMITIVE_DRIVER
+#define FLOW_DEFINE_PRIMITIVE_DRIVER(DriverVar, GetterFn, NameStr, VerStr, QueueDepth, MaxBufBytes, ZeroCopy, KernelBypass, GenomeBits, ExecFn) \
+    static int GetterFn##_register(void) { return 1; } \
+    static int GetterFn##_get_bounds(FlowHardwareBounds *bounds_out) { \
+        if (!bounds_out) return 0; \
+        *bounds_out = (FlowHardwareBounds){ \
+            .name = (NameStr), .max_queue_depth = (QueueDepth), .max_buffer_bytes = (MaxBufBytes), \
+            .supports_zero_copy = (ZeroCopy), .is_kernel_bypass = (KernelBypass), .genome_bits_required = (GenomeBits) \
+        }; \
+        return 1; \
+    } \
+    static const FlowPrimitiveDriver DriverVar = { \
+        (NameStr), (VerStr), GetterFn##_register, GetterFn##_get_bounds, (ExecFn) \
+    }; \
+    const FlowPrimitiveDriver *GetterFn(void) { return &(DriverVar); }
+#endif
 #endif

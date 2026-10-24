@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 static const FlowPlugin *PLUGINS[FLOW_PLUGIN_MAX];
 static size_t plugin_count_value;
 static int registry_initialized;
@@ -49,7 +50,29 @@ int flow_registry_load_dso(const char *so_path, char *err_msg, size_t err_size) 
     #define DSO_ERR(...) do { if (err_msg && err_size) snprintf(err_msg, err_size, __VA_ARGS__); if (handle) dlclose(handle); return 0; } while (0)
     if (err_msg && err_size) err_msg[0] = '\0';
     void *handle = NULL;
-    if (!so_path) DSO_ERR("null dso path");
+    if (!so_path || !so_path[0]) DSO_ERR("null or empty dso path");
+    if (strstr(so_path, "..")) DSO_ERR("path traversal rejected in dso path");
+    size_t plen = strlen(so_path);
+    int ext_ok = (plen > 3 && strcmp(so_path + plen - 3, ".so") == 0) ||
+                 (plen > 6 && strcmp(so_path + plen - 6, ".dylib") == 0);
+    if (!ext_ok) DSO_ERR("dso path must end in .so or .dylib");
+    struct stat st;
+    if (stat(so_path, &st) != 0) DSO_ERR("stat failed on dso path: %s", so_path);
+    if (!S_ISREG(st.st_mode)) DSO_ERR("dso path is not a regular file");
+    if ((st.st_mode & S_IWOTH) != 0) DSO_ERR("world-writable dso rejected for security");
+    FILE *fp = fopen(so_path, "rb");
+    if (!fp) DSO_ERR("cannot open dso file for header verification");
+    uint8_t magic[4] = {0};
+    size_t nread = fread(magic, 1, 4, fp);
+    fclose(fp);
+    uint32_t m32 = 0;
+    if (nread == 4) memcpy(&m32, magic, 4);
+    int magic_ok = (nread == 4) && (
+        (magic[0] == 0x7f && magic[1] == 'E' && magic[2] == 'L' && magic[3] == 'F') ||
+        m32 == 0xfeedfaceU || m32 == 0xcefaedfeU ||
+        m32 == 0xfeedfacfU || m32 == 0xcffaedfeU ||
+        m32 == 0xcafebabeU || m32 == 0xbebafecaU);
+    if (!magic_ok) DSO_ERR("invalid ELF/Mach-O binary header in dso");
     if (!(handle = dlopen(so_path, RTLD_NOW | RTLD_LOCAL))) DSO_ERR("dlopen failed: %s", dlerror());
     static const char *const SYMS[] = {"flow_plugin_entry_v1", "flow_embodied_entry_v1", "flow_swarm_entry_v1"};
     FlowPluginEntryFn entry_fn = NULL;
@@ -75,6 +98,22 @@ int flow_registry_load_dso(const char *so_path, char *err_msg, size_t err_size) 
     return 1;
 }
 int flow_registry_register(const FlowPlugin *plugin) { return flow_registry_init() ? add_plugin(plugin) : 0; }
+int flow_registry_resolve_plugin(const char *mod_name) {
+    if (!mod_name || !mod_name[0]) return 0;
+    if (flow_registry_lookup(mod_name)) return 1;
+    const char *base = (!strncmp(mod_name, "flow.", 5)) ? mod_name + 5 : mod_name;
+    static const char *const fmts[6] = {
+        "build/libflow_%s.so", "build/libflow_%s.dylib",
+        "libflow_%s.so", "libflow_%s.dylib",
+        "build/lib%s.so", "build/lib%s.dylib"
+    };
+    char path[256], err[256] = {0};
+    for (int i = 0; i < 6; ++i) {
+        snprintf(path, sizeof(path), fmts[i], base);
+        if (flow_registry_load_dso(path, err, sizeof(err))) return 1;
+    }
+    return 0;
+}
 const FlowPlugin *flow_registry_lookup(const char *name) {
     if (!flow_registry_init() || !name || !name[0]) return NULL;
     for (size_t i = 0; i < plugin_count_value; ++i) if (!strcmp(PLUGINS[i]->name, name)) return PLUGINS[i];
@@ -120,8 +159,11 @@ int flow_component_verify_plan(const SemanticIR *ir, const Component *c, const F
     memset(r, 0, sizeof(*r));
     const FlowPlugin *p = flow_component_plugin(c);
     if (p && p->verify_plan) return p->verify_plan(ir, c, plan, r);
-    size_t cap = plan->count > 0 ? (size_t)plan->values[0] : (size_t)ir->input_max_count, shd = plan->count > 2 ? (size_t)plan->values[2] : 1;
-    return flow_component_verify(ir, c, cap ? cap : 1, shd ? shd : 1, r->message, sizeof(r->message));
+    size_t cap = (plan->count > 0 && plan->values[0] > 0) ? (size_t)plan->values[0] : (size_t)(ir && ir->input_max_count > 0 ? ir->input_max_count : 1024);
+    size_t shd = (plan->count > 2 && plan->values[2] > 0) ? (size_t)plan->values[2] : 1;
+    r->capacity = cap ? cap : 1;
+    (void)flow_component_memory(ir, c, r->capacity, shd, &r->estimated_bytes);
+    return flow_component_verify(ir, c, r->capacity, shd, r->message, sizeof(r->message));
 }
 uint64_t flow_component_benchmark(const SemanticIR *ir, const Component *c, const FlowPlanAssignment *plan) {
     const FlowPlugin *p = flow_component_plugin(c);

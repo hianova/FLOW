@@ -1,22 +1,55 @@
 #include "flow_test_kit.h"
 #include "reload.h"
 #include "jit.h"
-#include "adaptive.h"
 #include "security.h"
 #include "bitspace.h"
 #include "smt.h"
 #include "registry.h"
-#include "bitmanifold.h"
 #include "token_ring.h"
-#include "entropy_collapse.h"
 #include "flow_jet.h"
-#include "audit.h"
+#include "topology.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdatomic.h>
 #include <math.h>
+#include <pthread.h>
+#include <sys/mman.h>
+
+#include <sched.h>
+#include <unistd.h>
+
+typedef struct {
+    FlowReloadContext *ctx;
+    atomic_int *readers_ready;
+    atomic_int *stop_flag;
+    atomic_uint_fast64_t *calls_done;
+} ConcurWorkerArg;
+
+static void *concur_reader_thread(void *arg) {
+    ConcurWorkerArg *w = (ConcurWorkerArg *)arg;
+    FlowReloadReader r;
+    memset(&r, 0, sizeof(r));
+    if (flow_reload_reader_register(w->ctx, &r) != FLOW_RELOAD_OK) return NULL;
+    atomic_fetch_add_explicit(w->readers_ready, 1, memory_order_release);
+    uint64_t in_v = 3, out_v = 0;
+    while (!atomic_load_explicit(w->stop_flag, memory_order_acquire)) {
+        FlowInvocation inv;
+        memset(&inv, 0, sizeof(inv));
+        if (flow_reload_begin(w->ctx, &r, &inv) == FLOW_RELOAD_OK) {
+            inv.unit->run(NULL, inv.state, &in_v, &out_v);
+            flow_reload_end(&inv);
+            atomic_fetch_add_explicit(w->calls_done, 1, memory_order_relaxed);
+        }
+        if (flow_qsbr_call(w->ctx, &in_v, &out_v) == FLOW_RELOAD_OK) {
+            atomic_fetch_add_explicit(w->calls_done, 1, memory_order_relaxed);
+        }
+        flow_qsbr_checkpoint(&r);
+    }
+    flow_reload_reader_unregister(&r);
+    return NULL;
+}
 
 typedef struct {
     uint64_t multiplier;
@@ -153,12 +186,75 @@ int main(void) {
         /* Synchronize QSBR barrier */
         FLOW_ASSERT_EQ(flow_qsbr_synchronize(ctx, 1000000000ULL), FLOW_RELOAD_OK);
 
-        /* New generation executes flawlessly with zero downtime */
+        /* New generation executes flawlessly with migrated state: 10 * (10+1) + (5+2) = 117 */
         FLOW_ASSERT_EQ(flow_qsbr_call(ctx, &in_v, &out_v), FLOW_RELOAD_OK);
-        FLOW_ASSERT_EQ(out_v, 105ULL); /* 10 * 10 + 5 */
+        FLOW_ASSERT_EQ(out_v, 117ULL);
+
+        /* Active reader must block reclamation of retired generation until flow_reload_end */
+        FlowReloadReader pin_reader;
+        memset(&pin_reader, 0, sizeof(pin_reader));
+        FLOW_ASSERT_EQ(flow_reload_reader_register(ctx, &pin_reader), FLOW_RELOAD_OK);
+        FlowInvocation pin_inv;
+        memset(&pin_inv, 0, sizeof(pin_inv));
+        FLOW_ASSERT_EQ(flow_reload_begin(ctx, &pin_reader, &pin_inv), FLOW_RELOAD_OK);
+
+        void *v3_state = NULL;
+        FLOW_ASSERT_EQ(v2.init(NULL, &v3_state), 0);
+        FLOW_ASSERT_EQ(flow_reload_publish(ctx, &v2, v3_state), FLOW_RELOAD_OK);
+        /* Reader is still pinned on generation 2 -> synchronize must time out and reclaim must return 0 */
+        FLOW_ASSERT_EQ(flow_qsbr_synchronize(ctx, 50000ULL), FLOW_RELOAD_BUSY);
+        FLOW_ASSERT_EQ(flow_reload_reclaim(ctx), 0ULL);
+
+        flow_reload_end(&pin_inv);
+        flow_qsbr_checkpoint(&pin_reader);
+        FLOW_ASSERT_EQ(flow_qsbr_synchronize(ctx, 100000000ULL), FLOW_RELOAD_OK);
+        FLOW_ASSERT_TRUE(flow_reload_reclaim(ctx) >= 1ULL);
+        FLOW_ASSERT_EQ(flow_reload_reader_unregister(&pin_reader), FLOW_RELOAD_OK);
+        /* Double unregister must fail safely */
+        FLOW_ASSERT_EQ(flow_reload_reader_unregister(&pin_reader), FLOW_RELOAD_INVALID);
+
+        /* Error path coverage: invalid ABI & incompatible constraint hash */
+        FlowUnit bad_abi = v1;
+        bad_abi.abi_version = FLOW_RELOAD_ABI_VERSION + 99;
+        FLOW_ASSERT_EQ(flow_reload_activate(ctx, &bad_abi), FLOW_RELOAD_INVALID);
+        FlowUnit incompat_u = v1;
+        incompat_u.constraint_hash = 0xDEADCAFEULL;
+        FLOW_ASSERT_EQ(flow_reload_activate(ctx, &incompat_u), FLOW_RELOAD_INCOMPATIBLE);
+
+        /* Real multithreaded QSBR reader/writer stress */
+        atomic_int readers_ready = 0;
+        atomic_int stop_flag = 0;
+        atomic_uint_fast64_t calls_done = 0;
+        ConcurWorkerArg warg = {
+            .ctx = ctx,
+            .readers_ready = &readers_ready,
+            .stop_flag = &stop_flag,
+            .calls_done = &calls_done
+        };
+        pthread_t tids[4];
+        for (int t = 0; t < 4; ++t) {
+            FLOW_ASSERT_EQ(pthread_create(&tids[t], NULL, concur_reader_thread, &warg), 0);
+        }
+        while (atomic_load_explicit(&readers_ready, memory_order_acquire) < 4 ||
+               atomic_load_explicit(&calls_done, memory_order_relaxed) < 8) {
+            sched_yield();
+        }
+        for (int swap = 0; swap < 8; ++swap) {
+            void *ns = NULL;
+            FLOW_ASSERT_EQ(v2.init(NULL, &ns), 0);
+            FLOW_ASSERT_EQ(flow_reload_publish(ctx, &v2, ns), FLOW_RELOAD_OK);
+            FLOW_ASSERT_EQ(flow_qsbr_synchronize(ctx, 500000000ULL), FLOW_RELOAD_OK);
+            (void)flow_reload_reclaim(ctx);
+        }
+        atomic_store_explicit(&stop_flag, 1, memory_order_release);
+        for (int t = 0; t < 4; ++t) {
+            pthread_join(tids[t], NULL);
+        }
+        (void)flow_reload_reclaim(ctx);
+        FLOW_ASSERT_TRUE(atomic_load(&calls_done) >= 8);
 
         flow_reload_destroy(ctx);
-        printf("  ✓ Stage 2 Passed: Zero-downtime hot-swap bumped generation 1 -> 2 with state migrated.\n\n");
+        printf("  ✓ Stage 2 Passed: Zero-downtime hot-swap bumped generation 1 -> 2 with state migrated & MT QSBR verified.\n\n");
     }
 
     /* ========================================================================= */
@@ -630,12 +726,14 @@ int main(void) {
         FLOW_ASSERT_TRUE(!isinf(predicted_obs[0]));
 
         /* 4. Binary .fjet Serialization, Deserialization & CRC32 Integrity */
-        const char *test_fjet_path = "/tmp/flow_test_jet_bundle.fjet";
+        char test_fjet_path[256];
+        snprintf(test_fjet_path, sizeof(test_fjet_path), "/tmp/flow_test_jet_bundle_%d.fjet", (int)getpid());
         jet_forward.payload.crc32 = flow_jet_crc32(&jet_forward.payload, offsetof(FlowJetPayload, crc32));
         FLOW_ASSERT_EQ(flow_jet_write_file(&jet_forward, test_fjet_path), 1);
 
         FlowJet jet_loaded;
         FLOW_ASSERT_EQ(flow_jet_read_file(test_fjet_path, &jet_loaded), 1);
+        unlink(test_fjet_path);
         FLOW_ASSERT_EQ(jet_loaded.payload.crc32, jet_forward.payload.crc32);
         FLOW_ASSERT_TRUE(jet_loaded.payload.crc32 != 0);
         FLOW_ASSERT_EQ(strcmp(jet_loaded.header.id, jet_forward.header.id), 0);
@@ -736,12 +834,14 @@ int main(void) {
         FLOW_ASSERT_TRUE(flow_jet_hamiltonian(&jet_64) > 0.0);
 
         /* 64-D Binary Serialization & CRC32 Attestation */
-        const char *test_64d_path = "/tmp/flow_test_jet_64d.fjet";
+        char test_64d_path[256];
+        snprintf(test_64d_path, sizeof(test_64d_path), "/tmp/flow_test_jet_64d_%d.fjet", (int)getpid());
         jet_64.payload.crc32 = flow_jet_crc32(&jet_64.payload, offsetof(FlowJetPayload, crc32));
         FLOW_ASSERT_EQ(flow_jet_write_file(&jet_64, test_64d_path), 1);
 
         FlowJet jet_64_loaded;
         FLOW_ASSERT_EQ(flow_jet_read_file(test_64d_path, &jet_64_loaded), 1);
+        unlink(test_64d_path);
         FLOW_ASSERT_EQ(jet_64_loaded.header.vector_dim, 64);
         FLOW_ASSERT_EQ(jet_64_loaded.payload.crc32, jet_64.payload.crc32);
         FLOW_ASSERT_EQ(jet_64_loaded.payload.q[63], jet_64.payload.q[63]);
@@ -840,10 +940,18 @@ int main(void) {
         FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_PASS);
 
         /* Violation: Writable heap aliased directly to executable heap */
+        memset(wx_msg, 0, sizeof(wx_msg));
         outcome = flow_security_check_jit_wx_gate(&block, stats.exec_base, stats.exec_base,
                                                   wx_msg, sizeof(wx_msg));
         FLOW_ASSERT_EQ(outcome, FLOW_SECURITY_MEMORY_VIOLATION);
         FLOW_ASSERT_TRUE(strstr(wx_msg, "W^X") != NULL);
+
+        /* OS Page-table W^X inspection (unconditionally kills Mutation #12 on macOS & Linux) */
+        FLOW_ASSERT_EQ(mprotect((void *)stats.write_base, 4096, PROT_READ), 0);
+        memset(wx_msg, 0, sizeof(wx_msg));
+        FLOW_ASSERT_EQ(flow_jit_verify_wx_invariants(engine, wx_msg, sizeof(wx_msg)), 0);
+        FLOW_ASSERT_EQ(mprotect((void *)stats.write_base, 4096, PROT_READ | PROT_WRITE), 0);
+        FLOW_ASSERT_EQ(flow_jit_verify_wx_invariants(engine, wx_msg, sizeof(wx_msg)), 1);
 
         flow_jit_destroy(engine);
         printf("  ✓ Stage 14 Passed: JIT W^X invariant verified; simultaneous writable+executable page injection blocked.\n\n");

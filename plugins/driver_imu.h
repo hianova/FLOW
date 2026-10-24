@@ -1,8 +1,7 @@
 #ifndef FLOW_DRIVER_IMU_H
 #define FLOW_DRIVER_IMU_H
-#include "primitive.h"
+#include "plugin.h"
 #include "smt.h"
-#include "flow_smt_dsl.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>

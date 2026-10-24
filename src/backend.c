@@ -123,6 +123,21 @@ static const char *lean_scalar_to_c_type(const char *t) {
     if (!strcmp(t, "Int") || !strcmp(t, "Int64")) return "int64_t";
     return "uint64_t";
 }
+static const FlowLeanStruct *find_ir_lean_struct(const SemanticIR *ir, const char *name) {
+    if (!ir || !name || !name[0]) return NULL;
+    for (size_t i = 0; i < ir->lean_struct_count; ++i)
+        if (strcmp(ir->lean_structs[i].name, name) == 0) return &ir->lean_structs[i];
+    return NULL;
+}
+static const char *lean_type_to_c_type(const SemanticIR *ir, const char *t) {
+    if (!t) return "uint64_t";
+    if (find_ir_lean_struct(ir, t)) return t;
+    if (ir) {
+        for (size_t i = 0; i < ir->lean_enum_count; ++i)
+            if (strcmp(ir->lean_enums[i].name, t) == 0) return t;
+    }
+    return lean_scalar_to_c_type(t);
+}
 static int is_lean_kw_at(const char *p, const char *start, const char *end, const char *kw, size_t kwlen) {
     if ((size_t)(end - p) < kwlen || strncmp(p, kw, kwlen) != 0) return 0;
     int l_ok = (p == start) || isspace((unsigned char)p[-1]) || p[-1] == '(';
@@ -144,7 +159,29 @@ static void subst_lean_var(const char *src, size_t src_len, const char *var, con
     }
     out[j] = '\0';
 }
-static void emit_norm_lean_slice(FILE *out, const char *s, size_t len) {
+typedef enum { LEAN_EXPR_NAT = 0, LEAN_EXPR_UINT = 1, LEAN_EXPR_INT = 2, LEAN_EXPR_FLOAT = 3 } LeanExprMode;
+static LeanExprMode infer_c_type_expr_mode(const char *c_type, LeanExprMode fallback) {
+    if (!c_type) return fallback;
+    if (!strcmp(c_type, "double") || !strcmp(c_type, "float")) return LEAN_EXPR_FLOAT;
+    if (!strcmp(c_type, "int64_t") || !strcmp(c_type, "int32_t") || !strcmp(c_type, "int16_t") || !strcmp(c_type, "int8_t")) return LEAN_EXPR_INT;
+    if (!strcmp(c_type, "uint32_t") || !strcmp(c_type, "uint16_t") || !strcmp(c_type, "uint8_t")) return LEAN_EXPR_UINT;
+    return fallback;
+}
+static LeanExprMode infer_fn_expr_mode(const FlowLeanFunction *fn) {
+    if (!fn) return LEAN_EXPR_NAT;
+    if (!strcmp(fn->return_type, "Float") || !strcmp(fn->return_type, "Float32")) return LEAN_EXPR_FLOAT;
+    for (size_t i = 0; i < fn->param_count; ++i)
+        if (!strcmp(fn->param_types[i], "Float") || !strcmp(fn->param_types[i], "Float32")) return LEAN_EXPR_FLOAT;
+    if (!strcmp(fn->return_type, "Int") || !strcmp(fn->return_type, "Int64") || !strcmp(fn->return_type, "Int32") ||
+        !strcmp(fn->return_type, "Int16") || !strcmp(fn->return_type, "Int8")) return LEAN_EXPR_INT;
+    for (size_t i = 0; i < fn->param_count; ++i)
+        if (!strcmp(fn->param_types[i], "Int") || !strcmp(fn->param_types[i], "Int64") || !strcmp(fn->param_types[i], "Int32") ||
+            !strcmp(fn->param_types[i], "Int16") || !strcmp(fn->param_types[i], "Int8")) return LEAN_EXPR_INT;
+    if (!strcmp(fn->return_type, "UInt64") || !strcmp(fn->return_type, "UInt32") || !strcmp(fn->return_type, "UInt16") ||
+        !strcmp(fn->return_type, "UInt8")) return LEAN_EXPR_UINT;
+    return LEAN_EXPR_NAT;
+}
+static void emit_norm_lean_slice(FILE *out, const char *s, size_t len, LeanExprMode mode) {
     for (;;) {
         while (len > 0 && isspace((unsigned char)*s)) { s++; len--; }
         while (len > 0 && isspace((unsigned char)s[len - 1])) len--;
@@ -165,16 +202,21 @@ static void emit_norm_lean_slice(FILE *out, const char *s, size_t len) {
         for (const char *p = s + 3; p + 1 < end && *p != '\n'; ++p) if (p[0] == ':' && p[1] == '=') { ce = p; break; }
         if (ce) {
             char var[FLOW_NAME] = {0}; size_t k = 0;
-            for (const char *p = s + 3; p < ce; ++p) if (!isspace((unsigned char)*p) && k + 1 < sizeof(var)) var[k++] = *p;
+            for (const char *p = s + 3; p < ce; ++p) {
+                if (*p == ':') break;
+                if (!isspace((unsigned char)*p) && k + 1 < sizeof(var)) var[k++] = *p;
+            }
             const char *rhs = ce + 2, *rhs_end = end, *rest = end; int pd = 0;
             for (const char *p = rhs; p < end; ++p) {
                 if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
-                else if (pd == 0 && *p == '\n') { rhs_end = p; rest = p + 1; break; }
+                else if (pd == 0 && (*p == '\n' || *p == ';')) { rhs_end = p; rest = p + 1; break; }
                 else if (pd == 0 && is_lean_kw_at(p, rhs, end, "in", 2)) { rhs_end = p; rest = p + 2; break; }
             }
+            while (rest < end && isspace((unsigned char)*rest)) rest++;
+            if (is_lean_kw_at(rest, rest, end, "in", 2)) rest += 2;
             char sub[4096];
             subst_lean_var(rest, (size_t)(end - rest), var, rhs, (size_t)(rhs_end - rhs), sub, sizeof(sub));
-            emit_norm_lean_slice(out, sub, strlen(sub)); return;
+            emit_norm_lean_slice(out, sub, strlen(sub), mode); return;
         }
     }
     if (is_lean_kw_at(s, s, end, "match", 5)) {
@@ -202,12 +244,12 @@ static void emit_norm_lean_slice(FILE *out, const char *s, size_t len) {
                     while (pat_len > 0 && isspace((unsigned char)*pat)) { pat++; pat_len--; }
                     while (pat_len > 0 && isspace((unsigned char)pat[pat_len - 1])) pat_len--;
                     if ((pat_len == 1 && pat[0] == '_') || a + 1 == arm_cnt) {
-                        emit_norm_lean_slice(out, arr + 2, (size_t)(a_end - (arr + 2)));
+                        emit_norm_lean_slice(out, arr + 2, (size_t)(a_end - (arr + 2)), mode);
                         break;
                     }
-                    fputs("((", out); emit_norm_lean_slice(out, scrut, scrut_len);
-                    fputs(" == ", out); emit_norm_lean_slice(out, pat, pat_len);
-                    fputs(") ? ", out); emit_norm_lean_slice(out, arr + 2, (size_t)(a_end - (arr + 2)));
+                    fputs("((", out); emit_norm_lean_slice(out, scrut, scrut_len, mode);
+                    fputs(" == ", out); emit_norm_lean_slice(out, pat, pat_len, mode);
+                    fputs(") ? ", out); emit_norm_lean_slice(out, arr + 2, (size_t)(a_end - (arr + 2)), mode);
                     fputs(" : ", out); open_parens++;
                 }
                 while (open_parens-- > 0) fputc(')', out);
@@ -231,61 +273,108 @@ static void emit_norm_lean_slice(FILE *out, const char *s, size_t len) {
             }
         }
         if (th && el) {
-            fputc('(', out); emit_norm_lean_slice(out, s + 2, (size_t)(th - (s + 2)));
-            fputs(" ? ", out); emit_norm_lean_slice(out, th + 4, (size_t)(el - (th + 4)));
-            fputs(" : ", out); emit_norm_lean_slice(out, el + 4, (size_t)(end - (el + 4))); fputc(')', out); return;
+            fputc('(', out); emit_norm_lean_slice(out, s + 2, (size_t)(th - (s + 2)), mode);
+            fputs(" ? ", out); emit_norm_lean_slice(out, th + 4, (size_t)(el - (th + 4)), mode);
+            fputs(" : ", out); emit_norm_lean_slice(out, el + 4, (size_t)(end - (el + 4)), mode); fputc(')', out); return;
         }
     }
-    for (int pass = 1; pass <= 8; ++pass) {
+    for (int pass = 1; pass <= 10; ++pass) {
+        if (pass == 10) {
+            int pd = 0;
+            for (const char *p = s + 1; p < end; ++p) {
+                if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
+                if (pd != 0) continue;
+                if (p[0] == '^' && p[-1] != '^' && (p + 1 == end || p[1] != '^')) {
+                    const char *fn_pow = (mode == LEAN_EXPR_FLOAT) ? "flow_float_pow(" : ((mode == LEAN_EXPR_INT) ? "flow_int_pow(" : "flow_nat_pow(");
+                    fputs(fn_pow, out); emit_norm_lean_slice(out, s, (size_t)(p - s), mode);
+                    fputs(", ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1)), mode); fputc(')', out); return;
+                }
+            }
+            continue;
+        }
         int pd = 0;
         for (const char *p = end - 1; p > s; --p) {
             if (*p == ')') pd++; else if (*p == '(' && pd > 0) pd--;
             if (pd != 0) continue;
             if (pass == 1 && p + 1 < end && p[0] == '|' && p[1] == '|' && p[-1] != '|' && (p + 2 == end || p[2] != '|')) {
-                fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s)); fputs(" || ", out); emit_norm_lean_slice(out, p + 2, (size_t)(end - (p + 2))); fputc(')', out); return;
+                fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s), mode); fputs(" || ", out); emit_norm_lean_slice(out, p + 2, (size_t)(end - (p + 2)), mode); fputc(')', out); return;
             }
             if (pass == 2 && p + 1 < end && p[0] == '&' && p[1] == '&' && p[-1] != '&' && (p + 2 == end || p[2] != '&')) {
-                fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s)); fputs(" && ", out); emit_norm_lean_slice(out, p + 2, (size_t)(end - (p + 2))); fputc(')', out); return;
+                fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s), mode); fputs(" && ", out); emit_norm_lean_slice(out, p + 2, (size_t)(end - (p + 2)), mode); fputc(')', out); return;
             }
             if (pass == 3) {
                 if (p + 1 < end && ((p[0] == '=' && p[1] == '=') || (p[0] == '!' && p[1] == '=') || (p[0] == '<' && p[1] == '=' && p[-1] != '<') || (p[0] == '>' && p[1] == '=' && p[-1] != '>'))) {
-                    fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s)); fprintf(out, " %c%c ", p[0], p[1]); emit_norm_lean_slice(out, p + 2, (size_t)(end - (p + 2))); fputc(')', out); return;
+                    fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s), mode); fprintf(out, " %c%c ", p[0], p[1]); emit_norm_lean_slice(out, p + 2, (size_t)(end - (p + 2)), mode); fputc(')', out); return;
                 }
                 if (p[0] == '<' && p[-1] != '<' && (p + 1 < end && p[1] != '<' && p[1] != '=')) {
-                    fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s)); fputs(" < ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1))); fputc(')', out); return;
+                    fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s), mode); fputs(" < ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1)), mode); fputc(')', out); return;
                 }
                 if (p[0] == '>' && p[-1] != '>' && p[-1] != '=' && p[-1] != '-' && (p + 1 < end && p[1] != '>' && p[1] != '=')) {
-                    fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s)); fputs(" > ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1))); fputc(')', out); return;
+                    fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s), mode); fputs(" > ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1)), mode); fputc(')', out); return;
                 }
                 if (p[0] == '=' && p[-1] != '=' && p[-1] != '!' && p[-1] != '<' && p[-1] != '>' && p[-1] != ':' && (p + 1 < end && p[1] != '=' && p[1] != '>')) {
-                    fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s)); fputs(" == ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1))); fputc(')', out); return;
+                    fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s), mode); fputs(" == ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1)), mode); fputc(')', out); return;
                 }
             }
-            if (pass == 4 && p + 2 < end && ((p[0] == '^' && p[1] == '^' && p[2] == '^') || (p[0] == '&' && p[1] == '&' && p[2] == '&') || (p[0] == '|' && p[1] == '|' && p[2] == '|'))) {
-                fputs("((uint64_t)", out); emit_norm_lean_slice(out, s, (size_t)(p - s)); fprintf(out, " %c (uint64_t)", p[0]); emit_norm_lean_slice(out, p + 3, (size_t)(end - (p + 3))); fputc(')', out); return;
+            if (pass == 4 && p + 2 < end && p[0] == '|' && p[1] == '|' && p[2] == '|') {
+                fputs("((uint64_t)", out); emit_norm_lean_slice(out, s, (size_t)(p - s), mode); fputs(" | (uint64_t)", out); emit_norm_lean_slice(out, p + 3, (size_t)(end - (p + 3)), mode); fputc(')', out); return;
             }
-            if (pass == 5 && p + 2 < end && ((p[0] == '<' && p[1] == '<' && p[2] == '<') || (p[0] == '>' && p[1] == '>' && p[2] == '>'))) {
-                fputs("((uint64_t)", out); emit_norm_lean_slice(out, s, (size_t)(p - s)); fprintf(out, " %c%c (uint64_t)", p[0], p[0]); emit_norm_lean_slice(out, p + 3, (size_t)(end - (p + 3))); fputc(')', out); return;
+            if (pass == 5 && p + 2 < end && p[0] == '^' && p[1] == '^' && p[2] == '^') {
+                fputs("((uint64_t)", out); emit_norm_lean_slice(out, s, (size_t)(p - s), mode); fputs(" ^ (uint64_t)", out); emit_norm_lean_slice(out, p + 3, (size_t)(end - (p + 3)), mode); fputc(')', out); return;
             }
-            if (pass == 6 && (p[0] == '+' || (p[0] == '-' && (p + 1 == end || p[1] != '>')))) {
+            if (pass == 6 && p + 2 < end && p[0] == '&' && p[1] == '&' && p[2] == '&') {
+                fputs("((uint64_t)", out); emit_norm_lean_slice(out, s, (size_t)(p - s), mode); fputs(" & (uint64_t)", out); emit_norm_lean_slice(out, p + 3, (size_t)(end - (p + 3)), mode); fputc(')', out); return;
+            }
+            if (pass == 7 && p + 2 < end && ((p[0] == '<' && p[1] == '<' && p[2] == '<') || (p[0] == '>' && p[1] == '>' && p[2] == '>'))) {
+                fputs("((uint64_t)", out); emit_norm_lean_slice(out, s, (size_t)(p - s), mode); fprintf(out, " %c%c (uint64_t)", p[0], p[0]); emit_norm_lean_slice(out, p + 3, (size_t)(end - (p + 3)), mode); fputc(')', out); return;
+            }
+            if (pass == 8 && (p[0] == '+' || (p[0] == '-' && (p + 1 == end || p[1] != '>')))) {
                 const char *l = p - 1; while (l > s && isspace((unsigned char)*l)) --l;
                 if (isalnum((unsigned char)*l) || *l == ')' || *l == '_') {
-                    if (p[0] == '+') { fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s)); fputs(" + ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1))); fputc(')', out); return; }
-                    fputs("flow_nat_sub(", out); emit_norm_lean_slice(out, s, (size_t)(p - s)); fputs(", ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1))); fputc(')', out); return;
+                    if (p[0] == '+' || mode != LEAN_EXPR_NAT) {
+                        fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s), mode); fprintf(out, " %c ", p[0]); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1)), mode); fputc(')', out); return;
+                    }
+                    fputs("flow_nat_sub(", out); emit_norm_lean_slice(out, s, (size_t)(p - s), mode); fputs(", ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1)), mode); fputc(')', out); return;
                 }
             }
-            if (pass == 7 && (p[0] == '*' || p[0] == '/' || p[0] == '%')) {
-                if (p[0] == '*') { fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s)); fputs(" * ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1))); fputc(')', out); return; }
-                fprintf(out, "flow_nat_%s(", p[0] == '/' ? "div" : "mod");
-                emit_norm_lean_slice(out, s, (size_t)(p - s)); fputs(", ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1))); fputc(')', out); return;
-            }
-            if (pass == 8 && p[0] == '^' && p[-1] != '^' && (p + 1 == end || p[1] != '^')) {
-                fputs("flow_nat_pow(", out); emit_norm_lean_slice(out, s, (size_t)(p - s)); fputs(", ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1))); fputc(')', out); return;
+            if (pass == 9 && (p[0] == '*' || p[0] == '/' || p[0] == '%')) {
+                if (p[0] == '*' || (mode == LEAN_EXPR_FLOAT && p[0] == '/')) {
+                    fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s), mode); fprintf(out, " %c ", p[0]); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1)), mode); fputc(')', out); return;
+                }
+                if (mode == LEAN_EXPR_FLOAT && p[0] == '%') {
+                    fputs("__builtin_fmod(", out); emit_norm_lean_slice(out, s, (size_t)(p - s), mode); fputs(", ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1)), mode); fputc(')', out); return;
+                }
+                fprintf(out, "flow_%s_%s(", mode == LEAN_EXPR_INT ? "int" : "nat", p[0] == '/' ? "div" : "mod");
+                emit_norm_lean_slice(out, s, (size_t)(p - s), mode); fputs(", ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1)), mode); fputc(')', out); return;
             }
         }
     }
     if (s[0] == '!') {
-        fputs("(!", out); emit_norm_lean_slice(out, s + 1, len - 1); fputc(')', out); return;
+        fputs("(!", out); emit_norm_lean_slice(out, s + 1, len - 1, mode); fputc(')', out); return;
+    }
+    if (s[0] == '-' && len > 1 && s[1] != '>') {
+        int has_dot = 0;
+        for (size_t i = 1; i < len; ++i) if (s[i] == '.') { has_dot = 1; break; }
+        if (mode == LEAN_EXPR_NAT && !has_dot) { fputs("0ULL", out); return; }
+        fputs("(-", out); emit_norm_lean_slice(out, s + 1, len - 1, has_dot ? LEAN_EXPR_FLOAT : mode); fputc(')', out); return;
+    }
+    if (s[0] == '(') {
+        int pd = 0; const char *close_p = NULL;
+        for (const char *p = s; p < end; ++p) {
+            if (*p == '(') pd++;
+            else if (*p == ')' && --pd == 0) { close_p = p; break; }
+        }
+        if (close_p && close_p + 2 <= end && close_p[1] == '.') {
+            int valid_proj = 1;
+            for (const char *q = close_p + 2; q < end; ++q)
+                if (!isalnum((unsigned char)*q) && *q != '_') { valid_proj = 0; break; }
+            if (valid_proj && close_p + 2 < end) {
+                fputc('(', out);
+                emit_norm_lean_slice(out, s + 1, (size_t)(close_p - (s + 1)), mode);
+                fprintf(out, ").%.*s", (int)(end - (close_p + 2)), close_p + 2);
+                return;
+            }
+        }
     }
     const char *tok_s[16]; size_t tok_l[16], tok_cnt = 0;
     for (const char *p = s; p < end && tok_cnt < 16; ) {
@@ -302,12 +391,26 @@ static void emit_norm_lean_slice(FILE *out, const char *s, size_t len) {
     }
     if (tok_cnt > 1) {
         if (tok_l[0] == 6 && !strncmp(tok_s[0], "decide", 6) && tok_cnt == 2) {
-            fputs("((bool)", out); emit_norm_lean_slice(out, tok_s[1], tok_l[1]); fputc(')', out); return;
+            fputs("((bool)", out); emit_norm_lean_slice(out, tok_s[1], tok_l[1], mode); fputc(')', out); return;
+        }
+        if (tok_l[0] == 13 && !strncmp(tok_s[0], "flow_quantize", 13) && tok_cnt == 5) {
+            fputs("flow_quantize((double)(", out); emit_norm_lean_slice(out, tok_s[1], tok_l[1], LEAN_EXPR_FLOAT);
+            fputs("), (double)(", out); emit_norm_lean_slice(out, tok_s[2], tok_l[2], LEAN_EXPR_FLOAT);
+            fputs("), (double)(", out); emit_norm_lean_slice(out, tok_s[3], tok_l[3], LEAN_EXPR_FLOAT);
+            fputs("), (uint32_t)(", out); emit_norm_lean_slice(out, tok_s[4], tok_l[4], LEAN_EXPR_UINT);
+            fputs("))", out); return;
+        }
+        if (tok_l[0] == 15 && !strncmp(tok_s[0], "flow_dequantize", 15) && tok_cnt == 5) {
+            fputs("flow_dequantize((uint64_t)(", out); emit_norm_lean_slice(out, tok_s[1], tok_l[1], LEAN_EXPR_UINT);
+            fputs("), (double)(", out); emit_norm_lean_slice(out, tok_s[2], tok_l[2], LEAN_EXPR_FLOAT);
+            fputs("), (double)(", out); emit_norm_lean_slice(out, tok_s[3], tok_l[3], LEAN_EXPR_FLOAT);
+            fputs("), (uint32_t)(", out); emit_norm_lean_slice(out, tok_s[4], tok_l[4], LEAN_EXPR_UINT);
+            fputs("))", out); return;
         }
         fprintf(out, "%.*s(", (int)tok_l[0], tok_s[0]);
         for (size_t ti = 1; ti < tok_cnt; ++ti) {
             if (ti > 1) fputs(", ", out);
-            emit_norm_lean_slice(out, tok_s[ti], tok_l[ti]);
+            emit_norm_lean_slice(out, tok_s[ti], tok_l[ti], mode);
         }
         fputc(')', out); return;
     }
@@ -316,7 +419,7 @@ static void emit_norm_lean_slice(FILE *out, const char *s, size_t len) {
     }
     fprintf(out, "%.*s", (int)len, s);
 }
-static void emit_lean_expr_as_c(FILE *out, const char *expr) {
+static void emit_lean_expr_as_c(FILE *out, const char *expr, LeanExprMode mode) {
     char norm[2048]; size_t j = 0;
     for (size_t i = 0; expr[i] && j + 16 < sizeof(norm); ) {
         if (!strncmp(expr + i, "\xe2\x89\xa4", 3)) { norm[j++] = '<'; norm[j++] = '='; i += 3; }
@@ -329,7 +432,7 @@ static void emit_lean_expr_as_c(FILE *out, const char *expr) {
         else if (!strncmp(expr + i, "Nat.max", 7) && !isalnum((unsigned char)expr[i + 7])) { memcpy(norm + j, "flow_nat_max", 12); j += 12; i += 7; }
         else norm[j++] = expr[i++];
     }
-    norm[j] = '\0'; emit_norm_lean_slice(out, norm, j);
+    norm[j] = '\0'; emit_norm_lean_slice(out, norm, j, mode);
 }
 void flow_emit_abi_exports(FILE *output, const SemanticIR *ir, const Component *c, size_t cap) {
     size_t stride = (ir && ir->input_stride_bytes > 0) ? ir->input_stride_bytes : 8;
@@ -337,9 +440,45 @@ void flow_emit_abi_exports(FILE *output, const SemanticIR *ir, const Component *
     uint64_t sla = ir ? ir->sla_latency_ns : 0;
     uint32_t ver = (ir && ir->state_schema_version > 0) ? ir->state_schema_version : 1;
     fprintf(output,
-        "\n#include <stdatomic.h>\n#include <stdbool.h>\n#include <stdint.h>\n#include <string.h>\n"
+        "\n#include <math.h>\n#include <stdatomic.h>\n#include <stdbool.h>\n#include <stdint.h>\n#include <stdlib.h>\n#include <string.h>\n#include <time.h>\n#include <sys/mman.h>\n"
         "#define FLOW_INPUT_STRIDE %zu\n#define FLOW_INPUT_ALIGN %zu\n"
-        "#define FLOW_SLA_LATENCY_NS UINT64_C(%llu)\n#define FLOW_STATE_SCHEMA_VERSION %u\n"
+        "#define FLOW_SLA_LATENCY_NS UINT64_C(%llu)\n#define FLOW_STATE_SCHEMA_VERSION %u\n",
+        stride, align, (unsigned long long)sla, ver);
+    if (ir) {
+        if (ir->sla_latency_ns > 0) fprintf(output, "#define FLOW_MANIFEST_SLA_NS UINT64_C(%llu)\n", (unsigned long long)ir->sla_latency_ns);
+        if (ir->arena_limit_bytes > 0) fprintf(output, "#define FLOW_MANIFEST_ARENA_BYTES %zu\n", ir->arena_limit_bytes);
+        if (ir->qsbr_timeout_ns > 0) fprintf(output, "#define FLOW_MANIFEST_QSBR_TIMEOUT_NS UINT64_C(%llu)\n", (unsigned long long)ir->qsbr_timeout_ns);
+        if (ir->ingress_driver[0]) fprintf(output, "#define FLOW_MANIFEST_INGRESS_DRIVER \"%s\"\n", ir->ingress_driver);
+        if (ir->egress_driver[0]) fprintf(output, "#define FLOW_MANIFEST_EGRESS_DRIVER \"%s\"\n", ir->egress_driver);
+        if (ir->migrate_fn[0]) fprintf(output, "#define FLOW_MANIFEST_MIGRATE_FN %s\n", ir->migrate_fn);
+        size_t ncoords = ir->jet_coord_count > 0 ? ir->jet_coord_count : ir->state_field_count;
+        if (ncoords > 0) {
+            char fname_id[FLOW_NAME] = "default";
+            if (ir->flow_name[0]) {
+                size_t k = 0;
+                for (size_t i = 0; ir->flow_name[i] && k + 1 < sizeof(fname_id); ++i)
+                    fname_id[k++] = (isalnum((unsigned char)ir->flow_name[i]) || ir->flow_name[i] == '_') ? ir->flow_name[i] : '_';
+                fname_id[k] = '\0';
+            }
+            fprintf(output, "#ifndef FLOW_NAMED_JET_VIEW_%s_DEFINED\n#define FLOW_NAMED_JET_VIEW_%s_DEFINED\ntypedef struct {\n", fname_id, fname_id);
+            for (size_t ci = 0; ci < ncoords; ++ci) {
+                const char *raw_cn = ir->jet_coord_count > 0 ? ir->jet_coord_names[ci] : ir->state_fields[ci].name;
+                char cn[FLOW_NAME] = {0}; size_t ck = 0;
+                for (size_t i = 0; raw_cn[i] && ck + 1 < sizeof(cn); ++i)
+                    cn[ck++] = (isalnum((unsigned char)raw_cn[i]) || raw_cn[i] == '_') ? raw_cn[i] : '_';
+                cn[ck] = '\0';
+                fprintf(output, "    double %s;\n", cn[0] ? cn : "coord");
+            }
+            fprintf(output,
+                "} FlowCoords_%s;\n"
+                "typedef struct { FlowCoords_%s *q; FlowCoords_%s *p; FlowCoords_%s *a; } FlowJetView_%s;\n"
+                "static inline __attribute__((unused)) FlowJetView_%s FlowJetView_%s_from_arrays(double *q, double *p, double *a) {\n"
+                "    FlowJetView_%s v = { (FlowCoords_%s *)(void *)q, (FlowCoords_%s *)(void *)p, (FlowCoords_%s *)(void *)a };\n"
+                "    return v;\n}\n#endif\n",
+                fname_id, fname_id, fname_id, fname_id, fname_id, fname_id, fname_id, fname_id, fname_id, fname_id, fname_id);
+        }
+    }
+    fprintf(output,
         "#ifndef FLOW_LEAN_NAT_OPS_DEFINED\n#define FLOW_LEAN_NAT_OPS_DEFINED\n"
         "static inline __attribute__((unused)) uint64_t flow_nat_sub(uint64_t a, uint64_t b) { return a >= b ? (a - b) : 0ULL; }\n"
         "static inline __attribute__((unused)) uint64_t flow_nat_div(uint64_t a, uint64_t b) { return b == 0ULL ? 0ULL : (a / b); }\n"
@@ -347,36 +486,192 @@ void flow_emit_abi_exports(FILE *output, const SemanticIR *ir, const Component *
         "static inline __attribute__((unused)) uint64_t flow_nat_pow(uint64_t base, uint64_t exp) { uint64_t r = 1ULL; while (exp > 0ULL) { if (exp & 1ULL) r *= base; base *= base; exp >>= 1U; } return r; }\n"
         "static inline __attribute__((unused)) uint64_t flow_nat_min(uint64_t a, uint64_t b) { return a < b ? a : b; }\n"
         "static inline __attribute__((unused)) uint64_t flow_nat_max(uint64_t a, uint64_t b) { return a > b ? a : b; }\n"
+        "static inline __attribute__((unused)) int64_t flow_int_div(int64_t a, int64_t b) { return b == 0 ? 0 : ((a == INT64_MIN && b == -1) ? INT64_MIN : (a / b)); }\n"
+        "static inline __attribute__((unused)) int64_t flow_int_mod(int64_t a, int64_t b) { return b == 0 ? a : ((a == INT64_MIN && b == -1) ? 0 : (a %% b)); }\n"
+        "static inline __attribute__((unused)) int64_t flow_int_pow(int64_t base, int64_t exp) { if (exp < 0) return 0; int64_t r = 1; while (exp > 0) { if (exp & 1) r *= base; base *= base; exp >>= 1; } return r; }\n"
+        "static inline __attribute__((unused)) double flow_float_pow(double base, double exp) { return __builtin_pow(base, exp); }\n"
+        "static inline __attribute__((unused)) uint64_t flow_quantize(double val, double min_v, double max_v, uint32_t bits) {\n"
+        "    if (!isfinite(val) || !isfinite(min_v) || !isfinite(max_v) || max_v <= min_v || bits == 0 || bits > 32) return 0ULL;\n"
+        "    double c = val < min_v ? min_v : (val > max_v ? max_v : val);\n"
+        "    uint64_t max_q = (1ULL << bits) - 1ULL;\n"
+        "    return (uint64_t)((c - min_v) / (max_v - min_v) * (double)max_q + 0.5);\n"
+        "}\n"
+        "static inline __attribute__((unused)) double flow_dequantize(uint64_t code, double min_v, double max_v, uint32_t bits) {\n"
+        "    if (!isfinite(min_v) || !isfinite(max_v) || max_v <= min_v || bits == 0 || bits > 32) return 0.0;\n"
+        "    uint64_t max_q = (1ULL << bits) - 1ULL;\n"
+        "    uint64_t c = code > max_q ? max_q : code;\n"
+        "    return min_v + ((double)c / (double)max_q) * (max_v - min_v);\n"
+        "}\n"
+        "#endif\n"
+        "#ifndef FLOW_STATUS_CODE_DEFINED\n#define FLOW_STATUS_CODE_DEFINED\n"
+        "typedef enum { FLOW_OK = 0, FLOW_ERR_INVALID_ARG = -1, FLOW_ERR_QUOTA_OR_STRIDE = -2, FLOW_ERR_KERNEL_UNBOUND = -3, FLOW_ERR_WATCHDOG_ESTOP = -4 } FlowStatusCode;\n"
         "#endif\n"
         "#ifndef FLOW_EXTENT_DESCRIPTOR_DEFINED\n#define FLOW_EXTENT_DESCRIPTOR_DEFINED\n"
         "typedef struct { uint64_t base_offset, byte_length, qsbr_epoch; uint32_t stride_bytes, align_bytes, schema_version, flags; uint64_t reserved[3]; } FlowExtentDescriptor;\n"
         "_Static_assert(sizeof(FlowExtentDescriptor) == 64, \"FlowExtentDescriptor must be 64 bytes\");\n"
-        "#endif\n"
-        "typedef struct { _Atomic uint64_t active_epoch, qsbr_epoch; uint64_t sla_latency_ns; size_t capacity, stride, align; int context_bound; } flow_abi_qsbr_ctx;\n",
-        stride, align, (unsigned long long)sla, ver);
-    int kernel_emitted = 0;
+        "#endif\n");
+    if (ir) {
+        for (size_t ei = 0; ei < ir->lean_enum_count; ++ei) {
+            const FlowLeanEnum *en = &ir->lean_enums[ei];
+            fprintf(output, "#ifndef FLOW_LEAN_ENUM_%s_DEFINED\n#define FLOW_LEAN_ENUM_%s_DEFINED\ntypedef enum {\n", en->name, en->name);
+            for (size_t vi = 0; vi < en->variant_count; ++vi)
+                fprintf(output, "    %s = %zu%s\n", en->variants[vi], vi, vi + 1 < en->variant_count ? "," : "");
+            fprintf(output, "} %s;\n#endif\n", en->name);
+        }
+        for (size_t si = 0; si < ir->lean_struct_count; ++si) {
+            const FlowLeanStruct *st = &ir->lean_structs[si];
+            fprintf(output, "#ifndef FLOW_LEAN_STRUCT_%s_DEFINED\n#define FLOW_LEAN_STRUCT_%s_DEFINED\ntypedef struct {\n", st->name, st->name);
+            for (size_t fi = 0; fi < st->field_count; ++fi)
+                fprintf(output, "    %s %s;\n", st->fields[fi].c_type, st->fields[fi].name);
+            fprintf(output, "} %s;\n#endif\n", st->name);
+        }
+    }
+    fprintf(output,
+        "typedef struct { _Atomic uint64_t active_epoch, qsbr_epoch; uint64_t sla_latency_ns, qsbr_timeout_ns; size_t capacity, stride, align, arena_limit_bytes; int context_bound; uint8_t *prefaulted_arena; size_t prefaulted_arena_bytes; _Atomic int emergency_stop_latched; _Atomic uint64_t wcet_breach_count; int emergency_stop_enabled; } flow_abi_qsbr_ctx;\n");
+    size_t arena_lim = ir ? ir->arena_limit_bytes : 0;
+    uint64_t qsbr_tmo = ir ? ir->qsbr_timeout_ns : 0;
+    int estop_en = (ir && strcmp(ir->fallback_policy, "emergency_stop") == 0) ? 1 : 0;
+    int kernel_emitted = 0, kernel_name_collides = 0;
+    const char *step_kern_fn = (ir && ir->extern_kernel[0]) ? ir->extern_kernel : "";
     if (ir && ir->lean_function_count > 0) {
         for (size_t fi = 0; fi < ir->lean_function_count; ++fi) {
             const FlowLeanFunction *fn = &ir->lean_functions[fi];
-            const char *ret_c = lean_scalar_to_c_type(fn->return_type);
-            int is_kern = (ir->extern_kernel[0] && !strcmp(fn->name, ir->extern_kernel));
-            if (is_kern) kernel_emitted = 1;
+            const char *ret_c = lean_type_to_c_type(ir, fn->return_type);
+            LeanExprMode fmode = infer_fn_expr_mode(fn);
+            if (fn->is_struct_transform) {
+                if (ir->extern_kernel[0] && !strcmp(fn->name, ir->extern_kernel)) kernel_name_collides = 1;
+                const FlowLeanStruct *out_st = find_ir_lean_struct(ir, fn->return_type);
+                fprintf(output, "%s %s(", ret_c, fn->name);
+                for (size_t pi = 0; pi < fn->param_count; ++pi)
+                    fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
+                fprintf(output, ") {\n");
+                for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                    fprintf(output, "    (void)%s;\n", fn->param_names[pi]);
+                    const FlowLeanStruct *in_st = find_ir_lean_struct(ir, fn->param_types[pi]);
+                    if (in_st) {
+                        for (size_t sfi = 0; sfi < in_st->field_count; ++sfi) {
+                            const char *sfc = in_st->fields[sfi].c_type;
+                            if (!strcmp(sfc, "double") || !strcmp(sfc, "float"))
+                                fprintf(output, "    if (!isfinite(%s.%s)) %s.%s = (%s)0.0;\n", fn->param_names[pi], in_st->fields[sfi].name, fn->param_names[pi], in_st->fields[sfi].name, sfc);
+                        }
+                    } else if (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32")) {
+                        fprintf(output, "    if (!isfinite(%s)) %s = 0.0;\n", fn->param_names[pi], fn->param_names[pi]);
+                    }
+                }
+                fprintf(output, "    %s _out = {0};\n", ret_c);
+                if (out_st) {
+                    for (size_t sfi = 0; sfi < out_st->field_count; ++sfi) {
+                        const char *fname = out_st->fields[sfi].name;
+                        const char *fc = out_st->fields[sfi].c_type;
+                        const char *fexpr = NULL;
+                        for (size_t ai = 0; ai < fn->field_assign_count; ++ai) {
+                            if (strcmp(fn->field_assign_names[ai], fname) == 0) {
+                                fexpr = fn->field_assign_exprs[ai];
+                                break;
+                            }
+                        }
+                        if (!fexpr) continue;
+                        LeanExprMode fm = infer_c_type_expr_mode(fc, fmode);
+                        if (!strcmp(fc, "double") || !strcmp(fc, "float")) {
+                            fprintf(output, "    { %s _v = (%s)(", fc, fc);
+                            emit_lean_expr_as_c(output, fexpr, LEAN_EXPR_FLOAT);
+                            fprintf(output, "); _out.%s = isfinite(_v) ? _v : (%s)0.0; }\n", fname, fc);
+                        } else {
+                            fprintf(output, "    _out.%s = (%s)(", fname, fc);
+                            emit_lean_expr_as_c(output, fexpr, fm);
+                            fprintf(output, ");\n");
+                        }
+                    }
+                }
+                fprintf(output, "    return _out;\n}\n");
+                continue;
+            }
+            int is_step_sig = (fn->param_count == 4 && !strcmp(fn->return_type, "UInt32"));
+            for (size_t pi = 0; is_step_sig && pi < 4; ++pi)
+                if (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32") || !strcmp(fn->param_types[pi], "Bool") || find_ir_lean_struct(ir, fn->param_types[pi]))
+                    is_step_sig = 0;
+            int is_kern = 0;
+            if (ir->extern_kernel[0] && !strcmp(fn->name, ir->extern_kernel)) {
+                if (is_step_sig) { is_kern = 1; kernel_emitted = 1; }
+                else kernel_name_collides = 1;
+            }
             fprintf(output, "%s%s %s(", is_kern ? "__attribute__((weak)) " : "", ret_c, fn->name);
             for (size_t pi = 0; pi < fn->param_count; ++pi)
-                fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_scalar_to_c_type(fn->param_types[pi]), fn->param_names[pi]);
+                fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
             fprintf(output, ") {\n    ");
-            for (size_t pi = 0; pi < fn->param_count; ++pi)
+            int float_param_cnt = 0;
+            for (size_t pi = 0; pi < fn->param_count; ++pi) {
                 fprintf(output, "(void)%s; ", fn->param_names[pi]);
-            fprintf(output, "\n    return (%s)", ret_c);
-            emit_lean_expr_as_c(output, fn->body);
-            fprintf(output, ";\n}\n");
+                if (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32")) float_param_cnt++;
+                const FlowLeanStruct *in_st = find_ir_lean_struct(ir, fn->param_types[pi]);
+                if (in_st) {
+                    for (size_t sfi = 0; sfi < in_st->field_count; ++sfi) {
+                        const char *sfc = in_st->fields[sfi].c_type;
+                        if (!strcmp(sfc, "double") || !strcmp(sfc, "float"))
+                            fprintf(output, "if (!isfinite(%s.%s)) %s.%s = (%s)0.0; ", fn->param_names[pi], in_st->fields[sfi].name, fn->param_names[pi], in_st->fields[sfi].name, sfc);
+                    }
+                }
+            }
+            if (float_param_cnt > 0) {
+                fprintf(output, "\n    if (");
+                int seen_fp = 0;
+                for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                    if (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32")) {
+                        fprintf(output, "%s!isfinite(%s)", seen_fp ? " || " : "", fn->param_names[pi]);
+                        seen_fp++;
+                    }
+                }
+                fprintf(output, ") return (%s)0;", ret_c);
+            }
+            if (!strcmp(fn->return_type, "Float") || !strcmp(fn->return_type, "Float32")) {
+                fprintf(output, "\n    %s _flow_ret = (%s)", ret_c, ret_c);
+                emit_lean_expr_as_c(output, fn->body, fmode);
+                fprintf(output, ";\n    return isfinite(_flow_ret) ? _flow_ret : (%s)0.0;\n}\n", ret_c);
+            } else {
+                fprintf(output, "\n    return (%s)", ret_c);
+                emit_lean_expr_as_c(output, fn->body, fmode);
+                fprintf(output, ";\n}\n");
+            }
+        }
+    }
+    if (ir && ir->migrate_fn[0]) {
+        for (size_t fi = 0; fi < ir->lean_function_count; ++fi) {
+            const FlowLeanFunction *mfn = &ir->lean_functions[fi];
+            if (strcmp(mfn->name, ir->migrate_fn) == 0 && mfn->is_struct_transform && mfn->param_count == 1) {
+                const char *in_t = mfn->param_types[0];
+                const char *out_t = mfn->return_type;
+                fprintf(output,
+                    "int32_t flow_%s_migrate_buffer(const void *old_buf, size_t old_len, void *new_buf, size_t new_len);\n"
+                    "int flow_%s_migrate_unit(void *host_ctx, const void *old_state, void *new_state);\n"
+                    "int32_t flow_%s_migrate_buffer(const void *old_buf, size_t old_len, void *new_buf, size_t new_len) {\n"
+                    "    if (!old_buf || !new_buf || old_len < sizeof(%s) || new_len < sizeof(%s)) return -1;\n"
+                    "    *(%s *)new_buf = %s(*(const %s *)old_buf);\n"
+                    "    return 0;\n"
+                    "}\n"
+                    "int flow_%s_migrate_unit(void *host_ctx, const void *old_state, void *new_state) {\n"
+                    "    (void)host_ctx;\n"
+                    "    if (!old_state || !new_state) return -1;\n"
+                    "    *(%s *)new_state = %s(*(const %s *)old_state);\n"
+                    "    return 0;\n"
+                    "}\n",
+                    c->id, c->id, c->id, in_t, out_t, out_t, mfn->name, in_t, c->id, out_t, mfn->name, in_t);
+                break;
+            }
         }
     }
     if (ir && ir->extern_kernel[0] && !kernel_emitted) {
-        if (ir->extern_kernel_body[0]) {
+        if (kernel_name_collides) {
+            step_kern_fn = "_flow_abi_step_guard";
+            kernel_emitted = 1;
+            const char *gbody = ir->extern_kernel_body[0] ? ir->extern_kernel_body : "if stride > 0 && epoch > 0 && baseOff + byteLen >= baseOff then 0 else 1";
+            fprintf(output, "static uint32_t _flow_abi_step_guard(uint64_t baseOff, uint64_t byteLen, uint64_t stride, uint64_t epoch) {\n"
+                            "    (void)baseOff; (void)byteLen; (void)stride; (void)epoch;\n    return (uint32_t)");
+            emit_lean_expr_as_c(output, gbody, LEAN_EXPR_UINT);
+            fprintf(output, ";\n}\n");
+        } else if (ir->extern_kernel_body[0]) {
             fprintf(output, "__attribute__((weak)) uint32_t %s(uint64_t baseOff, uint64_t byteLen, uint64_t stride, uint64_t epoch) {\n"
                             "    (void)baseOff; (void)byteLen; (void)stride; (void)epoch;\n    return (uint32_t)", ir->extern_kernel);
-            emit_lean_expr_as_c(output, ir->extern_kernel_body);
+            emit_lean_expr_as_c(output, ir->extern_kernel_body, LEAN_EXPR_UINT);
             fprintf(output, ";\n}\n");
         } else {
             fprintf(output, "extern uint32_t %s(uint64_t base_off, uint64_t byte_len, uint64_t stride, uint64_t epoch) __attribute__((weak));\n", ir->extern_kernel);
@@ -387,13 +682,29 @@ void flow_emit_abi_exports(FILE *output, const SemanticIR *ir, const Component *
         "uint64_t flow_%s_acquire_epoch(void *handle);\nvoid flow_%s_release_epoch(void *handle, uint64_t epoch);\n"
         "int32_t flow_%s_process(void *handle, const uint8_t *input, size_t input_len, uint8_t *output, size_t *output_len);\n"
         "int32_t flow_%s_process_descriptor(void *handle, const FlowExtentDescriptor *in_desc, FlowExtentDescriptor *out_desc);\n"
+        "int32_t flow_%s_trip_watchdog_for_test(void *handle, uint64_t simulated_elapsed_ns);\n"
+        "int32_t flow_%s_reset_watchdog(void *handle);\n"
+        "uint64_t flow_%s_watchdog_breach_count(void *handle);\n"
         "void flow_%s_destroy(void *handle);\n"
         "void *flow_%s_create(void) {\n"
         "    flow_abi_qsbr_ctx *ctx = (flow_abi_qsbr_ctx *)calloc(1, sizeof(*ctx));\n"
         "    if (!ctx) return NULL;\n"
         "    atomic_init(&ctx->active_epoch, 0); atomic_init(&ctx->qsbr_epoch, 1);\n"
-        "    ctx->sla_latency_ns = FLOW_SLA_LATENCY_NS; ctx->capacity = %zu; ctx->stride = FLOW_INPUT_STRIDE; ctx->align = FLOW_INPUT_ALIGN;\n"
-        "    return ctx;\n}\n"
+        "    atomic_init(&ctx->emergency_stop_latched, 0); atomic_init(&ctx->wcet_breach_count, 0);\n"
+        "    ctx->sla_latency_ns = FLOW_SLA_LATENCY_NS; ctx->qsbr_timeout_ns = UINT64_C(%llu); ctx->capacity = %zu; ctx->stride = FLOW_INPUT_STRIDE; ctx->align = FLOW_INPUT_ALIGN; ctx->arena_limit_bytes = %zu;\n"
+        "    ctx->emergency_stop_enabled = %d;\n"
+        "    if (ctx->arena_limit_bytes > 0) {\n"
+        "        ctx->prefaulted_arena_bytes = (ctx->arena_limit_bytes + 63ULL) & ~63ULL;\n"
+        "        void *_arena_ptr = NULL;\n"
+        "        if (posix_memalign(&_arena_ptr, 64, ctx->prefaulted_arena_bytes) == 0 && _arena_ptr) {\n"
+        "            ctx->prefaulted_arena = (uint8_t *)_arena_ptr;\n"
+        "            memset(ctx->prefaulted_arena, 0, ctx->prefaulted_arena_bytes);\n"
+        "            (void)mlock(ctx->prefaulted_arena, ctx->prefaulted_arena_bytes);\n"
+        "        }\n"
+        "    }\n"
+        "    return ctx;\n}\n",
+        c->id, c->id, c->id, c->id, c->id, c->id, c->id, c->id, c->id, c->id, c->id, (unsigned long long)qsbr_tmo, cap, arena_lim, estop_en);
+    fprintf(output,
         "void *%s_bind_context(void *handle) {\n"
         "    flow_abi_qsbr_ctx *ctx = (flow_abi_qsbr_ctx *)handle;\n"
         "    if (ctx) ctx->context_bound = 1;\n    return handle;\n}\n"
@@ -404,36 +715,73 @@ void flow_emit_abi_exports(FILE *output, const SemanticIR *ir, const Component *
         "void flow_%s_release_epoch(void *handle, uint64_t epoch) {\n"
         "    flow_abi_qsbr_ctx *ctx = (flow_abi_qsbr_ctx *)handle;\n"
         "    if (ctx) atomic_compare_exchange_strong_explicit(&ctx->active_epoch, &epoch, 0ULL, memory_order_release, memory_order_relaxed);\n}\n"
+        "int32_t flow_%s_trip_watchdog_for_test(void *handle, uint64_t simulated_elapsed_ns) {\n"
+        "    flow_abi_qsbr_ctx *ctx = (flow_abi_qsbr_ctx *)handle;\n"
+        "    if (!ctx) return FLOW_ERR_INVALID_ARG;\n"
+        "    uint64_t _lim = ctx->sla_latency_ns > 0 ? ctx->sla_latency_ns : UINT64_C(1000000);\n"
+        "    if (simulated_elapsed_ns > _lim) {\n"
+        "        atomic_fetch_add_explicit(&ctx->wcet_breach_count, 1, memory_order_relaxed);\n"
+        "        atomic_store_explicit(&ctx->emergency_stop_latched, 1, memory_order_release);\n"
+        "        return FLOW_ERR_WATCHDOG_ESTOP;\n"
+        "    }\n"
+        "    return atomic_load_explicit(&ctx->emergency_stop_latched, memory_order_acquire) ? FLOW_ERR_WATCHDOG_ESTOP : FLOW_OK;\n"
+        "}\n"
+        "int32_t flow_%s_reset_watchdog(void *handle) {\n"
+        "    flow_abi_qsbr_ctx *ctx = (flow_abi_qsbr_ctx *)handle;\n"
+        "    if (!ctx) return FLOW_ERR_INVALID_ARG;\n"
+        "    atomic_store_explicit(&ctx->emergency_stop_latched, 0, memory_order_release);\n"
+        "    return FLOW_OK;\n"
+        "}\n"
+        "uint64_t flow_%s_watchdog_breach_count(void *handle) {\n"
+        "    flow_abi_qsbr_ctx *ctx = (flow_abi_qsbr_ctx *)handle;\n"
+        "    if (!ctx) return 0ULL;\n"
+        "    return atomic_load_explicit(&ctx->wcet_breach_count, memory_order_relaxed);\n"
+        "}\n"
         "int32_t flow_%s_process(void *handle, const uint8_t *input, size_t input_len, uint8_t *output, size_t *output_len) {\n"
         "    flow_abi_qsbr_ctx *ctx = (flow_abi_qsbr_ctx *)handle;\n"
         "    if (!ctx || (!input && input_len > 0) || !output || !output_len) return -1;\n"
-        "    if (input_len > ctx->capacity * ctx->stride || *output_len < input_len) return -2;\n"
+        "    if (atomic_load_explicit(&ctx->emergency_stop_latched, memory_order_acquire)) return -4;\n"
+        "    if (input_len > ctx->capacity * ctx->stride || (ctx->arena_limit_bytes > 0 && input_len > ctx->arena_limit_bytes) || *output_len < input_len) return -2;\n"
+        "    struct timespec _ts0, _ts1;\n"
+        "    clock_gettime(CLOCK_MONOTONIC, &_ts0);\n"
         "    uint64_t ep = atomic_fetch_add_explicit(&ctx->qsbr_epoch, 1, memory_order_acq_rel) + 1;\n"
         "    atomic_store_explicit(&ctx->active_epoch, ep, memory_order_release);\n",
-        c->id, c->id, c->id, c->id, c->id, c->id, c->id, c->id, cap, c->id, c->id, c->id, c->id);
+        c->id, c->id, c->id, c->id, c->id, c->id, c->id);
     if (ir && ir->extern_kernel[0]) {
-        if (ir->extern_kernel_body[0]) {
+        if (kernel_emitted || ir->extern_kernel_body[0]) {
             fprintf(output,
                 "    {\n"
                 "        uint32_t krc = %s(0ULL, (uint64_t)input_len, (uint64_t)ctx->stride, ep);\n"
                 "        if (krc != 0) { atomic_store_explicit(&ctx->active_epoch, 0, memory_order_release); return -(int32_t)krc; }\n"
-                "    }\n", ir->extern_kernel);
+                "    }\n", step_kern_fn);
         } else {
             fprintf(output,
-                "    if (%s) {\n"
+                "    {\n"
+                "        if (!%s) { atomic_store_explicit(&ctx->active_epoch, 0, memory_order_release); return -3; }\n"
                 "        uint32_t krc = %s(0ULL, (uint64_t)input_len, (uint64_t)ctx->stride, ep);\n"
                 "        if (krc != 0) { atomic_store_explicit(&ctx->active_epoch, 0, memory_order_release); return -(int32_t)krc; }\n"
-                "    }\n", ir->extern_kernel, ir->extern_kernel);
+                "    }\n", step_kern_fn, step_kern_fn);
         }
     }
     fprintf(output,
         "    if (input_len > 0 && output != input) memcpy(output, input, input_len);\n"
         "    *output_len = input_len;\n"
         "    atomic_store_explicit(&ctx->active_epoch, 0, memory_order_release);\n"
+        "    clock_gettime(CLOCK_MONOTONIC, &_ts1);\n"
+        "    uint64_t _elapsed_ns = (uint64_t)(_ts1.tv_sec - _ts0.tv_sec) * UINT64_C(1000000000) + (uint64_t)(_ts1.tv_nsec - _ts0.tv_nsec);\n"
+        "    if (_elapsed_ns < 2) _elapsed_ns = 2;\n"
+        "    if (ctx->sla_latency_ns > 0 && _elapsed_ns > ctx->sla_latency_ns) {\n"
+        "        atomic_fetch_add_explicit(&ctx->wcet_breach_count, 1, memory_order_relaxed);\n"
+        "        if (ctx->emergency_stop_enabled) { atomic_store_explicit(&ctx->emergency_stop_latched, 1, memory_order_release); return -4; }\n"
+        "    }\n"
         "    return 0;\n}\n"
         "int32_t flow_%s_process_descriptor(void *handle, const FlowExtentDescriptor *in_desc, FlowExtentDescriptor *out_desc) {\n"
         "    flow_abi_qsbr_ctx *ctx = (flow_abi_qsbr_ctx *)handle;\n"
         "    if (!ctx || !in_desc || !out_desc) return -1;\n"
+        "    if (atomic_load_explicit(&ctx->emergency_stop_latched, memory_order_acquire)) return -4;\n"
+        "    if (ctx->arena_limit_bytes > 0 && in_desc->byte_length > ctx->arena_limit_bytes) return -2;\n"
+        "    struct timespec _ts0, _ts1;\n"
+        "    clock_gettime(CLOCK_MONOTONIC, &_ts0);\n"
         "    uint64_t ep = atomic_fetch_add_explicit(&ctx->qsbr_epoch, 1, memory_order_acq_rel) + 1;\n"
         "    atomic_store_explicit(&ctx->active_epoch, ep, memory_order_release);\n"
         "    *out_desc = *in_desc;\n"
@@ -443,27 +791,80 @@ void flow_emit_abi_exports(FILE *output, const SemanticIR *ir, const Component *
         "    out_desc->schema_version = FLOW_STATE_SCHEMA_VERSION;\n",
         c->id);
     if (ir && ir->extern_kernel[0]) {
-        if (ir->extern_kernel_body[0]) {
+        if (kernel_emitted || ir->extern_kernel_body[0]) {
             fprintf(output,
                 "    {\n"
                 "        uint32_t krc = %s(in_desc->base_offset, in_desc->byte_length, out_desc->stride_bytes, ep);\n"
                 "        if (krc != 0) { atomic_store_explicit(&ctx->active_epoch, 0, memory_order_release); return -(int32_t)krc; }\n"
-                "    }\n", ir->extern_kernel);
+                "    }\n", step_kern_fn);
         } else {
             fprintf(output,
-                "    if (%s) {\n"
+                "    {\n"
+                "        if (!%s) { atomic_store_explicit(&ctx->active_epoch, 0, memory_order_release); return -3; }\n"
                 "        uint32_t krc = %s(in_desc->base_offset, in_desc->byte_length, out_desc->stride_bytes, ep);\n"
                 "        if (krc != 0) { atomic_store_explicit(&ctx->active_epoch, 0, memory_order_release); return -(int32_t)krc; }\n"
-                "    }\n", ir->extern_kernel, ir->extern_kernel);
+                "    }\n", step_kern_fn, step_kern_fn);
         }
     }
     fprintf(output,
         "    out_desc->base_offset = in_desc->base_offset + in_desc->byte_length;\n"
         "    atomic_store_explicit(&ctx->active_epoch, 0, memory_order_release);\n"
-        "    return 0;\n}\n"
+        "    clock_gettime(CLOCK_MONOTONIC, &_ts1);\n"
+        "    uint64_t _elapsed_ns = (uint64_t)(_ts1.tv_sec - _ts0.tv_sec) * UINT64_C(1000000000) + (uint64_t)(_ts1.tv_nsec - _ts0.tv_nsec);\n"
+        "    if (_elapsed_ns < 2) _elapsed_ns = 2;\n"
+        "    if (ctx->sla_latency_ns > 0 && _elapsed_ns > ctx->sla_latency_ns) {\n"
+        "        atomic_fetch_add_explicit(&ctx->wcet_breach_count, 1, memory_order_relaxed);\n"
+        "        if (ctx->emergency_stop_enabled) { atomic_store_explicit(&ctx->emergency_stop_latched, 1, memory_order_release); return -4; }\n"
+        "    }\n"
+        "    return 0;\n}\n");
+    if (ir && ir->patchbay_stage_count > 0 &&
+        ir->patchbay_stages[0].in_struct[0] &&
+        ir->patchbay_stages[ir->patchbay_stage_count - 1].out_struct[0]) {
+        const char *pb_in = ir->patchbay_stages[0].in_struct;
+        const char *pb_out = ir->patchbay_stages[ir->patchbay_stage_count - 1].out_struct;
+        fprintf(output,
+            "int32_t flow_%s_run_patchbay(void *handle, const %s *in_frame, %s *out_frame);\n"
+            "int32_t flow_%s_run_patchbay(void *handle, const %s *in_frame, %s *out_frame) {\n"
+            "    flow_abi_qsbr_ctx *ctx = (flow_abi_qsbr_ctx *)handle;\n"
+            "    if (!ctx || !in_frame || !out_frame) return -1;\n"
+            "    if (atomic_load_explicit(&ctx->emergency_stop_latched, memory_order_acquire)) return -4;\n"
+            "    struct timespec _ts0, _ts1;\n"
+            "    clock_gettime(CLOCK_MONOTONIC, &_ts0);\n"
+            "    uint64_t ep = atomic_fetch_add_explicit(&ctx->qsbr_epoch, 1, memory_order_acq_rel) + 1;\n"
+            "    atomic_store_explicit(&ctx->active_epoch, ep, memory_order_release);\n",
+            c->id, pb_in, pb_out, c->id, pb_in, pb_out);
+        for (size_t si = 0; si < ir->patchbay_stage_count; ++si) {
+            const FlowPatchbayStage *stg = &ir->patchbay_stages[si];
+            if (si == 0) {
+                fprintf(output, "    %s _stage_0 = %s(*in_frame);\n", stg->out_struct, stg->fn_name);
+            } else {
+                fprintf(output, "    %s _stage_%zu = %s(_stage_%zu);\n", stg->out_struct, si, stg->fn_name, si - 1);
+            }
+        }
+        fprintf(output,
+            "    *out_frame = _stage_%zu;\n"
+            "    atomic_store_explicit(&ctx->active_epoch, 0, memory_order_release);\n"
+            "    clock_gettime(CLOCK_MONOTONIC, &_ts1);\n"
+            "    uint64_t _elapsed_ns = (uint64_t)(_ts1.tv_sec - _ts0.tv_sec) * UINT64_C(1000000000) + (uint64_t)(_ts1.tv_nsec - _ts0.tv_nsec);\n"
+            "    if (_elapsed_ns < 2) _elapsed_ns = 2;\n"
+            "    if (ctx->sla_latency_ns > 0 && _elapsed_ns > ctx->sla_latency_ns) {\n"
+            "        atomic_fetch_add_explicit(&ctx->wcet_breach_count, 1, memory_order_relaxed);\n"
+            "        if (ctx->emergency_stop_enabled) { atomic_store_explicit(&ctx->emergency_stop_latched, 1, memory_order_release); return -4; }\n"
+            "    }\n"
+            "    return 0;\n}\n",
+            ir->patchbay_stage_count - 1);
+    }
+    fprintf(output,
         "void flow_%s_destroy(void *handle) {\n"
         "    flow_abi_qsbr_ctx *ctx = (flow_abi_qsbr_ctx *)handle;\n"
-        "    if (ctx) { atomic_store_explicit(&ctx->active_epoch, 0, memory_order_release); free(ctx); }\n}\n",
+        "    if (ctx) {\n"
+        "        atomic_store_explicit(&ctx->active_epoch, 0, memory_order_release);\n"
+        "        if (ctx->prefaulted_arena) {\n"
+        "            (void)munlock(ctx->prefaulted_arena, ctx->prefaulted_arena_bytes);\n"
+        "            free(ctx->prefaulted_arena);\n"
+        "        }\n"
+        "        free(ctx);\n"
+        "    }\n}\n",
         c->id);
 }
 int flow_emit_builtin_component(FILE *output, const SemanticIR *ir, const Component *c, const SearchResult *s, const VerificationReport *v, int reload_adapter) {

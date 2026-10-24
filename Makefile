@@ -11,19 +11,11 @@ FLOWY := $(BUILD_DIR)/flowy
 LIBFLOW_A := $(BUILD_DIR)/libflow.a
 
 SRC_LIB_ROOT    := $(filter-out src/flowc.c src/flowy_main.c,$(wildcard src/*.c))
-SRC_LIB_FVEC    := $(wildcard src/fvec/*.c)
-SRC_LIB_JET     := $(wildcard src/jet/*.c)
-SRC_LIB_TOPO    := $(wildcard src/topo/*.c)
-SRC_LIB_INSPECT := $(wildcard src/inspect/*.c)
 SRC_LIB_PLUGINS := $(wildcard plugins/*.c)
-SRC_LIB := $(SRC_LIB_ROOT) $(SRC_LIB_FVEC) $(SRC_LIB_JET) $(SRC_LIB_TOPO) $(SRC_LIB_INSPECT) $(SRC_LIB_PLUGINS)
+SRC_LIB := $(SRC_LIB_ROOT) $(SRC_LIB_PLUGINS)
 
 LIB_OBJS := \
   $(patsubst src/%.c,              $(BUILD_DIR)/obj/%.o,          $(SRC_LIB_ROOT)) \
-  $(patsubst src/fvec/%.c,         $(BUILD_DIR)/obj/fvec_%.o,     $(SRC_LIB_FVEC)) \
-  $(patsubst src/jet/%.c,          $(BUILD_DIR)/obj/jet_%.o,      $(SRC_LIB_JET)) \
-  $(patsubst src/topo/%.c,         $(BUILD_DIR)/obj/topo_%.o,     $(SRC_LIB_TOPO)) \
-  $(patsubst src/inspect/%.c,      $(BUILD_DIR)/obj/inspect_%.o,  $(SRC_LIB_INSPECT)) \
   $(patsubst plugins/%.c,          $(BUILD_DIR)/obj/plugin_%.o,   $(SRC_LIB_PLUGINS))
 
 AR ?= ar
@@ -33,7 +25,7 @@ PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 INCLUDEDIR ?= $(PREFIX)/include/flow
 
-PLUGINS_SO := $(BUILD_DIR)/libflow_embodied.so $(BUILD_DIR)/libflow_swarm.so
+PLUGINS_SO := $(BUILD_DIR)/libflow_embodied.so
 
 .PHONY: all clean test security-test install uninstall fuzz test-build test-run test-asan test-tsan plugins flowy libflow test-cubical-hott
 
@@ -57,22 +49,6 @@ $(BUILD_DIR):
 
 
 $(BUILD_DIR)/obj/%.o: src/%.c $(wildcard src/*.h) | $(BUILD_DIR)
-	@mkdir -p $(BUILD_DIR)/obj
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc -c $< -o $@
-
-$(BUILD_DIR)/obj/fvec_%.o: src/fvec/%.c $(wildcard src/*.h) $(wildcard src/fvec/*.h) | $(BUILD_DIR)
-	@mkdir -p $(BUILD_DIR)/obj
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc -c $< -o $@
-
-$(BUILD_DIR)/obj/jet_%.o: src/jet/%.c $(wildcard src/*.h) $(wildcard src/jet/*.h) | $(BUILD_DIR)
-	@mkdir -p $(BUILD_DIR)/obj
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc -c $< -o $@
-
-$(BUILD_DIR)/obj/topo_%.o: src/topo/%.c $(wildcard src/*.h) $(wildcard src/topo/*.h) | $(BUILD_DIR)
-	@mkdir -p $(BUILD_DIR)/obj
-	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc -c $< -o $@
-
-$(BUILD_DIR)/obj/inspect_%.o: src/inspect/%.c $(wildcard src/*.h) $(wildcard src/inspect/*.h) | $(BUILD_DIR)
 	@mkdir -p $(BUILD_DIR)/obj
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) -Isrc -c $< -o $@
 
@@ -100,9 +76,6 @@ plugins: $(PLUGINS_SO)
 $(BUILD_DIR)/libflow_embodied.so: plugins/embodied.c plugins/flow_embodied_mz.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -shared -fPIC -DFLOW_PLUGIN_DSO -undefined dynamic_lookup $(THREAD_FLAGS) -Isrc -Iplugins plugins/embodied.c plugins/flow_embodied_mz.c -o $@ $(LDLIBS)
 
-$(BUILD_DIR)/libflow_swarm.so: src/swarm.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -shared -fPIC -DFLOW_PLUGIN_DSO -undefined dynamic_lookup $(THREAD_FLAGS) -Isrc src/swarm.c -o $@ $(LDLIBS)
-
 # ==============================================================================
 # Two-Stage Native Makefile Test Pipeline (Native Hermetic Barrier)
 # ==============================================================================
@@ -122,6 +95,7 @@ TEST_BINARIES := \
 	$(BUILD_DIR)/test-refactored-core \
 	$(BUILD_DIR)/test-geometric-axiom \
 	$(BUILD_DIR)/test-cubical-hott \
+	$(BUILD_DIR)/fuzz-test
 
 
 $(BUILD_DIR)/test-brain: tests/test_brain.c $(TEST_DEPS) | $(BUILD_DIR)
@@ -146,6 +120,9 @@ $(BUILD_DIR)/test-geometric-axiom: tests/test_geometric_axiom.c $(TEST_DEPS) | $
 	$(CC) $(CFLAGS) $(TEST_DEFS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
 $(BUILD_DIR)/test-cubical-hott: tests/test_cubical_hott.c $(TEST_DEPS) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(TEST_DEFS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
+
+$(BUILD_DIR)/fuzz-test: tests/fuzz-test.c $(TEST_DEPS) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(TEST_DEFS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
 
 
@@ -186,7 +163,7 @@ test-run: $(TEST_BINARIES)
 	@$(BUILD_DIR)/test-body || echo test-body >> $(BUILD_DIR)/.failed-suites
 	@echo "=== [3/8] Concurrency: QSBR RCU, Live Reload, Zero-TLB & Moving Target Defense ==="
 	@$(BUILD_DIR)/test-concurrency || echo test-concurrency >> $(BUILD_DIR)/.failed-suites
-	@echo "=== [4/8] Fvec & Swarm: Architectural Memory, Swarm Federation, Neuro-Bridge & Pre-Play ==="
+	@echo "=== [4/8] Fvec & Swarm: Architectural Memory, Swarm Federation & Speculative Pre-Play ==="
 	@$(BUILD_DIR)/test-fvec-swarm || echo test-fvec-swarm >> $(BUILD_DIR)/.failed-suites
 	@echo "=== [5/8] System: Compiler Pipeline, Pure .lean Fusion, Plugin ABI & Polyglot Emitter ==="
 	@$(BUILD_DIR)/test-system || echo test-system >> $(BUILD_DIR)/.failed-suites
@@ -196,6 +173,8 @@ test-run: $(TEST_BINARIES)
 	@$(BUILD_DIR)/test-geometric-axiom || echo test-geometric-axiom >> $(BUILD_DIR)/.failed-suites
 	@echo "=== [8/8] Cubical HoTT: Discrete Cubical Sets, Kan Fillers & Topos Subobject Classifier ==="
 	@$(BUILD_DIR)/test-cubical-hott || echo test-cubical-hott >> $(BUILD_DIR)/.failed-suites
+	@echo "=== [Fuzz] Standalone Corpus & 1,000 BMF Mutation Fuzz Harness ==="
+	@$(BUILD_DIR)/fuzz-test || echo fuzz-test >> $(BUILD_DIR)/.failed-suites
 	@if [ -s $(BUILD_DIR)/.failed-suites ]; then echo "❌ FAILED SUITES:"; cat $(BUILD_DIR)/.failed-suites; exit 1; fi
 
 test: test-build

@@ -7,23 +7,24 @@ int flow_physics_init(FlowPhysicsEngine *engine, size_t joint_count, double mass
     if (!engine) return 0;
     memset(engine, 0, sizeof(*engine));
     if (joint_count > FLOW_MAX_JOINTS) joint_count = FLOW_MAX_JOINTS;
-    if (joint_count == 0) joint_count = 6;
+    if (joint_count == 0) joint_count = FLOW_EMBODIED_DEFAULT_JOINTS;
     engine->current_state.joint_count = joint_count;
-    engine->current_state.mass_kg = mass_kg > 0.0 ? mass_kg : 25.0;
-    engine->current_state.dt_seconds = 0.001;
-    engine->max_angular_accel = 50.0;
+    engine->current_state.mass_kg = mass_kg > 0.0 ? mass_kg : FLOW_EMBODIED_DEFAULT_MASS_KG;
+    engine->current_state.dt_seconds = FLOW_EMBODIED_DEFAULT_DT_SEC;
+    engine->max_angular_accel = FLOW_EMBODIED_DEFAULT_MAX_ACCEL;
     engine->friction_coefficient = 0.6;
-    for (size_t j = 0; j < joint_count; ++j) engine->current_state.max_torque_limit[j] = 80.0;
+    for (size_t j = 0; j < joint_count; ++j) engine->current_state.max_torque_limit[j] = FLOW_EMBODIED_DEFAULT_MAX_TORQUE;
     engine->current_state.support_vertex_count = 4;
     const double poly[4][2] = {{-0.15, -0.10}, {0.15, -0.10}, {0.15, 0.10}, {-0.15, 0.10}};
     memcpy(engine->current_state.support_polygon, poly, sizeof(poly));
-    engine->current_state.center_of_mass[2] = 0.65;
+    engine->current_state.center_of_mass[2] = FLOW_EMBODIED_DEFAULT_COM_Z;
     return 1;
 }
 bool flow_physics_is_torque_safe(const FlowRigidBodyState *state, const double *candidate_torques) {
     if (!state || !candidate_torques) return false;
     for (size_t j = 0; j < state->joint_count; ++j) {
-        double limit = state->max_torque_limit[j] > 0.0 ? state->max_torque_limit[j] : 80.0;
+        if (!isfinite(candidate_torques[j])) return false;
+        double limit = state->max_torque_limit[j] > 0.0 ? state->max_torque_limit[j] : FLOW_EMBODIED_DEFAULT_MAX_TORQUE;
         if (fabs(candidate_torques[j]) > limit) return false;
     }
     return true;
@@ -31,6 +32,7 @@ bool flow_physics_is_torque_safe(const FlowRigidBodyState *state, const double *
 bool flow_physics_is_zmp_stable(const FlowRigidBodyState *state) {
     if (!state || state->support_vertex_count < 3) return false;
     double px = state->zmp_position[0], py = state->zmp_position[1];
+    if (!isfinite(px) || !isfinite(py)) return false;
     size_t n = state->support_vertex_count;
     bool pos = false, neg = false;
     for (size_t i = 0; i < n; ++i) {
@@ -38,6 +40,7 @@ bool flow_physics_is_zmp_stable(const FlowRigidBodyState *state) {
         double x1 = state->support_polygon[i][0], y1 = state->support_polygon[i][1];
         double x2 = state->support_polygon[next][0], y2 = state->support_polygon[next][1];
         double cross = (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1);
+        if (!isfinite(cross)) return false;
         if (cross > 1e-7) pos = true;
         if (cross < -1e-7) neg = true;
         if (pos && neg) return false;
@@ -48,20 +51,23 @@ int flow_physics_simulate_step(FlowPhysicsEngine *engine, const double *applied_
     if (!engine || !applied_torques) return 0;
     FlowRigidBodyState *s = &engine->current_state;
     if (!flow_physics_is_torque_safe(s, applied_torques)) { engine->violations_prevented_total++; return 0; }
-    double dt = s->dt_seconds > 0.0 ? s->dt_seconds : 0.001, net_tx = 0.0, net_ty = 0.0;
-    for (size_t j = 0; j < s->joint_count; ++j) {
-        double accel = (applied_torques[j] - 0.05 * s->joint_velocities[j]) / 0.25;
+    FlowRigidBodyState next = *s;
+    double dt = next.dt_seconds > 0.0 ? next.dt_seconds : FLOW_EMBODIED_DEFAULT_DT_SEC, net_tx = 0.0, net_ty = 0.0;
+    double mass = next.mass_kg > 0.0 ? next.mass_kg : FLOW_EMBODIED_DEFAULT_MASS_KG;
+    for (size_t j = 0; j < next.joint_count; ++j) {
+        double accel = (applied_torques[j] - 0.05 * next.joint_velocities[j]) / 0.25;
         accel = fmin(engine->max_angular_accel, fmax(-engine->max_angular_accel, accel));
-        s->joint_velocities[j] += accel * dt;
-        s->joint_angles[j] += s->joint_velocities[j] * dt;
-        s->joint_torques[j] = applied_torques[j];
+        next.joint_velocities[j] += accel * dt;
+        next.joint_angles[j] += next.joint_velocities[j] * dt;
+        next.joint_torques[j] = applied_torques[j];
         net_tx += applied_torques[j] * 0.1;
         net_ty += applied_torques[j] * 0.05;
     }
-    s->zmp_position[0] = s->center_of_mass[0] - (net_ty / (s->mass_kg * 9.81));
-    s->zmp_position[1] = s->center_of_mass[1] + (net_tx / (s->mass_kg * 9.81));
+    next.zmp_position[0] = next.center_of_mass[0] - (net_ty / (mass * FLOW_PHYSICS_GRAVITY_MPS2));
+    next.zmp_position[1] = next.center_of_mass[1] + (net_tx / (mass * FLOW_PHYSICS_GRAVITY_MPS2));
+    if (!flow_physics_is_zmp_stable(&next)) { engine->violations_prevented_total++; return 0; }
+    *s = next;
     engine->simulated_steps_total++;
-    if (!flow_physics_is_zmp_stable(s)) { engine->violations_prevented_total++; return 0; }
     return 1;
 }
 static const Component EMBODIED_COMPONENTS[] = {{
@@ -81,9 +87,10 @@ static void embodied_lower_semantics(const FlowSpec *spec, SemanticIR *ir, const
     if (!ir->resource_name[0]) strncpy(ir->resource_name, "hardware", FLOW_NAME - 1);
     if (!ir->capability_name[0]) strncpy(ir->capability_name, "realtime", FLOW_NAME - 1);
     if (!ir->contract_name[0]) strncpy(ir->contract_name, "zmp_torque_safe", FLOW_NAME - 1);
+    if (!ir->fallback_policy[0]) strncpy(ir->fallback_policy, "emergency_stop", FLOW_NAME - 1);
     if (!ir->jet.enabled) {
         ir->jet.enabled = 1; ir->jet.frequency_hz = 1000.0; ir->jet.symplectic = 1;
-        ir->jet.max_drift = 0.005; ir->jet.zmp_margin = 0.02; ir->jet.dt = 0.001; ir->jet.dim = 6;
+        ir->jet.max_drift = 0.005; ir->jet.zmp_margin = 0.02; ir->jet.dt = FLOW_EMBODIED_DEFAULT_DT_SEC; ir->jet.dim = FLOW_EMBODIED_DEFAULT_JOINTS;
     }
 }
 static uint64_t embodied_env_mask(const SemanticIR *ir, const Component *c, const FlowPlanDimensionSet *dims, const FlowEnvironmentState *env) {
@@ -129,13 +136,5 @@ static const FlowPlugin EMBODIED_PLUGIN = {
     .doc_key_apis = "flow_physics_simulate_step, flow_physics_is_zmp_stable",
     .doc_layer = 2
 };
-static const FlowPluginDescriptor EMBODIED_DESCRIPTOR = {
-    .abi_major = FLOW_PLUGIN_ABI_MAJOR, .abi_minor = FLOW_PLUGIN_ABI_MINOR,
-    .descriptor_size = sizeof(FlowPluginDescriptor), .module_name = "flow.embodied",
-    .module_version = "1.0", .module_hash = 0xEB0D1ED1,
-    .plugin = &EMBODIED_PLUGIN, .abi_v2 = &EMBODIED_ABI_V2
-};
+FLOW_DEFINE_PLUGIN_DESCRIPTOR(EMBODIED_DESCRIPTOR, "flow.embodied", "1.0", 0xEB0D1ED1, &EMBODIED_PLUGIN, &EMBODIED_ABI_V2)
 const FlowPluginDescriptor *flow_embodied_entry_v1(void) { return &EMBODIED_DESCRIPTOR; }
-#ifdef FLOW_PLUGIN_DSO
-const FlowPluginDescriptor *flow_plugin_entry_v1(void) { return &EMBODIED_DESCRIPTOR; }
-#endif

@@ -1,6 +1,4 @@
 #include "driver_can.h"
-#include "flow_smt_dsl.h"
-#include "flow_str.h"
 #include "hardware_telemetry.h"
 
 #include <stdio.h>
@@ -23,6 +21,7 @@
  * Fixed-point conversions for MIT Cheetah / Robomaster motor protocol
  */
 static inline uint16_t float_to_uint(float val, float min_val, float max_val, int bits) {
+    if (!isfinite(val)) val = 0.0f;
     if (val < min_val) val = min_val;
     if (val > max_val) val = max_val;
     float span = max_val - min_val, norm = (val - min_val) / (span == 0.0f ? 1.0f : span);
@@ -46,9 +45,13 @@ static inline float uint_to_float(uint16_t ival, float min_val, float max_val, i
 
 int flow_can_encode_motor_cmd(const FlowMotorCommand *cmd, FlowCANFrame *frame_out) {
     if (!cmd || !frame_out) return 0;
+    if ((int)cmd->mode < (int)FLOW_MOTOR_MODE_IDLE || (int)cmd->mode > (int)FLOW_MOTOR_MODE_EMERGENCY_STOP) return 0;
+    if (!isfinite(cmd->target_position_rad) || !isfinite(cmd->target_velocity_rad_s) ||
+        !isfinite(cmd->target_torque_nm) || !isfinite(cmd->kp) || !isfinite(cmd->kd)) return 0;
     memset(frame_out, 0, sizeof(*frame_out));
     frame_out->can_id = ((uint32_t)cmd->mode << 8) | (uint32_t)cmd->motor_id;
     frame_out->len = 8;
+    frame_out->res0 = 1;
     uint16_t p = float_to_uint(cmd->target_position_rad, P_MIN, P_MAX, 16);
     uint16_t v = float_to_uint(cmd->target_velocity_rad_s, V_MIN, V_MAX, 12);
     uint16_t kp = float_to_uint(cmd->kp, KP_MIN, KP_MAX, 12);
@@ -63,10 +66,13 @@ int flow_can_encode_motor_cmd(const FlowMotorCommand *cmd, FlowCANFrame *frame_o
 }
 
 int flow_can_decode_motor_cmd(const FlowCANFrame *frame, FlowMotorCommand *cmd_out) {
-    if (!frame || !cmd_out || frame->len < 8) return 0;
+    if (!frame || !cmd_out || frame->len < 8 || frame->len > FLOW_CAN_MAX_DLEN) return 0;
+    if (frame->res0 == 2) return 0; /* Reject motor feedback frames */
+    uint32_t raw_mode = (frame->can_id >> 8) & 0xFF;
+    if (raw_mode > (uint32_t)FLOW_MOTOR_MODE_EMERGENCY_STOP) return 0;
     memset(cmd_out, 0, sizeof(*cmd_out));
     cmd_out->motor_id = (uint8_t)(frame->can_id & 0xFF);
-    cmd_out->mode = (FlowMotorControlMode)((frame->can_id >> 8) & 0xFF);
+    cmd_out->mode = (FlowMotorControlMode)raw_mode;
     uint16_t p = ((uint16_t)frame->data[0] << 8) | frame->data[1];
     uint16_t v = ((uint16_t)frame->data[2] << 4) | (frame->data[3] >> 4);
     uint16_t kp = (((uint16_t)frame->data[3] & 0x0F) << 8) | frame->data[4];
@@ -82,9 +88,12 @@ int flow_can_decode_motor_cmd(const FlowCANFrame *frame, FlowMotorCommand *cmd_o
 
 int flow_can_encode_motor_feedback(const FlowMotorFeedback *fb, FlowCANFrame *frame_out) {
     if (!fb || !frame_out) return 0;
+    if (!isfinite(fb->actual_position_rad) || !isfinite(fb->actual_velocity_rad_s) ||
+        !isfinite(fb->actual_torque_nm) || !isfinite(fb->motor_temp_celsius)) return 0;
     memset(frame_out, 0, sizeof(*frame_out));
-    frame_out->can_id = 0x200 | (uint32_t)fb->motor_id;
+    frame_out->can_id = 0x600 | (uint32_t)fb->motor_id;
     frame_out->len = 8;
+    frame_out->res0 = 2;
     uint16_t p = float_to_uint(fb->actual_position_rad, P_MIN, P_MAX, 16);
     uint16_t v = float_to_uint(fb->actual_velocity_rad_s, V_MIN, V_MAX, 12);
     uint16_t t = float_to_uint(fb->actual_torque_nm, T_MIN, T_MAX, 12);
@@ -97,7 +106,10 @@ int flow_can_encode_motor_feedback(const FlowMotorFeedback *fb, FlowCANFrame *fr
 }
 
 int flow_can_decode_motor_feedback(const FlowCANFrame *frame, FlowMotorFeedback *fb_out) {
-    if (!frame || !fb_out || frame->len < 8) return 0;
+    if (!frame || !fb_out || frame->len < 8 || frame->len > FLOW_CAN_MAX_DLEN) return 0;
+    if (frame->res0 == 1) return 0; /* Reject motor command frames */
+    uint32_t prefix = (frame->can_id >> 8) & 0xFF;
+    if (prefix != 0x06 && prefix != 0x02) return 0;
     memset(fb_out, 0, sizeof(*fb_out));
     fb_out->motor_id = (uint8_t)(frame->can_id & 0xFF);
     uint16_t p = ((uint16_t)frame->data[0] << 8) | frame->data[1];
@@ -165,12 +177,13 @@ int flow_can_create_loopback_pair(FlowCANBus **bus_a_out, FlowCANBus **bus_b_out
 }
 
 int flow_can_send(FlowCANBus *bus, const FlowCANFrame *frame) {
-    if (!bus || !frame) return 0;
+    if (!bus || !frame || frame->len > FLOW_CAN_MAX_DLEN) return 0;
     if (!bus->is_loopback && bus->fd >= 0) {
 #if defined(__linux__)
         if (bus->is_fd) {
-            struct canfd_frame fd_frame = { .can_id = frame->can_id, .len = frame->len, .flags = frame->flags };
-            memcpy(fd_frame.data, frame->data, frame->len);
+            uint8_t clamped_len = frame->len > 64 ? 64 : frame->len;
+            struct canfd_frame fd_frame = { .can_id = frame->can_id, .len = clamped_len, .flags = frame->flags };
+            memcpy(fd_frame.data, frame->data, clamped_len);
             return write(bus->fd, &fd_frame, sizeof(fd_frame)) == sizeof(fd_frame);
         } else {
             struct can_frame c_frame = { .can_id = frame->can_id, .can_dlc = frame->len > 8 ? 8 : frame->len };
@@ -234,17 +247,6 @@ void flow_can_close(FlowCANBus *bus) {
 /*
  * 3-Function Minimal Driver ABI Singleton
  */
-static int can_register(void) { return 1; }
-
-static int can_get_bounds(FlowHardwareBounds *bounds_out) {
-    if (!bounds_out) return 0;
-    *bounds_out = (FlowHardwareBounds){
-        .name = "socketcan_fd", .max_queue_depth = 1024, .max_buffer_bytes = 64 * 1024,
-        .supports_zero_copy = 1, .is_kernel_bypass = 0, .genome_bits_required = 8
-    };
-    return 1;
-}
-
 static int can_execute(const FlowPrimitiveContext *ctx, FlowPrimitiveResult *res_out) {
     if (!ctx || !res_out) return -1;
     uint64_t t_start = flow_hardware_cycles();
@@ -257,11 +259,7 @@ static int can_execute(const FlowPrimitiveContext *ctx, FlowPrimitiveResult *res
     return res_out->status_code;
 }
 
-static const FlowPrimitiveDriver G_CAN_DRIVER = {
-    "socketcan_fd", "2.1.0", can_register, can_get_bounds, can_execute
-};
-
-const FlowPrimitiveDriver *flow_primitive_can_driver(void) { return &G_CAN_DRIVER; }
+FLOW_DEFINE_PRIMITIVE_DRIVER(G_CAN_DRIVER, flow_primitive_can_driver, "socketcan_fd", "2.1.0", 1024, 64 * 1024, 1, 0, 8, can_execute)
 
 /*
  * SMT Formal Real-Time Arbitration & Non-Interference Proof

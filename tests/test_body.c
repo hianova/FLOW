@@ -1,9 +1,8 @@
 #include "flow_test_kit.h"
-#include "numa_affinity.h"
-#include "simd_manifold.h"
+#include "bitspace.h"
 #include "hardware_telemetry.h"
 #include "embodied.h"
-#include "primitive.h"
+#include "plugin.h"
 #include "driver_can.h"
 #include "driver_imu.h"
 #include "flow_embodied_mz.h"
@@ -157,6 +156,14 @@ int main(void) {
         FLOW_ASSERT_TRUE(probe.elapsed_cycles > 0);
         FLOW_ASSERT_TRUE(probe.elapsed_nanoseconds > 0.0);
 
+        FlowPhysicalProbe zero_probe;
+        memset(&zero_probe, 0, sizeof(zero_probe));
+        FlowThermalState therm_state;
+        memset(&therm_state, 0, sizeof(therm_state));
+        flow_hardware_probe_update_thermal(&zero_probe, &therm_state, 1.0);
+        FLOW_ASSERT_FLOAT_EQ(therm_state.active_power_w, 5.0, 1e-6);
+        FLOW_ASSERT_TRUE(therm_state.temp_c > therm_state.temp_ambient_c + 10.0);
+
         printf("  ✓ Stage 3 Passed: Physical hardware timer (%llu Hz) & cycle probe (elapsed: %.1fns) active.\n\n",
                (unsigned long long)freq, probe.elapsed_nanoseconds);
     }
@@ -192,6 +199,20 @@ int main(void) {
         phys.current_state.zmp_position[0] = 0.0;
         phys.current_state.zmp_position[1] = 0.0;
         FLOW_ASSERT_TRUE(flow_physics_is_zmp_stable(&phys.current_state));
+
+        /* ZMP violation during simulate_step must NOT corrupt current_state (E4) */
+        phys.current_state.center_of_mass[0] = 0.45;
+        double prev_angle0 = phys.current_state.joint_angles[0];
+        uint64_t prev_steps = phys.simulated_steps_total;
+        FLOW_ASSERT_EQ(flow_physics_simulate_step(&phys, safe_torques), 0);
+        FLOW_ASSERT_EQ(phys.simulated_steps_total, prev_steps);
+        FLOW_ASSERT_FLOAT_EQ(phys.current_state.joint_angles[0], prev_angle0, 1e-9);
+        phys.current_state.center_of_mass[0] = 0.0;
+
+        /* NaN torque rejection (E2) */
+        double nan_torques[6] = { NAN, 0.0, 0.0, 0.0, 0.0, 0.0 };
+        FLOW_ASSERT_FALSE(flow_physics_is_torque_safe(&phys.current_state, nan_torques));
+        FLOW_ASSERT_EQ(flow_physics_simulate_step(&phys, nan_torques), 0);
 
         printf("  ✓ Stage 4 Passed: Joint torque safe limits verified & ZMP tip-over violation prevented.\n\n");
     }
@@ -259,15 +280,18 @@ int main(void) {
         FLOW_ASSERT_EQ(flow_can_encode_motor_cmd(&cmd, &tx_frame), 1);
         FLOW_ASSERT_EQ(flow_can_send(bus_tx, &tx_frame), 1);
 
-        /* 3. Receive & Decode Motor Command Frame */
+        /* 3. Receive & Decode Motor Command Frame (assert all 5 fields with quantization-tight tolerances, kills Mutation #15) */
         FlowCANFrame rx_frame;
         FLOW_ASSERT_EQ(flow_can_recv(bus_rx, &rx_frame, 10), 1);
         FlowMotorCommand decoded_cmd;
         FLOW_ASSERT_EQ(flow_can_decode_motor_cmd(&rx_frame, &decoded_cmd), 1);
         FLOW_ASSERT_EQ(decoded_cmd.motor_id, 3);
         FLOW_ASSERT_EQ(decoded_cmd.mode, FLOW_MOTOR_MODE_MIT_HYBRID);
-        FLOW_ASSERT_FLOAT_NEAR(decoded_cmd.target_position_rad, 1.5708f, 0.01f);
-        FLOW_ASSERT_FLOAT_NEAR(decoded_cmd.target_torque_nm, 12.5f, 0.1f);
+        FLOW_ASSERT_FLOAT_NEAR(decoded_cmd.target_position_rad, 1.5708f, 0.001f);
+        FLOW_ASSERT_FLOAT_NEAR(decoded_cmd.target_velocity_rad_s, 5.0f, 0.05f);
+        FLOW_ASSERT_FLOAT_NEAR(decoded_cmd.kp, 80.0f, 0.15f);
+        FLOW_ASSERT_FLOAT_NEAR(decoded_cmd.kd, 2.5f, 0.01f);
+        FLOW_ASSERT_FLOAT_NEAR(decoded_cmd.target_torque_nm, 12.5f, 0.06f);
 
         /* 4. Encode & Send Motor Feedback Frame */
         FlowMotorFeedback fb = {
@@ -280,6 +304,8 @@ int main(void) {
         };
         FlowCANFrame fb_frame;
         FLOW_ASSERT_EQ(flow_can_encode_motor_feedback(&fb, &fb_frame), 1);
+        /* Feedback frame must not decode as a motor command frame (E6) */
+        FLOW_ASSERT_EQ(flow_can_decode_motor_cmd(&fb_frame, &decoded_cmd), 0);
         FLOW_ASSERT_EQ(flow_can_send(bus_rx, &fb_frame), 1);
 
         FlowCANFrame rx_fb_frame;
@@ -287,7 +313,9 @@ int main(void) {
         FlowMotorFeedback decoded_fb;
         FLOW_ASSERT_EQ(flow_can_decode_motor_feedback(&rx_fb_frame, &decoded_fb), 1);
         FLOW_ASSERT_EQ(decoded_fb.motor_id, 3);
-        FLOW_ASSERT_FLOAT_NEAR(decoded_fb.actual_position_rad, 1.5690f, 0.01f);
+        FLOW_ASSERT_FLOAT_NEAR(decoded_fb.actual_position_rad, 1.5690f, 0.001f);
+        FLOW_ASSERT_FLOAT_NEAR(decoded_fb.actual_velocity_rad_s, 4.95f, 0.05f);
+        FLOW_ASSERT_FLOAT_NEAR(decoded_fb.actual_torque_nm, 12.4f, 0.06f);
         FLOW_ASSERT_FLOAT_NEAR(decoded_fb.motor_temp_celsius, 42.0f, 0.5f);
 
         /* 5. Verify Primitive Driver ABI */
@@ -298,11 +326,15 @@ int main(void) {
         FLOW_ASSERT_EQ(can_drv->get_hardware_bounds(&bounds), 1);
         FLOW_ASSERT_TRUE(bounds.max_queue_depth >= 1024);
 
-        /* 6. SMT Real-Time Priority Arbitration Invariant */
+        /* 6. SMT Real-Time Priority Arbitration Invariant (positive + negative) */
         FlowSMTProofAttestation can_proof;
-        memset(&can_proof, 0, sizeof(can_proof));
+        FLOW_SMT_PROOF_POISON(&can_proof);
         FLOW_ASSERT_EQ(flow_can_verify_arbitration_smt(0x001, 0x700, 1000, 300.0, &can_proof), FLOW_SMT_PROVEN_UNSAT);
         FLOW_ASSERT_SMT_SOUND(can_proof);
+
+        FlowSMTProofAttestation bad_can_proof;
+        FLOW_SMT_PROOF_POISON(&bad_can_proof);
+        FLOW_ASSERT_EQ(flow_can_verify_arbitration_smt(0x700, 0x001, 1000, 300.0, &bad_can_proof), FLOW_SMT_VIOLATION_SAT);
 
         flow_can_close(bus_tx);
         flow_can_close(bus_rx);
@@ -348,16 +380,28 @@ int main(void) {
         }
         FLOW_ASSERT_TRUE(filter.roll_rad > 0.40f);
 
+        /* Extreme gyro spike / NaN must not hang flow_imu_filter_update (E5) */
+        FlowIMUSample spike = tilted;
+        spike.gyro_rad_s[0] = 1.0e20f;
+        flow_imu_filter_update(&filter, &spike, 0.001f);
+        FLOW_ASSERT_TRUE(isfinite(filter.roll_rad) && fabsf(filter.roll_rad) <= 3.1416f);
+
         /* Verify Primitive Driver ABI */
         const FlowPrimitiveDriver *imu_drv = flow_primitive_imu_driver();
         FLOW_ASSERT_TRUE(imu_drv != NULL);
         FLOW_ASSERT_STR_EQ(imu_drv->driver_name, "sensor_imu_6dof");
 
-        /* SMT Invariant Verification */
+        /* SMT Invariant Verification (positive + negative) */
         FlowSMTProofAttestation imu_proof;
-        memset(&imu_proof, 0, sizeof(imu_proof));
+        FLOW_SMT_PROOF_POISON(&imu_proof);
         FLOW_ASSERT_EQ(flow_imu_verify_bounds_smt(&tilted, &filter, &imu_proof), FLOW_SMT_PROVEN_UNSAT);
         FLOW_ASSERT_SMT_SOUND(imu_proof);
+
+        FlowIMUSample saturated_imu = tilted;
+        saturated_imu.gyro_rad_s[0] = 100.0f; /* Exceeds 35 rad/s limit */
+        FlowSMTProofAttestation bad_imu_proof;
+        FLOW_SMT_PROOF_POISON(&bad_imu_proof);
+        FLOW_ASSERT_EQ(flow_imu_verify_bounds_smt(&saturated_imu, &filter, &bad_imu_proof), FLOW_SMT_VIOLATION_SAT);
 
         printf("  ✓ Stage 9 Passed: IMU sensor streaming & complementary filter verified; SMT Bounds Sound.\n\n");
     }
@@ -383,11 +427,18 @@ int main(void) {
         FLOW_ASSERT_TRUE(ctrl.dissipated_energy_joules > 0.0);
         FLOW_ASSERT_EQ(ctrl.collision_shocks_absorbed, 1ULL);
 
-        /* 2. SMT Supreme Court Passivity & Safety Proof */
+        /* 2. SMT Supreme Court Passivity & Safety Proof (positive + negative) */
         FlowSMTProofAttestation mz_proof;
-        memset(&mz_proof, 0, sizeof(mz_proof));
+        FLOW_SMT_PROOF_POISON(&mz_proof);
         FLOW_ASSERT_EQ(flow_embodied_mz_verify_smt(&ctrl, &mz_proof), FLOW_SMT_PROVEN_UNSAT);
         FLOW_ASSERT_SMT_SOUND(mz_proof);
+
+        FlowMoriZwanzigImpedanceController bad_ctrl = ctrl;
+        bad_ctrl.peak_contact_torque = 999.0;
+        bad_ctrl.is_passivity_maintained = false;
+        FlowSMTProofAttestation bad_mz_proof;
+        FLOW_SMT_PROOF_POISON(&bad_mz_proof);
+        FLOW_ASSERT_EQ(flow_embodied_mz_verify_smt(&bad_ctrl, &bad_mz_proof), FLOW_SMT_VIOLATION_SAT);
 
         printf("  ✓ Stage 11 Passed: Mori-Zwanzig viscoelastic kernel settled impact shock in %.2fms (<5ms limit, peak=%.1fNm); SMT passivity proven.\n\n",
                settling_time_ms, peak_torque);

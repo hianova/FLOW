@@ -1,5 +1,5 @@
 #include "flow_embodied_mz.h"
-#include "flow_smt_dsl.h"
+#include "smt.h"
 #include <math.h>
 #include <string.h>
 #include <stdio.h>

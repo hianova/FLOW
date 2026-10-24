@@ -2,7 +2,7 @@
 #define BACKEND_H
 #include "flow.h"
 #include "registry.h"
-#include "search.h"
+#include "bitspace.h"
 #include "smt.h"
 int emit_c(FILE *output, const SemanticIR *ir, const Component *component, const SearchResult *search, const VerificationReport *verification, int reload_adapter);
 int flow_emit_mlir(FILE *output, const SemanticIR *ir, const Component *component, const SearchResult *search, const VerificationReport *verification);

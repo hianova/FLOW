@@ -6,13 +6,13 @@ FLOW 將 `.lean` 提升為 **「領域意圖 + 數學證明 + 算子核函數」
 
 ## 4.1 三層自動推導機制
 
-1. **零 `@[export]` 之定理錨定算子與全純量 `def` 自動 C17 降階 ([`src/parser.c`](../../src/parser.c), [`src/backend.c`](../../src/backend.c))**：
-   - 開發者只需撰寫標準 Lean 4 的 `structure`（資料型別）、`def`（純計算函數）與 `theorem`（安全邊界證明）。
-   - 解析器自動從 `structure` 推導 `stride`、`align` 與熱重載欄位，將被 `theorem` 引用驗證的最後一個計算型 `def` 自動綁定為 `extern_kernel`，並將檔案內**所有**純量 `def`（`Nat`、`UInt64`、`UInt32`、`Bool`、`Float`）自動編譯為匯出的 C17 原生函數（含 Lean 4 飽和減法 `flow_nat_sub`、安全除法 `flow_nat_div`、`let` 綁定、`match` 與跨函數呼叫），同步綁定至 C Header、Rust、Python、JS 與 `--target-ui`。
+1. **零 `@[export]` 之定理錨定算子、全純量與 `structure` 轉換函數自動 C17 降階 ([`src/parser.c`](../../src/parser.c), [`src/backend.c`](../../src/backend.c))**：
+   - 開發者只需撰寫標準 Lean 4 的 `structure`（支援多結構與巢狀展平）、有限 `inductive` 列舉、`def`（純量或 `InStruct -> OutStruct` 記錄文字轉換）與 `theorem`（安全邊界與熱重載守恆證明）。
+   - 解析器執行 **`Lean-RT` 零 GC 靜態閘門** 與 **AST 靜態 WCET 成本推導（`estimated_wcet_ns`）**，將檔案內所有純量與結構轉換 `def`（含 `flow_quantize` / `flow_dequantize` 與欄位級 `isfinite()` 防火牆）編譯為 C17 原生函數，並自動在 C Header、Rust（`#[repr(C)] pub struct`）與 Python（`ctypes.Structure`、`migrate_state`、`run_patchbay`）產生強型別零拷貝綁定。
 2. **Plugin 領域意圖函子降階 ([`plugins/embodied.c`](../../plugins/embodied.c))**：
    - 當 `.lean` 宣告 `namespace Embodied.*` 與 `theorem zmp_torque_safe` 時，`EMBODIED_PLUGIN` 自動透過 `lower_domain_semantics` 展開 1kHz 實時迴圈 SLA、辛幾何（Symplectic Jet）相空間約束與 ZMP 穩定多邊形遮罩。
-3. **SMT QF_LIA 四大定理與零 `sorry` 鐵門 ([`src/smt.c`](../../src/smt.c), [`src/abi.c`](../../src/abi.c))**：
-   - 強制檢驗緩衝區邊界（`buffer_bounds`）、記憶體配額（`memory_quota`）、分片正交（`shard_isolation`）與決定論（`determinism`），並嚴格拒絕任何含 `sorry` 或自訂 `axiom` 之輸入。
+3. **SMT QF_LIA 四大定理、`@patchbay` 組合式證明與零 `sorry` 鐵門 ([`src/smt.c`](../../src/smt.c), [`src/abi.c`](../../src/abi.c))**：
+   - 強制檢驗緩衝區邊界（`buffer_bounds`）、記憶體配額（`memory_quota`）、分片正交與 `@patchbay` 跨階段 Schema/Stride 相容性（`shard_isolation`），以及決定論與多階段時間預算 $\sum \text{wcet}_i \le \text{sla\_latency\_ns}$ 且 $\text{wcet}_i \ge \text{ast\_wcet}_i$（`determinism`）。
 
 ---
 

@@ -1,7 +1,8 @@
 #include "flow_test_kit.h"
 #include "flow_jet.h"
 #include "polyhedral.h"
-#include "swarm.h"
+#include "bitspace.h"
+#include "token_ring.h"
 #include "hardware_telemetry.h"
 
 #include <stdio.h>
@@ -55,8 +56,9 @@ int main(void) {
         flow_hardware_probe_start(&probe);
         for (volatile int k = 0; k < 100000; ++k);
         flow_hardware_probe_stop(&probe);
+        FLOW_ASSERT_TRUE(probe.physical_power_watts > 0.01 && probe.physical_power_watts < 1000.0);
         flow_hardware_probe_update_thermal(&probe, &jet.payload.thermal, 0.001);
-        FLOW_ASSERT_TRUE(jet.payload.thermal.active_power_w > 0.0);
+        FLOW_ASSERT_TRUE(jet.payload.thermal.active_power_w > 0.01 && jet.payload.thermal.active_power_w < 1000.0);
 
         /* High-Ambient Chassis 10kHz WCET Loop Simulation (1,000 ticks) */
         const double T_amb = 50.0;
@@ -133,9 +135,18 @@ int main(void) {
 
         /* Verify formal SMT proof including Theorem 4 (Quadratic Convexity) */
         FlowSMTProofAttestation proof;
+        FLOW_SMT_PROOF_POISON(&proof);
         FlowSMTResult smt_res = flow_polyhedral_verify_smt(&poly, &sched, &proof);
         FLOW_ASSERT_EQ(smt_res, FLOW_SMT_PROVEN_UNSAT);
         FLOW_ASSERT_TRUE(strstr(proof.proof_summary, "QuadVol=") != NULL);
+
+        /* Negative check: parallel aliasing (not parallelizable but SIMD > 1) must be rejected */
+        FlowPolyhedralSchedule bad_sched = sched;
+        bad_sched.is_parallelizable = false;
+        bad_sched.optimal_simd_width = 4;
+        FlowSMTProofAttestation bad_proof;
+        FLOW_SMT_PROOF_POISON(&bad_proof);
+        FLOW_ASSERT_EQ(flow_polyhedral_verify_smt(&poly, &bad_sched, &bad_proof), FLOW_SMT_VIOLATION_SAT);
 
         printf("    * P1 Result: Affine Box=38x18, Quad Recovered Volume=%.1f, T*=%zu, V*=%zu, Proof=%s\n",
                sched.quadratic_recovered_volume, sched.optimal_tile_size, sched.optimal_simd_width,

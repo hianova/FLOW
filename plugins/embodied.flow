@@ -1,0 +1,35 @@
+# =============================================================================
+# FLOW Embodied AI Runtime & Hardware Manifest (plugins/embodied.flow)
+# =============================================================================
+# Binds the pure mathematical laws of `plugins/embodied.lean` (What) to
+# real-time SLA/Arena quotas, IMU + SocketCAN hardware drivers, and QSBR
+# hot-reload policies (Where & How).
+# =============================================================================
+
+project embodied_reflex
+bind "plugins/embodied.lean"
+
+@quota {
+    deterministic
+    lean_certified
+    deadline 200us
+    arena 64kb
+    memory < 16mb
+    fallback emergency_stop
+}
+
+@embodied {
+    frequency 1khz
+    symplectic
+    max_drift 0.5%
+    zmp_margin 0.02
+    ingress sensor_imu_6dof
+    egress socketcan_fd
+    coordinates [hipPitch, hipRoll, kneePitch, anklePitch, ankleRoll, torsoYaw, comX, comY]
+}
+
+@reload {
+    schema_version 2
+    qsbr_timeout 5ms
+    migrate embodiedStepKernel
+}

@@ -12,6 +12,9 @@
 #define FLOW_FVEC_HEADER_SIZE 1024
 #define FLOW_FVEC_MAX_ENTRIES 128
 #define FLOW_FVEC_DEFAULT_DIR ".flow/vecs"
+#define FLOW_FVEC_RAM_CRITICAL_PCT (90.0)
+#define FLOW_FVEC_CACHE_MISS_CRITICAL (0.15)
+#define FLOW_FVEC_MAX_SWAP_NS (500ULL)
 typedef struct { char magic[16], id[64], name[128], origin_hardware[128], trigger_intent[64], category[32], component_id[32], description[256], smt_signature[64];
     double energy_score; uint64_t created_at_unix; uint32_t vector_dim, payload_size, confidence_score; uint64_t last_reinforced_unix; uint8_t is_auto_promoted;
     char content_hash[32], filepath[256]; } FlowVecHeader;

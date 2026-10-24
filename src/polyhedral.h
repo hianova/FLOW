@@ -5,9 +5,10 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdatomic.h>
 #ifndef FLOW_SMT_RESULT_DEFINED
 #define FLOW_SMT_RESULT_DEFINED
-typedef enum { FLOW_SMT_PROVEN_UNSAT = 0, FLOW_SMT_VIOLATION_SAT = 1, FLOW_SMT_UNKNOWN = 2 } FlowSMTResult;
+typedef enum { FLOW_SMT_UNINITIALIZED = 0, FLOW_SMT_PROVEN_UNSAT = 1, FLOW_SMT_VIOLATION_SAT = 2, FLOW_SMT_UNKNOWN = 3 } FlowSMTResult;
 #endif
 struct FlowSMTProofAttestation; typedef struct FlowSMTProofAttestation FlowSMTProofAttestation;
 #ifdef __cplusplus
@@ -39,6 +40,16 @@ int flow_polyhedron_add_inequality(FlowPolyhedronSystem *poly, const double *coe
 int flow_polyhedron_from_ir(const SemanticIR *ir, const Component *comp, const FlowPlanDimensionSet *dims, FlowPolyhedronSystem *poly);
 uint64_t flow_polyhedron_project_mask(const FlowPolyhedronSystem *poly, const FlowPlanDimensionSet *dims, uint32_t total_bits);
 int flow_polyhedron_from_affine(const FlowPolyhedron *affine_poly, FlowPolyhedronSystem *poly_out);
+#define FLOW_HARDWIRED_MAX_PLANES 64
+#define FLOW_HARDWIRED_MAX_DIM    8
+typedef struct __attribute__((aligned(64))) FlowHardwiredPolyhedralTemplate {
+    double coeffs[FLOW_HARDWIRED_MAX_PLANES][FLOW_HARDWIRED_MAX_DIM]; _Atomic double b_constants[FLOW_HARDWIRED_MAX_PLANES]; _Atomic uint64_t active_mask;
+    _Atomic double translation[FLOW_HARDWIRED_MAX_DIM]; _Atomic double scale[FLOW_HARDWIRED_MAX_DIM]; size_t dimension, total_planes; _Atomic uint64_t generation;
+    uint64_t total_evaluations, total_hot_updates, icache_flushes_avoided; } FlowHardwiredPolyhedralTemplate;
+typedef struct { bool is_inside; uint64_t violated_mask; double max_violation, projected_x[FLOW_HARDWIRED_MAX_DIM]; } FlowHardwiredEvalResult;
+int flow_hardwired_template_init(FlowHardwiredPolyhedralTemplate *tpl, size_t dimension);
+int flow_hardwired_template_from_polyhedron(FlowHardwiredPolyhedralTemplate *tpl, const FlowPolyhedron *poly);
+int flow_hardwired_eval(FlowHardwiredPolyhedralTemplate *tpl, const double x[FLOW_HARDWIRED_MAX_DIM], FlowHardwiredEvalResult *res_out);
 #ifdef __cplusplus
 }
 #endif

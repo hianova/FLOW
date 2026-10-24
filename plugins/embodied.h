@@ -7,6 +7,13 @@
 #include <stdbool.h>
 #define FLOW_MAX_JOINTS 16
 #define FLOW_SUPPORT_POLYGON_VERTICES 8
+#define FLOW_PHYSICS_GRAVITY_MPS2       9.81
+#define FLOW_EMBODIED_DEFAULT_JOINTS    6U
+#define FLOW_EMBODIED_DEFAULT_MASS_KG   25.0
+#define FLOW_EMBODIED_DEFAULT_DT_SEC    0.001
+#define FLOW_EMBODIED_DEFAULT_MAX_ACCEL 50.0
+#define FLOW_EMBODIED_DEFAULT_MAX_TORQUE 80.0
+#define FLOW_EMBODIED_DEFAULT_COM_Z     0.65
 typedef struct {
     double joint_angles[FLOW_MAX_JOINTS];
     double joint_velocities[FLOW_MAX_JOINTS];
