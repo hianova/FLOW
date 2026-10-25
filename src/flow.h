@@ -12,7 +12,8 @@
 #define FLOW_LEAN_FN_MAX 32
 #define FLOW_LEAN_PARAM_MAX 8
 #define FLOW_LEAN_THEOREM_MAX 32
-#define FLOW_LEAN_BODY_MAX 768
+#define FLOW_LEAN_BODY_MAX 1536
+#define FLOW_TUPLE_MAX 4
 #define FLOW_LEAN_STRUCT_MAX 16
 #define FLOW_LEAN_ENUM_MAX 8
 #define FLOW_PATCHBAY_STAGE_MAX 8
@@ -22,7 +23,7 @@ typedef struct { char name[FLOW_NAME]; char c_type[16]; char lean_type[16]; size
 typedef struct { char name[FLOW_NAME]; FlowLeanStructField fields[FLOW_FIELD_MAX]; size_t field_count; size_t byte_size; size_t align_bytes; } FlowLeanStruct;
 typedef struct { char name[FLOW_NAME]; char variants[16][FLOW_NAME]; size_t variant_count; } FlowLeanEnum;
 typedef struct { char stage_name[FLOW_NAME]; char lean_file[FLOW_LINE]; char fn_name[FLOW_NAME]; char in_struct[FLOW_NAME]; char out_struct[FLOW_NAME]; size_t in_bytes; size_t out_bytes; uint64_t wcet_ns; uint64_t ast_wcet_ns; } FlowPatchbayStage;
-typedef struct { char name[FLOW_NAME]; char return_type[FLOW_NAME]; size_t param_count; char param_names[FLOW_LEAN_PARAM_MAX][FLOW_NAME]; char param_types[FLOW_LEAN_PARAM_MAX][FLOW_NAME]; char body[FLOW_LEAN_BODY_MAX]; int is_struct_transform; char field_assign_names[FLOW_FIELD_MAX][FLOW_NAME]; char field_assign_exprs[FLOW_FIELD_MAX][128]; size_t field_assign_count; uint64_t estimated_wcet_ns; } FlowLeanFunction;
+typedef struct { char name[FLOW_NAME]; char return_type[FLOW_NAME]; size_t param_count; char param_names[FLOW_LEAN_PARAM_MAX][FLOW_NAME]; char param_types[FLOW_LEAN_PARAM_MAX][FLOW_NAME]; char body[FLOW_LEAN_BODY_MAX]; int is_struct_transform; char field_assign_names[FLOW_FIELD_MAX][FLOW_NAME]; char field_assign_exprs[FLOW_FIELD_MAX][128]; size_t field_assign_count; int is_tuple_return; size_t tuple_arity; char tuple_types[FLOW_TUPLE_MAX][32]; char tuple_exprs[FLOW_TUPLE_MAX][FLOW_LEAN_BODY_MAX]; uint64_t estimated_wcet_ns; } FlowLeanFunction;
 typedef struct { char name[FLOW_NAME]; char anchored_fn[FLOW_NAME]; } FlowLeanTheorem;
 typedef enum { FLOW_FACT_SHARED_STATE, FLOW_FACT_COLLECTION,
     FLOW_FACT_TRANSFORM, FLOW_FACT_PARALLELIZABLE, FLOW_FACT_ORDERED, FLOW_FACT_BOUNDED, FLOW_FACT_CAPABILITY, FLOW_FACT_CONSTRAINT, FLOW_FACT_HOLE, FLOW_FACT_RANGE,

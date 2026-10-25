@@ -14,13 +14,47 @@
 #define FLOW_GENOME_FIELD_MASK(offset, width) (FLOW_GENOME_MASK(width) << (offset))
 #define FLOW_GENOME_GET(genome, offset, width) (((uint64_t)(genome) >> (offset)) & FLOW_GENOME_MASK(width))
 #define FLOW_GENOME_PACK(val, offset, width) (((uint64_t)(val) & FLOW_GENOME_MASK(width)) << (offset))
-static inline uint64_t flow_manifold_project(uint64_t genome, uint64_t hard_safety_mask, uint64_t dynamic_bias) { uint64_t projected = genome & hard_safety_mask;
-    uint64_t malleable_bits = hard_safety_mask & ~genome; if (dynamic_bias != 0 && malleable_bits != 0) projected |= (dynamic_bias & malleable_bits); return projected; }
+static inline uint64_t flow_manifold_project(uint64_t genome, uint64_t hard_safety_mask, uint64_t dynamic_bias) {
+    uint64_t projected = genome & hard_safety_mask;
+    uint64_t malleable_bits = hard_safety_mask & ~genome;
+    if (dynamic_bias != 0 && malleable_bits != 0) {
+        projected |= (dynamic_bias & malleable_bits);
+    }
+    return projected;
+}
 static inline uint64_t flow_manifold_transition(uint64_t genome, uint64_t mask, uint64_t *rng_state, uint32_t *mutated_bit_out) {
-    if (!mask) { if (mutated_bit_out) *mutated_bit_out = 0; return genome; } uint64_t s = rng_state && *rng_state ? *rng_state : 0x853c49e6748fea9bULL;
-    s ^= s >> 12; s ^= s << 25; s ^= s >> 27; uint64_t r = s * 0x2545F4914F6CDD1DULL; if (rng_state) *rng_state = s; int bit_positions[64], count = 0;
-    for (int i = 0; i < 64; ++i) if ((mask >> i) & 1ULL) bit_positions[count++] = i; if (!count) { if (mutated_bit_out) *mutated_bit_out = 0; return genome; }
-    int chosen_idx = bit_positions[r % (uint64_t)count]; if (mutated_bit_out) *mutated_bit_out = (uint32_t)chosen_idx; return genome ^ (1ULL << chosen_idx); }
+    if (!mask) {
+        if (mutated_bit_out) {
+            *mutated_bit_out = 0;
+        }
+        return genome;
+    }
+    uint64_t s = (rng_state && *rng_state) ? *rng_state : 0x853c49e6748fea9bULL;
+    s ^= s >> 12;
+    s ^= s << 25;
+    s ^= s >> 27;
+    uint64_t r = s * 0x2545F4914F6CDD1DULL;
+    if (rng_state) {
+        *rng_state = s;
+    }
+    int bit_positions[64], count = 0;
+    for (int i = 0; i < 64; ++i) {
+        if ((mask >> i) & 1ULL) {
+            bit_positions[count++] = i;
+        }
+    }
+    if (!count) {
+        if (mutated_bit_out) {
+            *mutated_bit_out = 0;
+        }
+        return genome;
+    }
+    int chosen_idx = bit_positions[r % (uint64_t)count];
+    if (mutated_bit_out) {
+        *mutated_bit_out = (uint32_t)chosen_idx;
+    }
+    return genome ^ (1ULL << chosen_idx);
+}
 #define FLOW_BMF_SW_HARD_SAFETY        (1ULL << 0)
 #define FLOW_BMF_SW_CONTRACT_GATE      (1ULL << 1)
 #define FLOW_BMF_SW_RESOURCE_QUOTA     (1ULL << 2)
@@ -69,18 +103,49 @@ static inline FlowBmf1BitCanvas flow_atomic_stage_load_impl(const FlowBmf1BitCan
 }
 #define FLOW_ATOMIC_STAGE_LOAD(src)      flow_atomic_stage_load_impl(src)
 static inline void flow_bmf_canvas_init(FlowBmf1BitCanvas *canvas, uint32_t subspace_id, uint64_t invariant_mask, uint64_t malleable_mask, uint64_t initial_switches) {
-    if (!canvas) return; canvas->subspace_id = subspace_id; canvas->invariant_mask = invariant_mask; canvas->malleable_mask = malleable_mask;
-    canvas->switchboard_bits = (initial_switches | invariant_mask); canvas->dynamic_bias = 0; canvas->energy = 0.0; canvas->is_adjudicated_sound = 0; }
-static inline int flow_bmf_canvas_get_switch(const FlowBmf1BitCanvas *canvas, uint64_t switch_flag) { return canvas ? ((canvas->switchboard_bits & switch_flag) != 0) : 0; }
+    if (!canvas) {
+        return;
+    }
+    canvas->subspace_id = subspace_id;
+    canvas->invariant_mask = invariant_mask;
+    canvas->malleable_mask = malleable_mask;
+    canvas->switchboard_bits = (initial_switches | invariant_mask);
+    canvas->dynamic_bias = 0;
+    canvas->energy = 0.0;
+    canvas->is_adjudicated_sound = 0;
+}
+static inline int flow_bmf_canvas_get_switch(const FlowBmf1BitCanvas *canvas, uint64_t switch_flag) {
+    return canvas ? ((canvas->switchboard_bits & switch_flag) != 0) : 0;
+}
 static inline void flow_bmf_canvas_set_switch(FlowBmf1BitCanvas *canvas, uint64_t switch_flag, int value) {
-    if (!canvas || (!value && (canvas->invariant_mask & switch_flag))) return; if (value) canvas->switchboard_bits |= switch_flag;
-    else canvas->switchboard_bits &= ~switch_flag; canvas->is_adjudicated_sound = 0; }
-static inline int flow_bmf_canvas_verify_invariants(const FlowBmf1BitCanvas *canvas) { return canvas ? ((canvas->switchboard_bits & canvas->invariant_mask) == canvas->invariant_mask) : 0; }
-static inline uint64_t flow_bmf_canvas_flip_1bit(FlowBmf1BitCanvas *canvas, uint64_t *rng_state, uint32_t *mutated_bit_out) { if (!canvas) return 0;
+    if (!canvas || (!value && (canvas->invariant_mask & switch_flag))) {
+        return;
+    }
+    if (value) {
+        canvas->switchboard_bits |= switch_flag;
+    } else {
+        canvas->switchboard_bits &= ~switch_flag;
+    }
+    canvas->is_adjudicated_sound = 0;
+}
+static inline int flow_bmf_canvas_verify_invariants(const FlowBmf1BitCanvas *canvas) {
+    return canvas ? ((canvas->switchboard_bits & canvas->invariant_mask) == canvas->invariant_mask) : 0;
+}
+static inline uint64_t flow_bmf_canvas_flip_1bit(FlowBmf1BitCanvas *canvas, uint64_t *rng_state, uint32_t *mutated_bit_out) {
+    if (!canvas) {
+        return 0;
+    }
     uint64_t flippable_mask = canvas->malleable_mask & ~canvas->invariant_mask;
-    if (!flippable_mask) { if (mutated_bit_out) *mutated_bit_out = 0; return canvas->switchboard_bits; }
-    canvas->switchboard_bits = flow_manifold_transition(canvas->switchboard_bits, flippable_mask, rng_state, mutated_bit_out); canvas->is_adjudicated_sound = 0;
-    return canvas->switchboard_bits; }
+    if (!flippable_mask) {
+        if (mutated_bit_out) {
+            *mutated_bit_out = 0;
+        }
+        return canvas->switchboard_bits;
+    }
+    canvas->switchboard_bits = flow_manifold_transition(canvas->switchboard_bits, flippable_mask, rng_state, mutated_bit_out);
+    canvas->is_adjudicated_sound = 0;
+    return canvas->switchboard_bits;
+}
 typedef uint64_t flow_v512_u64 __attribute__((vector_size(64)));
 typedef union { flow_v512_u64 vec; uint64_t u64[8]; uint32_t u32[16]; uint8_t u8[64]; } FlowVector512;
 static inline FlowVector512 flow_v512_from_u64s(uint64_t w0, uint64_t w1, uint64_t w2, uint64_t w3, uint64_t w4, uint64_t w5, uint64_t w6, uint64_t w7) {
@@ -90,7 +155,13 @@ static inline FlowVector512 flow_v512_zero(void) { return (FlowVector512){0}; }
 static inline FlowVector512 flow_v512_all_ones(void) { return flow_v512_broadcast(~0ULL); }
 static inline FlowVector512 flow_v512_project(FlowVector512 g, FlowVector512 h, FlowVector512 b) { return (FlowVector512){ .vec = (g.vec & h.vec) | (b.vec & h.vec) }; }
 static inline FlowVector512 flow_v512_and(FlowVector512 a, FlowVector512 b) { return (FlowVector512){ .vec = a.vec & b.vec }; }
-static inline uint32_t flow_v512_popcount(FlowVector512 v) { uint32_t c = 0; for (int i = 0; i < 8; ++i) c += (uint32_t)__builtin_popcountll(v.u64[i]); return c; }
+static inline uint32_t flow_v512_popcount(FlowVector512 v) {
+    uint32_t c = 0;
+    for (int i = 0; i < 8; ++i) {
+        c += (uint32_t)__builtin_popcountll(v.u64[i]);
+    }
+    return c;
+}
 static inline uint64_t flow_v512_horizontal_or(FlowVector512 v) { return v.u64[0] | v.u64[1] | v.u64[2] | v.u64[3] | v.u64[4] | v.u64[5] | v.u64[6] | v.u64[7]; }
 static inline uint64_t flow_v512_horizontal_and(FlowVector512 v) { return v.u64[0] & v.u64[1] & v.u64[2] & v.u64[3] & v.u64[4] & v.u64[5] & v.u64[6] & v.u64[7]; }
 #define FLOW_PARETO_MAX 16

@@ -2355,6 +2355,153 @@ int main(void) {
         printf("  ✓ Stage 16 & 17 Passed: 15-module flat consolidation, unified boilerplate (B1-B6), symbolic constants (M1-M7), Algorithmic UI & Six-Persona Last-Mile SDK verified.\n\n");
     }
 
+    /* =========================================================================
+     * STAGE 18: Application-Layer PR #1-#4 Verification
+     *   PR #1: Multi-line Lean 4 def, (Float × Float) tuple return destructuring, Float.* math builtins & unary -x
+     *   PR #2: flowc <input.lean> -o <out.c> --target-c-header <out.h> (static inline flowc_<fn> + FlowPluginDescriptor)
+     *   PR #3: Cross-DLL / Cross-DSO process-wide shadow A/B verification & per-kernel PMU counters
+     *   PR #4: Strict -std=gnu17 -Wall -Wextra -Wpedantic -Werror -Wmisleading-indentation clean headers
+     * ========================================================================= */
+    FLOW_STAGE_BEGIN(18, "Application-Layer PR #1-#4: Multi-line Tuple Lean 4, Static Inline Header, Cross-DSO Shadow A/B & -Wpedantic");
+    {
+        const char *pr_lean_path = "/tmp/flow_stage18_quant.lean";
+        const char *pr_c_path    = "/tmp/flow_stage18_quant.c";
+        const char *pr_h_path    = "/tmp/flow_stage18_quant.h";
+        const char *pr_so_path   = "/tmp/libflow_stage18_quant.so";
+        const char *pr_drv_path  = "/tmp/flow_stage18_driver.c";
+        const char *pr_bin_path  = "/tmp/flow_stage18_driver";
+
+        FILE *pr_fp = fopen(pr_lean_path, "w");
+        FLOW_ASSERT_TRUE(pr_fp != NULL);
+        fputs(
+            "namespace Quant.BilateralQuote\n"
+            "structure QuoteBook where\n"
+            "  mid_px : Float\n"
+            "  inv_qty : Float\n"
+            "def exec_bilateral_quote\n"
+            "    (mid : Float)\n"
+            "    (vol : Float)\n"
+            "    (inv : Float)\n"
+            "    (tick : Float) : (Float × Float) :=\n"
+            "  let safe_tick := Float.max tick 1.0e-6 in\n"
+            "  let half_sprd := Float.max (Float.sqrt (Float.abs vol) * 0.5) safe_tick in\n"
+            "  let skew := if inv == 0.0 then 0.0 else (if inv < 0.0 then -half_sprd * 0.25 else half_sprd * 0.25) in\n"
+            "  let raw_bid := mid - half_sprd - skew in\n"
+            "  let raw_ask := mid + half_sprd - skew in\n"
+            "  let bid_px := Float.floor (raw_bid / safe_tick) * safe_tick in\n"
+            "  let ask_px := Float.ceil (raw_ask / safe_tick) * safe_tick in\n"
+            "  (bid_px, ask_px)\n"
+            "def quote_spread\n"
+            "    (mid : Float)\n"
+            "    (vol : Float)\n"
+            "    (inv : Float)\n"
+            "    (tick : Float) : Float :=\n"
+            "  let (b, a) := exec_bilateral_quote mid vol inv tick in\n"
+            "  Float.max (a - b) (Float.min tick 1.0)\n"
+            "end Quant.BilateralQuote\n",
+            pr_fp);
+        fclose(pr_fp);
+
+        /* PR #1 + PR #2: Run flowc <input.lean> -o <out.c> --target-c-header <out.h> */
+        char cmd_flowc[512];
+        snprintf(cmd_flowc, sizeof(cmd_flowc),
+                 "%s/flowc %s -o %s --target-c-header %s",
+                 FLOW_BUILD_DIR, pr_lean_path, pr_c_path, pr_h_path);
+        FLOW_ASSERT_EQ(system(cmd_flowc), 0);
+        FLOW_ASSERT_EQ(access(pr_c_path, F_OK), 0);
+        FLOW_ASSERT_EQ(access(pr_h_path, F_OK), 0);
+
+        /* Compile shared library from generated .c */
+        char cmd_so[512];
+        snprintf(cmd_so, sizeof(cmd_so),
+                 "cc -std=c17 -Wall -Wextra -Wpedantic -Werror -O2 -shared -fPIC -DFLOW_SHARED_LIB %s -o %s -lm -lpthread",
+                 pr_c_path, pr_so_path);
+        FLOW_ASSERT_EQ(system(cmd_so), 0);
+
+        /* PR #2, #3, #4: Compile C17 driver with -std=gnu17 -Wall -Wextra -Wpedantic -Werror -Wmisleading-indentation
+         * that directly includes plugin.h, bitspace.h, smt.h AND the generated --target-c-header file,
+         * dlopens the shared library, verifies FlowPluginDescriptor, static inline flowc_*, tuple out_0/out_1,
+         * and cross-DSO shadow A/B telemetry & per-kernel PMU counters! */
+        FILE *drv_fp = fopen(pr_drv_path, "w");
+        FLOW_ASSERT_TRUE(drv_fp != NULL);
+        fprintf(drv_fp,
+            "#include <assert.h>\n"
+            "#include <dlfcn.h>\n"
+            "#include <math.h>\n"
+            "#include <stdio.h>\n"
+            "#include \"plugin.h\"\n"
+            "#include \"bitspace.h\"\n"
+            "#include \"smt.h\"\n"
+            "#include \"%s\"\n"
+            "typedef double (*exec_quote_fn)(double, double, double, double, double *, double *);\n"
+            "typedef double (*quote_spread_fn)(double, double, double, double);\n"
+            "typedef void (*ab_rec_fn)(uint32_t, double, double, double);\n"
+            "typedef uint64_t (*ab_get_u64_fn)(void);\n"
+            "typedef uint64_t (*ab_get_fn_u64_fn)(uint32_t);\n"
+            "typedef void (*ab_reset_fn)(void);\n"
+            "int main(void) {\n"
+            "    /* 1. Test static inline zero-overhead C17 synthesis (PR #1 & PR #2) */\n"
+            "    double inl_bid = 0.0, inl_ask = 0.0;\n"
+            "    double ret0 = flowc_exec_bilateral_quote(100.0, 4.0, -2.0, 0.25, &inl_bid, &inl_ask);\n"
+            "    assert(fabs(ret0 - inl_bid) < 1e-9);\n"
+            "    /* vol=4.0 -> half_sprd = sqrt(4)*0.5 = 1.0; inv=-2 < 0 -> skew = -0.25;\n"
+            "       raw_bid = 100 - 1.0 - (-0.25) = 99.25; raw_ask = 100 + 1.0 - (-0.25) = 101.25 */\n"
+            "    assert(fabs(inl_bid - 99.25) < 1e-9);\n"
+            "    assert(fabs(inl_ask - 101.25) < 1e-9);\n"
+            "    double inl_sprd = flowc_quote_spread(100.0, 4.0, -2.0, 0.25);\n"
+            "    assert(fabs(inl_sprd - 2.0) < 1e-9);\n"
+            "    /* 2. Test cross-DSO execution, FlowPluginDescriptor & PMU/Shadow A/B counters (PR #2 & PR #3) */\n"
+            "    void *h = dlopen(\"%s\", RTLD_NOW | RTLD_LOCAL);\n"
+            "    assert(h != NULL);\n"
+            "    FlowPluginEntryFn entry = (FlowPluginEntryFn)dlsym(h, \"flow_plugin_entry_v1\");\n"
+            "    assert(entry != NULL);\n"
+            "    const FlowPluginDescriptor *desc = entry();\n"
+            "    assert(desc != NULL && desc->abi_major == 1 && desc->descriptor_size >= 64);\n"
+            "    exec_quote_fn dso_quote = (exec_quote_fn)dlsym(h, \"exec_bilateral_quote\");\n"
+            "    quote_spread_fn dso_spread = (quote_spread_fn)dlsym(h, \"quote_spread\");\n"
+            "    ab_rec_fn dso_ab_rec = (ab_rec_fn)dlsym(h, \"flow_ab_shadow_record\");\n"
+            "    ab_get_u64_fn dso_ab_calls = (ab_get_u64_fn)dlsym(h, \"flow_ab_shadow_get_calls\");\n"
+            "    ab_get_u64_fn dso_ab_mis = (ab_get_u64_fn)dlsym(h, \"flow_ab_shadow_get_mismatches\");\n"
+            "    ab_get_fn_u64_fn dso_ab_fn = (ab_get_fn_u64_fn)dlsym(h, \"flow_ab_shadow_get_fn_calls\");\n"
+            "    ab_reset_fn dso_ab_reset = (ab_reset_fn)dlsym(h, \"flow_ab_shadow_reset\");\n"
+            "    assert(dso_quote && dso_spread && dso_ab_rec && dso_ab_calls && dso_ab_mis && dso_ab_fn && dso_ab_reset);\n"
+            "    dso_ab_reset();\n"
+            "    assert(dso_ab_calls() == 0 && dso_ab_fn(0) == 0 && dso_ab_fn(1) == 0);\n"
+            "    double dso_bid = 0.0, dso_ask = 0.0;\n"
+            "    dso_quote(100.0, 4.0, -2.0, 0.25, &dso_bid, &dso_ask);\n"
+            "    assert(fabs(dso_bid - inl_bid) < 1e-9 && fabs(dso_ask - inl_ask) < 1e-9);\n"
+            "    assert(dso_ab_fn(0) == 1);\n"
+            "    double dso_sprd = dso_spread(100.0, 4.0, -2.0, 0.25);\n"
+            "    assert(fabs(dso_sprd - inl_sprd) < 1e-9);\n"
+            "    assert(dso_ab_fn(1) == 1);\n"
+            "    dso_ab_rec(0, dso_bid, inl_bid, 1e-9);\n"
+            "    dso_ab_rec(1, dso_sprd, inl_sprd + 0.5, 1e-9);\n"
+            "    assert(dso_ab_calls() == 2);\n"
+            "    assert(dso_ab_mis() == 1);\n"
+            "    dso_ab_reset();\n"
+            "    assert(dso_ab_calls() == 0 && dso_ab_mis() == 0 && dso_ab_fn(0) == 0);\n"
+            "    dlclose(h);\n"
+            "    return 0;\n"
+            "}\n",
+            pr_h_path, pr_so_path);
+        fclose(drv_fp);
+
+        char cmd_drv[1024];
+        snprintf(cmd_drv, sizeof(cmd_drv),
+                 "cc -std=gnu17 -Wall -Wextra -Wpedantic -Werror -Wmisleading-indentation -O2 -Isrc %s -o %s -lm -ldl",
+                 pr_drv_path, pr_bin_path);
+        FLOW_ASSERT_EQ(system(cmd_drv), 0);
+        FLOW_ASSERT_EQ(system(pr_bin_path), 0);
+
+        remove(pr_lean_path);
+        remove(pr_c_path);
+        remove(pr_h_path);
+        remove(pr_so_path);
+        remove(pr_drv_path);
+        remove(pr_bin_path);
+        printf("  ✓ Stage 18 Passed: PR #1 (multi-line tuple Lean 4 & math builtins), PR #2 (--target-c-header static inline & FlowPluginDescriptor), PR #3 (cross-DSO shadow A/B & PMU counters), and PR #4 (-Wpedantic -Werror=misleading-indentation) verified.\n\n");
+    }
+
     FLOW_TEST_SUITE_END();
     return 0;
 }

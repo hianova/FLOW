@@ -77,12 +77,35 @@ typedef struct { int status_code; size_t bytes_transferred; uint64_t latency_cyc
 typedef struct FlowPrimitiveDriver { char driver_name[FLOW_PRIMITIVE_NAME_MAX], driver_version[FLOW_PRIMITIVE_VERSION_MAX];
     int (*register_primitive)(void); int (*get_hardware_bounds)(FlowHardwareBounds *bounds_out); int (*execute_primitive)(const FlowPrimitiveContext *ctx, FlowPrimitiveResult *res_out); } FlowPrimitiveDriver;
 typedef struct { size_t count; const FlowPrimitiveDriver *drivers[FLOW_MAX_PRIMITIVE_DRIVERS]; } FlowPrimitiveRegistry;
-static inline void flow_primitive_registry_init(FlowPrimitiveRegistry *reg) { if (reg) memset(reg, 0, sizeof(*reg)); }
-static inline int flow_primitive_register(FlowPrimitiveRegistry *reg, const FlowPrimitiveDriver *driver) { if (!reg || !driver || reg->count >= FLOW_MAX_PRIMITIVE_DRIVERS) return 0;
-    if (driver->register_primitive && !driver->register_primitive()) return 0; reg->drivers[reg->count++] = driver; return 1; }
-static inline const FlowPrimitiveDriver *flow_primitive_lookup(const FlowPrimitiveRegistry *reg, const char *name) { if (!reg || !name) return NULL;
-    for (size_t i = 0; i < reg->count; ++i) if (reg->drivers[i] && !strcmp(reg->drivers[i]->driver_name, name)) return reg->drivers[i]; return NULL; }
-static inline size_t flow_primitive_count(const FlowPrimitiveRegistry *reg) { return reg ? reg->count : 0; }
+static inline void flow_primitive_registry_init(FlowPrimitiveRegistry *reg) {
+    if (reg) {
+        memset(reg, 0, sizeof(*reg));
+    }
+}
+static inline int flow_primitive_register(FlowPrimitiveRegistry *reg, const FlowPrimitiveDriver *driver) {
+    if (!reg || !driver || reg->count >= FLOW_MAX_PRIMITIVE_DRIVERS) {
+        return 0;
+    }
+    if (driver->register_primitive && !driver->register_primitive()) {
+        return 0;
+    }
+    reg->drivers[reg->count++] = driver;
+    return 1;
+}
+static inline const FlowPrimitiveDriver *flow_primitive_lookup(const FlowPrimitiveRegistry *reg, const char *name) {
+    if (!reg || !name) {
+        return NULL;
+    }
+    for (size_t i = 0; i < reg->count; ++i) {
+        if (reg->drivers[i] && !strcmp(reg->drivers[i]->driver_name, name)) {
+            return reg->drivers[i];
+        }
+    }
+    return NULL;
+}
+static inline size_t flow_primitive_count(const FlowPrimitiveRegistry *reg) {
+    return reg ? reg->count : 0;
+}
 #ifndef FLOW_DEFINE_PRIMITIVE_DRIVER
 #define FLOW_DEFINE_PRIMITIVE_DRIVER(DriverVar, GetterFn, NameStr, VerStr, QueueDepth, MaxBufBytes, ZeroCopy, KernelBypass, GenomeBits, ExecFn) \
     static int GetterFn##_register(void) { return 1; } \

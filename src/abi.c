@@ -1,4 +1,5 @@
 #include "abi.h"
+#include "backend.h"
 #include "registry.h"
 #include "cubical_hott.h"
 #include <ctype.h>
@@ -227,9 +228,14 @@ int flow_abi_emit_c_header(FILE *output, const FlowComponentABI *abi) { if (!out
             fprintf(output, "%s %s(", abi_lean_c_type_ir(abi->ir, fn->return_type), fn->name);
             for (size_t pi = 0; pi < fn->param_count; ++pi)
                 fprintf(output, "%s%s %s", pi > 0 ? ", " : "", abi_lean_c_type_ir(abi->ir, fn->param_types[pi]), fn->param_names[pi]);
+            if (fn->is_tuple_return && fn->tuple_arity >= 2) {
+                for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                    fprintf(output, "%s%s *out_%zu", (fn->param_count > 0 || ti > 0) ? ", " : "", abi_lean_c_type_ir(abi->ir, fn->tuple_types[ti]), ti);
+            }
             fprintf(output, ");\n");
         }
     }
+    flow_emit_inline_lean_kernels(output, abi->ir);
     fprintf(output, "#ifdef __cplusplus\n}\n#endif\n#endif /* FLOW_ABI_%s_H */\n", id_upper); return ferror(output) == 0; }
 int flow_abi_emit_rust_adapter(FILE *output, const FlowComponentABI *abi) { if (!output || !abi) return 0; char pascal_name[64], id_safe[64];
     sanitize_ident(abi->component_id, id_safe, sizeof(id_safe)); to_pascal_case(abi->component_id, pascal_name, sizeof(pascal_name));
@@ -261,6 +267,10 @@ int flow_abi_emit_rust_adapter(FILE *output, const FlowComponentABI *abi) { if (
             fprintf(output, "    fn %s(", fn->name);
             for (size_t pi = 0; pi < fn->param_count; ++pi)
                 fprintf(output, "%s%s: %s", pi > 0 ? ", " : "", fn->param_names[pi], abi_lean_rust_type_ir(abi->ir, fn->param_types[pi]));
+            if (fn->is_tuple_return && fn->tuple_arity >= 2) {
+                for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                    fprintf(output, "%sout_%zu: *mut %s", (fn->param_count > 0 || ti > 0) ? ", " : "", ti, abi_lean_rust_type_ir(abi->ir, fn->tuple_types[ti]));
+            }
             fprintf(output, ") -> %s;\n", abi_lean_rust_type_ir(abi->ir, fn->return_type));
         }
     }
@@ -285,10 +295,28 @@ int flow_abi_emit_rust_adapter(FILE *output, const FlowComponentABI *abi) { if (
             fprintf(output, "    pub fn %s(&self", fn->name);
             for (size_t pi = 0; pi < fn->param_count; ++pi)
                 fprintf(output, ", %s: %s", fn->param_names[pi], abi_lean_rust_type_ir(abi->ir, fn->param_types[pi]));
-            fprintf(output, ") -> %s { unsafe { %s(", abi_lean_rust_type_ir(abi->ir, fn->return_type), fn->name);
-            for (size_t pi = 0; pi < fn->param_count; ++pi)
-                fprintf(output, "%s%s", pi > 0 ? ", " : "", fn->param_names[pi]);
-            fprintf(output, ") } }\n");
+            if (fn->is_tuple_return && fn->tuple_arity >= 2) {
+                fprintf(output, ") -> (");
+                for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                    fprintf(output, "%s%s", ti > 0 ? ", " : "", abi_lean_rust_type_ir(abi->ir, fn->tuple_types[ti]));
+                fprintf(output, ") { ");
+                for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                    fprintf(output, "let mut _out_%zu: %s = Default::default(); ", ti, abi_lean_rust_type_ir(abi->ir, fn->tuple_types[ti]));
+                fprintf(output, "unsafe { %s(", fn->name);
+                for (size_t pi = 0; pi < fn->param_count; ++pi)
+                    fprintf(output, "%s%s", pi > 0 ? ", " : "", fn->param_names[pi]);
+                for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                    fprintf(output, "%s&mut _out_%zu", (fn->param_count > 0 || ti > 0) ? ", " : "", ti);
+                fprintf(output, "); } (");
+                for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                    fprintf(output, "%s_out_%zu", ti > 0 ? ", " : "", ti);
+                fprintf(output, ") }\n");
+            } else {
+                fprintf(output, ") -> %s { unsafe { %s(", abi_lean_rust_type_ir(abi->ir, fn->return_type), fn->name);
+                for (size_t pi = 0; pi < fn->param_count; ++pi)
+                    fprintf(output, "%s%s", pi > 0 ? ", " : "", fn->param_names[pi]);
+                fprintf(output, ") } }\n");
+            }
         }
     }
     fprintf(output,
@@ -393,9 +421,29 @@ int flow_abi_emit_python_adapter(FILE *output, const FlowComponentABI *abi) { if
             fprintf(output, "        if hasattr(self._lib, '%s'):\n            self._lib.%s.argtypes = [", fn->name, fn->name);
             for (size_t pi = 0; pi < fn->param_count; ++pi)
                 fprintf(output, "%s%s", pi ? ", " : "", abi_lean_ctypes_type_ir(abi->ir, fn->param_types[pi]));
+            if (fn->is_tuple_return && fn->tuple_arity >= 2) {
+                for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                    fprintf(output, "%sctypes.POINTER(%s)", (fn->param_count > 0 || ti > 0) ? ", " : "", abi_lean_ctypes_type_ir(abi->ir, fn->tuple_types[ti]));
+            }
             fprintf(output, "]\n            self._lib.%s.restype = %s\n", fn->name, abi_lean_ctypes_type_ir(abi->ir, fn->return_type));
         }
     }
+    fprintf(output,
+        "        if hasattr(self._lib, 'flow_ab_shadow_record'):\n"
+        "            self._lib.flow_ab_shadow_record.argtypes = [ctypes.c_uint32, ctypes.c_double, ctypes.c_double, ctypes.c_double]\n"
+        "            self._lib.flow_ab_shadow_record.restype = None\n"
+        "        if hasattr(self._lib, 'flow_ab_shadow_get_calls'):\n"
+        "            self._lib.flow_ab_shadow_get_calls.argtypes = []\n"
+        "            self._lib.flow_ab_shadow_get_calls.restype = ctypes.c_uint64\n"
+        "        if hasattr(self._lib, 'flow_ab_shadow_get_mismatches'):\n"
+        "            self._lib.flow_ab_shadow_get_mismatches.argtypes = []\n"
+        "            self._lib.flow_ab_shadow_get_mismatches.restype = ctypes.c_uint64\n"
+        "        if hasattr(self._lib, 'flow_ab_shadow_get_fn_calls'):\n"
+        "            self._lib.flow_ab_shadow_get_fn_calls.argtypes = [ctypes.c_uint32]\n"
+        "            self._lib.flow_ab_shadow_get_fn_calls.restype = ctypes.c_uint64\n"
+        "        if hasattr(self._lib, 'flow_ab_shadow_reset'):\n"
+        "            self._lib.flow_ab_shadow_reset.argtypes = []\n"
+        "            self._lib.flow_ab_shadow_reset.restype = None\n");
     size_t def_stride = (abi->ir && abi->ir->input_stride_bytes > 0) ? abi->ir->input_stride_bytes : 64;
     size_t def_align = (abi->ir && abi->ir->input_align_bytes > 0) ? abi->ir->input_align_bytes : 8;
     uint32_t def_ver = (abi->ir && abi->ir->state_schema_version > 0) ? abi->ir->state_schema_version : 1;
@@ -466,6 +514,29 @@ int flow_abi_emit_python_adapter(FILE *output, const FlowComponentABI *abi) { if
     if (abi->ir && abi->ir->lean_function_count > 0) {
         for (size_t fi = 0; fi < abi->ir->lean_function_count; ++fi) {
             const FlowLeanFunction *fn = &abi->ir->lean_functions[fi];
+            if (fn->is_tuple_return && fn->tuple_arity >= 2) {
+                fprintf(output, "    def %s(self", fn->name);
+                for (size_t pi = 0; pi < fn->param_count; ++pi) fprintf(output, ", %s", fn->param_names[pi]);
+                fprintf(output, ") -> tuple:\n        ");
+                for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                    fprintf(output, "_out_%zu = %s(); ", ti, abi_lean_ctypes_type_ir(abi->ir, fn->tuple_types[ti]));
+                fprintf(output, "\n        self._lib.%s(", fn->name);
+                for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                    const char *pt = fn->param_types[pi];
+                    const char *conv = !strcmp(pt, "Bool") ? "bool" : ((!strcmp(pt, "Float") || !strcmp(pt, "Float32")) ? "float" : ((!strcmp(pt, "Int") || !strcmp(pt, "Int64") || !strcmp(pt, "Int32") || !strcmp(pt, "Int16") || !strcmp(pt, "Int8")) ? "int" : "self._u64"));
+                    fprintf(output, "%s%s(%s)", pi ? ", " : "", conv, fn->param_names[pi]);
+                }
+                for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                    fprintf(output, "%sctypes.byref(_out_%zu)", (fn->param_count > 0 || ti > 0) ? ", " : "", ti);
+                fprintf(output, ")\n        return (");
+                for (size_t ti = 0; ti < fn->tuple_arity; ++ti) {
+                    const char *tt = fn->tuple_types[ti];
+                    const char *tpy = !strcmp(tt, "Bool") ? "bool" : ((!strcmp(tt, "Float") || !strcmp(tt, "Float32")) ? "float" : "int");
+                    fprintf(output, "%s%s(_out_%zu.value)", ti ? ", " : "", tpy, ti);
+                }
+                fprintf(output, "%s)\n", fn->tuple_arity == 1 ? "," : "");
+                continue;
+            }
             int ret_is_struct = abi_find_lean_struct(abi->ir, fn->return_type) != NULL;
             const char *py_ret = ret_is_struct ? fn->return_type : (!strcmp(fn->return_type, "Bool") ? "bool" : ((!strcmp(fn->return_type, "Float") || !strcmp(fn->return_type, "Float32")) ? "float" : "int"));
             fprintf(output, "    def %s(self", fn->name);

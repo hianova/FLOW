@@ -199,21 +199,51 @@ static int has_word_match(const char *hay, const char *word) {
     return 0;
 }
 static void normalize_lean_body(const char *in, char *out, size_t max_len) {
+    static const struct { const char *lean_fn; size_t l_len; const char *c_fn; size_t c_len; } BUILTIN_MAP[] = {
+        {"Nat.min", 7, "flow_nat_min", 12},
+        {"Nat.max", 7, "flow_nat_max", 12},
+        {"Float.abs", 9, "flow_float_abs", 14},
+        {"Float.floor", 11, "flow_float_floor", 16},
+        {"Float.ceil", 10, "flow_float_ceil", 15},
+        {"Float.round", 11, "flow_float_round", 16},
+        {"Float.sqrt", 10, "flow_float_sqrt", 15},
+        {"Float.exp", 9, "flow_float_exp", 14},
+        {"Float.log", 9, "flow_float_log", 14},
+        {"Float.sin", 9, "flow_float_sin", 14},
+        {"Float.cos", 9, "flow_float_cos", 14},
+        {"Float.atan2", 11, "flow_float_atan2", 16},
+        {"Float.pow", 9, "flow_float_pow", 14},
+        {"Float.max", 9, "flow_float_max", 14},
+        {"Float.min", 9, "flow_float_min", 14},
+        {"Float.ofNat", 11, "flow_float_of_nat", 17},
+        {"Float.ofInt", 11, "flow_float_of_int", 17}
+    };
     size_t j = 0;
-    for (size_t i = 0; in[i] && j + 16 < max_len; ) {
-        if (!strncmp(in + i, "\xe2\x89\xa4", 3)) { out[j++] = '<'; out[j++] = '='; i += 3; }
-        else if (!strncmp(in + i, "\xe2\x89\xa5", 3)) { out[j++] = '>'; out[j++] = '='; i += 3; }
-        else if (!strncmp(in + i, "\xe2\x89\xa0", 3)) { out[j++] = '!'; out[j++] = '='; i += 3; }
-        else if (!strncmp(in + i, "\xe2\x88\xa7", 3)) { out[j++] = '&'; out[j++] = '&'; i += 3; }
-        else if (!strncmp(in + i, "\xe2\x88\xa8", 3)) { out[j++] = '|'; out[j++] = '|'; i += 3; }
-        else if (!strncmp(in + i, "\xc2\xac", 2)) { out[j++] = '!'; i += 2; }
-        else if (!strncmp(in + i, "Nat.min", 7) && !isalnum((unsigned char)in[i + 7])) { memcpy(out + j, "flow_nat_min", 12); j += 12; i += 7; }
-        else if (!strncmp(in + i, "Nat.max", 7) && !isalnum((unsigned char)in[i + 7])) { memcpy(out + j, "flow_nat_max", 12); j += 12; i += 7; }
-        else if (in[i] == '.' && (i == 0 || (!isalnum((unsigned char)in[i - 1]) && in[i - 1] != '_' && in[i - 1] != ')')) &&
-                 (isalpha((unsigned char)in[i + 1]) || in[i + 1] == '_')) {
-            i++;
+    for (size_t i = 0; in[i] && j + 20 < max_len; ) {
+        if (!strncmp(in + i, "\xe2\x89\xa4", 3)) { out[j++] = '<'; out[j++] = '='; i += 3; continue; }
+        if (!strncmp(in + i, "\xe2\x89\xa5", 3)) { out[j++] = '>'; out[j++] = '='; i += 3; continue; }
+        if (!strncmp(in + i, "\xe2\x89\xa0", 3)) { out[j++] = '!'; out[j++] = '='; i += 3; continue; }
+        if (!strncmp(in + i, "\xe2\x88\xa7", 3)) { out[j++] = '&'; out[j++] = '&'; i += 3; continue; }
+        if (!strncmp(in + i, "\xe2\x88\xa8", 3)) { out[j++] = '|'; out[j++] = '|'; i += 3; continue; }
+        if (!strncmp(in + i, "\xc2\xac", 2)) { out[j++] = '!'; i += 2; continue; }
+        int mapped = 0;
+        for (size_t bi = 0; bi < sizeof(BUILTIN_MAP) / sizeof(BUILTIN_MAP[0]); ++bi) {
+            size_t ll = BUILTIN_MAP[bi].l_len;
+            if (!strncmp(in + i, BUILTIN_MAP[bi].lean_fn, ll) && !isalnum((unsigned char)in[i + ll]) && in[i + ll] != '_') {
+                memcpy(out + j, BUILTIN_MAP[bi].c_fn, BUILTIN_MAP[bi].c_len);
+                j += BUILTIN_MAP[bi].c_len;
+                i += ll;
+                mapped = 1;
+                break;
+            }
         }
-        else out[j++] = in[i++];
+        if (mapped) continue;
+        if (in[i] == '.' && (i == 0 || (!isalnum((unsigned char)in[i - 1]) && in[i - 1] != '_' && in[i - 1] != ')')) &&
+            (isalpha((unsigned char)in[i + 1]) || in[i + 1] == '_')) {
+            i++;
+        } else {
+            out[j++] = in[i++];
+        }
     }
     out[j] = '\0';
     for (size_t i = 1; out[i]; ++i) {
@@ -243,10 +273,17 @@ static uint64_t estimate_lean_ast_wcet_ns(const FlowLeanFunction *fn) {
     }
     return cost;
 }
-static int is_valid_scalar_lean_body(const FlowSpec *spec, const FlowLeanFunction *fn) {
-    static const char *const KW[] = {"if", "then", "else", "let", "in", "match", "with", "true", "false", "decide", "flow_nat_min", "flow_nat_max", "flow_quantize", "flow_dequantize", "_", NULL};
-    char let_vars[16][FLOW_NAME]; size_t let_cnt = 0; const char *b = fn->body;
-    if (!b[0]) return 0;
+static int is_valid_scalar_lean_body_str(const FlowSpec *spec, const FlowLeanFunction *fn, const char *b) {
+    static const char *const KW[] = {
+        "if", "then", "else", "let", "in", "match", "with", "true", "false", "decide",
+        "flow_nat_min", "flow_nat_max", "flow_quantize", "flow_dequantize",
+        "flow_float_abs", "flow_float_floor", "flow_float_ceil", "flow_float_round",
+        "flow_float_sqrt", "flow_float_exp", "flow_float_log", "flow_float_sin",
+        "flow_float_cos", "flow_float_atan2", "flow_float_pow", "flow_float_max",
+        "flow_float_min", "flow_float_of_nat", "flow_float_of_int", "_", NULL
+    };
+    char let_vars[32][FLOW_NAME]; size_t let_cnt = 0;
+    if (!b || !b[0]) return 0;
     int has_struct_param = 0;
     for (size_t i = 0; i < fn->param_count; ++i)
         if (find_lean_struct(spec, fn->param_types[i]) != NULL) has_struct_param = 1;
@@ -254,12 +291,34 @@ static int is_valid_scalar_lean_body(const FlowSpec *spec, const FlowLeanFunctio
         if (*p == '{' || *p == '}' || *p == '[' || *p == ']') return 0;
         if (*p == '.' && isalpha((unsigned char)p[1]) && !has_struct_param && spec->lean_enum_count == 0) return 0;
         if (!strncmp(p, "let ", 4) && (p == b || isspace((unsigned char)p[-1]) || p[-1] == '(')) {
-            char lv[FLOW_NAME] = {0};
-            if (sscanf(p + 4, "%63[^ :=\t\r\n]", lv) == 1 && lv[0] && let_cnt < 16) strncpy(let_vars[let_cnt++], lv, FLOW_NAME - 1);
+            const char *vs = p + 4;
+            while (*vs && isspace((unsigned char)*vs)) ++vs;
+            if (*vs == '(') {
+                ++vs;
+                while (*vs && *vs != ')') {
+                    while (*vs && (isspace((unsigned char)*vs) || *vs == ',')) ++vs;
+                    char lv[FLOW_NAME] = {0}; size_t lk = 0;
+                    while (*vs && (isalnum((unsigned char)*vs) || *vs == '_')) {
+                        if (lk + 1 < sizeof(lv)) lv[lk++] = *vs;
+                        ++vs;
+                    }
+                    while (*vs && *vs != ',' && *vs != ')') ++vs;
+                    if (lv[0] && let_cnt < 32) strncpy(let_vars[let_cnt++], lv, FLOW_NAME - 1);
+                }
+            } else {
+                char lv[FLOW_NAME] = {0};
+                if (sscanf(vs, "%63[^ :=\t\r\n]", lv) == 1 && lv[0] && let_cnt < 32) strncpy(let_vars[let_cnt++], lv, FLOW_NAME - 1);
+            }
         }
     }
     for (const char *p = b; *p; ) {
-        if (isdigit((unsigned char)*p)) { while (isalnum((unsigned char)*p) || *p == '_' || *p == '.') ++p; continue; }
+        if (isdigit((unsigned char)*p)) {
+            while (isalnum((unsigned char)*p) || *p == '_' || *p == '.') {
+                if ((*p == 'e' || *p == 'E') && (p[1] == '+' || p[1] == '-')) ++p;
+                ++p;
+            }
+            continue;
+        }
         if (isalpha((unsigned char)*p) || *p == '_') {
             char id[FLOW_NAME] = {0}; size_t k = 0;
             while (isalnum((unsigned char)*p) || *p == '_' || *p == '\'') { if (*p == '\'') return 0; if (k + 1 < sizeof(id)) id[k++] = *p; ++p; }
@@ -281,6 +340,9 @@ static int is_valid_scalar_lean_body(const FlowSpec *spec, const FlowLeanFunctio
         } else ++p;
     }
     return 1;
+}
+static int is_valid_scalar_lean_body(const FlowSpec *spec, const FlowLeanFunction *fn) {
+    return is_valid_scalar_lean_body_str(spec, fn, fn->body);
 }
 static void subst_whole_ident(const char *src, const char *var, const char *val, char *out, size_t out_max) {
     size_t vlen = strlen(var), rlen = strlen(val), j = 0;
@@ -373,23 +435,297 @@ static void parse_struct_record_fields(FlowLeanFunction *fn, const char *prefix,
         }
     }
 }
+static int is_kw_tok(const char *p, const char *start, const char *end, const char *kw, size_t kwlen) {
+    if ((size_t)(end - p) < kwlen || strncmp(p, kw, kwlen) != 0) return 0;
+    int l_ok = (p == start) || isspace((unsigned char)p[-1]) || p[-1] == '(' || p[-1] == ')';
+    int r_ok = (p + kwlen == end) || isspace((unsigned char)p[kwlen]) || p[kwlen] == '(' || p[kwlen] == ')';
+    return l_ok && r_ok;
+}
+static int project_lean_tuple_component(const FlowSpec *spec, const char *s, size_t len, size_t comp_idx, size_t arity, char *out, size_t out_max) {
+    (void)spec;
+    if (!s || !out || out_max == 0) return 0;
+    while (len > 0 && isspace((unsigned char)*s)) { ++s; --len; }
+    while (len > 0 && isspace((unsigned char)s[len - 1])) --len;
+    if (len == 0) { out[0] = '\0'; return 0; }
+    const char *end = s + len;
+    if (is_kw_tok(s, s, end, "let", 3)) {
+        const char *ce = NULL; int pd = 0;
+        for (const char *p = s + 3; p + 1 < end; ++p) {
+            if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
+            else if (pd == 0 && p[0] == ':' && p[1] == '=') { ce = p; break; }
+        }
+        if (ce) {
+            const char *rhs = ce + 2;
+            while (rhs < end && isspace((unsigned char)*rhs)) ++rhs;
+            const char *rhs_end = NULL, *rest = NULL;
+            pd = 0; int ld = 0;
+            for (const char *p = rhs; p < end; ++p) {
+                if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
+                else if (pd == 0 && is_kw_tok(p, rhs, end, "let", 3)) ld++;
+                else if (pd == 0 && is_kw_tok(p, rhs, end, "in", 2)) {
+                    if (ld == 0) { rhs_end = p; rest = p + 2; break; }
+                    ld--;
+                }
+            }
+            if (!rhs_end) {
+                pd = 0; int id = 0;
+                for (const char *p = rhs; p < end; ++p) {
+                    if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
+                    else if (pd == 0 && is_kw_tok(p, rhs, end, "if", 2)) id++;
+                    else if (pd == 0 && is_kw_tok(p, rhs, end, "else", 4) && id > 0) id--;
+                    else if (pd == 0 && id == 0 && (*p == ';' || *p == '\n')) { rhs_end = p; rest = p + 1; break; }
+                }
+            }
+            if (rhs_end && rest) {
+                while (rhs_end > rhs && isspace((unsigned char)rhs_end[-1])) --rhs_end;
+                while (rest < end && isspace((unsigned char)*rest)) ++rest;
+                char rest_proj[FLOW_LEAN_BODY_MAX] = {0};
+                if (!project_lean_tuple_component(spec, rest, (size_t)(end - rest), comp_idx, arity, rest_proj, sizeof(rest_proj)))
+                    return 0;
+                const char *ps = s + 3, *pe = ce;
+                while (ps < pe && isspace((unsigned char)*ps)) ++ps;
+                while (pe > ps && isspace((unsigned char)pe[-1])) --pe;
+                if (pe - ps >= 2 && ps[0] == '(' && pe[-1] == ')') {
+                    char tvars[FLOW_TUPLE_MAX][FLOW_NAME] = {{0}};
+                    size_t tcnt = 0;
+                    const char *q = ps + 1, *qe = pe - 1;
+                    while (q < qe && tcnt < FLOW_TUPLE_MAX) {
+                        while (q < qe && (isspace((unsigned char)*q) || *q == ',')) ++q;
+                        size_t vk = 0;
+                        while (q < qe && (isalnum((unsigned char)*q) || *q == '_')) {
+                            if (vk + 1 < FLOW_NAME) tvars[tcnt][vk++] = *q;
+                            ++q;
+                        }
+                        while (q < qe && *q != ',') ++q;
+                        if (tvars[tcnt][0]) tcnt++;
+                    }
+                    if (tcnt >= 2) {
+                        char accum[FLOW_LEAN_BODY_MAX] = {0};
+                        size_t aj = 0;
+                        for (size_t ti = 0; ti < tcnt; ++ti) {
+                            char comp_rhs[FLOW_LEAN_BODY_MAX] = {0};
+                            if (!project_lean_tuple_component(spec, rhs, (size_t)(rhs_end - rhs), ti, tcnt, comp_rhs, sizeof(comp_rhs)))
+                                return 0;
+                            int w = snprintf(accum + aj, sizeof(accum) - aj, "let %s := (%s) in ", tvars[ti], comp_rhs);
+                            if (w < 0 || (size_t)w >= sizeof(accum) - aj) return 0;
+                            aj += (size_t)w;
+                        }
+                        snprintf(out, out_max, "%s%s", accum, rest_proj);
+                        return 1;
+                    }
+                }
+                char vname[FLOW_NAME] = {0}; size_t vk = 0;
+                for (const char *p = ps; p < pe && *p != ':' && !isspace((unsigned char)*p); ++p)
+                    if (vk + 1 < sizeof(vname)) vname[vk++] = *p;
+                if (!vname[0]) return 0;
+                snprintf(out, out_max, "let %s := %.*s in %s", vname, (int)(rhs_end - rhs), rhs, rest_proj);
+                return 1;
+            }
+        }
+    }
+    if (is_kw_tok(s, s, end, "if", 2)) {
+        const char *th = NULL, *el = NULL; int pd = 0, id = 0;
+        for (const char *p = s + 2; p < end; ++p) {
+            if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
+            else if (pd == 0 && is_kw_tok(p, s, end, "if", 2)) id++;
+            else if (pd == 0 && is_kw_tok(p, s, end, "then", 4)) {
+                if (id == 0) { th = p; break; }
+                id--;
+            }
+        }
+        if (th) {
+            pd = 0; id = 0;
+            for (const char *p = th + 4; p < end; ++p) {
+                if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
+                else if (pd == 0 && is_kw_tok(p, s, end, "if", 2)) id++;
+                else if (pd == 0 && is_kw_tok(p, s, end, "else", 4)) {
+                    if (id == 0) { el = p; break; }
+                    id--;
+                }
+            }
+        }
+        if (th && el) {
+            const char *cs = s + 2, *ce_c = th;
+            while (cs < ce_c && isspace((unsigned char)*cs)) ++cs;
+            while (ce_c > cs && isspace((unsigned char)ce_c[-1])) --ce_c;
+            char t_proj[FLOW_LEAN_BODY_MAX] = {0}, e_proj[FLOW_LEAN_BODY_MAX] = {0};
+            if (!project_lean_tuple_component(spec, th + 4, (size_t)(el - (th + 4)), comp_idx, arity, t_proj, sizeof(t_proj)) ||
+                !project_lean_tuple_component(spec, el + 4, (size_t)(end - (el + 4)), comp_idx, arity, e_proj, sizeof(e_proj)))
+                return 0;
+            snprintf(out, out_max, "if %.*s then (%s) else (%s)", (int)(ce_c - cs), cs, t_proj, e_proj);
+            return 1;
+        }
+    }
+    if (arity <= 1) {
+        if (len >= out_max) len = out_max - 1;
+        memcpy(out, s, len); out[len] = '\0';
+        return 1;
+    }
+    while (len >= 2 && s[0] == '(' && s[len - 1] == ')') {
+        int d = 0, wrapped = 1;
+        for (size_t i = 0; i + 1 < len; ++i) {
+            if (s[i] == '(') d++;
+            else if (s[i] == ')' && --d == 0) { wrapped = 0; break; }
+        }
+        if (!wrapped) break;
+        ++s; len -= 2;
+        while (len > 0 && isspace((unsigned char)*s)) { ++s; --len; }
+        while (len > 0 && isspace((unsigned char)s[len - 1])) --len;
+    }
+    end = s + len;
+    if (is_kw_tok(s, s, end, "let", 3) || is_kw_tok(s, s, end, "if", 2))
+        return project_lean_tuple_component(spec, s, len, comp_idx, arity, out, out_max);
+    const char *seg_s[FLOW_TUPLE_MAX + 1];
+    const char *seg_e[FLOW_TUPLE_MAX + 1];
+    size_t seg_cnt = 0;
+    const char *cur = s; int pd = 0;
+    for (const char *p = s; p < end; ++p) {
+        if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
+        else if (pd == 0 && *p == ',' && seg_cnt < FLOW_TUPLE_MAX) {
+            seg_s[seg_cnt] = cur; seg_e[seg_cnt] = p; seg_cnt++;
+            cur = p + 1;
+        }
+    }
+    if (seg_cnt > 0 && seg_cnt + 1 >= arity && comp_idx <= seg_cnt) {
+        seg_s[seg_cnt] = cur; seg_e[seg_cnt] = end; seg_cnt++;
+        const char *cs = seg_s[comp_idx], *ce_s = seg_e[comp_idx];
+        while (cs < ce_s && isspace((unsigned char)*cs)) ++cs;
+        while (ce_s > cs && isspace((unsigned char)ce_s[-1])) --ce_s;
+        size_t cl = (size_t)(ce_s - cs);
+        if (cl == 0 || cl >= out_max) return 0;
+        memcpy(out, cs, cl); out[cl] = '\0';
+        return 1;
+    }
+    if (spec && (isalpha((unsigned char)*s) || *s == '_')) {
+        char cname[FLOW_NAME] = {0}; size_t ck = 0;
+        const char *p = s;
+        while (p < end && (isalnum((unsigned char)*p) || *p == '_')) {
+            if (ck + 1 < sizeof(cname)) cname[ck++] = *p;
+            ++p;
+        }
+        const FlowLeanFunction *callee = NULL;
+        for (size_t fi = 0; fi < spec->lean_function_count; ++fi) {
+            if (!strcmp(spec->lean_functions[fi].name, cname) && spec->lean_functions[fi].is_tuple_return && comp_idx < spec->lean_functions[fi].tuple_arity) {
+                callee = &spec->lean_functions[fi];
+                break;
+            }
+        }
+        if (callee) {
+            const char *arg_s[FLOW_LEAN_PARAM_MAX], *arg_e[FLOW_LEAN_PARAM_MAX];
+            size_t acnt = 0;
+            while (p < end && acnt < callee->param_count) {
+                while (p < end && isspace((unsigned char)*p)) ++p;
+                if (p >= end) break;
+                if (*p == '(') {
+                    int d = 0; arg_s[acnt] = p + 1;
+                    while (p < end) {
+                        if (*p == '(') d++;
+                        else if (*p == ')' && --d == 0) { arg_e[acnt] = p; ++p; break; }
+                        ++p;
+                    }
+                    acnt++;
+                } else {
+                    arg_s[acnt] = p;
+                    while (p < end && !isspace((unsigned char)*p) && *p != '(' && *p != ')') ++p;
+                    arg_e[acnt] = p;
+                    acnt++;
+                }
+            }
+            while (p < end && isspace((unsigned char)*p)) ++p;
+            if (acnt == callee->param_count && p == end) {
+                const char *tpl = callee->tuple_exprs[comp_idx];
+                size_t j = 0;
+                for (size_t ti = 0; tpl[ti] && j + 4 < out_max; ) {
+                    int matched = 0;
+                    if (isalpha((unsigned char)tpl[ti]) || tpl[ti] == '_') {
+                        int l_ok = (ti == 0) || (!isalnum((unsigned char)tpl[ti - 1]) && tpl[ti - 1] != '_' && tpl[ti - 1] != '.');
+                        if (l_ok) {
+                            for (size_t pi = 0; pi < callee->param_count; ++pi) {
+                                size_t plen = strlen(callee->param_names[pi]);
+                                if (plen > 0 && !strncmp(tpl + ti, callee->param_names[pi], plen) &&
+                                    !isalnum((unsigned char)tpl[ti + plen]) && tpl[ti + plen] != '_') {
+                                    size_t alen = (size_t)(arg_e[pi] - arg_s[pi]);
+                                    if (j + alen + 3 < out_max) {
+                                        out[j++] = '(';
+                                        memcpy(out + j, arg_s[pi], alen);
+                                        j += alen;
+                                        out[j++] = ')';
+                                        ti += plen;
+                                        matched = 1;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (!matched) out[j++] = tpl[ti++];
+                }
+                out[j] = '\0';
+                return j > 0;
+            }
+        }
+    }
+    return 0;
+}
 static void try_add_lean_function(FlowSpec *spec, const char *sig_in, const char *body_in) {
     if (!spec || spec->lean_function_count >= FLOW_LEAN_FN_MAX || !sig_in || !body_in) return;
     char sig[FLOW_LEAN_BODY_MAX]; strncpy(sig, sig_in, sizeof(sig) - 1); sig[sizeof(sig) - 1] = '\0';
     char *s = trim(sig); if (!starts_with(s, "def ")) return;
     FlowLeanFunction fn; memset(&fn, 0, sizeof(fn));
-    if (sscanf(s + 4, "%63[^ ({:\t\n]", fn.name) != 1 || !fn.name[0] || is_internal_lean_def(fn.name)) return;
+    if (sscanf(s + 4, "%63[^ ({:\t\n\r]", fn.name) != 1 || !fn.name[0] || is_internal_lean_def(fn.name)) return;
     for (size_t i = 0; i < spec->lean_function_count; ++i)
         if (!strcmp(spec->lean_functions[i].name, fn.name)) return;
-    char *first_lp = strchr(s, '('), *last_rp = strrchr(s, ')');
-    if (!first_lp || !last_rp || last_rp <= first_lp) return;
-    char *ret_colon = strchr(last_rp + 1, ':'); if (!ret_colon) return;
-    char ret_t[FLOW_NAME] = {0}, extra[16] = {0};
-    if (sscanf(ret_colon + 1, "%63s %15s", ret_t, extra) != 1) return;
-    int ret_is_struct = (find_lean_struct(spec, ret_t) != NULL);
-    int ret_is_scalar = is_scalar_lean_type(ret_t) || (find_lean_enum(spec, ret_t) != NULL);
-    if (!ret_is_struct && !ret_is_scalar) return;
-    strncpy(fn.return_type, ret_t, sizeof(fn.return_type) - 1);
+    char *first_lp = strchr(s, '('), *last_rp = NULL, *ret_colon = NULL;
+    if (!first_lp) return;
+    int pd = 0;
+    for (char *p = first_lp; *p; ++p) {
+        if (*p == '(' || *p == '{' || *p == '[') pd++;
+        else if (*p == ')' || *p == '}' || *p == ']') {
+            if (pd > 0) pd--;
+            if (pd == 0 && *p == ')') last_rp = p;
+        } else if (pd == 0 && *p == ':' && last_rp != NULL) {
+            ret_colon = p;
+            break;
+        }
+    }
+    if (!last_rp || !ret_colon || last_rp <= first_lp) return;
+    char ret_buf[FLOW_LINE] = {0};
+    strncpy(ret_buf, ret_colon + 1, sizeof(ret_buf) - 1);
+    char *ret_raw = trim(ret_buf);
+    size_t rlen = strlen(ret_raw);
+    if (rlen >= 2 && ret_raw[0] == '(' && ret_raw[rlen - 1] == ')') {
+        ret_raw[rlen - 1] = '\0';
+        ret_raw = trim(ret_raw + 1);
+    }
+    int ret_is_struct = 0, ret_is_scalar = 0, ret_is_tuple = 0;
+    if (strstr(ret_raw, "\xc3\x97") != NULL || strchr(ret_raw, '*') != NULL) {
+        char tcopy[FLOW_LINE] = {0};
+        size_t tj = 0;
+        for (size_t i = 0; ret_raw[i] && tj + 2 < sizeof(tcopy); ) {
+            if (!strncmp(ret_raw + i, "\xc3\x97", 2)) { tcopy[tj++] = '*'; i += 2; }
+            else tcopy[tj++] = ret_raw[i++];
+        }
+        tcopy[tj] = '\0';
+        char *sp = NULL;
+        for (char *tok = strtok_r(tcopy, "*", &sp); tok; tok = strtok_r(NULL, "*", &sp)) {
+            char *tt = trim(tok);
+            if (!*tt || fn.tuple_arity >= FLOW_TUPLE_MAX || !is_scalar_lean_type(tt)) { fn.tuple_arity = 0; break; }
+            strncpy(fn.tuple_types[fn.tuple_arity++], tt, sizeof(fn.tuple_types[0]) - 1);
+        }
+        if (fn.tuple_arity >= 2) {
+            ret_is_tuple = 1;
+            fn.is_tuple_return = 1;
+            strncpy(fn.return_type, fn.tuple_types[0], sizeof(fn.return_type) - 1);
+        }
+    }
+    if (!ret_is_tuple) {
+        char ret_t[FLOW_NAME] = {0}, extra[16] = {0};
+        if (sscanf(ret_raw, "%63s %15s", ret_t, extra) != 1) return;
+        ret_is_struct = (find_lean_struct(spec, ret_t) != NULL);
+        ret_is_scalar = is_scalar_lean_type(ret_t) || (find_lean_enum(spec, ret_t) != NULL);
+        if (!ret_is_struct && !ret_is_scalar) return;
+        strncpy(fn.return_type, ret_t, sizeof(fn.return_type) - 1);
+    }
     for (char *p = first_lp; p && p < last_rp; ) {
         char *lp = strchr(p, '('); if (!lp || lp >= last_rp) break;
         char *rp = strchr(lp + 1, ')'); if (!rp || rp > last_rp) return;
@@ -414,14 +750,31 @@ static void try_add_lean_function(FlowSpec *spec, const char *sig_in, const char
         fn.is_struct_transform = 1;
         parse_struct_record_fields(&fn, "", fn.body);
         if (fn.field_assign_count == 0) return;
+    } else if (ret_is_tuple) {
+        for (size_t ti = 0; ti < fn.tuple_arity; ++ti) {
+            if (!project_lean_tuple_component(spec, fn.body, strlen(fn.body), ti, fn.tuple_arity, fn.tuple_exprs[ti], sizeof(fn.tuple_exprs[ti])))
+                return;
+            if (!is_valid_scalar_lean_body_str(spec, &fn, fn.tuple_exprs[ti]))
+                return;
+        }
+        strncpy(fn.body, fn.tuple_exprs[0], sizeof(fn.body) - 1);
     } else {
+        if (strstr(fn.body, "let (") != NULL) {
+            char desugared[FLOW_LEAN_BODY_MAX] = {0};
+            if (project_lean_tuple_component(spec, fn.body, strlen(fn.body), 0, 1, desugared, sizeof(desugared)) && desugared[0])
+                strncpy(fn.body, desugared, sizeof(fn.body) - 1);
+        }
         if (!is_valid_scalar_lean_body(spec, &fn)) return;
     }
     fn.estimated_wcet_ns = estimate_lean_ast_wcet_ns(&fn);
     spec->lean_functions[spec->lean_function_count++] = fn;
 }
 static int is_lean_top_decl(const char *line) {
-    static const char *const P[] = {"def ", "theorem ", "structure ", "inductive ", "namespace ", "end ", "@[", "#print ", "opaque ", "open ", "import ", "module", "deriving ", NULL};
+    static const char *const P[] = {
+        "def ", "theorem ", "lemma ", "abbrev ", "axiom ", "noncomputable ",
+        "structure ", "inductive ", "namespace ", "section ", "variable ",
+        "end ", "@[", "#print ", "#check ", "#eval ", "opaque ", "open ", "import ", "module", "deriving ", NULL
+    };
     for (int i = 0; P[i]; ++i) if (starts_with(line, P[i])) return 1;
     return 0;
 }
@@ -516,11 +869,32 @@ static int lean_eval_slice(const char *s, size_t len, const LeanEvalEnv *env, in
         }
     }
     if (len > 4 && !strncmp(s, "let ", 4)) {
-        const char *ce = NULL, *sep = NULL; int pd = 0;
+        const char *ce = NULL, *sep = NULL; int pd = 0, skip = 0;
         for (const char *p = s + 4; p + 1 < end; ++p) {
             if (*p == '(') pd++; else if (*p == ')') pd--;
             if (pd == 0 && !ce && p[0] == ':' && p[1] == '=') ce = p;
-            else if (pd == 0 && ce && (*p == ';' || *p == '\n' || (!strncmp(p, " in ", 4)))) { sep = p; break; }
+        }
+        if (ce) {
+            pd = 0; int ld = 0;
+            for (const char *p = ce + 2; p < end; ++p) {
+                if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
+                else if (pd == 0 && is_kw_tok(p, ce + 2, end, "let", 3)) ld++;
+                else if (pd == 0 && is_kw_tok(p, ce + 2, end, "in", 2)) {
+                    if (ld == 0) { sep = p; skip = 2; break; }
+                    ld--;
+                }
+            }
+            if (!sep) {
+                const char *r0 = ce + 2;
+                while (r0 < end && isspace((unsigned char)*r0)) ++r0;
+                pd = 0; int id = 0;
+                for (const char *p = r0; p < end; ++p) {
+                    if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
+                    else if (pd == 0 && is_kw_tok(p, r0, end, "if", 2)) id++;
+                    else if (pd == 0 && is_kw_tok(p, r0, end, "else", 4) && id > 0) id--;
+                    else if (pd == 0 && id == 0 && (*p == ';' || *p == '\n')) { sep = p; skip = 1; break; }
+                }
+            }
         }
         if (ce && sep) {
             char vname[FLOW_NAME] = {0};
@@ -531,13 +905,12 @@ static int lean_eval_slice(const char *s, size_t len, const LeanEvalEnv *env, in
                 int64_t rhs_val = 0;
                 if (!lean_eval_slice(ce + 2, (size_t)(sep - (ce + 2)), env, is_nat_ctx, depth + 1, &rhs_val)) return 0;
                 LeanEvalEnv next_env = *env;
-                if (next_env.var_count < 16) {
+                if (next_env.var_count < 32) {
                     strncpy(next_env.var_names[next_env.var_count], vname, FLOW_NAME - 1);
                     next_env.var_vals[next_env.var_count] = rhs_val;
                     next_env.var_is_nat[next_env.var_count] = is_nat_ctx;
                     next_env.var_count++;
                 }
-                size_t skip = (*sep == ';' || *sep == '\n') ? 1 : 4;
                 return lean_eval_slice(sep + skip, (size_t)(end - (sep + skip)), &next_env, is_nat_ctx, depth + 1, out);
             }
         }
@@ -716,6 +1089,21 @@ static int lean_eval_slice(const char *s, size_t len, const LeanEvalEnv *env, in
             if (!lean_eval_slice(tok_s[1], tok_l[1], env, 1, depth + 1, &a) ||
                 !lean_eval_slice(tok_s[2], tok_l[2], env, 1, depth + 1, &b)) return 0;
             *out = (!strncmp(tok_s[0], "flow_nat_min", 12)) ? ((uint64_t)a < (uint64_t)b ? a : b) : ((uint64_t)a > (uint64_t)b ? a : b);
+            return 1;
+        }
+        if (tok_l[0] == 14 && (!strncmp(tok_s[0], "flow_float_min", 14) || !strncmp(tok_s[0], "flow_float_max", 14)) && tok_cnt == 3) {
+            int64_t a = 0, b = 0;
+            if (!lean_eval_slice(tok_s[1], tok_l[1], env, 0, depth + 1, &a) ||
+                !lean_eval_slice(tok_s[2], tok_l[2], env, 0, depth + 1, &b)) return 0;
+            *out = (!strncmp(tok_s[0], "flow_float_min", 14)) ? (a < b ? a : b) : (a > b ? a : b);
+            return 1;
+        }
+        if (tok_l[0] >= 14 && !strncmp(tok_s[0], "flow_float_", 11) && tok_cnt == 2) {
+            int64_t a = 0;
+            if (!lean_eval_slice(tok_s[1], tok_l[1], env, 0, depth + 1, &a)) return 0;
+            if (tok_l[0] == 14 && !strncmp(tok_s[0], "flow_float_abs", 14)) *out = a < 0 ? -a : a;
+            else if (tok_l[0] == 15 && !strncmp(tok_s[0], "flow_float_sqrt", 15)) *out = a > 0 ? (int64_t)__builtin_sqrt((double)a) : 0;
+            else *out = a;
             return 1;
         }
         if ((tok_l[0] == 13 && !strncmp(tok_s[0], "flow_quantize", 13)) && tok_cnt == 5) {
@@ -1053,7 +1441,7 @@ int flow_verify_lean_theorems(const char *lean_source, char *err_msg, size_t err
             if (ce) { *ce = '\0'; strncpy(def_body, trim(ce + 2), sizeof(def_body) - 1); in_def = 2; }
         } else if (in_def == 2) {
             size_t bl = strlen(def_body);
-            if (bl + 1 + strlen(line) < sizeof(def_body)) { if (bl > 0) def_body[bl++] = ' '; strncpy(def_body + bl, line, sizeof(def_body) - bl - 1); }
+            if (bl + 1 + strlen(line) < sizeof(def_body)) { if (bl > 0) def_body[bl++] = '\n'; strncpy(def_body + bl, line, sizeof(def_body) - bl - 1); }
         } else if (in_thm && thm_cnt > 0) {
             size_t tl = strlen(thm_lines[thm_cnt - 1]);
             if (tl + 1 + strlen(line) < sizeof(thm_lines[0])) { thm_lines[thm_cnt - 1][tl] = ' '; strncpy(thm_lines[thm_cnt - 1] + tl + 1, line, sizeof(thm_lines[0]) - tl - 2); }
@@ -1527,7 +1915,7 @@ int parse_spec(FILE *input, FlowSpec *spec) {
     int is_literate = 0, is_lean_doc = 0, has_flow_kw = 0, in_code_block = 0, flow_block_completed = 0; long start_pos = ftell(input); if (start_pos >= 0) { while (fgets(raw, sizeof(raw), input)) {
             char *p = trim(raw); if (!strncmp(p, "```flow", 7) || !strncmp(p, "~~~flow", 7)) { is_literate = 1; break; }
             if (starts_with(p, "project ") || starts_with(p, "flow ") || starts_with(p, "bind ") || starts_with(p, "input ") || starts_with(p, "@quota") || starts_with(p, "@embodied") || starts_with(p, "@reload") || starts_with(p, "@patchbay") || starts_with(p, "patchbay ") || !strcmp(p, "patchbay {") || !strcmp(p, "require {")) has_flow_kw = 1;
-            if (starts_with(p, "namespace ") || starts_with(p, "theorem ") || starts_with(p, "@[export ") || (starts_with(p, "structure ") && strstr(p, " where")) || (starts_with(p, "def ") && strstr(p, ":="))) is_lean_doc = 1; } fseek(input, start_pos, SEEK_SET);
+            if (starts_with(p, "namespace ") || starts_with(p, "theorem ") || starts_with(p, "@[export ") || starts_with(p, "inductive ") || (starts_with(p, "structure ") && strstr(p, " where")) || starts_with(p, "def ")) is_lean_doc = 1; } fseek(input, start_pos, SEEK_SET);
         if (is_lean_doc && !has_flow_kw && !is_literate) return parse_lean_spec(input, spec); }
     memset(spec, 0, sizeof(*spec)); while (fgets(raw, sizeof(raw), input)) { ++line_number; char *line = trim(raw); if (is_literate) { if (!in_code_block) {
                 if (!strncmp(line, "```flow", 7) || !strncmp(line, "~~~flow", 7)) { if (flow_block_completed) break; in_code_block = 1; } continue;
