@@ -31,22 +31,28 @@ Instead of inventing a third configuration or annotation DSL (`@quota`, `@embodi
 │     • Flattens nested structures (`PoseFrame.pos.x` -> `pos_x`) & tuple `<fn>_tuple_t` │
 │     • Pure data fields naturally determine C17 ABI alignment & byte stride             │
 │                                                                                        │
-│  2️⃣ Sum Types -> C17 Enums (`inductive E`)                                            │
+│  2️⃣ Sum Types -> C17 Enums & Zero-Branch FSM LUTs (`inductive E`)                     │
 │     • Finite `inductive` types map 1-to-1 to C17 `typedef enum`                        │
+│     • Pure `inductive` state transitions (`match s, ev with`) compile to zero-branch   │
+│       C17 lookup tables (`static const uint8_t <fn>_transition_table[|S|][|E|]`)       │
 │     • `Lean-RT` Zero-GC Gate rejects recursive inductives, `List`, `Array`, closures   │
 │                                                                                        │
-│  3️⃣ Pure Function Composition -> C17 Static Inline Graph (`def`, `private def`)       │
+│  3️⃣ Pure Function Composition -> C17 Static Inline & 2-Jet AD Graph (`def`)           │
 │     • `private def` -> internal C17 `static inline` helper / constant                  │
-│     • `def f` -> Dual-Track C17 operators:                                             │
+│     • `def f` -> Tri-Track C17 operators:                                              │
 │         - IEEE-754 `double`: `f(...)` (DSO) & `flowc_f(...)` (`static inline` header)  │
 │         - Exact Q32.32 `flow_fx64_t`: `f_fx(...)` & `flowc_f_fx(...)`                  │
+│         - 2-Jet Forward AD `FlowJetScalar2`: `jet2_f(...)` & `flowc_jet2_f(...)`       │
+│           computing `(f(x), f'(x), f''(x))` (Value, Delta, Gamma) via 2-Jet chain rule │
 │     • `let x := rhs in` & `let (a, b) := g x in` lower to real C17 local variables     │
 │       and direct C17 function calls (`g(x, &a, &b)`)                                   │
 │                                                                                        │
 │  4️⃣ Theorems -> C17 Hardware Contracts (`theorem` -> `lean_<fn>`)                     │
-│     • Hypotheses (`(h : P x)` or `P x → Q (f x)`) -> Precondition `FLOW_LEAN_PRE_GUARD`│
-│     • Conclusion (`Q (f x)`) -> Postcondition `FLOW_LEAN_POST_GUARD`                   │
-│     • Multiple theorems on `f` automatically conjoin: (/\ P_i) => (/\ Q_j)             │
+│     • Structural Domain Precondition (`structure` `Prop` fields & `def` proof params) │
+│       -> `if (!(domain_ok)) return fallback;` (`FLOW_LEAN_PRE_GUARD`)                 │
+│     • Theorem Hypotheses `P(x) -> Q(x, f(x))` -> Material Implication Guard:          │
+│       `if ((P(x)) && !(Q(x, _ret))) return fallback;` (`FLOW_LEAN_IMPLIES_GUARD`)     │
+│     • Local theorems (`v > 0`, `v < 0`) stack into a denser mesh without blocking!    │
 │                                                                                        │
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -57,9 +63,9 @@ Instead of inventing a third configuration or annotation DSL (`@quota`, `@embodi
 
 | Dimension | Traditional FFI / DSL Stack | FLOW Pure `.lean` + Explicit C17 |
 | :--- | :--- | :--- |
-| **Single Source of Math** | Separate YAML/DSL annotations + manual `@[export]` + C/C++ re-implementation | **100% Pure `.lean`** (`structure`, `inductive`, `def`, `theorem`) with **Zero `@[export]`** and **Zero `@` Config Injection** |
-| **Dual-Track Numerics & NaN Safety** | Lossy float/fixed mismatch & hand-written `isfinite()` guards | **0-ULP IEEE-754 `double`** (`flowc_<fn>`) + **Deterministic 128-bit-intermediate $Q32.32$ Fixed-Point** (`flowc_<fn>_fx` / `flow_fx64_t`) + **256-Bit Montgomery/Miller-Rabin BigInt** (`FlowU256`, `secp256k1` verified) |
-| **Theorem-Backed Hardware Contracts** | Detached proofs or manual runtime `assert()` | Every `theorem` proven about `def f` automatically synthesizes `lean_f()` / `flowc_lean_f()` with conjoined pre-guards (`\bigwedge_i P_i`) and post-guards (`\bigwedge_j Q_j`) |
+| **Single Source of Math** | Separate YAML/DSL annotations + manual `@[export]` + C/C++ re-implementation | **100% Pure `.lean`** (`structure`, `inductive`, `def`, `theorem`) with **Zero `@[export]`**, **Zero `@` Config Injection**, and **Zero-Branch C17 FSM LUTs** (`<fn>_transition_table[|S|][|E|]`) |
+| **Tri-Track Numerics & 2-Jet AD** | Lossy float/fixed mismatch & hand-written analytical derivatives / Greeks | **0-ULP IEEE-754 `double`** (`flowc_<fn>`) + **Deterministic $Q32.32$ Fixed-Point** (`flowc_<fn>_fx`) + **2-Jet Forward AD** (`flowc_jet2_<fn>` / `FlowJetScalar2` computing `(f, f', f'')`) + **256-Bit BigInt** (`FlowU256`) |
+| **Theorem-Backed Hardware Contracts** | Detached proofs or manual runtime `assert()` | Structural domain preconditions (`FLOW_LEAN_PRE_GUARD`) + per-theorem **Material Implication Guards** (`P_k(x) -> Q_k(x, _ret)` via `FLOW_LEAN_IMPLIES_GUARD`) in `lean_<fn>()` / `flowc_lean_<fn>()` |
 | **Explicit C17 Runtime (`libflow_rt.a`)** | Opaque compiler-generated pipeline boilerplate | Clean C17 primitives: lock-free **`flow_spsc.h`** ring buffers, 64B cache-line-aligned **`reload.h`** QSBR hot-swap (`< 100ns`), symplectic **`flow_jet.h`** contact manifolds, **`polyhedral.h`**, and **`cubical_hott.h`** |
 | **Zero-`sorry` & `Lean-RT` Zero-GC Gate** | Unchecked axioms or hidden GC allocations | Rejects `sorry`, `admit`, `sorryAx`, `native_decide`, custom `axiom`, unclosed `/-` comments, `List`, `Array`, `ByteArray`, `++`, closures (`fun x =>`), and recursion at compile time |
 
@@ -109,11 +115,31 @@ Compile to C17 + static inline C17 header, or build a shared library directly:
 # Emit C17 implementation + static inline C17 header (flowc_bounded_gain, flowc_bounded_gain_fx, flowc_lean_bounded_gain)
 ./build/flowc control.lean -o build/control.c --target-c-header build/control.h
 
+# Emit C17 implementation + MATLAB / Simulink MEX dispatcher (`mexFunction`)
+./build/flowc control.lean -o build/control_mex.c --target-c-header build/control.h --target-mex
+
 # Or build build/libcontrol.so + build/control.h in one command
 ./build/flowy build --shared control.lean
 ```
 
-### 3. Explicit C17 Pipeline Wiring (`libflow_rt.a`)
+### 3. MATLAB / Simulink Zero-Modification C Caller & Native MEX (`--target-mex`)
+
+1. **Simulink `C Caller Block` & MATLAB `loadlibrary` / `clibgen` (Zero-Modification)**:
+   Because `--target-c-header` emits a 100% pure C17 header (`typedef struct` with `Prop` proof fields erased and pure `double` / `flow_fx64_t` operators) and suppresses `int main(void)` in the `.c` file, `build/control.h` and `build/control.c` can be dragged directly into Simulink's **C Caller Block** for closed-loop SIL/PIL verification or loaded via `loadlibrary('libcontrol.so', 'control.h')`.
+2. **High-Throughput Native MEX Dispatcher (`--target-mex`)**:
+   For million-iteration Monte Carlo or historical tick backtesting in MATLAB, `--target-mex` appends a native C17 `mexFunction` dispatcher to the generated `.c` file:
+   ```matlab
+   % Compile in MATLAB (one line):
+   mex -Iinclude build/control_mex.c
+
+   % Invoke theorem-guarded or raw C17 operators at native speed:
+   cmd = control_mex('lean_bounded_gain', 120.0, 80.0);
+
+   % Or evaluate 2-Jet Forward AD (Value, 1st-order Delta, 2nd-order Gamma) in one call:
+   [val, delta, gamma] = control_mex('jet2_bounded_gain', 60.0, 80.0);
+   ```
+
+### 4. Explicit C17 Pipeline Wiring (`libflow_rt.a`)
 
 Wire your synthesized C17 operators with explicit C17 primitives (`flow_spsc.h`, `flow_jet.h`, `reload.h`):
 
@@ -142,7 +168,7 @@ int main(void) {
 }
 ```
 
-### 4. Introspection & Formal Audit (`flowy`)
+### 5. Introspection & Formal Audit (`flowy`)
 
 ```sh
 # Verify Cubical HoTT Universe U_0 univalence & QF_LIA SMT soundness

@@ -60,7 +60,8 @@ int main(void) {
             "namespace Flow.SystemPipeline\n"
             "structure TaskFrame where\n"
             "  taskId : UInt64\n"
-            "  weight : UInt64\n"
+            "  w      : UInt64\n"
+            "  h_w    : w > 0\n"
             "def slaLatencyNs : Nat := 25000\n"
             "def memoryQuotaBytes : Nat := 16777216\n"
             "def inputMaxCount : Nat := 2048\n"
@@ -88,7 +89,8 @@ int main(void) {
         FLOW_ASSERT_EQ(spec.max_count, 1024);
         FLOW_ASSERT_EQ(spec.memory_mb, 64);
 
-        /* Verify private vs non-private def and theorem pre/post contract extraction */
+        /* Verify private vs non-private def, structural domain precond (from structure Prop field)
+         * and theorem material implication guards P(x) => Q(x, _ret) */
         const FlowLeanFunction *fn_priv = NULL;
         const FlowLeanFunction *fn_pub = NULL;
         for (size_t i = 0; i < spec.lean_function_count; ++i) {
@@ -98,8 +100,10 @@ int main(void) {
         FLOW_ASSERT_TRUE(fn_priv != NULL && fn_priv->is_private == 1);
         FLOW_ASSERT_TRUE(fn_pub != NULL && fn_pub->is_private == 0);
         FLOW_ASSERT_TRUE(strstr(fn_pub->precond_expr, "w > 0") != NULL);
-        FLOW_ASSERT_TRUE(strstr(fn_pub->precond_expr, "w < 1000") != NULL);
+        FLOW_ASSERT_EQ(fn_pub->thm_guard_count, 2u);
+        FLOW_ASSERT_TRUE(strstr(fn_pub->postcond_expr, "w > 0") != NULL);
         FLOW_ASSERT_TRUE(strstr(fn_pub->postcond_expr, "_ret > w") != NULL);
+        FLOW_ASSERT_TRUE(strstr(fn_pub->postcond_expr, "w < 1000") != NULL);
         FLOW_ASSERT_TRUE(strstr(fn_pub->postcond_expr, "_ret < 2001") != NULL);
 
         /* Verify retired @quota / @embodied / @reload / @patchbay annotations are rejected */
@@ -465,6 +469,9 @@ int main(void) {
             "  pos : Vec2\n"
             "  vel : Vel2\n"
             "  ticks : UInt64\n"
+            "structure GainDomain where\n"
+            "  limit : Float\n"
+            "  h_lim : limit > 0.0\n"
             "private def half_dt : Float := 0.5\n"
             "def step_pose (p : PoseFrame) : PoseFrame :=\n"
             "  { pos := { x := p.pos.x + p.vel.vx * half_dt, y := p.pos.y + p.vel.vy * half_dt }, vel := { vx := p.vel.vx, vy := p.vel.vy }, ticks := p.ticks + 1 }\n"
@@ -475,6 +482,7 @@ int main(void) {
             "theorem step_pose_ticks_monotonic (p : PoseFrame) : (step_pose p).ticks > p.ticks := by decide\n"
             "theorem bounded_gain_contract (x : Float) (limit : Float) (h_lim : limit > 0.0) : bounded_gain x limit <= limit := by decide\n"
             "theorem bounded_gain_nonneg (x : Float) (limit : Float) : x >= 0.0 → bounded_gain x limit >= 0.0 := by decide\n"
+            "theorem bounded_gain_neg (x : Float) (limit : Float) (h_lim : limit > 0.0) : x < 0.0 → bounded_gain x limit < 0.0 := by decide\n"
             "end Flow.Stage6Nested\n", nlf);
         fclose(nlf);
 
@@ -517,12 +525,12 @@ int main(void) {
               "    bg_fn_t fn_lean_bg = (bg_fn_t)dlsym(dl, \"lean_bounded_gain\");\n"
               "    sp_fn_t fn_lean_sp = (sp_fn_t)dlsym(dl, \"lean_step_pose\");\n"
               "    assert(fn_lean_bg != NULL && fn_lean_sp != NULL);\n"
-              "    /* Valid precondition (limit > 0.0 && x >= 0.0) and postcondition (_ret <= limit && _ret >= 0.0) */\n"
+              "    /* Valid domain (limit > 0.0) & positive x: satisfies x >= 0.0 => _ret >= 0.0 */\n"
               "    assert(fabs(fn_lean_bg(120.0, 80.0) - 80.0) < 1e-9);\n"
-              "    /* Violating theorem 1 hypothesis (limit <= 0.0) triggers hardware-grade pre-guard -> 0.0 */\n"
+              "    /* Violating structural domain precondition (limit <= 0.0) triggers domain pre-guard -> 0.0 */\n"
               "    assert(fn_lean_bg(50.0, -10.0) == 0.0);\n"
-              "    /* Violating theorem 2 hypothesis (x < 0.0) triggers conjoined hardware-grade pre-guard -> 0.0 */\n"
-              "    assert(fn_lean_bg(-5.0, 80.0) == 0.0);\n"
+              "    /* Valid negative x = -5.0: material implication guards (x >= 0 => _ret >= 0) and (x < 0 => _ret < 0) both pass! */\n"
+              "    assert(fabs(fn_lean_bg(-5.0, 80.0) - (-5.0)) < 1e-9);\n"
               "    PoseFrame pf = { 1.0, 2.0, 4.0, -2.0, 10ULL };\n"
               "    PoseFrame out = fn_lean_sp(pf);\n"
               "    assert(fabs(out.pos_x - 3.0) < 1e-9 && fabs(out.pos_y - 1.0) < 1e-9 && out.ticks == 11ULL);\n"
@@ -934,7 +942,218 @@ int main(void) {
         remove("/tmp/flow_ff_drv.c");
         remove("/tmp/flow_ff_drv");
 
-        printf("  ✓ Stage 10 Passed: Pure C17 runtime (libflow_rt.a), HoTT U_0 Univalence, and FlowFinance C17 verified.\n\n");
+        /* 5. MATLAB --target-mex, Material Implication Guards, 2-Jet Forward AD & Zero-Branch FSM LUT Regression:
+         *    (1) Mathlib |v| and |a - b| syntax sugar
+         *    (2) Indentation-aware multi-line let bindings
+         *    (3) Structural domain precondition (ReynoldsDomain Prop fields) vs Theorem Material Implication Guards (P => Q)
+         *    (4) namespace Spec + namespace Exec computable mirror override inheriting Spec theorem contract
+         *    (5) 2-Jet Forward AD synthesis (flowc_jet2_<fn>, jet2_<fn>, and MEX "jet2_<fn>" returning [v, d1, d2])
+         *    (6) Zero-branch C17 LUT synthesis (static const uint8_t step_order_fsm_transition_table[6][6]) for inductive FSM */
+        const char *mex_lean = "/tmp/flow_mex_frictions.lean";
+        FILE *mxf = fopen(mex_lean, "w");
+        FLOW_ASSERT_TRUE(mxf != NULL);
+        fputs("namespace FlowFinance.MexBridge\n"
+              "noncomputable section\n"
+              "structure ReynoldsDomain where\n"
+              "  w_v  : ℝ\n"
+              "  w_a  : ℝ\n"
+              "  h_wv : w_v ≥ 0\n"
+              "  h_wa : w_a > 0\n"
+              "inductive OrderState\n"
+              "  | Idle\n"
+              "  | PendingNew\n"
+              "  | Working\n"
+              "  | PartialFill\n"
+              "  | PendingCancel\n"
+              "  | Terminal\n"
+              "inductive ExecEvent\n"
+              "  | EvSubmit\n"
+              "  | EvAck\n"
+              "  | EvPartial\n"
+              "  | EvFill\n"
+              "  | EvCancelReq\n"
+              "  | EvCanceled\n"
+              "def step_order_fsm (s : OrderState) (ev : ExecEvent) : OrderState :=\n"
+              "  match s, ev with\n"
+              "  | OrderState.Idle, ExecEvent.EvSubmit => OrderState.PendingNew\n"
+              "  | OrderState.PendingNew, ExecEvent.EvAck => OrderState.Working\n"
+              "  | OrderState.PendingNew, ExecEvent.EvFill => OrderState.Terminal\n"
+              "  | OrderState.PendingNew, ExecEvent.EvCanceled => OrderState.Terminal\n"
+              "  | OrderState.Working, ExecEvent.EvPartial => OrderState.PartialFill\n"
+              "  | OrderState.Working, ExecEvent.EvFill => OrderState.Terminal\n"
+              "  | OrderState.Working, ExecEvent.EvCancelReq => OrderState.PendingCancel\n"
+              "  | OrderState.Working, ExecEvent.EvCanceled => OrderState.Terminal\n"
+              "  | OrderState.PartialFill, ExecEvent.EvPartial => OrderState.PartialFill\n"
+              "  | OrderState.PartialFill, ExecEvent.EvFill => OrderState.Terminal\n"
+              "  | OrderState.PartialFill, ExecEvent.EvCancelReq => OrderState.PendingCancel\n"
+              "  | OrderState.PartialFill, ExecEvent.EvCanceled => OrderState.Terminal\n"
+              "  | OrderState.PendingCancel, ExecEvent.EvPartial => OrderState.PendingCancel\n"
+              "  | OrderState.PendingCancel, ExecEvent.EvFill => OrderState.Terminal\n"
+              "  | OrderState.PendingCancel, ExecEvent.EvCanceled => OrderState.Terminal\n"
+              "  | OrderState.Terminal, _ => OrderState.Terminal\n"
+              "  | _, _ => s\n"
+              "theorem no_zombie_order (s : OrderState) (ev : ExecEvent)\n"
+              "    (h_term : s = OrderState.Terminal) :\n"
+              "    step_order_fsm s ev = OrderState.Terminal := by decide\n"
+              "noncomputable def eval_reynolds_domain (dom : ReynoldsDomain) (v : ℝ) : ℝ :=\n"
+              "  dom.w_v * |v| + dom.w_a\n"
+              "noncomputable def option_payoff_smooth (S : ℝ) (K : ℝ) : ℝ :=\n"
+              "  let d := S - K\n"
+              "  0.5 * d + 0.5 * Real.sqrt (d * d + 4.0)\n"
+              "noncomputable def portfolio_utility (S : ℝ) (K : ℝ) : ℝ :=\n"
+              "  let v := option_payoff_smooth S K\n"
+              "  v * v + 0.1 * (S ^ 3.0)\n"
+              "namespace Spec\n"
+              "noncomputable def scale_term (w : ℝ) (x : ℝ) : ℝ := w * |x|\n"
+              "noncomputable def hamiltonian_reynolds (w_v : ℝ) (w_a : ℝ) (v : ℝ) (a : ℝ) : ℝ :=\n"
+              "  w_v * |v| + w_a * |a|\n"
+              "theorem hamiltonian_reynolds_nonneg (w_v : ℝ) (w_a : ℝ) (v : ℝ) (a : ℝ)\n"
+              "    (h_wv : w_v ≥ 0) (h_wa : w_a > 0) :\n"
+              "    hamiltonian_reynolds w_v w_a v a ≥ 0 := by decide\n"
+              "theorem hamiltonian_reynolds_bullish_branch (w_v : ℝ) (w_a : ℝ) (v : ℝ) (a : ℝ)\n"
+              "    (h_wv : w_v ≥ 0) (h_wa : w_a > 0) (h_v_pos : v > 0) :\n"
+              "    hamiltonian_reynolds w_v w_a v a ≥ w_v * v := by decide\n"
+              "theorem hamiltonian_reynolds_bearish_branch (w_v : ℝ) (w_a : ℝ) (v : ℝ) (a : ℝ)\n"
+              "    (h_wv : w_v ≥ 0) (h_wa : w_a > 0) (h_v_neg : v < 0) :\n"
+              "    hamiltonian_reynolds w_v w_a v a ≥ w_v * (-v) := by decide\n"
+              "theorem hamiltonian_reynolds_iff (w_v : ℝ) (w_a : ℝ) (v : ℝ) (a : ℝ) :\n"
+              "    hamiltonian_reynolds w_v w_a v a = 0 ↔ v = 0 := by decide\n"
+              "end Spec\n"
+              "namespace Exec\n"
+              "def hamiltonian_reynolds (w_v : Float) (w_a : Float) (v : Float) (a : Float) : Float :=\n"
+              "  let ke :=\n"
+              "    scale_term w_v\n"
+              "      v\n"
+              "  let pe := f_max\n"
+              "    (w_a * |a - 0.0|)\n"
+              "    1.0\n"
+              "  ke +\n"
+              "    pe\n"
+              "end Exec\n"
+              "end FlowFinance.MexBridge\n", mxf);
+        fclose(mxf);
+
+        char mex_cmd[1024];
+        snprintf(mex_cmd, sizeof(mex_cmd),
+                 "%s/flowc %s -o /tmp/flow_mex_gen.c --target-c-header /tmp/flow_mex_gen.h --target-mex",
+                 FLOW_BUILD_DIR, mex_lean);
+        FLOW_ASSERT_EQ(system(mex_cmd), 0);
+
+        /* Verify that zero-branch FSM transition table and 2-Jet AD operators are synthesized in .h and .c */
+        FILE *chk_h = fopen("/tmp/flow_mex_gen.h", "r");
+        FLOW_ASSERT_TRUE(chk_h != NULL);
+        char *h_text = (char *)calloc(1, 65536);
+        FLOW_ASSERT_TRUE(h_text != NULL);
+        (void)fread(h_text, 1, 65535, chk_h);
+        fclose(chk_h);
+        FLOW_ASSERT_TRUE(strstr(h_text, "static const uint8_t step_order_fsm_transition_table[6][6] = {") != NULL);
+        FLOW_ASSERT_TRUE(strstr(h_text, "FlowJetScalar2 flowc_jet2_portfolio_utility(FlowJetScalar2 S, FlowJetScalar2 K)") != NULL);
+        FLOW_ASSERT_TRUE(strstr(h_text, "FlowJetScalar2 jet2_portfolio_utility(FlowJetScalar2 S, FlowJetScalar2 K);") != NULL);
+        FLOW_ASSERT_TRUE(strstr(h_text, "FLOW_LEAN_IMPLIES_GUARD(") != NULL);
+        free(h_text);
+
+        FILE *mex_drv = fopen("/tmp/flow_mex_drv.c", "w");
+        FLOW_ASSERT_TRUE(mex_drv != NULL);
+        fputs("#include \"bitspace.h\"\n"
+              "#include \"/tmp/flow_mex_gen.h\"\n"
+              "#include <assert.h>\n"
+              "#include <math.h>\n"
+              "#include <string.h>\n"
+              "typedef struct { int is_str; char str[64]; double val; } MockMx;\n"
+              "static MockMx s_scalars[8];\n"
+              "static int s_scalar_idx = 0;\n"
+              "static int s_mex_err_triggered = 0;\n"
+              "int mxGetString(const void *pm, char *str, size_t strlen) {\n"
+              "    const MockMx *m = (const MockMx *)pm;\n"
+              "    if (!m || !m->is_str) return 1;\n"
+              "    strncpy(str, m->str, strlen - 1);\n"
+              "    str[strlen - 1] = '\\0';\n"
+              "    return 0;\n"
+              "}\n"
+              "double mxGetScalar(const void *pm) {\n"
+              "    const MockMx *m = (const MockMx *)pm;\n"
+              "    return m ? m->val : 0.0;\n"
+              "}\n"
+              "void *mxCreateDoubleScalar(double value) {\n"
+              "    MockMx *m = &s_scalars[s_scalar_idx++ & 7];\n"
+              "    m->is_str = 0;\n"
+              "    m->val = value;\n"
+              "    return m;\n"
+              "}\n"
+              "void mexErrMsgIdAndTxt(const char *id, const char *msg, ...) {\n"
+              "    (void)id; (void)msg;\n"
+              "    s_mex_err_triggered = 1;\n"
+              "}\n"
+              "extern void mexFunction(int nlhs, void *plhs[], int nrhs, const void *prhs[]);\n"
+              "int main(void) {\n"
+              "    /* 1. Coexisting bullish (v > 0) and bearish (v < 0) Material Implication Guards */\n"
+              "    MockMx cmd_lean = { .is_str = 1, .str = \"lean_hamiltonian_reynolds\" };\n"
+              "    MockMx a_wv = { .val = 2.0 }, a_wa = { .val = 4.0 }, a_v = { .val = -3.0 }, a_a = { .val = -0.5 };\n"
+              "    const void *prhs[5] = { &cmd_lean, &a_wv, &a_wa, &a_v, &a_a };\n"
+              "    void *plhs[3] = { NULL, NULL, NULL };\n"
+              "    mexFunction(1, plhs, 5, prhs);\n"
+              "    assert(!s_mex_err_triggered && plhs[0] != NULL);\n"
+              "    assert(fabs(mxGetScalar(plhs[0]) - 8.0) < 1e-9);\n"
+              "    MockMx a_v_pos = { .val = 3.0 };\n"
+              "    const void *prhs_pos[5] = { &cmd_lean, &a_wv, &a_wa, &a_v_pos, &a_a };\n"
+              "    mexFunction(1, plhs, 5, prhs_pos);\n"
+              "    assert(fabs(mxGetScalar(plhs[0]) - 8.0) < 1e-9);\n"
+              "    /* 2. Structural domain precondition from ReynoldsDomain Prop fields */\n"
+              "    ReynoldsDomain ok_dom = { .w_v = 2.0, .w_a = 4.0 };\n"
+              "    ReynoldsDomain bad_dom = { .w_v = 2.0, .w_a = -1.0 };\n"
+              "    assert(fabs(lean_eval_reynolds_domain(ok_dom, -3.0) - 10.0) < 1e-9);\n"
+              "    assert(lean_eval_reynolds_domain(bad_dom, -3.0) == 0.0);\n"
+              "    /* 3. 2-Jet Forward AD: verify Value (0-jet), Delta (1-jet), and Gamma (2-jet) */\n"
+              "    double S = 102.0, K = 100.0;\n"
+              "    double d = S - K;\n"
+              "    double r = sqrt(d * d + 4.0);\n"
+              "    double v_ref = 0.5 * d + 0.5 * r;\n"
+              "    double vp_ref = 0.5 + 0.5 * (d / r);\n"
+              "    double vpp_ref = 2.0 / (r * r * r);\n"
+              "    double u_ref = v_ref * v_ref + 0.1 * S * S * S;\n"
+              "    double up_ref = 2.0 * v_ref * vp_ref + 0.3 * S * S;\n"
+              "    double upp_ref = 2.0 * (vp_ref * vp_ref + v_ref * vpp_ref) + 0.6 * S;\n"
+              "    FlowJetScalar2 j_inl = flowc_jet2_portfolio_utility(flow_jet2_var(S), flow_jet2_const(K));\n"
+              "    FlowJetScalar2 j_abi = jet2_portfolio_utility(flow_jet2_var(S), flow_jet2_const(K));\n"
+              "    assert(fabs(j_inl.v - u_ref) < 1e-10 && fabs(j_abi.v - u_ref) < 1e-10);\n"
+              "    assert(fabs(j_inl.d1 - up_ref) < 1e-10 && fabs(j_abi.d1 - up_ref) < 1e-10);\n"
+              "    assert(fabs(j_inl.d2 - upp_ref) < 1e-10 && fabs(j_abi.d2 - upp_ref) < 1e-10);\n"
+              "    /* Verify MEX dispatcher for jet2_portfolio_utility returning [v, d1, d2] */\n"
+              "    MockMx cmd_jet = { .is_str = 1, .str = \"jet2_portfolio_utility\" };\n"
+              "    MockMx mx_S = { .val = S }, mx_K = { .val = K };\n"
+              "    const void *prhs_jet[3] = { &cmd_jet, &mx_S, &mx_K };\n"
+              "    mexFunction(3, plhs, 3, prhs_jet);\n"
+              "    assert(fabs(mxGetScalar(plhs[0]) - u_ref) < 1e-10);\n"
+              "    assert(fabs(mxGetScalar(plhs[1]) - up_ref) < 1e-10);\n"
+              "    assert(fabs(mxGetScalar(plhs[2]) - upp_ref) < 1e-10);\n"
+              "    /* 4. Zero-branch C17 lookup table FSM transitions + no_zombie_order theorem guard */\n"
+              "    OrderState st = Idle;\n"
+              "    st = lean_step_order_fsm(st, EvSubmit);\n"
+              "    assert(st == PendingNew);\n"
+              "    st = lean_step_order_fsm(st, EvAck);\n"
+              "    assert(st == Working);\n"
+              "    st = lean_step_order_fsm(st, EvPartial);\n"
+              "    assert(st == PartialFill);\n"
+              "    st = lean_step_order_fsm(st, EvCancelReq);\n"
+              "    assert(st == PendingCancel);\n"
+              "    st = lean_step_order_fsm(st, EvFill);\n"
+              "    assert(st == Terminal);\n"
+              "    assert(lean_step_order_fsm(Terminal, EvSubmit) == Terminal);\n"
+              "    assert(flowc_step_order_fsm(Working, EvCanceled) == Terminal);\n"
+              "    return 0;\n"
+              "}\n", mex_drv);
+        fclose(mex_drv);
+
+        /* Compile & link /tmp/flow_mex_gen.c directly with /tmp/flow_mex_drv.c WITHOUT -DFLOW_SHARED_LIB! */
+        FLOW_ASSERT_EQ(system("cc -std=c17 -Wall -Wextra -Wpedantic -Werror -Wmisleading-indentation -O2 -Isrc /tmp/flow_mex_drv.c /tmp/flow_mex_gen.c -lm -lpthread -o /tmp/flow_mex_drv && /tmp/flow_mex_drv"), 0);
+
+        remove(mex_lean);
+        remove("/tmp/flow_mex_gen.c");
+        remove("/tmp/flow_mex_gen.h");
+        remove("/tmp/flow_mex_drv.c");
+        remove("/tmp/flow_mex_drv");
+
+        printf("  ✓ Stage 10 Passed: Pure C17 runtime (libflow_rt.a), HoTT U_0, FlowFinance C17 & MATLAB --target-mex verified.\n\n");
     }
 
     FLOW_TEST_SUITE_END();

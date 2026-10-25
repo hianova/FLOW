@@ -64,6 +64,37 @@ static int abi_fn_has_fx_variant(const SemanticIR *ir, const FlowLeanFunction *f
     }
     return has_float && !has_struct;
 }
+static int abi_body_has_ident_tok(const char *s, const char *ident) {
+    if (!s || !ident || !ident[0]) return 0;
+    size_t ilen = strlen(ident);
+    for (const char *p = strstr(s, ident); p; p = strstr(p + 1, ident)) {
+        int l_ok = (p == s) || (!isalnum((unsigned char)p[-1]) && p[-1] != '_' && p[-1] != '.');
+        int r_ok = !isalnum((unsigned char)p[ilen]) && p[ilen] != '_' && p[ilen] != '.';
+        if (l_ok && r_ok) return 1;
+    }
+    return 0;
+}
+static int abi_fn_has_jet2_variant_depth(const SemanticIR *ir, const FlowLeanFunction *fn, int depth) {
+    if (depth > 4 || !fn || fn->is_struct_transform || fn->is_tuple_return || fn->param_count == 0) return 0;
+    if (strcmp(fn->return_type, "Float") != 0 && strcmp(fn->return_type, "Float32") != 0) return 0;
+    if (strstr(fn->body, "let (") != NULL) return 0;
+    for (size_t pi = 0; pi < fn->param_count; ++pi) {
+        if (abi_find_lean_struct(ir, fn->param_types[pi])) return 0;
+        if (strcmp(fn->param_types[pi], "Float") != 0 && strcmp(fn->param_types[pi], "Float32") != 0) return 0;
+    }
+    if (ir) {
+        for (size_t k = 0; k < ir->lean_function_count; ++k) {
+            if (&ir->lean_functions[k] == fn) continue;
+            if (abi_body_has_ident_tok(fn->body, ir->lean_functions[k].name) &&
+                !abi_fn_has_jet2_variant_depth(ir, &ir->lean_functions[k], depth + 1)) return 0;
+        }
+    }
+    return 1;
+}
+static int abi_fn_has_jet2_variant(const SemanticIR *ir, const FlowLeanFunction *fn) {
+    if (!fn || fn->is_private) return 0;
+    return abi_fn_has_jet2_variant_depth(ir, fn, 0);
+}
 static int abi_fn_has_lean_wrapper(const SemanticIR *ir, const FlowLeanFunction *fn) {
     if (!fn || fn->is_private || !fn->name[0] || !strncmp(fn->name, "lean_", 5)) return 0;
     if (ir) {
@@ -157,7 +188,8 @@ int flow_abi_emit_c_header(FILE *output, const FlowComponentABI *abi) { if (!out
         "#ifdef __cplusplus\nextern \"C\" {\n#endif\ntypedef void* %s_Handle;\n"
         "#ifndef FLOW_LEAN_CONTRACT_GUARDS_DEFINED\n#define FLOW_LEAN_CONTRACT_GUARDS_DEFINED\n"
         "#define FLOW_LEAN_PRE_GUARD(cond, fallback_status) do { if (__builtin_expect(!(cond), 0)) { return (fallback_status); } } while (0)\n"
-        "#define FLOW_LEAN_POST_GUARD(cond, fallback_status) do { if (__builtin_expect(!(cond), 0)) { return (fallback_status); } } while (0)\n#endif\n"
+        "#define FLOW_LEAN_POST_GUARD(cond, fallback_status) do { if (__builtin_expect(!(cond), 0)) { return (fallback_status); } } while (0)\n"
+        "#define FLOW_LEAN_IMPLIES_GUARD(hyp, conc, fallback_status) do { if (__builtin_expect((hyp) && !(conc), 0)) { return (fallback_status); } } while (0)\n#endif\n"
         "typedef struct { void *address; size_t length, alignment; int mutability, ownership; uint64_t lifetime_epoch; int is_relocatable, is_validated, mode; } %s_MemoryView;\n"
         "#ifndef FLOW_STATUS_CODE_DEFINED\n#define FLOW_STATUS_CODE_DEFINED\n"
         "typedef enum { FLOW_OK = 0, FLOW_ERR_INVALID_ARG = -1, FLOW_ERR_QUOTA_OR_STRIDE = -2, FLOW_ERR_KERNEL_UNBOUND = -3, FLOW_ERR_WATCHDOG_ESTOP = -4 } FlowStatusCode;\n"
@@ -251,9 +283,98 @@ int flow_abi_emit_c_header(FILE *output, const FlowComponentABI *abi) { if (!out
                 }
                 fprintf(output, ");\n");
             }
+            if (abi_fn_has_jet2_variant(abi->ir, fn)) {
+                fprintf(output, "FlowJetScalar2 jet2_%s(", fn->name);
+                for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                    char p_ident[96];
+                    fprintf(output, "%sFlowJetScalar2 %s", pi > 0 ? ", " : "", abi_escape_c_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                }
+                fprintf(output, ");\n");
+            }
         }
     }
     fprintf(output, "#ifdef __cplusplus\n}\n#endif\n#endif /* FLOW_ABI_%s_H */\n", id_upper); return ferror(output) == 0; }
+int flow_abi_emit_mex_dispatcher(FILE *output, const SemanticIR *ir) {
+    if (!output || !ir) return 0;
+    fputs(
+        "\n/* Auto-generated MATLAB MEX C17 Dispatcher (--target-mex) */\n"
+        "#if defined(MATLAB_MEX_FILE)\n"
+        "#include \"mex.h\"\n"
+        "#elif !defined(FLOW_MEX_TYPES_DEFINED)\n"
+        "#define FLOW_MEX_TYPES_DEFINED\n"
+        "typedef void mxArray;\n"
+        "extern int mxGetString(const mxArray *pm, char *str, size_t strlen);\n"
+        "extern double mxGetScalar(const mxArray *pm);\n"
+        "extern mxArray *mxCreateDoubleScalar(double value);\n"
+        "extern void mexErrMsgIdAndTxt(const char *identifier, const char *err_msg, ...);\n"
+        "#endif\n"
+        "void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]);\n"
+        "void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {\n"
+        "    char _cmd[128] = {0};\n"
+        "    (void)nlhs;\n"
+        "    if (nrhs < 1 || !prhs || mxGetString(prhs[0], _cmd, sizeof(_cmd)) != 0) {\n"
+        "        mexErrMsgIdAndTxt(\"FLOW:invalidSelector\", \"First argument must be a function name string.\");\n"
+        "        return;\n"
+        "    }\n",
+        output);
+    for (size_t fi = 0; fi < ir->lean_function_count; ++fi) {
+        const FlowLeanFunction *fn = &ir->lean_functions[fi];
+        if (fn->is_private || fn->is_struct_transform || abi_find_lean_struct(ir, fn->return_type)) continue;
+        int has_struct_param = 0;
+        for (size_t pi = 0; pi < fn->param_count; ++pi)
+            if (abi_find_lean_struct(ir, fn->param_types[pi])) { has_struct_param = 1; break; }
+        if (has_struct_param) continue;
+        int wraps = abi_fn_has_lean_wrapper(ir, fn) ? 2 : 1;
+        for (int w = 0; w < wraps; ++w) {
+            const char *pfx = (w == 1) ? "lean_" : "";
+            fprintf(output,
+                "    if (strcmp(_cmd, \"%s%s\") == 0) {\n"
+                "        if (nrhs != %zu) { mexErrMsgIdAndTxt(\"FLOW:nrhs\", \"Expected %zu arguments for %s%s.\"); return; }\n",
+                pfx, fn->name, fn->param_count + 1, fn->param_count + 1, pfx, fn->name);
+            if (fn->is_tuple_return && fn->tuple_arity >= 2) {
+                for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                    fprintf(output, "        %s _out_%zu = (%s)0;\n", abi_lean_c_type_ir(ir, fn->tuple_types[ti]), ti, abi_lean_c_type_ir(ir, fn->tuple_types[ti]));
+                fprintf(output, "        (void)%s%s(", pfx, fn->name);
+                for (size_t pi = 0; pi < fn->param_count; ++pi)
+                    fprintf(output, "%s(%s)mxGetScalar(prhs[%zu])", pi > 0 ? ", " : "", abi_lean_c_type_ir(ir, fn->param_types[pi]), pi + 1);
+                for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                    fprintf(output, "%s&_out_%zu", (fn->param_count > 0 || ti > 0) ? ", " : "", ti);
+                fputs(");\n", output);
+                for (size_t ti = 0; ti < fn->tuple_arity; ++ti) {
+                    if (ti == 0)
+                        fputs("        if (plhs) plhs[0] = mxCreateDoubleScalar((double)_out_0);\n", output);
+                    else
+                        fprintf(output, "        if (plhs && nlhs > %zu) plhs[%zu] = mxCreateDoubleScalar((double)_out_%zu);\n", ti, ti, ti);
+                }
+                fputs("        return;\n    }\n", output);
+            } else {
+                fprintf(output, "        double _res = (double)%s%s(", pfx, fn->name);
+                for (size_t pi = 0; pi < fn->param_count; ++pi)
+                    fprintf(output, "%s(%s)mxGetScalar(prhs[%zu])", pi > 0 ? ", " : "", abi_lean_c_type_ir(ir, fn->param_types[pi]), pi + 1);
+                fputs(");\n        if (plhs) plhs[0] = mxCreateDoubleScalar(_res);\n        return;\n    }\n", output);
+            }
+        }
+        if (abi_fn_has_jet2_variant(ir, fn)) {
+            fprintf(output,
+                "    if (strcmp(_cmd, \"jet2_%s\") == 0) {\n"
+                "        if (nrhs != %zu && nrhs != %zu) { mexErrMsgIdAndTxt(\"FLOW:nrhs\", \"Expected %zu (or %zu with diff_idx) arguments for jet2_%s.\"); return; }\n"
+                "        size_t _diff_idx = (nrhs == %zu) ? (size_t)mxGetScalar(prhs[%zu]) : 0;\n"
+                "        FlowJetScalar2 _jet = jet2_%s(",
+                fn->name, fn->param_count + 1, fn->param_count + 2, fn->param_count + 1, fn->param_count + 2, fn->name,
+                fn->param_count + 2, fn->param_count + 1, fn->name);
+            for (size_t pi = 0; pi < fn->param_count; ++pi)
+                fprintf(output, "%s(_diff_idx == %zu ? flow_jet2_var(mxGetScalar(prhs[%zu])) : flow_jet2_const(mxGetScalar(prhs[%zu])))",
+                        pi > 0 ? ", " : "", pi, pi + 1, pi + 1);
+            fputs(");\n"
+                  "        if (plhs) plhs[0] = mxCreateDoubleScalar(_jet.v);\n"
+                  "        if (plhs && nlhs > 1) plhs[1] = mxCreateDoubleScalar(_jet.d1);\n"
+                  "        if (plhs && nlhs > 2) plhs[2] = mxCreateDoubleScalar(_jet.d2);\n"
+                  "        return;\n    }\n", output);
+        }
+    }
+    fputs("    mexErrMsgIdAndTxt(\"FLOW:unknownFunction\", \"Unknown FLOW operator.\");\n}\n", output);
+    return ferror(output) == 0;
+}
 int flow_abi_emit_lean_adapter(FILE *output, const SemanticIR *ir, const FlowComponentABI *abi, uint64_t genome, size_t capacity, size_t shards) {
     if (!output || !abi) return 0; char pascal_name[64], id_safe[64]; sanitize_ident(abi->component_id, id_safe, sizeof(id_safe));
     to_pascal_case(abi->component_id, pascal_name, sizeof(pascal_name)); size_t in_max = (ir && ir->input_max_count > 0) ? (size_t)ir->input_max_count : 1024;

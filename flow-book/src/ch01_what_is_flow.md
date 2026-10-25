@@ -26,17 +26,19 @@ FLOW 的核心編譯器 `flowc`（[`src/parser.c`](../../src/parser.c)、[`src/b
 │     • Lean `structure S` 與多回傳值 `(A × B)` -> C17 `typedef struct` (`<fn>_tuple_t`) │
 │     • 自動抹除 0-byte `Prop` 證明欄位，純數據欄位自然決定 alignment 與 byte stride     │
 │                                                                                        │
-│  2. 和型別湧現狀態空間 (Sum Types -> C17 Enums)                                        │
+│  2. 和型別湧現狀態空間與零分支查表 (Sum Types -> C17 Enums & FSM LUT)                 │
 │     • Lean `inductive E` -> C17 `typedef enum`                                         │
+│     • 有限狀態轉移 `match s, ev with` -> `static const uint8_t <fn>_transition_table`  │
 │                                                                                        │
-│  3. 純函數複合湧現算子網路 (Pure Functions -> C17 Static Inline Graph)                 │
-│     • 每個 `def f` 一對一映射為 C17 算子 (`f`, `f_fx`, `flowc_f`, `flowc_f_fx`)        │
+│  3. 純函數複合湧現三軌算子與 2-Jet 自動微分 (Pure Functions -> Tri-Track C17 Graph)   │
+│     • 每個 `def f` 自動合成三軌 C17 算子 (`f`, `f_fx`, `jet2_f` 與 `flowc_*` 內聯版)   │
+│     • `jet2_f` 以 2-Jet 對偶數 `FlowJetScalar2` 一次算出 `(f(x), f'(x), f''(x))`       │
 │     • `let x := rhs in` 與 `let (a, b) := g x in` 直接映射為原生 C17 區域變數與函式呼叫│
 │                                                                                        │
 │  4. 定理湧現硬體級防護邊界 (Theorems -> C17 Hardware Contracts `lean_<fn>`)            │
-│     • 定理前提 (Hypotheses `(h : P x)` 或 `P x → Q (f x)`) -> `FLOW_LEAN_PRE_GUARD`    │
-│     • 定理結論 (Conclusion `Q (f x)`) -> `FLOW_LEAN_POST_GUARD`                        │
-│     • 多條定理針對同一算子 `f` 自動取邏輯交集：(/\ P_i) => (/\ Q_j)                    │
+│     • 結構型定義域假設 (`structure` `Prop` 欄位 / `def` 證明參數) -> `FLOW_LEAN_PRE_GUARD`│
+│     • 定理命題 `P_k(x) → Q_k(x, f(x))` -> 實質蘊含守衛 `FLOW_LEAN_IMPLIES_GUARD`       │
+│     • 多條局部定理（如 `v > 0` 與 `v < 0`）自動疊加為高密度防護網，絕不誤殺合法輸入！  │
 │                                                                                        │
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```

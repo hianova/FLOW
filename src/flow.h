@@ -14,14 +14,24 @@
 #define FLOW_LEAN_FN_MAX 128
 #define FLOW_LEAN_PARAM_MAX 32
 #define FLOW_LEAN_THEOREM_MAX 128
-#define FLOW_LEAN_BODY_MAX 2048
+#define FLOW_LEAN_BODY_MAX 4096
 #define FLOW_TUPLE_MAX 4
 #define FLOW_LEAN_STRUCT_MAX 24
 #define FLOW_LEAN_ENUM_MAX 24
+#define FLOW_LEAN_STRUCT_INV_MAX 8
+#define FLOW_LEAN_THM_GUARD_MAX 16
 typedef struct { char name[FLOW_NAME]; } FlowNode; typedef struct { int id; int score; } FlowSample;
 typedef struct { char name[FLOW_NAME]; size_t size_bytes; uint32_t flags; } FlowFieldSpec;
 typedef struct { char name[FLOW_NAME]; char c_type[16]; char lean_type[16]; size_t size_bytes; } FlowLeanStructField;
-typedef struct { char name[FLOW_NAME]; FlowLeanStructField fields[FLOW_FIELD_MAX]; size_t field_count; size_t byte_size; size_t align_bytes; } FlowLeanStruct;
+typedef struct {
+    char name[FLOW_NAME];
+    FlowLeanStructField fields[FLOW_FIELD_MAX];
+    size_t field_count;
+    size_t byte_size;
+    size_t align_bytes;
+    size_t invariant_count;
+    char invariants[FLOW_LEAN_STRUCT_INV_MAX][128];
+} FlowLeanStruct;
 typedef struct { char name[FLOW_NAME]; char variants[16][FLOW_NAME]; size_t variant_count; } FlowLeanEnum;
 typedef struct {
     char name[FLOW_NAME];
@@ -41,6 +51,9 @@ typedef struct {
     };
     char precond_expr[256];
     char postcond_expr[512];
+    size_t thm_guard_count;
+    char thm_hyp_exprs[FLOW_LEAN_THM_GUARD_MAX][256];
+    char thm_conc_exprs[FLOW_LEAN_THM_GUARD_MAX][256];
     int is_private;
     uint64_t estimated_wcet_ns;
 } FlowLeanFunction;
@@ -98,6 +111,7 @@ typedef enum { FLOW_FACT_SHARED_STATE, FLOW_FACT_COLLECTION,
     FlowLeanEnum lean_enums[FLOW_LEAN_ENUM_MAX]; \
     size_t lean_enum_count; \
     int float_abi_ieee64; \
+    int omit_dummy_main; \
     uint64_t qsbr_timeout_ns; \
     size_t arena_limit_bytes; \
     char jet_coord_names[FLOW_FIELD_MAX][FLOW_NAME]; \

@@ -14,6 +14,7 @@ static void flowc_print_usage(FILE *out) { fprintf(out, "FLOW Lean 4 -> C17 Form
         "Usage: flowc <input.lean> [-o <output.c>] [options]\n"
         "  -o <output.c>              Target C17 source path (default: <input>.c)\n"
         "  --target-c-header <file.h> Emit static inline double/fx64 C17 header & FlowStatusCode\n"
+        "  --target-mex               Append MATLAB MEX C17 mexFunction dispatcher to <output.c>\n"
         "  --target-lean <file.lean>  Emit & verify Lean 4 formal soundness certificate\n"
         "  --target-llvm-ir / --target-mlir <file> Emit LLVM IR or MLIR module\n"
         "  --apply-fvec <file.fvec>   Apply pre-baked SMT-certified architecture weights\n"
@@ -33,7 +34,7 @@ int flowc_main(int argc, char **argv) { const char *input_path = NULL, *output_p
     static FlowSpec spec; static SemanticIR ir; static FlowComponentABI abi; static FlowBitSpace space;
     memset(&spec, 0, sizeof(spec)); memset(&ir, 0, sizeof(ir)); memset(&abi, 0, sizeof(abi)); memset(&space, 0, sizeof(space));
     const Component *component; VerificationReport verification;
-    SearchResult search = {0}; ProfileSeed profile = {0}; int use_search = 0, use_benchmark = 0, use_reload_adapter = 0, force_ieee64 = 0;
+    SearchResult search = {0}; ProfileSeed profile = {0}; int use_search = 0, use_benchmark = 0, use_reload_adapter = 0, force_ieee64 = 0, target_mex = 0;
     size_t iterations = 250, workload_bytes = 0; uint32_t seed = 0xC0F0123u;
     if (!flow_registry_init()) { fprintf(stderr, "flowc: failed to initialize plugin registry\n"); return EXIT_FAILURE; }
     if (argc < 2) { flowc_print_usage(stderr); return EXIT_FAILURE; }
@@ -47,6 +48,7 @@ int flowc_main(int argc, char **argv) { const char *input_path = NULL, *output_p
         else if (!strcmp(argv[arg], "--component") && arg + 1 < argc) component_override = argv[++arg];
         else if ((!strcmp(argv[arg], "--apply-fvec") || !strcmp(argv[arg], "--fvec")) && arg + 1 < argc) apply_fvec_path = argv[++arg];
         else if (!strcmp(argv[arg], "--target-c-header") && arg + 1 < argc) target_c_header = argv[++arg];
+        else if (!strcmp(argv[arg], "--target-mex")) target_mex = 1;
         else if (!strcmp(argv[arg], "--target-lean") && arg + 1 < argc) target_lean = argv[++arg];
         else if (!strcmp(argv[arg], "--target-mlir") && arg + 1 < argc) target_mlir = argv[++arg];
         else if (!strcmp(argv[arg], "--target-llvm-ir") && arg + 1 < argc) target_llvm_ir = argv[++arg];
@@ -65,6 +67,7 @@ int flowc_main(int argc, char **argv) { const char *input_path = NULL, *output_p
     if (!input) { fprintf(stderr, "flowc: cannot open %s: %s\n", input_path, strerror(errno)); return EXIT_FAILURE; }
     if (!parse_spec(input, &spec)) { fclose(input); return EXIT_FAILURE; } fclose(input);
     if (force_ieee64 != 0) spec.float_abi_ieee64 = (force_ieee64 > 0) ? 1 : 0;
+    if (target_c_header != NULL || target_mex != 0) spec.omit_dummy_main = 1;
     lower_to_ir(&spec, &ir); if (target_lean) ir.fact_lean_certified = 1;
     ir.workload_bytes = workload_bytes; if (ir.imported_module_count > 0) { for (size_t m = 0; m < ir.imported_module_count; ++m)
             if (!validate_and_lower_module(ir.imported_modules[m], &spec, &ir)) { flow_ir_cleanup(&ir); return EXIT_FAILURE; }
@@ -119,6 +122,7 @@ int flowc_main(int argc, char **argv) { const char *input_path = NULL, *output_p
     FILE *output = fopen(output_path, "w");
     if (!output) { fprintf(stderr, "flowc: cannot write %s: %s\n", output_path, strerror(errno)); flow_ir_cleanup(&ir); return EXIT_FAILURE; }
     int generated_ok = emit_c(output, &ir, component, use_search ? &search : NULL, &verification, use_reload_adapter);
+    if (generated_ok && target_mex) generated_ok = flow_abi_emit_mex_dispatcher(output, &ir);
     if (fclose(output) != 0 || !generated_ok) { fprintf(stderr, "flowc: failed to generate %s\n", output_path); flow_ir_cleanup(&ir); return EXIT_FAILURE; }
     if (profile_out && use_search) { FILE *pf = fopen(profile_out, "w");
         if (!pf) { fprintf(stderr, "flowc: cannot write profile %s: %s\n", profile_out, strerror(errno)); flow_ir_cleanup(&ir); return EXIT_FAILURE; }
@@ -148,6 +152,7 @@ int flowc_main(int argc, char **argv) { const char *input_path = NULL, *output_p
             fprintf(pf, "flow,component,capacity,threads,shards,benchmark_ns,workload_bytes,buffer_bytes,initial_capacity,growth_percent,batch_size,arena_bytes\n%s,%s,%zu,%zu,%zu,%llu,%zu,%zu,%zu,%u,%zu,%zu\n",
                     ir.flow_name, component->id, (size_t)search.capacity, (size_t)search.threads, (size_t)search.shards, (unsigned long long)search.benchmark_ns, ir.workload_bytes, search.tuning.buffer_bytes, search.tuning.initial_capacity, search.tuning.growth_percent, search.tuning.batch_size, search.tuning.arena_bytes);
             fclose(pf); } printf("  profile: wrote %s\n", profile_out); } printf("flowc: %s -> %s\n", input_path, output_path);
+    if (target_mex) printf("  target-mex: appended mexFunction dispatcher to %s\n", output_path);
     if (ir.project_name[0]) printf("  project: %s\n", ir.project_name);
     printf("  IR: output=%s shared=%d read_heavy=%d bounded=%d parallelizable=%d ordered=%d unordered=%d deterministic=%d range=%d size_preserved=%d mutability_read_only=%d ensures=%d declared_constraints=%zu resource=%s capability=%s domain=%s contract=%s fallback=%s graph_nodes=%zu facts=%zu constraints=%zu holes=%zu\n  selected: %s (%s)\n  candidates:",
            ir.output_name, ir.state_shared, ir.state_read_heavy, ir.state_bounded, ir.flow_parallelizable, ir.fact_ordered, ir.fact_unordered, ir.fact_deterministic, ir.fact_range_proven, ir.fact_size_preserved, ir.fact_mutability_read_only, ir.ensure_count, ir.declared_constraint_count, ir.resource_name, ir.capability_name, ir.domain_name, ir.contract_name, ir.fallback_policy, ir.flow_node_count, ir.fact_count, ir.constraint_count, ir.hole_count, component->id, component->kind);

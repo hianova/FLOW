@@ -558,12 +558,12 @@ static inline __attribute__((unused)) flow_fx64_t flow_dequantize_fx(uint64_t co
 static inline __attribute__((unused)) uint64_t flow_nat_sub(uint64_t a, uint64_t b) { return a >= b ? (a - b) : 0ULL; } \
 static inline __attribute__((unused)) uint64_t flow_nat_div(uint64_t a, uint64_t b) { return b == 0ULL ? 0ULL : (a / b); } \
 static inline __attribute__((unused)) uint64_t flow_nat_mod(uint64_t a, uint64_t b) { return b == 0ULL ? a : (a % b); } \
-static inline __attribute__((unused)) uint64_t flow_nat_pow(uint64_t base, uint64_t exp) { uint64_t r = 1ULL; while (exp > 0ULL) { if (exp & 1ULL) r *= base; base *= base; exp >>= 1U; } return r; } \
+static inline __attribute__((unused)) uint64_t flow_nat_pow(uint64_t base, uint64_t exp) { uint64_t r = 1ULL; while (exp > 0ULL) { if (exp & 1ULL) { r *= base; } base *= base; exp >>= 1U; } return r; } \
 static inline __attribute__((unused)) uint64_t flow_nat_min(uint64_t a, uint64_t b) { return a < b ? a : b; } \
 static inline __attribute__((unused)) uint64_t flow_nat_max(uint64_t a, uint64_t b) { return a > b ? a : b; } \
 static inline __attribute__((unused)) int64_t flow_int_div(int64_t a, int64_t b) { return b == 0 ? 0 : ((a == INT64_MIN && b == -1) ? INT64_MIN : (a / b)); } \
 static inline __attribute__((unused)) int64_t flow_int_mod(int64_t a, int64_t b) { return b == 0 ? a : ((a == INT64_MIN && b == -1) ? 0 : (a % b)); } \
-static inline __attribute__((unused)) int64_t flow_int_pow(int64_t base, int64_t exp) { if (exp < 0) return 0; int64_t r = 1; while (exp > 0) { if (exp & 1) r *= base; base *= base; exp >>= 1; } return r; }
+static inline __attribute__((unused)) int64_t flow_int_pow(int64_t base, int64_t exp) { if (exp < 0) { return 0; } int64_t r = 1; while (exp > 0) { if (exp & 1) { r *= base; } base *= base; exp >>= 1; } return r; }
 
 #define FLOW_LEAN_FLOAT_OPS_C17 \
 static inline __attribute__((unused)) double flow_float_add(double a, double b) { return a + b; } \
@@ -600,6 +600,96 @@ static inline __attribute__((unused)) double flow_dequantize(uint64_t code, doub
     return min_v + ((double)c / (double)max_q) * (max_v - min_v); \
 }
 
+#ifndef FLOW_JET_SCALAR2_DEFINED
+#define FLOW_JET_SCALAR2_DEFINED
+typedef struct { double v; double d1; double d2; } FlowJetScalar2;
+#endif
+
+#define FLOW_JET2_ALU_C17 \
+static inline __attribute__((unused)) FlowJetScalar2 flow_jet2_make(double v, double d1, double d2) { \
+    FlowJetScalar2 r; \
+    r.v = __builtin_isfinite(v) ? v : 0.0; \
+    r.d1 = __builtin_isfinite(d1) ? d1 : 0.0; \
+    r.d2 = __builtin_isfinite(d2) ? d2 : 0.0; \
+    return r; \
+} \
+static inline __attribute__((unused)) FlowJetScalar2 flow_jet2_var(double v) { return flow_jet2_make(v, 1.0, 0.0); } \
+static inline __attribute__((unused)) FlowJetScalar2 flow_jet2_const(double c) { return flow_jet2_make(c, 0.0, 0.0); } \
+static inline __attribute__((unused)) FlowJetScalar2 flow_jet2_of_nat(uint64_t x) { return flow_jet2_make((double)x, 0.0, 0.0); } \
+static inline __attribute__((unused)) FlowJetScalar2 flow_jet2_of_int(int64_t x) { return flow_jet2_make((double)x, 0.0, 0.0); } \
+static inline __attribute__((unused)) FlowJetScalar2 flow_jet2_add(FlowJetScalar2 a, FlowJetScalar2 b) { return flow_jet2_make(a.v + b.v, a.d1 + b.d1, a.d2 + b.d2); } \
+static inline __attribute__((unused)) FlowJetScalar2 flow_jet2_sub(FlowJetScalar2 a, FlowJetScalar2 b) { return flow_jet2_make(a.v - b.v, a.d1 - b.d1, a.d2 - b.d2); } \
+static inline __attribute__((unused)) FlowJetScalar2 flow_jet2_mul(FlowJetScalar2 a, FlowJetScalar2 b) { return flow_jet2_make(a.v * b.v, a.d1 * b.v + a.v * b.d1, a.d2 * b.v + 2.0 * a.d1 * b.d1 + a.v * b.d2); } \
+static inline __attribute__((unused)) FlowJetScalar2 flow_jet2_div(FlowJetScalar2 a, FlowJetScalar2 b) { \
+    if (b.v == 0.0 || !__builtin_isfinite(b.v)) { return flow_jet2_const(0.0); } \
+    double v = a.v / b.v; \
+    double d1 = (a.d1 - v * b.d1) / b.v; \
+    double d2 = (a.d2 - 2.0 * d1 * b.d1 - v * b.d2) / b.v; \
+    return flow_jet2_make(v, d1, d2); \
+} \
+static inline __attribute__((unused)) FlowJetScalar2 flow_jet2_mod(FlowJetScalar2 a, FlowJetScalar2 b) { \
+    if (b.v == 0.0 || !__builtin_isfinite(b.v)) { return flow_jet2_const(0.0); } \
+    double q = __builtin_floor(a.v / b.v); \
+    return flow_jet2_make(__builtin_fmod(a.v, b.v), a.d1 - q * b.d1, a.d2 - q * b.d2); \
+} \
+static inline __attribute__((unused)) FlowJetScalar2 flow_jet2_neg(FlowJetScalar2 x) { return flow_jet2_make(-x.v, -x.d1, -x.d2); } \
+static inline __attribute__((unused)) FlowJetScalar2 flow_jet2_abs(FlowJetScalar2 x) { \
+    double s = (x.v > 0.0) ? 1.0 : ((x.v < 0.0) ? -1.0 : 0.0); \
+    return flow_jet2_make(__builtin_fabs(x.v), s * x.d1, s * x.d2); \
+} \
+static inline __attribute__((unused)) FlowJetScalar2 flow_jet2_floor(FlowJetScalar2 x) { return flow_jet2_make(__builtin_floor(x.v), 0.0, 0.0); } \
+static inline __attribute__((unused)) FlowJetScalar2 flow_jet2_ceil(FlowJetScalar2 x) { return flow_jet2_make(__builtin_ceil(x.v), 0.0, 0.0); } \
+static inline __attribute__((unused)) FlowJetScalar2 flow_jet2_round(FlowJetScalar2 x) { return flow_jet2_make(__builtin_round(x.v), 0.0, 0.0); }
+
+#define FLOW_JET2_MATH_C17 \
+static inline __attribute__((unused)) FlowJetScalar2 flow_jet2_sqrt(FlowJetScalar2 x) { \
+    if (x.v <= 0.0) { return flow_jet2_const(0.0); } \
+    double r = __builtin_sqrt(x.v); \
+    double d1 = x.d1 / (2.0 * r); \
+    double d2 = (x.d2 - 2.0 * d1 * d1) / (2.0 * r); \
+    return flow_jet2_make(r, d1, d2); \
+} \
+static inline __attribute__((unused)) FlowJetScalar2 flow_jet2_exp(FlowJetScalar2 x) { \
+    double e = __builtin_exp(x.v); \
+    return flow_jet2_make(e, e * x.d1, e * (x.d1 * x.d1 + x.d2)); \
+} \
+static inline __attribute__((unused)) FlowJetScalar2 flow_jet2_log(FlowJetScalar2 x) { \
+    if (x.v <= 0.0) { return flow_jet2_const(0.0); } \
+    double d1 = x.d1 / x.v; \
+    double d2 = (x.d2 - d1 * x.d1) / x.v; \
+    return flow_jet2_make(__builtin_log(x.v), d1, d2); \
+} \
+static inline __attribute__((unused)) FlowJetScalar2 flow_jet2_sin(FlowJetScalar2 x) { \
+    double s = __builtin_sin(x.v), c = __builtin_cos(x.v); \
+    return flow_jet2_make(s, c * x.d1, -s * x.d1 * x.d1 + c * x.d2); \
+} \
+static inline __attribute__((unused)) FlowJetScalar2 flow_jet2_cos(FlowJetScalar2 x) { \
+    double s = __builtin_sin(x.v), c = __builtin_cos(x.v); \
+    return flow_jet2_make(c, -s * x.d1, -c * x.d1 * x.d1 - s * x.d2); \
+} \
+static inline __attribute__((unused)) FlowJetScalar2 flow_jet2_atan2(FlowJetScalar2 y, FlowJetScalar2 x) { \
+    double r2 = x.v * x.v + y.v * y.v; \
+    if (r2 <= 0.0) { return flow_jet2_const(0.0); } \
+    double d1 = (x.v * y.d1 - y.v * x.d1) / r2; \
+    double d2 = ((x.v * y.d2 - y.v * x.d2) - 2.0 * d1 * (x.v * x.d1 + y.v * y.d1)) / r2; \
+    return flow_jet2_make(__builtin_atan2(y.v, x.v), d1, d2); \
+} \
+static inline __attribute__((unused)) FlowJetScalar2 flow_jet2_pow(FlowJetScalar2 b, FlowJetScalar2 e) { \
+    if (e.d1 == 0.0 && e.d2 == 0.0) { \
+        double p = e.v; \
+        double v = __builtin_pow(b.v, p); \
+        double gp = (p == 0.0) ? 0.0 : (p * __builtin_pow(b.v, p - 1.0)); \
+        double gpp = (p == 0.0 || p == 1.0) ? 0.0 : (p * (p - 1.0) * __builtin_pow(b.v, p - 2.0)); \
+        return flow_jet2_make(v, gp * b.d1, gpp * b.d1 * b.d1 + gp * b.d2); \
+    } \
+    if (b.v <= 0.0) { return flow_jet2_const(0.0); } \
+    return flow_jet2_exp(flow_jet2_mul(e, flow_jet2_log(b))); \
+} \
+static inline __attribute__((unused)) FlowJetScalar2 flow_jet2_max(FlowJetScalar2 a, FlowJetScalar2 b) { return (a.v >= b.v) ? a : b; } \
+static inline __attribute__((unused)) FlowJetScalar2 flow_jet2_min(FlowJetScalar2 a, FlowJetScalar2 b) { return (a.v <= b.v) ? a : b; }
+
+#define FLOW_JET2_OPS_C17 FLOW_JET2_ALU_C17 FLOW_JET2_MATH_C17
+
 FLOW_EXACT_CODEC_C17
 FLOW_EXACT_ALU_C17
 FLOW_EXACT_EXP_LOG_C17
@@ -608,6 +698,7 @@ FLOW_EXACT_TRIG_QUANT_C17
 #define FLOW_LEAN_NAT_OPS_DEFINED
 FLOW_LEAN_NAT_OPS_C17
 FLOW_LEAN_FLOAT_OPS_C17
+FLOW_JET2_OPS_C17
 #endif
 
 typedef struct {
@@ -707,18 +798,42 @@ typedef struct { uint8_t opcode; union { struct { uint8_t hash_bytes[8]; } antib
     struct { uint8_t role, node_id, bp_hi, bp_lo, lat_hi, lat_lo, crc_hi, crc_lo; } hetero_mesh;
     struct { uint8_t agent_id, role, x_hi, x_lo, y_hi, y_lo, crc_hi, crc_lo; } fleet; uint8_t raw[8]; } payload; } FlowWireFrame9;
 #pragma pack(pop)
-static inline uint16_t flow_wire_crc16(const uint8_t *data, size_t len) { uint16_t crc = 0xFFFF; if (!data) return 0; for (size_t i = 0; i < len; ++i) {
-    crc ^= (uint16_t)data[i] << 8; for (int b = 0; b < 8; ++b) crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) : (crc << 1); } return crc; }
+static inline uint16_t flow_wire_crc16(const uint8_t *data, size_t len) {
+    uint16_t crc = 0xFFFF;
+    if (!data) { return 0; }
+    for (size_t i = 0; i < len; ++i) {
+        crc ^= (uint16_t)data[i] << 8;
+        for (int b = 0; b < 8; ++b) {
+            crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) : (crc << 1);
+        }
+    }
+    return crc;
+}
 static inline int flow_wire_frame9_pack(const FlowWireFrame9 *frame, uint8_t out[FLOW_WIRE_FRAME9_SIZE]) {
-    return (frame && out) ? (memcpy(out, frame, FLOW_WIRE_FRAME9_SIZE), 1) : 0; }
+    return (frame && out) ? (memcpy(out, frame, FLOW_WIRE_FRAME9_SIZE), 1) : 0;
+}
 static inline int flow_wire_frame9_unpack(const uint8_t in[FLOW_WIRE_FRAME9_SIZE], FlowWireFrame9 *frame_out) {
-    return (in && frame_out) ? (memcpy(frame_out, in, FLOW_WIRE_FRAME9_SIZE), 1) : 0; }
-static inline int flow_wire_hash_encode(uint64_t content_hash, uint8_t out_packet[FLOW_WIRE_FRAME9_SIZE]) { if (!out_packet) return 0;
-    FlowWireFrame9 f = { .opcode = FLOW_WIRE_OP_HASH_SYNC }; for (int i = 0; i < 8; ++i) f.payload.antibody.hash_bytes[i] = (uint8_t)((content_hash >> (56 - i * 8)) & 0xFF);
-    return flow_wire_frame9_pack(&f, out_packet); }
-static inline int flow_wire_hash_decode(const uint8_t in_packet[FLOW_WIRE_FRAME9_SIZE], uint64_t *out_content_hash) { if (!in_packet || !out_content_hash) return 0;
-    FlowWireFrame9 f; if (!flow_wire_frame9_unpack(in_packet, &f) || f.opcode != FLOW_WIRE_OP_HASH_SYNC) return 0; uint64_t h = 0;
-    for (int i = 0; i < 8; ++i) h = (h << 8) | f.payload.antibody.hash_bytes[i]; *out_content_hash = h; return 1; }
+    return (in && frame_out) ? (memcpy(frame_out, in, FLOW_WIRE_FRAME9_SIZE), 1) : 0;
+}
+static inline int flow_wire_hash_encode(uint64_t content_hash, uint8_t out_packet[FLOW_WIRE_FRAME9_SIZE]) {
+    if (!out_packet) { return 0; }
+    FlowWireFrame9 f = { .opcode = FLOW_WIRE_OP_HASH_SYNC };
+    for (int i = 0; i < 8; ++i) {
+        f.payload.antibody.hash_bytes[i] = (uint8_t)((content_hash >> (56 - i * 8)) & 0xFF);
+    }
+    return flow_wire_frame9_pack(&f, out_packet);
+}
+static inline int flow_wire_hash_decode(const uint8_t in_packet[FLOW_WIRE_FRAME9_SIZE], uint64_t *out_content_hash) {
+    if (!in_packet || !out_content_hash) { return 0; }
+    FlowWireFrame9 f;
+    if (!flow_wire_frame9_unpack(in_packet, &f) || f.opcode != FLOW_WIRE_OP_HASH_SYNC) { return 0; }
+    uint64_t h = 0;
+    for (int i = 0; i < 8; ++i) {
+        h = (h << 8) | f.payload.antibody.hash_bytes[i];
+    }
+    *out_content_hash = h;
+    return 1;
+}
 #define FLOW_SWARM_MSG_ANTIBODY       FLOW_WIRE_OP_HASH_SYNC
 #define FLOW_SWARM_LYMPH_PKT_SIZE     FLOW_WIRE_FRAME9_SIZE
 #define flow_swarm_lymphatic_encode   flow_wire_hash_encode

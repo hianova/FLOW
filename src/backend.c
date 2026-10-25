@@ -124,7 +124,66 @@ static void subst_lean_var(const char *src, size_t src_len, const char *var, con
     }
     out[j] = '\0';
 }
-typedef enum { LEAN_EXPR_NAT = 0, LEAN_EXPR_UINT = 1, LEAN_EXPR_INT = 2, LEAN_EXPR_FLOAT = 3, LEAN_EXPR_FX64 = 4 } LeanExprMode;
+typedef enum { LEAN_EXPR_NAT = 0, LEAN_EXPR_UINT = 1, LEAN_EXPR_INT = 2, LEAN_EXPR_FLOAT = 3, LEAN_EXPR_FX64 = 4, LEAN_EXPR_JET2 = 5 } LeanExprMode;
+static const FlowLeanEnum *find_ir_lean_enum(const SemanticIR *ir, const char *name) {
+    if (!ir || !name || !name[0]) return NULL;
+    for (size_t i = 0; i < ir->lean_enum_count; ++i)
+        if (!strcmp(ir->lean_enums[i].name, name)) return &ir->lean_enums[i];
+    return NULL;
+}
+static int body_has_ident_tok(const char *s, const char *ident) {
+    if (!s || !ident || !ident[0]) return 0;
+    size_t ilen = strlen(ident);
+    for (const char *p = strstr(s, ident); p; p = strstr(p + 1, ident)) {
+        int l_ok = (p == s) || (!isalnum((unsigned char)p[-1]) && p[-1] != '_' && p[-1] != '.');
+        int r_ok = !isalnum((unsigned char)p[ilen]) && p[ilen] != '_' && p[ilen] != '.';
+        if (l_ok && r_ok) return 1;
+    }
+    return 0;
+}
+static int is_jet2_eligible_fn_depth(const SemanticIR *ir, const FlowLeanFunction *fn, int depth) {
+    if (depth > 4 || !fn || fn->is_struct_transform || fn->is_tuple_return || fn->param_count == 0) return 0;
+    if (strcmp(fn->return_type, "Float") != 0 && strcmp(fn->return_type, "Float32") != 0) return 0;
+    if (strstr(fn->body, "let (") != NULL) return 0;
+    for (size_t pi = 0; pi < fn->param_count; ++pi) {
+        if (find_ir_lean_struct(ir, fn->param_types[pi])) return 0;
+        if (strcmp(fn->param_types[pi], "Float") != 0 && strcmp(fn->param_types[pi], "Float32") != 0) return 0;
+    }
+    if (ir) {
+        for (size_t k = 0; k < ir->lean_function_count; ++k) {
+            if (&ir->lean_functions[k] == fn) continue;
+            if (body_has_ident_tok(fn->body, ir->lean_functions[k].name) &&
+                !is_jet2_eligible_fn_depth(ir, &ir->lean_functions[k], depth + 1)) return 0;
+        }
+    }
+    return 1;
+}
+static int is_jet2_eligible_fn(const SemanticIR *ir, const FlowLeanFunction *fn) {
+    return is_jet2_eligible_fn_depth(ir, fn, 0);
+}
+static size_t split_comma_slices(const char *s, size_t len, const char **out_s, size_t *out_l, size_t max_parts) {
+    const char *end = s + len, *cur = s;
+    size_t cnt = 0; int pd = 0;
+    for (const char *p = s; p <= end && cnt < max_parts; ++p) {
+        if (p < end && *p == '(') pd++;
+        else if (p < end && *p == ')' && pd > 0) pd--;
+        else if (p == end || (pd == 0 && *p == ',')) {
+            const char *ps = cur, *pe = p;
+            while (ps < pe && isspace((unsigned char)*ps)) ++ps;
+            while (pe > ps && isspace((unsigned char)pe[-1])) --pe;
+            if (pe - ps >= 2 && ps[0] == '(' && pe[-1] == ')') {
+                int d = 0, w = 1;
+                for (const char *q = ps; q + 1 < pe; ++q) { if (*q == '(') d++; else if (*q == ')' && --d == 0) { w = 0; break; } }
+                if (w) { ++ps; --pe; while (ps < pe && isspace((unsigned char)*ps)) ++ps; while (pe > ps && isspace((unsigned char)pe[-1])) --pe; }
+            }
+            out_s[cnt] = ps;
+            out_l[cnt] = (size_t)(pe - ps);
+            cnt++;
+            cur = p + 1;
+        }
+    }
+    return cnt;
+}
 static LeanExprMode infer_c_type_expr_mode(const char *c_type, LeanExprMode fallback) {
     if (!c_type) return fallback;
     if (!strcmp(c_type, "double") || !strcmp(c_type, "float")) return LEAN_EXPR_FLOAT;
@@ -167,7 +226,7 @@ static void emit_norm_lean_slice(FILE *out, const SemanticIR *ir, const char *s,
         }
         break;
     }
-    if (len == 0) { fputs("0", out); return; }
+    if (len == 0) { fputs(mode == LEAN_EXPR_JET2 ? "flow_jet2_const(0.0)" : "0", out); return; }
     const char *end = s + len;
     if (is_lean_kw_at(s, s, end, "let", 3)) {
         const char *ce = NULL; int pd = 0;
@@ -219,28 +278,42 @@ static void emit_norm_lean_slice(FILE *out, const SemanticIR *ir, const char *s,
         }
         if (w) {
             const char *scrut = s + 5; size_t scrut_len = (size_t)(w - scrut);
-            const char *arms[16]; size_t arm_cnt = 0; pd = 0;
+            const char *sc_s[4]; size_t sc_l[4], sc_cnt = split_comma_slices(scrut, scrut_len, sc_s, sc_l, 4);
+            const char *arms[64]; size_t arm_cnt = 0; pd = 0; int md = 0;
             for (const char *p = w + 4; p < end; ++p) {
                 if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
-                else if (pd == 0 && *p == '|' && (p == w + 4 || p[-1] != '|') && (p + 1 == end || p[1] != '|')) {
-                    if (arm_cnt < 16) arms[arm_cnt++] = p;
+                else if (pd == 0 && is_lean_kw_at(p, w + 4, end, "match", 5)) md++;
+                else if (pd == 0 && md == 0 && *p == '|' && (p == w + 4 || p[-1] != '|') && (p + 1 == end || p[1] != '|')) {
+                    if (arm_cnt < 64) arms[arm_cnt++] = p;
                 }
             }
-            if (arm_cnt > 0) {
+            if (arm_cnt > 0 && sc_cnt > 0) {
                 int open_parens = 0;
                 for (size_t a = 0; a < arm_cnt; ++a) {
                     const char *a_start = arms[a] + 1, *a_end = (a + 1 < arm_cnt) ? arms[a + 1] : end, *arr = NULL;
                     for (const char *p = a_start; p + 1 < a_end; ++p) if (p[0] == '=' && p[1] == '>') { arr = p; break; }
                     if (!arr) break;
                     const char *pat = a_start; size_t pat_len = (size_t)(arr - a_start);
-                    while (pat_len > 0 && isspace((unsigned char)*pat)) { pat++; pat_len--; }
-                    while (pat_len > 0 && isspace((unsigned char)pat[pat_len - 1])) pat_len--;
-                    if ((pat_len == 1 && pat[0] == '_') || a + 1 == arm_cnt) {
+                    const char *pt_s[4]; size_t pt_l[4], pt_cnt = split_comma_slices(pat, pat_len, pt_s, pt_l, 4);
+                    int all_wild = 1;
+                    for (size_t m = 0; m < pt_cnt && m < sc_cnt; ++m)
+                        if (!(pt_l[m] == 1 && pt_s[m][0] == '_')) all_wild = 0;
+                    if (all_wild || a + 1 == arm_cnt) {
                         emit_norm_lean_slice(out, ir, arr + 2, (size_t)(a_end - (arr + 2)), mode, is_header_inline);
                         break;
                     }
-                    fputs("((", out); emit_norm_lean_slice(out, ir, scrut, scrut_len, mode, is_header_inline);
-                    fputs(" == ", out); emit_norm_lean_slice(out, ir, pat, pat_len, mode, is_header_inline);
+                    fputs("((", out);
+                    int seen_cond = 0;
+                    for (size_t m = 0; m < pt_cnt && m < sc_cnt; ++m) {
+                        if (pt_l[m] == 1 && pt_s[m][0] == '_') continue;
+                        if (seen_cond) fputs(" && ", out);
+                        fputc('(', out);
+                        emit_norm_lean_slice(out, ir, sc_s[m], sc_l[m], mode, is_header_inline);
+                        fputs(" == ", out);
+                        emit_norm_lean_slice(out, ir, pt_s[m], pt_l[m], mode, is_header_inline);
+                        fputc(')', out);
+                        seen_cond = 1;
+                    }
                     fputs(") ? ", out); emit_norm_lean_slice(out, ir, arr + 2, (size_t)(a_end - (arr + 2)), mode, is_header_inline);
                     fputs(" : ", out); open_parens++;
                 }
@@ -277,7 +350,7 @@ static void emit_norm_lean_slice(FILE *out, const SemanticIR *ir, const char *s,
                 if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
                 if (pd != 0) continue;
                 if (p[0] == '^' && p[-1] != '^' && (p + 1 == end || p[1] != '^')) {
-                    const char *fn_pow = (mode == LEAN_EXPR_FX64) ? "flow_fx64_pow(" : ((mode == LEAN_EXPR_FLOAT) ? "flow_float_pow(" : ((mode == LEAN_EXPR_INT) ? "flow_int_pow(" : "flow_nat_pow("));
+                    const char *fn_pow = (mode == LEAN_EXPR_JET2) ? "flow_jet2_pow(" : ((mode == LEAN_EXPR_FX64) ? "flow_fx64_pow(" : ((mode == LEAN_EXPR_FLOAT) ? "flow_float_pow(" : ((mode == LEAN_EXPR_INT) ? "flow_int_pow(" : "flow_nat_pow(")));
                     fputs(fn_pow, out); emit_norm_lean_slice(out, ir, s, (size_t)(p - s), mode, is_header_inline);
                     fputs(", ", out); emit_norm_lean_slice(out, ir, p + 1, (size_t)(end - (p + 1)), mode, is_header_inline); fputc(')', out); return;
                 }
@@ -295,17 +368,19 @@ static void emit_norm_lean_slice(FILE *out, const SemanticIR *ir, const char *s,
                 fputc('(', out); emit_norm_lean_slice(out, ir, s, (size_t)(p - s), mode, is_header_inline); fputs(" && ", out); emit_norm_lean_slice(out, ir, p + 2, (size_t)(end - (p + 2)), mode, is_header_inline); fputc(')', out); return;
             }
             if (pass == 3) {
+                const char *v_suf = (mode == LEAN_EXPR_JET2) ? ").v" : "";
+                const char *v_pre = (mode == LEAN_EXPR_JET2) ? "(" : "";
                 if (p + 1 < end && ((p[0] == '=' && p[1] == '=') || (p[0] == '!' && p[1] == '=') || (p[0] == '<' && p[1] == '=' && p[-1] != '<') || (p[0] == '>' && p[1] == '=' && p[-1] != '>'))) {
-                    fputc('(', out); emit_norm_lean_slice(out, ir, s, (size_t)(p - s), mode, is_header_inline); fprintf(out, " %c%c ", p[0], p[1]); emit_norm_lean_slice(out, ir, p + 2, (size_t)(end - (p + 2)), mode, is_header_inline); fputc(')', out); return;
+                    fprintf(out, "(%s", v_pre); emit_norm_lean_slice(out, ir, s, (size_t)(p - s), mode, is_header_inline); fprintf(out, "%s %c%c %s", v_suf, p[0], p[1], v_pre); emit_norm_lean_slice(out, ir, p + 2, (size_t)(end - (p + 2)), mode, is_header_inline); fprintf(out, "%s)", v_suf); return;
                 }
                 if (p[0] == '<' && p[-1] != '<' && (p + 1 < end && p[1] != '<' && p[1] != '=')) {
-                    fputc('(', out); emit_norm_lean_slice(out, ir, s, (size_t)(p - s), mode, is_header_inline); fputs(" < ", out); emit_norm_lean_slice(out, ir, p + 1, (size_t)(end - (p + 1)), mode, is_header_inline); fputc(')', out); return;
+                    fprintf(out, "(%s", v_pre); emit_norm_lean_slice(out, ir, s, (size_t)(p - s), mode, is_header_inline); fprintf(out, "%s < %s", v_suf, v_pre); emit_norm_lean_slice(out, ir, p + 1, (size_t)(end - (p + 1)), mode, is_header_inline); fprintf(out, "%s)", v_suf); return;
                 }
                 if (p[0] == '>' && p[-1] != '>' && p[-1] != '=' && p[-1] != '-' && (p + 1 < end && p[1] != '>' && p[1] != '=')) {
-                    fputc('(', out); emit_norm_lean_slice(out, ir, s, (size_t)(p - s), mode, is_header_inline); fputs(" > ", out); emit_norm_lean_slice(out, ir, p + 1, (size_t)(end - (p + 1)), mode, is_header_inline); fputc(')', out); return;
+                    fprintf(out, "(%s", v_pre); emit_norm_lean_slice(out, ir, s, (size_t)(p - s), mode, is_header_inline); fprintf(out, "%s > %s", v_suf, v_pre); emit_norm_lean_slice(out, ir, p + 1, (size_t)(end - (p + 1)), mode, is_header_inline); fprintf(out, "%s)", v_suf); return;
                 }
                 if (p[0] == '=' && p[-1] != '=' && p[-1] != '!' && p[-1] != '<' && p[-1] != '>' && p[-1] != ':' && (p + 1 < end && p[1] != '=' && p[1] != '>')) {
-                    fputc('(', out); emit_norm_lean_slice(out, ir, s, (size_t)(p - s), mode, is_header_inline); fputs(" == ", out); emit_norm_lean_slice(out, ir, p + 1, (size_t)(end - (p + 1)), mode, is_header_inline); fputc(')', out); return;
+                    fprintf(out, "(%s", v_pre); emit_norm_lean_slice(out, ir, s, (size_t)(p - s), mode, is_header_inline); fprintf(out, "%s == %s", v_suf, v_pre); emit_norm_lean_slice(out, ir, p + 1, (size_t)(end - (p + 1)), mode, is_header_inline); fprintf(out, "%s)", v_suf); return;
                 }
             }
             if (pass == 4 && p + 2 < end && p[0] == '|' && p[1] == '|' && p[2] == '|') {
@@ -330,9 +405,13 @@ static void emit_norm_lean_slice(FILE *out, const SemanticIR *ir, const char *s,
                     if ((wl == 4 && (!strncmp(ws, "then", 4) || !strncmp(ws, "else", 4) || !strncmp(ws, "with", 4))) ||
                         (wl == 2 && (!strncmp(ws, "in", 2) || !strncmp(ws, "if", 2))) ||
                         (wl == 3 && !strncmp(ws, "let", 3)) ||
-                        (wl > 9 && (!strncmp(ws, "flow_nat_", 9) || !strncmp(ws, "flow_float_", 11) || !strncmp(ws, "flow_fx64_", 10))) ||
+                        (wl > 9 && (!strncmp(ws, "flow_nat_", 9) || !strncmp(ws, "flow_float_", 11) || !strncmp(ws, "flow_fx64_", 10) || !strncmp(ws, "flow_jet2_", 10))) ||
                         find_ir_lean_fn_len(ir, ws, wl) != NULL)
                         continue;
+                    if (mode == LEAN_EXPR_JET2) {
+                        fprintf(out, "flow_jet2_%s(", p[0] == '+' ? "add" : "sub");
+                        emit_norm_lean_slice(out, ir, s, (size_t)(p - s), mode, is_header_inline); fputs(", ", out); emit_norm_lean_slice(out, ir, p + 1, (size_t)(end - (p + 1)), mode, is_header_inline); fputc(')', out); return;
+                    }
                     if (mode == LEAN_EXPR_FX64) {
                         fprintf(out, "flow_fx64_%s(", p[0] == '+' ? "add" : "sub");
                         emit_norm_lean_slice(out, ir, s, (size_t)(p - s), mode, is_header_inline); fputs(", ", out); emit_norm_lean_slice(out, ir, p + 1, (size_t)(end - (p + 1)), mode, is_header_inline); fputc(')', out); return;
@@ -348,6 +427,10 @@ static void emit_norm_lean_slice(FILE *out, const SemanticIR *ir, const char *s,
                 }
             }
             if (pass == 9 && (p[0] == '*' || p[0] == '/' || p[0] == '%')) {
+                if (mode == LEAN_EXPR_JET2) {
+                    fprintf(out, "flow_jet2_%s(", p[0] == '*' ? "mul" : (p[0] == '/' ? "div" : "mod"));
+                    emit_norm_lean_slice(out, ir, s, (size_t)(p - s), mode, is_header_inline); fputs(", ", out); emit_norm_lean_slice(out, ir, p + 1, (size_t)(end - (p + 1)), mode, is_header_inline); fputc(')', out); return;
+                }
                 if (mode == LEAN_EXPR_FX64) {
                     fprintf(out, "flow_fx64_%s(", p[0] == '*' ? "mul" : (p[0] == '/' ? "div" : "mod"));
                     emit_norm_lean_slice(out, ir, s, (size_t)(p - s), mode, is_header_inline); fputs(", ", out); emit_norm_lean_slice(out, ir, p + 1, (size_t)(end - (p + 1)), mode, is_header_inline); fputc(')', out); return;
@@ -370,6 +453,9 @@ static void emit_norm_lean_slice(FILE *out, const SemanticIR *ir, const char *s,
     if (s[0] == '-' && len > 1 && s[1] != '>') {
         int has_dot = 0;
         for (size_t i = 1; i < len; ++i) if (s[i] == '.') { has_dot = 1; break; }
+        if (mode == LEAN_EXPR_JET2) {
+            fputs("flow_jet2_neg(", out); emit_norm_lean_slice(out, ir, s + 1, len - 1, LEAN_EXPR_JET2, is_header_inline); fputc(')', out); return;
+        }
         if (mode == LEAN_EXPR_FX64) {
             fputs("flow_fx64_neg(", out); emit_norm_lean_slice(out, ir, s + 1, len - 1, LEAN_EXPR_FX64, is_header_inline); fputc(')', out); return;
         }
@@ -448,7 +534,8 @@ static void emit_norm_lean_slice(FILE *out, const SemanticIR *ir, const char *s,
             LeanExprMode arg_mode = mode;
             if (op_len == 6 && !strncmp(op_suf, "of_nat", 6)) arg_mode = LEAN_EXPR_UINT;
             else if (op_len == 6 && !strncmp(op_suf, "of_int", 6)) arg_mode = LEAN_EXPR_INT;
-            if (mode == LEAN_EXPR_FX64) fprintf(out, "flow_fx64_%.*s(", (int)op_len, op_suf);
+            if (mode == LEAN_EXPR_JET2) fprintf(out, "flow_jet2_%.*s(", (int)op_len, op_suf);
+            else if (mode == LEAN_EXPR_FX64) fprintf(out, "flow_fx64_%.*s(", (int)op_len, op_suf);
             else fprintf(out, "%.*s(", (int)tok_l[0], tok_s[0]);
             for (size_t ti = 1; ti < tok_cnt; ++ti) {
                 if (ti > 1) fputs(", ", out);
@@ -457,6 +544,14 @@ static void emit_norm_lean_slice(FILE *out, const SemanticIR *ir, const char *s,
             fputc(')', out); return;
         }
         const FlowLeanFunction *callee = find_ir_lean_fn_len(ir, tok_s[0], tok_l[0]);
+        if (mode == LEAN_EXPR_JET2 && callee && is_jet2_eligible_fn(ir, callee)) {
+            fprintf(out, "%sjet2_%.*s(", is_header_inline ? "flowc_" : "", (int)tok_l[0], tok_s[0]);
+            for (size_t ti = 1; ti < tok_cnt; ++ti) {
+                if (ti > 1) fputs(", ", out);
+                emit_norm_lean_slice(out, ir, tok_s[ti], tok_l[ti], LEAN_EXPR_JET2, is_header_inline);
+            }
+            fputc(')', out); return;
+        }
         int use_fx = (callee && mode == LEAN_EXPR_FX64 && !(ir && ir->float_abi_ieee64) && infer_fn_expr_mode(callee) == LEAN_EXPR_FLOAT);
         fprintf(out, "%s%.*s%s(", (callee && is_header_inline) ? "flowc_" : "", (int)tok_l[0], tok_s[0], use_fx ? "_fx" : "");
         for (size_t ti = 1; ti < tok_cnt; ++ti) {
@@ -467,6 +562,9 @@ static void emit_norm_lean_slice(FILE *out, const SemanticIR *ir, const char *s,
     }
     if (len > 10 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X') && isxdigit((unsigned char)s[len - 1])) {
         fprintf(out, "%.*sULL", (int)len, s); return;
+    }
+    if (mode == LEAN_EXPR_JET2 && len > 0 && len < 64 && isdigit((unsigned char)s[0])) {
+        fprintf(out, "flow_jet2_const(%.*s)", (int)len, s); return;
     }
     if (mode == LEAN_EXPR_FX64 && len > 0 && len < 64 && isdigit((unsigned char)s[0])) {
         char nbuf[64];
@@ -543,10 +641,14 @@ static void emit_lean_nat_and_float_ops(FILE *output) {
     fputs(FLOW_STR(FLOW_EXACT_EXP_LOG_C17), output);
     fputc('\n', output);
     fputs(FLOW_STR(FLOW_EXACT_TRIG_QUANT_C17), output);
-    fputs("\n#endif /* FLOW_EXACT_NUMERICS_DEFINED */\n#ifndef FLOW_LEAN_NAT_OPS_DEFINED\n#define FLOW_LEAN_NAT_OPS_DEFINED\n", output);
+    fputs("\n#endif /* FLOW_EXACT_NUMERICS_DEFINED */\n#ifndef FLOW_JET_SCALAR2_DEFINED\n#define FLOW_JET_SCALAR2_DEFINED\ntypedef struct { double v; double d1; double d2; } FlowJetScalar2;\n#endif\n#ifndef FLOW_LEAN_NAT_OPS_DEFINED\n#define FLOW_LEAN_NAT_OPS_DEFINED\n", output);
     fputs(FLOW_STR(FLOW_LEAN_NAT_OPS_C17), output);
     fputc('\n', output);
     fputs(FLOW_STR(FLOW_LEAN_FLOAT_OPS_C17), output);
+    fputc('\n', output);
+    fputs(FLOW_STR(FLOW_JET2_ALU_C17), output);
+    fputc('\n', output);
+    fputs(FLOW_STR(FLOW_JET2_MATH_C17), output);
     fputs("\n#endif\n", output);
 }
 static const char *lean_type_to_fx_c_type(const SemanticIR *ir, const char *t) {
@@ -595,7 +697,7 @@ static void emit_lean_let_statements_and_tail(FILE *output, const SemanticIR *ir
         const char *ps = s + 3, *pe = ce;
         while (ps < pe && isspace((unsigned char)*ps)) ++ps;
         while (pe > ps && isspace((unsigned char)pe[-1])) --pe;
-        const char *default_ct = (mode == LEAN_EXPR_FX64) ? "flow_fx64_t" : ((mode == LEAN_EXPR_FLOAT) ? "double" : ((mode == LEAN_EXPR_INT) ? "int64_t" : "uint64_t"));
+        const char *default_ct = (mode == LEAN_EXPR_JET2) ? "FlowJetScalar2" : ((mode == LEAN_EXPR_FX64) ? "flow_fx64_t" : ((mode == LEAN_EXPR_FLOAT) ? "double" : ((mode == LEAN_EXPR_INT) ? "int64_t" : "uint64_t")));
         if (pe - ps >= 2 && ps[0] == '(' && pe[-1] == ')') {
             char tvars[FLOW_TUPLE_MAX][FLOW_NAME] = {{0}}; size_t tcnt = 0;
             const char *q = ps + 1, *qe = pe - 1;
@@ -637,9 +739,15 @@ static void emit_lean_let_statements_and_tail(FILE *output, const SemanticIR *ir
             for (const char *p = ps; p < pe && *p != ':' && !isspace((unsigned char)*p); ++p)
                 if (vk + 1 < sizeof(vname)) vname[vk++] = *p;
             if (vname[0]) {
-                fprintf(output, "    const %s %s = (%s)(", default_ct, vname, default_ct);
-                emit_norm_lean_slice(output, ir, rhs, (size_t)(rhs_end - rhs), mode, is_header_inline);
-                fputs(");\n", output);
+                if (mode == LEAN_EXPR_JET2) {
+                    fprintf(output, "    const %s %s = ", default_ct, vname);
+                    emit_norm_lean_slice(output, ir, rhs, (size_t)(rhs_end - rhs), mode, is_header_inline);
+                    fputs(";\n", output);
+                } else {
+                    fprintf(output, "    const %s %s = (%s)(", default_ct, vname, default_ct);
+                    emit_norm_lean_slice(output, ir, rhs, (size_t)(rhs_end - rhs), mode, is_header_inline);
+                    fputs(");\n", output);
+                }
             }
         }
         s = rest;
@@ -664,6 +772,203 @@ static void split_tuple_tail_slices(const char *s, size_t len, size_t arity, con
         else if (pd == 0 && *p == ',' && cnt + 1 < arity) { seg_s[cnt] = cur; seg_e[cnt] = p; cnt++; cur = p + 1; }
     }
     while (cnt < arity) { seg_s[cnt] = cur; seg_e[cnt] = end; cnt++; }
+}
+static int eval_enum_fsm_slice(const SemanticIR *ir, const FlowLeanFunction *fn, const char *s, size_t len, const uint32_t *param_vals, uint32_t *out_val) {
+    if (!ir || !fn || !s || !out_val) return 0;
+    for (;;) {
+        while (len > 0 && isspace((unsigned char)*s)) { ++s; --len; }
+        while (len > 0 && isspace((unsigned char)s[len - 1])) --len;
+        if (len >= 2 && s[0] == '(' && s[len - 1] == ')') {
+            int d = 0, w = 1;
+            for (size_t i = 0; i + 1 < len; ++i) { if (s[i] == '(') d++; else if (s[i] == ')' && --d == 0) { w = 0; break; } }
+            if (w) { ++s; len -= 2; continue; }
+        }
+        break;
+    }
+    if (len == 0) return 0;
+    const char *end = s + len;
+    if (is_lean_kw_at(s, s, end, "let", 3)) {
+        const char *ce = NULL; int pd = 0;
+        for (const char *p = s + 3; p + 1 < end; ++p) {
+            if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
+            else if (pd == 0 && p[0] == ':' && p[1] == '=') { ce = p; break; }
+        }
+        if (!ce) return 0;
+        char var[FLOW_NAME] = {0}; size_t k = 0;
+        for (const char *p = s + 3; p < ce; ++p) {
+            if (*p == ':') break;
+            if (!isspace((unsigned char)*p) && k + 1 < sizeof(var)) var[k++] = *p;
+        }
+        const char *rhs = ce + 2;
+        while (rhs < end && isspace((unsigned char)*rhs)) ++rhs;
+        const char *rhs_end = NULL, *rest = NULL; pd = 0; int ld = 0;
+        for (const char *p = rhs; p < end; ++p) {
+            if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
+            else if (pd == 0 && is_lean_kw_at(p, rhs, end, "let", 3)) ld++;
+            else if (pd == 0 && is_lean_kw_at(p, rhs, end, "in", 2)) { if (ld == 0) { rhs_end = p; rest = p + 2; break; } ld--; }
+        }
+        if (!rhs_end) {
+            pd = 0; int id = 0;
+            for (const char *p = rhs; p < end; ++p) {
+                if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
+                else if (pd == 0 && is_lean_kw_at(p, rhs, end, "if", 2)) id++;
+                else if (pd == 0 && is_lean_kw_at(p, rhs, end, "else", 4) && id > 0) id--;
+                else if (pd == 0 && id == 0 && (*p == '\n' || *p == ';')) { rhs_end = p; rest = p + 1; break; }
+            }
+        }
+        if (!rhs_end || !rest) return 0;
+        while (rhs_end > rhs && isspace((unsigned char)rhs_end[-1])) --rhs_end;
+        while (rest < end && isspace((unsigned char)*rest)) ++rest;
+        if (is_lean_kw_at(rest, rest, end, "in", 2)) rest += 2;
+        char sub[4096];
+        subst_lean_var(rest, (size_t)(end - rest), var, rhs, (size_t)(rhs_end - rhs), sub, sizeof(sub));
+        return eval_enum_fsm_slice(ir, fn, sub, strlen(sub), param_vals, out_val);
+    }
+    if (is_lean_kw_at(s, s, end, "match", 5)) {
+        const char *w = NULL; int pd = 0;
+        for (const char *p = s + 5; p < end; ++p) {
+            if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
+            else if (pd == 0 && is_lean_kw_at(p, s, end, "with", 4)) { w = p; break; }
+        }
+        if (!w) return 0;
+        const char *sc_s[4]; size_t sc_l[4], sc_cnt = split_comma_slices(s + 5, (size_t)(w - (s + 5)), sc_s, sc_l, 4);
+        uint32_t sc_vals[4] = {0};
+        for (size_t m = 0; m < sc_cnt; ++m)
+            if (!eval_enum_fsm_slice(ir, fn, sc_s[m], sc_l[m], param_vals, &sc_vals[m])) return 0;
+        const char *arms[64]; size_t arm_cnt = 0; pd = 0; int md = 0;
+        for (const char *p = w + 4; p < end; ++p) {
+            if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
+            else if (pd == 0 && is_lean_kw_at(p, w + 4, end, "match", 5)) md++;
+            else if (pd == 0 && md == 0 && *p == '|' && (p == w + 4 || p[-1] != '|') && (p + 1 == end || p[1] != '|')) {
+                if (arm_cnt < 64) arms[arm_cnt++] = p;
+            }
+        }
+        for (size_t a = 0; a < arm_cnt; ++a) {
+            const char *a_start = arms[a] + 1, *a_end = (a + 1 < arm_cnt) ? arms[a + 1] : end, *arr = NULL;
+            for (const char *p = a_start; p + 1 < a_end; ++p) if (p[0] == '=' && p[1] == '>') { arr = p; break; }
+            if (!arr) return 0;
+            const char *pt_s[4]; size_t pt_l[4], pt_cnt = split_comma_slices(a_start, (size_t)(arr - a_start), pt_s, pt_l, 4);
+            int matched = 1;
+            for (size_t m = 0; m < pt_cnt && m < sc_cnt; ++m) {
+                if (pt_l[m] == 1 && pt_s[m][0] == '_') continue;
+                uint32_t pv = 0;
+                if (!eval_enum_fsm_slice(ir, fn, pt_s[m], pt_l[m], param_vals, &pv)) return 0;
+                if (pv != sc_vals[m]) { matched = 0; break; }
+            }
+            if (matched || a + 1 == arm_cnt)
+                return eval_enum_fsm_slice(ir, fn, arr + 2, (size_t)(a_end - (arr + 2)), param_vals, out_val);
+        }
+        return 0;
+    }
+    if (is_lean_kw_at(s, s, end, "if", 2)) {
+        const char *th = NULL, *el = NULL; int d = 0, pd = 0;
+        for (const char *p = s + 2; p < end; ++p) {
+            if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
+            else if (pd == 0 && is_lean_kw_at(p, s, end, "if", 2)) d++;
+            else if (pd == 0 && is_lean_kw_at(p, s, end, "then", 4)) { if (d == 0) { th = p; break; } d--; }
+        }
+        if (th) {
+            d = 0; pd = 0;
+            for (const char *p = th + 4; p < end; ++p) {
+                if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
+                else if (pd == 0 && is_lean_kw_at(p, s, end, "if", 2)) d++;
+                else if (pd == 0 && is_lean_kw_at(p, s, end, "else", 4)) { if (d == 0) { el = p; break; } d--; }
+            }
+        }
+        if (!th || !el) return 0;
+        uint32_t cv = 0;
+        if (!eval_enum_fsm_slice(ir, fn, s + 2, (size_t)(th - (s + 2)), param_vals, &cv)) return 0;
+        return cv ? eval_enum_fsm_slice(ir, fn, th + 4, (size_t)(el - (th + 4)), param_vals, out_val)
+                  : eval_enum_fsm_slice(ir, fn, el + 4, (size_t)(end - (el + 4)), param_vals, out_val);
+    }
+    for (int pass = 1; pass <= 3; ++pass) {
+        int pd = 0;
+        for (const char *p = end - 1; p > s; --p) {
+            if (*p == ')') pd++; else if (*p == '(' && pd > 0) pd--;
+            if (pd != 0) continue;
+            if (pass == 1 && p + 1 < end && p[0] == '|' && p[1] == '|' && p[-1] != '|' && (p + 2 == end || p[2] != '|')) {
+                uint32_t lv = 0, rv = 0;
+                if (!eval_enum_fsm_slice(ir, fn, s, (size_t)(p - s), param_vals, &lv) || !eval_enum_fsm_slice(ir, fn, p + 2, (size_t)(end - (p + 2)), param_vals, &rv)) return 0;
+                *out_val = (lv || rv) ? 1u : 0u; return 1;
+            }
+            if (pass == 2 && p + 1 < end && p[0] == '&' && p[1] == '&' && p[-1] != '&' && (p + 2 == end || p[2] != '&')) {
+                uint32_t lv = 0, rv = 0;
+                if (!eval_enum_fsm_slice(ir, fn, s, (size_t)(p - s), param_vals, &lv) || !eval_enum_fsm_slice(ir, fn, p + 2, (size_t)(end - (p + 2)), param_vals, &rv)) return 0;
+                *out_val = (lv && rv) ? 1u : 0u; return 1;
+            }
+            if (pass == 3) {
+                uint32_t lv = 0, rv = 0;
+                if (p + 1 < end && ((p[0] == '=' && p[1] == '=') || (p[0] == '!' && p[1] == '=') || (p[0] == '<' && p[1] == '=' && p[-1] != '<') || (p[0] == '>' && p[1] == '=' && p[-1] != '>'))) {
+                    if (!eval_enum_fsm_slice(ir, fn, s, (size_t)(p - s), param_vals, &lv) || !eval_enum_fsm_slice(ir, fn, p + 2, (size_t)(end - (p + 2)), param_vals, &rv)) return 0;
+                    *out_val = (p[0] == '=') ? (lv == rv) : (p[0] == '!' ? (lv != rv) : (p[0] == '<' ? (lv <= rv) : (lv >= rv))); return 1;
+                }
+                if (p[0] == '=' && p[-1] != '=' && p[-1] != '!' && p[-1] != '<' && p[-1] != '>' && p[-1] != ':' && (p + 1 < end && p[1] != '=' && p[1] != '>')) {
+                    if (!eval_enum_fsm_slice(ir, fn, s, (size_t)(p - s), param_vals, &lv) || !eval_enum_fsm_slice(ir, fn, p + 1, (size_t)(end - (p + 1)), param_vals, &rv)) return 0;
+                    *out_val = (lv == rv) ? 1u : 0u; return 1;
+                }
+            }
+        }
+    }
+    if (s[0] == '!') {
+        uint32_t v = 0;
+        if (!eval_enum_fsm_slice(ir, fn, s + 1, len - 1, param_vals, &v)) return 0;
+        *out_val = v ? 0u : 1u; return 1;
+    }
+    if (len == 4 && !strncmp(s, "true", 4)) { *out_val = 1u; return 1; }
+    if (len == 5 && !strncmp(s, "false", 5)) { *out_val = 0u; return 1; }
+    for (size_t pi = 0; pi < fn->param_count; ++pi)
+        if (strlen(fn->param_names[pi]) == len && !strncmp(fn->param_names[pi], s, len)) { *out_val = param_vals[pi]; return 1; }
+    for (size_t ei = 0; ei < ir->lean_enum_count; ++ei) {
+        const FlowLeanEnum *en = &ir->lean_enums[ei];
+        for (size_t vi = 0; vi < en->variant_count; ++vi)
+            if (strlen(en->variants[vi]) == len && !strncmp(en->variants[vi], s, len)) { *out_val = (uint32_t)vi; return 1; }
+    }
+    return 0;
+}
+static int try_emit_enum_fsm_lut_c(FILE *output, const SemanticIR *ir, const FlowLeanFunction *fn, const char *ret_c) {
+    if (!output || !ir || !fn || fn->is_struct_transform || fn->is_tuple_return || fn->param_count == 0 || fn->param_count > 2) return 0;
+    const FlowLeanEnum *ret_en = find_ir_lean_enum(ir, fn->return_type);
+    const FlowLeanEnum *p0_en = find_ir_lean_enum(ir, fn->param_types[0]);
+    const FlowLeanEnum *p1_en = (fn->param_count == 2) ? find_ir_lean_enum(ir, fn->param_types[1]) : NULL;
+    if (!ret_en || !p0_en || (fn->param_count == 2 && !p1_en)) return 0;
+    size_t n0 = p0_en->variant_count, n1 = p1_en ? p1_en->variant_count : 1;
+    if (n0 == 0 || n0 > 16 || n1 == 0 || n1 > 16 || ret_en->variant_count == 0 || ret_en->variant_count > 64) return 0;
+    uint8_t lut[16][16] = {{0}};
+    for (size_t i = 0; i < n0; ++i) {
+        for (size_t j = 0; j < n1; ++j) {
+            uint32_t pvals[2] = { (uint32_t)i, (uint32_t)j }, rval = 0;
+            if (!eval_enum_fsm_slice(ir, fn, fn->body, strlen(fn->body), pvals, &rval) || rval >= ret_en->variant_count) return 0;
+            lut[i][j] = (uint8_t)rval;
+        }
+    }
+    if (fn->param_count == 2) {
+        fprintf(output, "    static const uint8_t %s_transition_table[%zu][%zu] = {\n", fn->name, n0, n1);
+        for (size_t i = 0; i < n0; ++i) {
+            fprintf(output, "        { ");
+            for (size_t j = 0; j < n1; ++j)
+                fprintf(output, "%s%uu", j > 0 ? ", " : "", (unsigned)lut[i][j]);
+            fprintf(output, " }%s\n", i + 1 < n0 ? "," : "");
+        }
+        fprintf(output,
+            "    };\n"
+            "    uint32_t _idx_0 = ((uint32_t)%s < %zuu) ? (uint32_t)%s : 0u;\n"
+            "    uint32_t _idx_1 = ((uint32_t)%s < %zuu) ? (uint32_t)%s : 0u;\n"
+            "    return (%s)%s_transition_table[_idx_0][_idx_1];\n}\n",
+            fn->param_names[0], n0, fn->param_names[0],
+            fn->param_names[1], n1, fn->param_names[1],
+            ret_c, fn->name);
+    } else {
+        fprintf(output, "    static const uint8_t %s_transition_table[%zu] = { ", fn->name, n0);
+        for (size_t i = 0; i < n0; ++i)
+            fprintf(output, "%s%uu", i > 0 ? ", " : "", (unsigned)lut[i][0]);
+        fprintf(output,
+            " };\n"
+            "    uint32_t _idx_0 = ((uint32_t)%s < %zuu) ? (uint32_t)%s : 0u;\n"
+            "    return (%s)%s_transition_table[_idx_0];\n}\n",
+            fn->param_names[0], n0, fn->param_names[0],
+            ret_c, fn->name);
+    }
+    return 1;
 }
 static void emit_lean_contract_wrapper_c(FILE *output, const SemanticIR *ir, const FlowLeanFunction *fn, int is_header_inline) {
     if (!output || !fn || fn->is_private || !fn->name[0] || !strncmp(fn->name, "lean_", 5)) return;
@@ -717,7 +1022,24 @@ static void emit_lean_contract_wrapper_c(FILE *output, const SemanticIR *ir, con
             fprintf(output, "%sout_%zu", (fn->param_count > 0 || ti > 0) ? ", " : "", ti);
     }
     fprintf(output, ");\n");
-    if (fn->postcond_expr[0]) {
+    if (fn->thm_guard_count > 0) {
+        for (size_t gi = 0; gi < fn->thm_guard_count; ++gi) {
+            if (fn->thm_hyp_exprs[gi][0]) {
+                fprintf(output, "    if ((");
+                emit_lean_expr_as_c_ex(output, ir, fn->thm_hyp_exprs[gi], fmode, is_header_inline);
+                fprintf(output, ") && !(");
+                emit_lean_expr_as_c_ex(output, ir, fn->thm_conc_exprs[gi], fmode, is_header_inline);
+            } else {
+                fprintf(output, "    if (!(");
+                emit_lean_expr_as_c_ex(output, ir, fn->thm_conc_exprs[gi], fmode, is_header_inline);
+            }
+            if (fn->is_struct_transform) {
+                fprintf(output, ")) { %s _z; __builtin_memset(&_z, 0, sizeof(_z)); return _z; }\n", ret_c);
+            } else {
+                fprintf(output, ")) return (%s)0;\n", ret_c);
+            }
+        }
+    } else if (fn->postcond_expr[0]) {
         fprintf(output, "    if (!(");
         emit_lean_expr_as_c_ex(output, ir, fn->postcond_expr, fmode, is_header_inline);
         if (fn->is_struct_transform) {
@@ -980,16 +1302,38 @@ static void emit_single_lean_fn_c(FILE *output, const SemanticIR *ir, const Flow
     } else {
         fputc('\n', output);
     }
-    const char *tail_c = NULL; size_t tail_c_len = 0;
-    emit_lean_let_statements_and_tail(output, ir, fn->body, fmode, is_header_inline, &tail_c, &tail_c_len);
-    if (!strcmp(fn->return_type, "Float") || !strcmp(fn->return_type, "Float32")) {
-        fprintf(output, "    %s _flow_ret = (%s)(", ret_c, ret_c);
-        emit_norm_lean_slice(output, ir, tail_c, tail_c_len, fmode, is_header_inline);
-        fprintf(output, ");\n    return isfinite(_flow_ret) ? _flow_ret : (%s)0.0;\n}\n", ret_c);
-    } else {
-        fprintf(output, "    return (%s)(", ret_c);
-        emit_norm_lean_slice(output, ir, tail_c, tail_c_len, fmode, is_header_inline);
-        fprintf(output, ");\n}\n");
+    if (!try_emit_enum_fsm_lut_c(output, ir, fn, ret_c)) {
+        const char *tail_c = NULL; size_t tail_c_len = 0;
+        emit_lean_let_statements_and_tail(output, ir, fn->body, fmode, is_header_inline, &tail_c, &tail_c_len);
+        if (!strcmp(fn->return_type, "Float") || !strcmp(fn->return_type, "Float32")) {
+            fprintf(output, "    %s _flow_ret = (%s)(", ret_c, ret_c);
+            emit_norm_lean_slice(output, ir, tail_c, tail_c_len, fmode, is_header_inline);
+            fprintf(output, ");\n    return isfinite(_flow_ret) ? _flow_ret : (%s)0.0;\n}\n", ret_c);
+        } else {
+            fprintf(output, "    return (%s)(", ret_c);
+            emit_norm_lean_slice(output, ir, tail_c, tail_c_len, fmode, is_header_inline);
+            fprintf(output, ");\n}\n");
+        }
+    }
+    if (is_jet2_eligible_fn(ir, fn)) {
+        if (!is_static_fn) {
+            fprintf(output, "FlowJetScalar2 jet2_%s(", fn->name);
+            for (size_t pi = 0; pi < fn->param_count; ++pi)
+                fprintf(output, "%sFlowJetScalar2 %s", pi > 0 ? ", " : "", fn->param_names[pi]);
+            fprintf(output, ");\n");
+        }
+        fprintf(output, "%sFlowJetScalar2 %sjet2_%s(", is_static_fn ? "static inline __attribute__((unused)) " : "", is_header_inline ? "flowc_" : "", fn->name);
+        for (size_t pi = 0; pi < fn->param_count; ++pi)
+            fprintf(output, "%sFlowJetScalar2 %s", pi > 0 ? ", " : "", fn->param_names[pi]);
+        fprintf(output, ") {\n    ");
+        for (size_t pi = 0; pi < fn->param_count; ++pi)
+            fprintf(output, "(void)%s; ", fn->param_names[pi]);
+        fputc('\n', output);
+        const char *tail_j2 = NULL; size_t tail_j2_len = 0;
+        emit_lean_let_statements_and_tail(output, ir, fn->body, LEAN_EXPR_JET2, is_header_inline, &tail_j2, &tail_j2_len);
+        fprintf(output, "    return ");
+        emit_norm_lean_slice(output, ir, tail_j2, tail_j2_len, LEAN_EXPR_JET2, is_header_inline);
+        fprintf(output, ";\n}\n");
     }
     emit_lean_contract_wrapper_c(output, ir, fn, is_header_inline);
 }
@@ -1231,7 +1575,9 @@ int flow_emit_builtin_component(FILE *output, const SemanticIR *ir, const Compon
     if (reload_adapter) { emit_reload_adapter(output, c, cap, shd); return ferror(output) == 0; }
     flow_emit_metadata(output, ir, c, s, v);
     flow_emit_abi_exports(output, ir, c, cap);
-    fputs("#ifndef FLOW_SHARED_LIB\nint main(void) { return 0; }\n#endif\n", output);
+    if (!ir || !ir->omit_dummy_main) {
+        fputs("#ifndef FLOW_SHARED_LIB\nint main(void) { return 0; }\n#endif\n", output);
+    }
     return ferror(output) == 0;
 }
 int emit_c(FILE *output, const SemanticIR *ir, const Component *c, const SearchResult *s, const VerificationReport *v, int reload_adapter) {

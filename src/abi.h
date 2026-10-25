@@ -36,6 +36,7 @@ typedef struct { char name[64]; FlowParam params[FLOW_ABI_MAX_PARAMS]; size_t pa
 typedef struct { char component_id[64], module_name[64], version[32]; int thread_safe; size_t max_memory_bytes, function_count; FlowMemoryMode default_memory_mode; FlowControlContract control_contract; FlowViewContract input_view_contract, output_view_contract; FlowFunctionSignature create_fn, destroy_fn, primary_fn, functions[FLOW_ABI_MAX_FUNCTIONS]; const SemanticIR *ir; } FlowComponentABI;
 int flow_abi_build_for_component(const SemanticIR *ir, const Component *comp, FlowComponentABI *abi);
 int flow_abi_emit_c_header(FILE *output, const FlowComponentABI *abi);
+int flow_abi_emit_mex_dispatcher(FILE *output, const SemanticIR *ir);
 int flow_abi_emit_lean_adapter(FILE *output, const SemanticIR *ir, const FlowComponentABI *abi, uint64_t genome, size_t capacity, size_t shards);
 int flow_abi_audit_lean_certificate(const char *lean_source, char *err_msg, size_t err_size);
 int flow_abi_verify_lean_certificate(const char *lean_path, char *err_msg, size_t err_size);

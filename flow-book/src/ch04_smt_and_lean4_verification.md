@@ -6,11 +6,10 @@ FLOW 將 `.lean` 的數學證明直接轉化為 C17 硬體級執行期防線與�
 
 ## 4.1 三層形式化驗證與硬體合約合成機制
 
-1. **定理自動合成 C17 硬體前後置合約（`theorem` $\to$ `lean_<fn>`，[`src/parser.c`](../../src/parser.c), [`src/backend.c`](../../src/backend.c)）**：
-   - 凡是針對算子 `def f` 證明的 `theorem`：
-     - 定理的前提（包含顯式參數 `(h : P x)` 與蘊含前提 `P x → Q (f x)`）自動正規化並收斂為輸入邊界斷言 `FLOW_LEAN_PRE_GUARD`。
-     - 定理的結論 `Q (f x)` 自動將 `f x` 代換為 `_ret`，收斂為輸出不變量斷言 `FLOW_LEAN_POST_GUARD`。
-   - 當多條 `theorem` 針對同一個 `f` 時，它們的前提與結論自動取邏輯交集（$\bigwedge_i P_i \implies \bigwedge_j Q_j$），合成出 `lean_f()`（DSO 匯出函數）與 `flowc_lean_f()`（`--target-c-header` 靜態內聯函數）。
+1. **結構型定義域前置斷言與定理實質蘊含合約（`structure` `Prop` & `theorem` $\to$ `lean_<fn>`，[`src/parser.c`](../../src/parser.c), [`src/backend.c`](../../src/backend.c)）**：
+   - **結構型定義域假設（Structural / Domain Precondition）**：來自輸入 `structure` 內嵌的 `Prop` 欄位（如 `h_wv : w_v ≥ 0`、`h_wa : w_a > 0`）與 `def` 簽名中的依賴證明參數，直接編譯為執行前輸入邊界斷言 `FLOW_LEAN_PRE_GUARD(domain_ok, fallback)`。
+   - **定理實質蘊含守衛（Material Implication Guard $P_k(x) \implies Q_k(x, \text{\_ret})$）**：凡是針對算子 `def f` 證明的 `theorem`，其前提 $P_k(x)$ 與結論 $Q_k(x, \text{\_ret})$ 直接編譯為實質蘊含斷言 `FLOW_LEAN_IMPLIES_GUARD(P_k(x), Q_k(x, _ret), fallback)`（即 `if ((P_k(x)) && !(Q_k(x, _ret))) return fallback;`）。
+   - 當多條局部 `theorem`（例如互斥的 `v > 0` 上漲定理與 `v < 0` 下跌定理，或 `inductive` 狀態機的 `no_zombie_order` 定理）針對同一個 `f` 時，所有定理守衛能無縫共存並織成嚴密的執行期防護網，合成出 `lean_f()`（DSO 匯出函數）與 `flowc_lean_f()`（`--target-c-header` 靜態內聯函數）。
 2. **SMT QF_LIA 四大定理與保守多面體看門狗（[`src/smt.c`](../../src/smt.c)）**：
    - 強制檢驗緩衝區邊界（`buffer_bounds_safety`）、記憶體配額（`memory_quota_bound`）、分片無別名正交（`shard_non_aliasing`）與決定論不變量（`determinism_invariant`）。
    - 支援微秒級預算之保守多面體區間包絡線快速驗證（`flow_smt_verify_with_budget`）與插件能力安全閘門（`flow_security_check_composition_gate`）。

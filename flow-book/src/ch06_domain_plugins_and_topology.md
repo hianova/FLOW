@@ -35,3 +35,22 @@
 # 4. 執行全套 8 大領域測試套件
 ./build/flowy test all
 ```
+
+---
+
+## 6.3 MATLAB / Simulink 零修改直通與 `--target-mex` 原生分派器 (`src/abi.c`, `src/flowc.c`)
+
+由於 `flowc` 產出的 C17 標頭檔與實作檔已收斂為 **100% 純淨 C17 ABI**（無證明欄位、無隱藏執行期狀態，且搭配 `--target-c-header` / `--target-mex` 時自動省略 `int main(void)`），FLOW 可透過兩條極簡路徑無縫接入 MATLAB 與 Simulink 生態：
+
+1. **零修改直通 Simulink `C Caller Block` 與 MATLAB `loadlibrary` / `clibgen`**：
+   - 執行 `./build/flowc model.lean -o build/model.c --target-c-header build/model.h`。
+   - 直接將 `build/model.h` 與 `build/model.c` 拖入 Simulink 的 **C Caller Block**，即可將 `lean_<fn>` 當作形式化認證過的控制器方塊（Verified Controller Block）執行閉迴路模擬（SIL / PIL）；或在 MATLAB 中透過 `loadlibrary('libmodel.so', 'model.h')` 直接呼叫。
+2. **百萬次蒙地卡羅與高頻回測專用：`--target-mex` 原生 C17 分派器**：
+   - 執行 `./build/flowc model.lean -o build/model_mex.c --target-c-header build/model.h --target-mex`。
+   - [`flow_abi_emit_mex_dispatcher`](../../src/abi.c) 會在 `build/model_mex.c` 尾端自動生成 `mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])` 分派器，涵蓋所有非私有標量與多回傳值算子（`<fn>`、定理防護版 `lean_<fn>`、以及 2-Jet 前向自動微分版 `jet2_<fn>`）。
+   - 在 MATLAB 中僅需一行指令編譯，即可享受原生 C17 速度、Lean 4 執行期定理保護與 2-Jet 二階自動微分（一次取回 `[價格, Delta, Gamma]`）：
+     ```matlab
+     mex -Iinclude build/model_mex.c
+     hr = model_mex('lean_hamiltonian_reynolds', w_v, w_a, v, a);
+     [val, delta, gamma] = model_mex('jet2_portfolio_utility', S, K);
+     ```
