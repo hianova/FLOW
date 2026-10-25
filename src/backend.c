@@ -1,4 +1,5 @@
 #include "backend.h"
+#include "bitspace.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -159,12 +160,12 @@ static void subst_lean_var(const char *src, size_t src_len, const char *var, con
     }
     out[j] = '\0';
 }
-typedef enum { LEAN_EXPR_NAT = 0, LEAN_EXPR_UINT = 1, LEAN_EXPR_INT = 2, LEAN_EXPR_FLOAT = 3 } LeanExprMode;
+typedef enum { LEAN_EXPR_NAT = 0, LEAN_EXPR_UINT = 1, LEAN_EXPR_INT = 2, LEAN_EXPR_FLOAT = 3, LEAN_EXPR_FX64 = 4 } LeanExprMode;
 static LeanExprMode infer_c_type_expr_mode(const char *c_type, LeanExprMode fallback) {
     if (!c_type) return fallback;
     if (!strcmp(c_type, "double") || !strcmp(c_type, "float")) return LEAN_EXPR_FLOAT;
     if (!strcmp(c_type, "int64_t") || !strcmp(c_type, "int32_t") || !strcmp(c_type, "int16_t") || !strcmp(c_type, "int8_t")) return LEAN_EXPR_INT;
-    if (!strcmp(c_type, "uint32_t") || !strcmp(c_type, "uint16_t") || !strcmp(c_type, "uint8_t")) return LEAN_EXPR_UINT;
+    if (!strcmp(c_type, "uint64_t") || !strcmp(c_type, "uint32_t") || !strcmp(c_type, "uint16_t") || !strcmp(c_type, "uint8_t") || !strcmp(c_type, "bool")) return LEAN_EXPR_UINT;
     return fallback;
 }
 static LeanExprMode infer_fn_expr_mode(const FlowLeanFunction *fn) {
@@ -305,7 +306,7 @@ static void emit_norm_lean_slice(FILE *out, const char *s, size_t len, LeanExprM
                 if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
                 if (pd != 0) continue;
                 if (p[0] == '^' && p[-1] != '^' && (p + 1 == end || p[1] != '^')) {
-                    const char *fn_pow = (mode == LEAN_EXPR_FLOAT) ? "flow_float_pow(" : ((mode == LEAN_EXPR_INT) ? "flow_int_pow(" : "flow_nat_pow(");
+                    const char *fn_pow = (mode == LEAN_EXPR_FX64) ? "flow_fx64_pow(" : ((mode == LEAN_EXPR_FLOAT) ? "flow_float_pow(" : ((mode == LEAN_EXPR_INT) ? "flow_int_pow(" : "flow_nat_pow("));
                     fputs(fn_pow, out); emit_norm_lean_slice(out, s, (size_t)(p - s), mode);
                     fputs(", ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1)), mode); fputc(')', out); return;
                 }
@@ -358,8 +359,16 @@ static void emit_norm_lean_slice(FILE *out, const char *s, size_t len, LeanExprM
                     if ((wl == 4 && (!strncmp(ws, "then", 4) || !strncmp(ws, "else", 4) || !strncmp(ws, "with", 4))) ||
                         (wl == 2 && (!strncmp(ws, "in", 2) || !strncmp(ws, "if", 2))) ||
                         (wl == 3 && !strncmp(ws, "let", 3)) ||
-                        (wl > 9 && (!strncmp(ws, "flow_nat_", 9) || !strncmp(ws, "flow_float_", 11))))
+                        (wl > 9 && (!strncmp(ws, "flow_nat_", 9) || !strncmp(ws, "flow_float_", 11) || !strncmp(ws, "flow_fx64_", 10))))
                         continue;
+                    if (mode == LEAN_EXPR_FX64) {
+                        fprintf(out, "flow_fx64_%s(", p[0] == '+' ? "add" : "sub");
+                        emit_norm_lean_slice(out, s, (size_t)(p - s), mode); fputs(", ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1)), mode); fputc(')', out); return;
+                    }
+                    if (mode == LEAN_EXPR_FLOAT) {
+                        fprintf(out, "flow_float_%s(", p[0] == '+' ? "add" : "sub");
+                        emit_norm_lean_slice(out, s, (size_t)(p - s), mode); fputs(", ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1)), mode); fputc(')', out); return;
+                    }
                     if (p[0] == '+' || mode != LEAN_EXPR_NAT) {
                         fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s), mode); fprintf(out, " %c ", p[0]); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1)), mode); fputc(')', out); return;
                     }
@@ -367,11 +376,16 @@ static void emit_norm_lean_slice(FILE *out, const char *s, size_t len, LeanExprM
                 }
             }
             if (pass == 9 && (p[0] == '*' || p[0] == '/' || p[0] == '%')) {
-                if (p[0] == '*' || (mode == LEAN_EXPR_FLOAT && p[0] == '/')) {
-                    fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s), mode); fprintf(out, " %c ", p[0]); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1)), mode); fputc(')', out); return;
+                if (mode == LEAN_EXPR_FX64) {
+                    fprintf(out, "flow_fx64_%s(", p[0] == '*' ? "mul" : (p[0] == '/' ? "div" : "mod"));
+                    emit_norm_lean_slice(out, s, (size_t)(p - s), mode); fputs(", ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1)), mode); fputc(')', out); return;
                 }
-                if (mode == LEAN_EXPR_FLOAT && p[0] == '%') {
-                    fputs("__builtin_fmod(", out); emit_norm_lean_slice(out, s, (size_t)(p - s), mode); fputs(", ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1)), mode); fputc(')', out); return;
+                if (mode == LEAN_EXPR_FLOAT) {
+                    fprintf(out, "flow_float_%s(", p[0] == '*' ? "mul" : (p[0] == '/' ? "div" : "mod"));
+                    emit_norm_lean_slice(out, s, (size_t)(p - s), mode); fputs(", ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1)), mode); fputc(')', out); return;
+                }
+                if (p[0] == '*') {
+                    fputc('(', out); emit_norm_lean_slice(out, s, (size_t)(p - s), mode); fprintf(out, " %c ", p[0]); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1)), mode); fputc(')', out); return;
                 }
                 fprintf(out, "flow_%s_%s(", mode == LEAN_EXPR_INT ? "int" : "nat", p[0] == '/' ? "div" : "mod");
                 emit_norm_lean_slice(out, s, (size_t)(p - s), mode); fputs(", ", out); emit_norm_lean_slice(out, p + 1, (size_t)(end - (p + 1)), mode); fputc(')', out); return;
@@ -384,8 +398,14 @@ static void emit_norm_lean_slice(FILE *out, const char *s, size_t len, LeanExprM
     if (s[0] == '-' && len > 1 && s[1] != '>') {
         int has_dot = 0;
         for (size_t i = 1; i < len; ++i) if (s[i] == '.') { has_dot = 1; break; }
-        if (mode == LEAN_EXPR_NAT && !has_dot) { fputs("0ULL", out); return; }
-        fputs("(-", out); emit_norm_lean_slice(out, s + 1, len - 1, has_dot ? LEAN_EXPR_FLOAT : mode); fputc(')', out); return;
+        if (mode == LEAN_EXPR_FX64) {
+            fputs("flow_fx64_neg(", out); emit_norm_lean_slice(out, s + 1, len - 1, LEAN_EXPR_FX64); fputc(')', out); return;
+        }
+        if (mode == LEAN_EXPR_FLOAT || has_dot) {
+            fputs("flow_float_neg(", out); emit_norm_lean_slice(out, s + 1, len - 1, LEAN_EXPR_FLOAT); fputc(')', out); return;
+        }
+        if (mode == LEAN_EXPR_NAT) { fputs("0ULL", out); return; }
+        fputs("(-", out); emit_norm_lean_slice(out, s + 1, len - 1, mode); fputc(')', out); return;
     }
     if (s[0] == '(') {
         int pd = 0; const char *close_p = NULL;
@@ -423,6 +443,13 @@ static void emit_norm_lean_slice(FILE *out, const char *s, size_t len, LeanExprM
             fputs("((bool)", out); emit_norm_lean_slice(out, tok_s[1], tok_l[1], mode); fputc(')', out); return;
         }
         if (tok_l[0] == 13 && !strncmp(tok_s[0], "flow_quantize", 13) && tok_cnt == 5) {
+            if (mode == LEAN_EXPR_FX64) {
+                fputs("flow_quantize_fx((flow_fx64_t)(", out); emit_norm_lean_slice(out, tok_s[1], tok_l[1], LEAN_EXPR_FX64);
+                fputs("), (flow_fx64_t)(", out); emit_norm_lean_slice(out, tok_s[2], tok_l[2], LEAN_EXPR_FX64);
+                fputs("), (flow_fx64_t)(", out); emit_norm_lean_slice(out, tok_s[3], tok_l[3], LEAN_EXPR_FX64);
+                fputs("), (uint32_t)(", out); emit_norm_lean_slice(out, tok_s[4], tok_l[4], LEAN_EXPR_UINT);
+                fputs("))", out); return;
+            }
             fputs("flow_quantize((double)(", out); emit_norm_lean_slice(out, tok_s[1], tok_l[1], LEAN_EXPR_FLOAT);
             fputs("), (double)(", out); emit_norm_lean_slice(out, tok_s[2], tok_l[2], LEAN_EXPR_FLOAT);
             fputs("), (double)(", out); emit_norm_lean_slice(out, tok_s[3], tok_l[3], LEAN_EXPR_FLOAT);
@@ -430,11 +457,32 @@ static void emit_norm_lean_slice(FILE *out, const char *s, size_t len, LeanExprM
             fputs("))", out); return;
         }
         if (tok_l[0] == 15 && !strncmp(tok_s[0], "flow_dequantize", 15) && tok_cnt == 5) {
+            if (mode == LEAN_EXPR_FX64) {
+                fputs("flow_dequantize_fx((uint64_t)(", out); emit_norm_lean_slice(out, tok_s[1], tok_l[1], LEAN_EXPR_UINT);
+                fputs("), (flow_fx64_t)(", out); emit_norm_lean_slice(out, tok_s[2], tok_l[2], LEAN_EXPR_FX64);
+                fputs("), (flow_fx64_t)(", out); emit_norm_lean_slice(out, tok_s[3], tok_l[3], LEAN_EXPR_FX64);
+                fputs("), (uint32_t)(", out); emit_norm_lean_slice(out, tok_s[4], tok_l[4], LEAN_EXPR_UINT);
+                fputs("))", out); return;
+            }
             fputs("flow_dequantize((uint64_t)(", out); emit_norm_lean_slice(out, tok_s[1], tok_l[1], LEAN_EXPR_UINT);
             fputs("), (double)(", out); emit_norm_lean_slice(out, tok_s[2], tok_l[2], LEAN_EXPR_FLOAT);
             fputs("), (double)(", out); emit_norm_lean_slice(out, tok_s[3], tok_l[3], LEAN_EXPR_FLOAT);
             fputs("), (uint32_t)(", out); emit_norm_lean_slice(out, tok_s[4], tok_l[4], LEAN_EXPR_UINT);
             fputs("))", out); return;
+        }
+        if (tok_l[0] > 11 && !strncmp(tok_s[0], "flow_float_", 11)) {
+            const char *op_suf = tok_s[0] + 11;
+            size_t op_len = tok_l[0] - 11;
+            LeanExprMode arg_mode = mode;
+            if (op_len == 6 && !strncmp(op_suf, "of_nat", 6)) arg_mode = LEAN_EXPR_UINT;
+            else if (op_len == 6 && !strncmp(op_suf, "of_int", 6)) arg_mode = LEAN_EXPR_INT;
+            if (mode == LEAN_EXPR_FX64) fprintf(out, "flow_fx64_%.*s(", (int)op_len, op_suf);
+            else fprintf(out, "%.*s(", (int)tok_l[0], tok_s[0]);
+            for (size_t ti = 1; ti < tok_cnt; ++ti) {
+                if (ti > 1) fputs(", ", out);
+                emit_norm_lean_slice(out, tok_s[ti], tok_l[ti], arg_mode);
+            }
+            fputc(')', out); return;
         }
         fprintf(out, "%.*s(", (int)tok_l[0], tok_s[0]);
         for (size_t ti = 1; ti < tok_cnt; ++ti) {
@@ -445,6 +493,19 @@ static void emit_norm_lean_slice(FILE *out, const char *s, size_t len, LeanExprM
     }
     if (len > 10 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X') && isxdigit((unsigned char)s[len - 1])) {
         fprintf(out, "%.*sULL", (int)len, s); return;
+    }
+    if (mode == LEAN_EXPR_FX64 && len > 0 && len < 64 && isdigit((unsigned char)s[0])) {
+        char nbuf[64];
+        memcpy(nbuf, s, len);
+        nbuf[len] = '\0';
+        char *ep = NULL;
+        double d = strtod(nbuf, &ep);
+        if (ep && *ep == '\0') {
+            flow_fx64_t fx = flow_fx64_from_double(d);
+            if (fx == INT64_MIN) fputs("FLOW_FX64_NONE", out);
+            else fprintf(out, "INT64_C(%lld)", (long long)fx);
+            return;
+        }
     }
     fprintf(out, "%.*s", (int)len, s);
 }
@@ -494,6 +555,306 @@ static void emit_lean_expr_as_c(FILE *out, const char *expr, LeanExprMode mode) 
 }
 static void emit_lean_nat_and_float_ops(FILE *output) {
     fputs(
+        "#ifndef FLOW_EXACT_NUMERICS_DEFINED\n#define FLOW_EXACT_NUMERICS_DEFINED\n"
+        "#if defined(__GNUC__) || defined(__clang__)\n"
+        "__extension__ typedef __int128 flow_i128_t;\n"
+        "__extension__ typedef unsigned __int128 flow_u128_t;\n"
+        "#endif\n"
+        "typedef int64_t flow_fx64_t;\n"
+        "#define FLOW_FX_SHIFT 32\n"
+        "#define FLOW_FX_ONE (INT64_C(1) << 32)\n"
+        "#define FLOW_FX_HALF (INT64_C(1) << 31)\n"
+        "#define FLOW_FX_FRAC_MASK ((INT64_C(1) << 32) - 1)\n"
+        "#define FLOW_FX64_NONE INT64_MIN\n"
+        "#define FLOW_FX_PI INT64_C(13493037705)\n"
+        "#define FLOW_FX_HALF_PI INT64_C(6746518852)\n"
+        "#define FLOW_FX_TWO_PI INT64_C(26986075409)\n"
+        "#define FLOW_FX_LN2 INT64_C(2977044472)\n"
+        "#define FLOW_FX_INV_LN2 INT64_C(6196328019)\n"
+        "#define FLOW_FX16_SHIFT 16\n"
+        "#define FLOW_FX16_ONE (1 << 16)\n"
+        "static inline __attribute__((unused)) int flow_exp_approx_q16(int32_t x, int32_t *out) {\n"
+        "    if (!out) return 0;\n"
+        "    if (x < -10 * FLOW_FX16_ONE) { *out = 0; return 1; }\n"
+        "    if (x > 10 * FLOW_FX16_ONE) return 0;\n"
+        "    int32_t x_scaled = (int32_t)(((int64_t)x * INT64_C(94548)) >> FLOW_FX16_SHIFT);\n"
+        "    int32_t int_part = x_scaled >> FLOW_FX16_SHIFT;\n"
+        "    int32_t frac_part = x_scaled & (FLOW_FX16_ONE - 1);\n"
+        "    int32_t approx_frac = FLOW_FX16_ONE + frac_part;\n"
+        "    if (int_part >= 0) *out = (int32_t)((uint32_t)approx_frac << int_part);\n"
+        "    else *out = approx_frac >> (-int_part);\n"
+        "    return 1;\n"
+        "}\n"
+        "static inline __attribute__((unused)) int flow_rsqrt_approx_i32(uint32_t x, uint32_t *out) {\n"
+        "    if (!out || x == 0U) return 0;\n"
+        "    uint32_t msb = 31U - (uint32_t)__builtin_clz(x);\n"
+        "    uint32_t sqrt_approx = 1U << (msb / 2U);\n"
+        "    *out = (1U << 16U) / sqrt_approx;\n"
+        "    return 1;\n"
+        "}\n"
+        "static inline __attribute__((unused)) int flow_silu_approx_i8(int8_t x, int8_t *out) {\n"
+        "    if (!out) return 0;\n"
+        "    int32_t x_q16 = (int32_t)((uint32_t)(int32_t)x << FLOW_FX16_SHIFT);\n"
+        "    int32_t exp_neg_x = 0;\n"
+        "    if (!flow_exp_approx_q16(-x_q16, &exp_neg_x)) return 0;\n"
+        "    int32_t denom = FLOW_FX16_ONE + exp_neg_x;\n"
+        "    if (denom == 0) return 0;\n"
+        "    int64_t result = ((int64_t)x_q16 * (int64_t)FLOW_FX16_ONE) / (int64_t)denom;\n"
+        "    int32_t res_i32 = (int32_t)(result >> FLOW_FX16_SHIFT);\n"
+        "    if (res_i32 < -128) res_i32 = -128;\n"
+        "    else if (res_i32 > 127) res_i32 = 127;\n"
+        "    *out = (int8_t)res_i32;\n"
+        "    return 1;\n"
+        "}\n",
+        output);
+    fputs(
+        "static inline __attribute__((unused)) flow_fx64_t flow_fx64_from_double(double d) {\n"
+        "    uint64_t bits = 0;\n"
+        "    memcpy(&bits, &d, sizeof(bits));\n"
+        "    uint64_t sign = bits >> 63;\n"
+        "    int32_t exp = (int32_t)((bits >> 52) & 0x7FFULL) - 1023;\n"
+        "    uint64_t mant = (bits & 0x000FFFFFFFFFFFFFULL) | 0x0010000000000000ULL;\n"
+        "    if (((bits >> 52) & 0x7FFULL) == 0x7FFULL) return FLOW_FX64_NONE;\n"
+        "    if ((bits & 0x7FFFFFFFFFFFFFFFULL) == 0ULL || exp < -33) return 0;\n"
+        "    if (exp >= 31) return FLOW_FX64_NONE;\n"
+        "    int32_t rshift = 20 - exp;\n"
+        "    uint64_t mag = 0;\n"
+        "    if (rshift > 0) {\n"
+        "        uint64_t half = 1ULL << (uint32_t)(rshift - 1);\n"
+        "        mag = (mant + half) >> (uint32_t)rshift;\n"
+        "    } else if (rshift == 0) {\n"
+        "        mag = mant;\n"
+        "    } else {\n"
+        "        mag = mant << (uint32_t)(-rshift);\n"
+        "    }\n"
+        "    if (mag > UINT64_C(0x7FFFFFFFFFFFFFFF)) return FLOW_FX64_NONE;\n"
+        "    return sign ? -(flow_fx64_t)mag : (flow_fx64_t)mag;\n"
+        "}\n"
+        "static inline __attribute__((unused)) double flow_fx64_to_double(flow_fx64_t x) {\n"
+        "    if (x == 0 || x == FLOW_FX64_NONE) return 0.0;\n"
+        "    uint64_t sign = (x < 0) ? 1ULL : 0ULL;\n"
+        "    uint64_t mag = (x < 0) ? (uint64_t)(-(x + 1)) + 1ULL : (uint64_t)x;\n"
+        "    uint32_t lz = (uint32_t)__builtin_clzll(mag);\n"
+        "    int32_t msb = 63 - (int32_t)lz;\n"
+        "    int32_t exp = msb - 32;\n"
+        "    uint64_t mant = 0;\n"
+        "    if (msb <= 52) {\n"
+        "        mant = (mag << (uint32_t)(52 - msb)) & 0x000FFFFFFFFFFFFFULL;\n"
+        "    } else {\n"
+        "        uint32_t rsh = (uint32_t)(msb - 52);\n"
+        "        uint64_t rounded = mag + (1ULL << (rsh - 1U));\n"
+        "        if (rounded >> (uint32_t)(msb + 1)) { exp += 1; rsh += 1; }\n"
+        "        mant = (rounded >> rsh) & 0x000FFFFFFFFFFFFFULL;\n"
+        "    }\n"
+        "    uint64_t biased_exp = (uint64_t)(exp + 1023);\n"
+        "    uint64_t bits = (sign << 63) | (biased_exp << 52) | mant;\n"
+        "    double out = 0.0;\n"
+        "    memcpy(&out, &bits, sizeof(out));\n"
+        "    return out;\n"
+        "}\n",
+        output);
+    fputs(
+        "static inline __attribute__((unused)) flow_fx64_t flow_fx64_add(flow_fx64_t a, flow_fx64_t b) {\n"
+        "    if (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE) return FLOW_FX64_NONE;\n"
+        "    flow_i128_t s = (flow_i128_t)a + (flow_i128_t)b;\n"
+        "    if (s > (flow_i128_t)INT64_MAX || s <= (flow_i128_t)INT64_MIN) return FLOW_FX64_NONE;\n"
+        "    return (flow_fx64_t)s;\n"
+        "}\n"
+        "static inline __attribute__((unused)) flow_fx64_t flow_fx64_sub(flow_fx64_t a, flow_fx64_t b) {\n"
+        "    if (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE) return FLOW_FX64_NONE;\n"
+        "    flow_i128_t d = (flow_i128_t)a - (flow_i128_t)b;\n"
+        "    if (d > (flow_i128_t)INT64_MAX || d <= (flow_i128_t)INT64_MIN) return FLOW_FX64_NONE;\n"
+        "    return (flow_fx64_t)d;\n"
+        "}\n"
+        "static inline __attribute__((unused)) flow_fx64_t flow_fx64_neg(flow_fx64_t x) {\n"
+        "    if (x == FLOW_FX64_NONE) return FLOW_FX64_NONE;\n"
+        "    return -x;\n"
+        "}\n"
+        "static inline __attribute__((unused)) flow_fx64_t flow_fx64_abs(flow_fx64_t x) {\n"
+        "    if (x == FLOW_FX64_NONE) return FLOW_FX64_NONE;\n"
+        "    return x < 0 ? -x : x;\n"
+        "}\n"
+        "static inline __attribute__((unused)) flow_fx64_t flow_fx64_mul(flow_fx64_t a, flow_fx64_t b) {\n"
+        "    if (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE) return FLOW_FX64_NONE;\n"
+        "    flow_i128_t prod = (flow_i128_t)a * (flow_i128_t)b;\n"
+        "    flow_i128_t half = (flow_i128_t)FLOW_FX_HALF;\n"
+        "    flow_i128_t res = (prod >= 0) ? ((prod + half) >> 32) : -(((-prod) + half) >> 32);\n"
+        "    if (res > (flow_i128_t)INT64_MAX || res <= (flow_i128_t)INT64_MIN) return FLOW_FX64_NONE;\n"
+        "    return (flow_fx64_t)res;\n"
+        "}\n"
+        "static inline __attribute__((unused)) flow_fx64_t flow_fx64_div(flow_fx64_t a, flow_fx64_t b) {\n"
+        "    if (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE || b == 0) return FLOW_FX64_NONE;\n"
+        "    flow_i128_t num = ((flow_i128_t)a << 32);\n"
+        "    flow_i128_t half_b = ((b > 0) ? (flow_i128_t)b : -(flow_i128_t)b) >> 1;\n"
+        "    if ((a >= 0) == (b >= 0)) num += half_b;\n"
+        "    else num -= half_b;\n"
+        "    flow_i128_t q = num / (flow_i128_t)b;\n"
+        "    if (q > (flow_i128_t)INT64_MAX || q <= (flow_i128_t)INT64_MIN) return FLOW_FX64_NONE;\n"
+        "    return (flow_fx64_t)q;\n"
+        "}\n",
+        output);
+    fputs(
+        "static inline __attribute__((unused)) flow_fx64_t flow_fx64_mod(flow_fx64_t a, flow_fx64_t b) {\n"
+        "    if (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE || b == 0) return 0;\n"
+        "    return a % b;\n"
+        "}\n"
+        "static inline __attribute__((unused)) flow_fx64_t flow_fx64_floor(flow_fx64_t x) {\n"
+        "    if (x == FLOW_FX64_NONE) return FLOW_FX64_NONE;\n"
+        "    return (flow_fx64_t)((uint64_t)x & ~UINT64_C(0xFFFFFFFF));\n"
+        "}\n"
+        "static inline __attribute__((unused)) flow_fx64_t flow_fx64_ceil(flow_fx64_t x) {\n"
+        "    if (x == FLOW_FX64_NONE) return FLOW_FX64_NONE;\n"
+        "    return -flow_fx64_floor(-x);\n"
+        "}\n"
+        "static inline __attribute__((unused)) flow_fx64_t flow_fx64_round(flow_fx64_t x) {\n"
+        "    if (x == FLOW_FX64_NONE) return FLOW_FX64_NONE;\n"
+        "    return (x >= 0) ? flow_fx64_floor(x + FLOW_FX_HALF) : -flow_fx64_floor((-x) + FLOW_FX_HALF);\n"
+        "}\n"
+        "static inline __attribute__((unused)) flow_fx64_t flow_fx64_max(flow_fx64_t a, flow_fx64_t b) {\n"
+        "    if (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE) return FLOW_FX64_NONE;\n"
+        "    return a > b ? a : b;\n"
+        "}\n"
+        "static inline __attribute__((unused)) flow_fx64_t flow_fx64_min(flow_fx64_t a, flow_fx64_t b) {\n"
+        "    if (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE) return FLOW_FX64_NONE;\n"
+        "    return a < b ? a : b;\n"
+        "}\n"
+        "static inline __attribute__((unused)) flow_fx64_t flow_fx64_of_nat(uint64_t x) {\n"
+        "    if (x > UINT64_C(2147483647)) return FLOW_FX64_NONE;\n"
+        "    return (flow_fx64_t)(x << 32);\n"
+        "}\n"
+        "static inline __attribute__((unused)) flow_fx64_t flow_fx64_of_int(int64_t x) {\n"
+        "    if (x > INT64_C(2147483647) || x < INT64_C(-2147483647)) return FLOW_FX64_NONE;\n"
+        "    return (flow_fx64_t)((uint64_t)x << 32);\n"
+        "}\n",
+        output);
+    fputs(
+        "static inline __attribute__((unused)) flow_fx64_t flow_fx64_sqrt(flow_fx64_t x) {\n"
+        "    if (x <= 0 || x == FLOW_FX64_NONE) return 0;\n"
+        "    uint64_t ux = (uint64_t)x;\n"
+        "    int32_t msb = 63 - (int32_t)__builtin_clzll(ux);\n"
+        "    int32_t shift = (msb - 32) >> 1;\n"
+        "    flow_u128_t y = (shift >= 0) ? ((flow_u128_t)FLOW_FX_ONE << (uint32_t)shift) : ((flow_u128_t)FLOW_FX_ONE >> (uint32_t)(-shift));\n"
+        "    if (y == 0) y = 1;\n"
+        "    flow_u128_t target = (flow_u128_t)ux << 32;\n"
+        "    for (int i = 0; i < 6; ++i) y = (y + target / y) >> 1;\n"
+        "    return (flow_fx64_t)y;\n"
+        "}\n"
+        "static inline __attribute__((unused)) flow_fx64_t flow_fx64_exp(flow_fx64_t x) {\n"
+        "    if (x == FLOW_FX64_NONE) return FLOW_FX64_NONE;\n"
+        "    if (x <= INT64_C(-95265423104)) return 0;\n"
+        "    if (x >= INT64_C(92288378632)) return FLOW_FX64_NONE;\n"
+        "    flow_fx64_t x_prime = flow_fx64_mul(x, FLOW_FX_INV_LN2);\n"
+        "    int32_t k = (int32_t)(x_prime >> 32);\n"
+        "    flow_fx64_t f = x_prime & FLOW_FX_FRAC_MASK;\n"
+        "    flow_fx64_t r = flow_fx64_mul(f, FLOW_FX_LN2);\n"
+        "    flow_fx64_t p = INT64_C(852176);\n"
+        "    p = flow_fx64_mul(p, r) + INT64_C(5965232);\n"
+        "    p = flow_fx64_mul(p, r) + INT64_C(35791394);\n"
+        "    p = flow_fx64_mul(p, r) + INT64_C(178956971);\n"
+        "    p = flow_fx64_mul(p, r) + INT64_C(715827883);\n"
+        "    p = flow_fx64_mul(p, r) + FLOW_FX_HALF;\n"
+        "    p = flow_fx64_mul(p, r) + FLOW_FX_ONE;\n"
+        "    p = flow_fx64_mul(p, r) + FLOW_FX_ONE;\n"
+        "    if (k >= 0) {\n"
+        "        if (k >= 31 || p > (INT64_MAX >> (uint32_t)k)) return FLOW_FX64_NONE;\n"
+        "        return p << (uint32_t)k;\n"
+        "    } else {\n"
+        "        uint32_t sh = (uint32_t)(-k);\n"
+        "        return (sh >= 62U) ? 0 : (p >> sh);\n"
+        "    }\n"
+        "}\n"
+        "static inline __attribute__((unused)) flow_fx64_t flow_fx64_log(flow_fx64_t x) {\n"
+        "    if (x <= 0 || x == FLOW_FX64_NONE) return 0;\n"
+        "    uint64_t ux = (uint64_t)x;\n"
+        "    int32_t msb = 63 - (int32_t)__builtin_clzll(ux);\n"
+        "    int32_t k = msb - 32;\n"
+        "    flow_fx64_t m = (k >= 0) ? (flow_fx64_t)(ux >> (uint32_t)k) : (flow_fx64_t)(ux << (uint32_t)(-k));\n"
+        "    flow_fx64_t u = flow_fx64_div(m - FLOW_FX_ONE, m + FLOW_FX_ONE);\n"
+        "    flow_fx64_t u2 = flow_fx64_mul(u, u);\n"
+        "    flow_fx64_t poly = INT64_C(613566757);\n"
+        "    poly = flow_fx64_mul(poly, u2) + INT64_C(858993459);\n"
+        "    poly = flow_fx64_mul(poly, u2) + INT64_C(1431655765);\n"
+        "    poly = flow_fx64_mul(poly, u2) + FLOW_FX_ONE;\n"
+        "    flow_fx64_t ln_m = flow_fx64_mul(2 * u, poly);\n"
+        "    return (flow_fx64_t)((flow_i128_t)k * (flow_i128_t)FLOW_FX_LN2) + ln_m;\n"
+        "}\n",
+        output);
+    fputs(
+        "static inline __attribute__((unused)) flow_fx64_t flow_fx64_pow(flow_fx64_t base, flow_fx64_t exp) {\n"
+        "    if (base == FLOW_FX64_NONE || exp == FLOW_FX64_NONE) return FLOW_FX64_NONE;\n"
+        "    if (exp == 0) return FLOW_FX_ONE;\n"
+        "    if (base <= 0) return 0;\n"
+        "    if ((exp & FLOW_FX_FRAC_MASK) == 0 && exp > 0 && exp <= (INT64_C(16) << 32)) {\n"
+        "        uint32_t e = (uint32_t)(exp >> 32);\n"
+        "        flow_fx64_t r = FLOW_FX_ONE, b = base;\n"
+        "        while (e > 0U) {\n"
+        "            if (e & 1U) r = flow_fx64_mul(r, b);\n"
+        "            b = flow_fx64_mul(b, b);\n"
+        "            e >>= 1U;\n"
+        "        }\n"
+        "        return r;\n"
+        "    }\n"
+        "    return flow_fx64_exp(flow_fx64_mul(exp, flow_fx64_log(base)));\n"
+        "}\n"
+        "static inline __attribute__((unused)) flow_fx64_t flow_fx64_sin(flow_fx64_t x) {\n"
+        "    if (x == FLOW_FX64_NONE) return FLOW_FX64_NONE;\n"
+        "    flow_fx64_t r = x % FLOW_FX_TWO_PI;\n"
+        "    if (r > FLOW_FX_PI) r -= FLOW_FX_TWO_PI;\n"
+        "    else if (r < -FLOW_FX_PI) r += FLOW_FX_TWO_PI;\n"
+        "    if (r > FLOW_FX_HALF_PI) r = FLOW_FX_PI - r;\n"
+        "    else if (r < -FLOW_FX_HALF_PI) r = -FLOW_FX_PI - r;\n"
+        "    if (r == FLOW_FX_HALF_PI) return FLOW_FX_ONE;\n"
+        "    else if (r == -FLOW_FX_HALF_PI) return -FLOW_FX_ONE;\n"
+        "    flow_fx64_t r2 = flow_fx64_mul(r, r);\n"
+        "    flow_fx64_t p = INT64_C(11836);\n"
+        "    p = flow_fx64_mul(p, r2) - INT64_C(852176);\n"
+        "    p = flow_fx64_mul(p, r2) + INT64_C(35791394);\n"
+        "    p = flow_fx64_mul(p, r2) - INT64_C(715827883);\n"
+        "    p = flow_fx64_mul(p, r2) + FLOW_FX_ONE;\n"
+        "    return flow_fx64_mul(r, p);\n"
+        "}\n"
+        "static inline __attribute__((unused)) flow_fx64_t flow_fx64_cos(flow_fx64_t x) {\n"
+        "    if (x == FLOW_FX64_NONE) return FLOW_FX64_NONE;\n"
+        "    if (x == 0) return FLOW_FX_ONE;\n"
+        "    return flow_fx64_sin(x + FLOW_FX_HALF_PI);\n"
+        "}\n"
+        "static inline __attribute__((unused)) flow_fx64_t flow_fx64_atan2(flow_fx64_t y, flow_fx64_t x) {\n"
+        "    if (y == FLOW_FX64_NONE || x == FLOW_FX64_NONE || (y == 0 && x == 0)) return 0;\n"
+        "    const flow_fx64_t QTR_PI = INT64_C(3373259426);\n"
+        "    flow_fx64_t abs_y = flow_fx64_abs(y) + 1;\n"
+        "    flow_fx64_t angle = 0;\n"
+        "    if (x >= 0) {\n"
+        "        flow_fx64_t r = flow_fx64_div(x - abs_y, x + abs_y);\n"
+        "        flow_fx64_t r2 = flow_fx64_mul(r, r);\n"
+        "        angle = QTR_PI + flow_fx64_mul(flow_fx64_mul(INT64_C(843018725), r2) - INT64_C(4216574283), r);\n"
+        "    } else {\n"
+        "        flow_fx64_t r = flow_fx64_div(x + abs_y, abs_y - x);\n"
+        "        flow_fx64_t r2 = flow_fx64_mul(r, r);\n"
+        "        angle = (3 * QTR_PI) + flow_fx64_mul(flow_fx64_mul(INT64_C(843018725), r2) - INT64_C(4216574283), r);\n"
+        "    }\n"
+        "    if (x == 0) angle = FLOW_FX_HALF_PI;\n"
+        "    else if (y == 0) return x < 0 ? FLOW_FX_PI : 0;\n"
+        "    return y < 0 ? -angle : angle;\n"
+        "}\n"
+        "static inline __attribute__((unused)) uint64_t flow_quantize_fx(flow_fx64_t val, flow_fx64_t min_v, flow_fx64_t max_v, uint32_t bits) {\n"
+        "    if (val == FLOW_FX64_NONE || min_v == FLOW_FX64_NONE || max_v == FLOW_FX64_NONE || max_v <= min_v || bits == 0 || bits > 32) return 0ULL;\n"
+        "    flow_fx64_t c = val < min_v ? min_v : (val > max_v ? max_v : val);\n"
+        "    uint64_t max_q = (1ULL << bits) - 1ULL;\n"
+        "    flow_u128_t num = (flow_u128_t)(uint64_t)(c - min_v) * (flow_u128_t)max_q;\n"
+        "    flow_u128_t den = (flow_u128_t)(uint64_t)(max_v - min_v);\n"
+        "    return (uint64_t)((num + (den >> 1)) / den);\n"
+        "}\n"
+        "static inline __attribute__((unused)) flow_fx64_t flow_dequantize_fx(uint64_t code, flow_fx64_t min_v, flow_fx64_t max_v, uint32_t bits) {\n"
+        "    if (min_v == FLOW_FX64_NONE || max_v == FLOW_FX64_NONE || max_v <= min_v || bits == 0 || bits > 32) return 0;\n"
+        "    uint64_t max_q = (1ULL << bits) - 1ULL;\n"
+        "    uint64_t c = code > max_q ? max_q : code;\n"
+        "    flow_u128_t span = (flow_u128_t)(uint64_t)(max_v - min_v);\n"
+        "    flow_fx64_t delta = (flow_fx64_t)(((flow_u128_t)c * span + (max_q >> 1)) / max_q);\n"
+        "    return min_v + delta;\n"
+        "}\n"
+        "#endif /* FLOW_EXACT_NUMERICS_DEFINED */\n",
+        output);
+    fputs(
         "#ifndef FLOW_LEAN_NAT_OPS_DEFINED\n#define FLOW_LEAN_NAT_OPS_DEFINED\n"
         "static inline __attribute__((unused)) uint64_t flow_nat_sub(uint64_t a, uint64_t b) { return a >= b ? (a - b) : 0ULL; }\n"
         "static inline __attribute__((unused)) uint64_t flow_nat_div(uint64_t a, uint64_t b) { return b == 0ULL ? 0ULL : (a / b); }\n"
@@ -506,41 +867,50 @@ static void emit_lean_nat_and_float_ops(FILE *output) {
         "static inline __attribute__((unused)) int64_t flow_int_pow(int64_t base, int64_t exp) { if (exp < 0) return 0; int64_t r = 1; while (exp > 0) { if (exp & 1) r *= base; base *= base; exp >>= 1; } return r; }\n",
         output);
     fputs(
-        "static inline __attribute__((unused)) double flow_float_pow(double base, double exp) { return __builtin_pow(base, exp); }\n"
-        "static inline __attribute__((unused)) double flow_float_abs(double x) { return __builtin_fabs(x); }\n"
-        "static inline __attribute__((unused)) double flow_float_floor(double x) { return __builtin_floor(x); }\n"
-        "static inline __attribute__((unused)) double flow_float_ceil(double x) { return __builtin_ceil(x); }\n"
-        "static inline __attribute__((unused)) double flow_float_round(double x) { return __builtin_round(x); }\n"
-        "static inline __attribute__((unused)) double flow_float_sqrt(double x) { return x > 0.0 ? __builtin_sqrt(x) : 0.0; }\n"
-        "static inline __attribute__((unused)) double flow_float_exp(double x) { return __builtin_exp(x); }\n"
-        "static inline __attribute__((unused)) double flow_float_log(double x) { return x > 0.0 ? __builtin_log(x) : 0.0; }\n"
-        "static inline __attribute__((unused)) double flow_float_sin(double x) { return __builtin_sin(x); }\n"
-        "static inline __attribute__((unused)) double flow_float_cos(double x) { return __builtin_cos(x); }\n"
-        "static inline __attribute__((unused)) double flow_float_atan2(double y, double x) { return __builtin_atan2(y, x); }\n"
-        "static inline __attribute__((unused)) double flow_float_max(double a, double b) { return a > b ? a : b; }\n"
-        "static inline __attribute__((unused)) double flow_float_min(double a, double b) { return a < b ? a : b; }\n"
-        "static inline __attribute__((unused)) double flow_float_of_nat(uint64_t x) { return (double)x; }\n"
-        "static inline __attribute__((unused)) double flow_float_of_int(int64_t x) { return (double)x; }\n",
-        output);
-    fputs(
+        "static inline __attribute__((unused)) double flow_float_add(double a, double b) { return flow_fx64_to_double(flow_fx64_add(flow_fx64_from_double(a), flow_fx64_from_double(b))); }\n"
+        "static inline __attribute__((unused)) double flow_float_sub(double a, double b) { return flow_fx64_to_double(flow_fx64_sub(flow_fx64_from_double(a), flow_fx64_from_double(b))); }\n"
+        "static inline __attribute__((unused)) double flow_float_mul(double a, double b) { return flow_fx64_to_double(flow_fx64_mul(flow_fx64_from_double(a), flow_fx64_from_double(b))); }\n"
+        "static inline __attribute__((unused)) double flow_float_div(double a, double b) { return flow_fx64_to_double(flow_fx64_div(flow_fx64_from_double(a), flow_fx64_from_double(b))); }\n"
+        "static inline __attribute__((unused)) double flow_float_mod(double a, double b) { return flow_fx64_to_double(flow_fx64_mod(flow_fx64_from_double(a), flow_fx64_from_double(b))); }\n"
+        "static inline __attribute__((unused)) double flow_float_neg(double x) { return flow_fx64_to_double(flow_fx64_neg(flow_fx64_from_double(x))); }\n"
+        "static inline __attribute__((unused)) double flow_float_pow(double base, double exp) { return flow_fx64_to_double(flow_fx64_pow(flow_fx64_from_double(base), flow_fx64_from_double(exp))); }\n"
+        "static inline __attribute__((unused)) double flow_float_abs(double x) { return flow_fx64_to_double(flow_fx64_abs(flow_fx64_from_double(x))); }\n"
+        "static inline __attribute__((unused)) double flow_float_floor(double x) { return flow_fx64_to_double(flow_fx64_floor(flow_fx64_from_double(x))); }\n"
+        "static inline __attribute__((unused)) double flow_float_ceil(double x) { return flow_fx64_to_double(flow_fx64_ceil(flow_fx64_from_double(x))); }\n"
+        "static inline __attribute__((unused)) double flow_float_round(double x) { return flow_fx64_to_double(flow_fx64_round(flow_fx64_from_double(x))); }\n"
+        "static inline __attribute__((unused)) double flow_float_sqrt(double x) { return flow_fx64_to_double(flow_fx64_sqrt(flow_fx64_from_double(x))); }\n"
+        "static inline __attribute__((unused)) double flow_float_exp(double x) { return flow_fx64_to_double(flow_fx64_exp(flow_fx64_from_double(x))); }\n"
+        "static inline __attribute__((unused)) double flow_float_log(double x) { return flow_fx64_to_double(flow_fx64_log(flow_fx64_from_double(x))); }\n"
+        "static inline __attribute__((unused)) double flow_float_sin(double x) { return flow_fx64_to_double(flow_fx64_sin(flow_fx64_from_double(x))); }\n"
+        "static inline __attribute__((unused)) double flow_float_cos(double x) { return flow_fx64_to_double(flow_fx64_cos(flow_fx64_from_double(x))); }\n"
+        "static inline __attribute__((unused)) double flow_float_atan2(double y, double x) { return flow_fx64_to_double(flow_fx64_atan2(flow_fx64_from_double(y), flow_fx64_from_double(x))); }\n"
+        "static inline __attribute__((unused)) double flow_float_max(double a, double b) { return flow_fx64_to_double(flow_fx64_max(flow_fx64_from_double(a), flow_fx64_from_double(b))); }\n"
+        "static inline __attribute__((unused)) double flow_float_min(double a, double b) { return flow_fx64_to_double(flow_fx64_min(flow_fx64_from_double(a), flow_fx64_from_double(b))); }\n"
+        "static inline __attribute__((unused)) double flow_float_of_nat(uint64_t x) { return flow_fx64_to_double(flow_fx64_of_nat(x)); }\n"
+        "static inline __attribute__((unused)) double flow_float_of_int(int64_t x) { return flow_fx64_to_double(flow_fx64_of_int(x)); }\n"
         "static inline __attribute__((unused)) uint64_t flow_quantize(double val, double min_v, double max_v, uint32_t bits) {\n"
-        "    if (!isfinite(val) || !isfinite(min_v) || !isfinite(max_v) || max_v <= min_v || bits == 0 || bits > 32) return 0ULL;\n"
-        "    double c = val < min_v ? min_v : (val > max_v ? max_v : val);\n"
-        "    uint64_t max_q = (1ULL << bits) - 1ULL;\n"
-        "    return (uint64_t)((c - min_v) / (max_v - min_v) * (double)max_q + 0.5);\n"
+        "    if (!isfinite(val) || !isfinite(min_v) || !isfinite(max_v)) return 0ULL;\n"
+        "    return flow_quantize_fx(flow_fx64_from_double(val), flow_fx64_from_double(min_v), flow_fx64_from_double(max_v), bits);\n"
         "}\n"
         "static inline __attribute__((unused)) double flow_dequantize(uint64_t code, double min_v, double max_v, uint32_t bits) {\n"
-        "    if (!isfinite(min_v) || !isfinite(max_v) || max_v <= min_v || bits == 0 || bits > 32) return 0.0;\n"
-        "    uint64_t max_q = (1ULL << bits) - 1ULL;\n"
-        "    uint64_t c = code > max_q ? max_q : code;\n"
-        "    return min_v + ((double)c / (double)max_q) * (max_v - min_v);\n"
+        "    if (!isfinite(min_v) || !isfinite(max_v)) return 0.0;\n"
+        "    return flow_fx64_to_double(flow_dequantize_fx(code, flow_fx64_from_double(min_v), flow_fx64_from_double(max_v), bits));\n"
         "}\n"
         "#endif\n",
         output);
 }
+static const char *lean_type_to_fx_c_type(const SemanticIR *ir, const char *t) {
+    if (!t) return "uint64_t";
+    if (!strcmp(t, "Float") || !strcmp(t, "Float32")) return "flow_fx64_t";
+    return lean_type_to_c_type(ir, t);
+}
 static void emit_single_lean_fn_c(FILE *output, const SemanticIR *ir, const FlowLeanFunction *fn, size_t fi, int is_header_inline, int *kernel_emitted, int *kernel_name_collides) {
     const char *ret_c = lean_type_to_c_type(ir, fn->return_type);
     LeanExprMode fmode = infer_fn_expr_mode(fn);
+    int has_struct_param = 0;
+    for (size_t pi = 0; pi < fn->param_count; ++pi) {
+        if (find_ir_lean_struct(ir, fn->param_types[pi])) { has_struct_param = 1; break; }
+    }
     if (fn->is_struct_transform) {
         if (!is_header_inline && ir->extern_kernel[0] && !strcmp(fn->name, ir->extern_kernel) && kernel_name_collides)
             *kernel_name_collides = 1;
@@ -595,6 +965,48 @@ static void emit_single_lean_fn_c(FILE *output, const SemanticIR *ir, const Flow
     if (fn->is_tuple_return && fn->tuple_arity >= 2) {
         if (!is_header_inline && ir->extern_kernel[0] && !strcmp(fn->name, ir->extern_kernel) && kernel_name_collides)
             *kernel_name_collides = 1;
+        int is_fx_tuple = (fmode == LEAN_EXPR_FLOAT && !has_struct_param);
+        for (size_t ti = 0; !is_fx_tuple && !has_struct_param && ti < fn->tuple_arity; ++ti)
+            if (!strcmp(fn->tuple_types[ti], "Float") || !strcmp(fn->tuple_types[ti], "Float32")) is_fx_tuple = 1;
+        if (is_fx_tuple) {
+            const char *ret_fx_c = lean_type_to_fx_c_type(ir, fn->return_type);
+            fprintf(output, "%s%s %s%s_fx(", is_header_inline ? "static inline __attribute__((unused)) " : "", ret_fx_c, is_header_inline ? "flowc_" : "", fn->name);
+            for (size_t pi = 0; pi < fn->param_count; ++pi)
+                fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_fx_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
+            for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                fprintf(output, "%s%s *out_%zu", (fn->param_count > 0 || ti > 0) ? ", " : "", lean_type_to_fx_c_type(ir, fn->tuple_types[ti]), ti);
+            fprintf(output, ") {\n");
+            int fx_param_cnt = 0;
+            for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                fprintf(output, "    (void)%s;\n", fn->param_names[pi]);
+                if (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32")) fx_param_cnt++;
+            }
+            if (fx_param_cnt > 0) {
+                fprintf(output, "    if (");
+                int seen_fp = 0;
+                for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                    if (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32")) {
+                        fprintf(output, "%s%s == FLOW_FX64_NONE", seen_fp ? " || " : "", fn->param_names[pi]);
+                        seen_fp++;
+                    }
+                }
+                fprintf(output, ") {\n");
+                for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                    fprintf(output, "        if (out_%zu) *out_%zu = (%s)0;\n", ti, ti, lean_type_to_fx_c_type(ir, fn->tuple_types[ti]));
+                fprintf(output, "        return (%s)0;\n    }\n", ret_fx_c);
+            }
+            for (size_t ti = 0; ti < fn->tuple_arity; ++ti) {
+                const char *tc_fx = lean_type_to_fx_c_type(ir, fn->tuple_types[ti]);
+                LeanExprMode tm = (!strcmp(tc_fx, "flow_fx64_t")) ? LEAN_EXPR_FX64 : infer_c_type_expr_mode(tc_fx, LEAN_EXPR_FX64);
+                fprintf(output, "    %s _flow_t%zu = (%s)(", tc_fx, ti, tc_fx);
+                emit_lean_expr_as_c(output, fn->tuple_exprs[ti], tm);
+                fprintf(output, ");\n");
+                if (!strcmp(tc_fx, "flow_fx64_t"))
+                    fprintf(output, "    if (_flow_t%zu == FLOW_FX64_NONE) _flow_t%zu = 0;\n", ti, ti);
+                fprintf(output, "    if (out_%zu) *out_%zu = _flow_t%zu;\n", ti, ti, ti);
+            }
+            fprintf(output, "    return (%s)_flow_t0;\n}\n", ret_fx_c);
+        }
         fprintf(output, "%s%s %s%s(", is_header_inline ? "static inline __attribute__((unused)) " : "", ret_c, is_header_inline ? "flowc_" : "", fn->name);
         for (size_t pi = 0; pi < fn->param_count; ++pi)
             fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
@@ -622,6 +1034,30 @@ static void emit_single_lean_fn_c(FILE *output, const SemanticIR *ir, const Flow
                 fprintf(output, "        if (out_%zu) *out_%zu = (%s)0;\n", ti, ti, lean_type_to_c_type(ir, fn->tuple_types[ti]));
             fprintf(output, "        return (%s)0;\n    }\n", ret_c);
         }
+        if (is_fx_tuple) {
+            for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                fprintf(output, "    %s _fx_out_%zu = 0;\n", lean_type_to_fx_c_type(ir, fn->tuple_types[ti]), ti);
+            fprintf(output, "    (void)%s%s_fx(", is_header_inline ? "flowc_" : "", fn->name);
+            for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                if (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32"))
+                    fprintf(output, "%sflow_fx64_from_double((double)%s)", pi > 0 ? ", " : "", fn->param_names[pi]);
+                else
+                    fprintf(output, "%s%s", pi > 0 ? ", " : "", fn->param_names[pi]);
+            }
+            for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                fprintf(output, "%s&_fx_out_%zu", (fn->param_count > 0 || ti > 0) ? ", " : "", ti);
+            fprintf(output, ");\n");
+            for (size_t ti = 0; ti < fn->tuple_arity; ++ti) {
+                const char *tc = lean_type_to_c_type(ir, fn->tuple_types[ti]);
+                if (!strcmp(tc, "double") || !strcmp(tc, "float"))
+                    fprintf(output, "    %s _flow_t%zu = (%s)flow_fx64_to_double(_fx_out_%zu);\n", tc, ti, tc, ti);
+                else
+                    fprintf(output, "    %s _flow_t%zu = (%s)_fx_out_%zu;\n", tc, ti, tc, ti);
+                fprintf(output, "    if (out_%zu) *out_%zu = _flow_t%zu;\n", ti, ti, ti);
+            }
+            fprintf(output, "    return (%s)_flow_t0;\n}\n", ret_c);
+            return;
+        }
         for (size_t ti = 0; ti < fn->tuple_arity; ++ti) {
             const char *tc = lean_type_to_c_type(ir, fn->tuple_types[ti]);
             LeanExprMode tm = infer_c_type_expr_mode(tc, fmode);
@@ -643,6 +1079,76 @@ static void emit_single_lean_fn_c(FILE *output, const SemanticIR *ir, const Flow
     if (!is_header_inline && ir->extern_kernel[0] && !strcmp(fn->name, ir->extern_kernel)) {
         if (is_step_sig) { is_kern = 1; if (kernel_emitted) *kernel_emitted = 1; }
         else if (kernel_name_collides) *kernel_name_collides = 1;
+    }
+    if (fmode == LEAN_EXPR_FLOAT && !has_struct_param) {
+        const char *ret_fx_c = lean_type_to_fx_c_type(ir, fn->return_type);
+        fprintf(output, "%s%s %s%s_fx(", is_header_inline ? "static inline __attribute__((unused)) " : "", ret_fx_c, is_header_inline ? "flowc_" : "", fn->name);
+        for (size_t pi = 0; pi < fn->param_count; ++pi)
+            fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_fx_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
+        fprintf(output, ") {\n    ");
+        int fx_param_cnt = 0;
+        for (size_t pi = 0; pi < fn->param_count; ++pi) {
+            fprintf(output, "(void)%s; ", fn->param_names[pi]);
+            if (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32")) fx_param_cnt++;
+        }
+        if (fx_param_cnt > 0) {
+            fprintf(output, "\n    if (");
+            int seen_fp = 0;
+            for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                if (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32")) {
+                    fprintf(output, "%s%s == FLOW_FX64_NONE", seen_fp ? " || " : "", fn->param_names[pi]);
+                    seen_fp++;
+                }
+            }
+            fprintf(output, ") return (%s)0;", ret_fx_c);
+        }
+        if (!strcmp(fn->return_type, "Float") || !strcmp(fn->return_type, "Float32")) {
+            fprintf(output, "\n    flow_fx64_t _flow_ret = (flow_fx64_t)(");
+            emit_lean_expr_as_c(output, fn->body, LEAN_EXPR_FX64);
+            fprintf(output, ");\n    return (_flow_ret == FLOW_FX64_NONE) ? 0 : _flow_ret;\n}\n");
+        } else {
+            fprintf(output, "\n    return (%s)(", ret_fx_c);
+            emit_lean_expr_as_c(output, fn->body, LEAN_EXPR_FX64);
+            fprintf(output, ");\n}\n");
+        }
+        fprintf(output, "%s%s %s%s(", is_header_inline ? "static inline __attribute__((unused)) " : (is_kern ? "__attribute__((weak)) " : ""), ret_c, is_header_inline ? "flowc_" : "", fn->name);
+        for (size_t pi = 0; pi < fn->param_count; ++pi)
+            fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
+        fprintf(output, ") {\n    ");
+        if (!is_header_inline && fi < 64)
+            fprintf(output, "atomic_fetch_add_explicit(&_flow_ab_fn_calls[%zu], 1ULL, memory_order_relaxed); ", fi);
+        int float_param_cnt = 0;
+        for (size_t pi = 0; pi < fn->param_count; ++pi) {
+            fprintf(output, "(void)%s; ", fn->param_names[pi]);
+            if (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32")) float_param_cnt++;
+        }
+        if (float_param_cnt > 0) {
+            fprintf(output, "\n    if (");
+            int seen_fp = 0;
+            for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                if (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32")) {
+                    fprintf(output, "%s!isfinite(%s)", seen_fp ? " || " : "", fn->param_names[pi]);
+                    seen_fp++;
+                }
+            }
+            fprintf(output, ") return (%s)0;", ret_c);
+        }
+        if (!strcmp(fn->return_type, "Float") || !strcmp(fn->return_type, "Float32")) {
+            fprintf(output, "\n    return (%s)flow_fx64_to_double(%s%s_fx(", ret_c, is_header_inline ? "flowc_" : "", fn->name);
+        } else {
+            fprintf(output, "\n    return (%s)%s%s_fx(", ret_c, is_header_inline ? "flowc_" : "", fn->name);
+        }
+        for (size_t pi = 0; pi < fn->param_count; ++pi) {
+            if (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32"))
+                fprintf(output, "%sflow_fx64_from_double((double)%s)", pi > 0 ? ", " : "", fn->param_names[pi]);
+            else
+                fprintf(output, "%s%s", pi > 0 ? ", " : "", fn->param_names[pi]);
+        }
+        if (!strcmp(fn->return_type, "Float") || !strcmp(fn->return_type, "Float32"))
+            fprintf(output, "));\n}\n");
+        else
+            fprintf(output, ");\n}\n");
+        return;
     }
     fprintf(output, "%s%s %s%s(", is_header_inline ? "static inline __attribute__((unused)) " : (is_kern ? "__attribute__((weak)) " : ""), ret_c, is_header_inline ? "flowc_" : "", fn->name);
     for (size_t pi = 0; pi < fn->param_count; ++pi)
@@ -686,7 +1192,6 @@ static void emit_single_lean_fn_c(FILE *output, const SemanticIR *ir, const Flow
 }
 void flow_emit_inline_lean_kernels(FILE *output, const SemanticIR *ir) {
     if (!output) return;
-    fputs("#include <math.h>\n", output);
     emit_lean_nat_and_float_ops(output);
     fputs(
         "#ifndef FLOW_AB_SHADOW_TELEMETRY_DECLARED\n#define FLOW_AB_SHADOW_TELEMETRY_DECLARED\n"
