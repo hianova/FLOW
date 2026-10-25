@@ -34,6 +34,9 @@ const char *verification_status_name(VerificationStatus status); uint64_t flow_v
     const char *violation_msg; /* Optional custom violation description, e.g. "exceeds hardware physical limit" */
 } FlowBoxConstraint; FlowSMTResult flow_smt_verify_box_invariants(const char *subsystem_tag, const FlowBoxConstraint *constraints, size_t constraint_count,
                                              FlowSMTProofAttestation *proof_out);
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((format(printf, 5, 6)))
+#endif
 static inline FlowSMTResult flow_smt_verify_rules(const char *tag, const FlowBoxConstraint *rules, size_t count, FlowSMTProofAttestation *proof_out, const char *summary_fmt, ...) {
     FlowSMTResult res = flow_smt_verify_box_invariants(tag, rules, count, proof_out);
     if (res == FLOW_SMT_PROVEN_UNSAT && proof_out && summary_fmt) {

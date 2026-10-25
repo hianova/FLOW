@@ -566,34 +566,38 @@ static inline __attribute__((unused)) int64_t flow_int_mod(int64_t a, int64_t b)
 static inline __attribute__((unused)) int64_t flow_int_pow(int64_t base, int64_t exp) { if (exp < 0) return 0; int64_t r = 1; while (exp > 0) { if (exp & 1) r *= base; base *= base; exp >>= 1; } return r; }
 
 #define FLOW_LEAN_FLOAT_OPS_C17 \
-static inline __attribute__((unused)) double flow_float_add(double a, double b) { return flow_fx64_to_double(flow_fx64_add(flow_fx64_from_double(a), flow_fx64_from_double(b))); } \
-static inline __attribute__((unused)) double flow_float_sub(double a, double b) { return flow_fx64_to_double(flow_fx64_sub(flow_fx64_from_double(a), flow_fx64_from_double(b))); } \
-static inline __attribute__((unused)) double flow_float_mul(double a, double b) { return flow_fx64_to_double(flow_fx64_mul(flow_fx64_from_double(a), flow_fx64_from_double(b))); } \
-static inline __attribute__((unused)) double flow_float_div(double a, double b) { return flow_fx64_to_double(flow_fx64_div(flow_fx64_from_double(a), flow_fx64_from_double(b))); } \
-static inline __attribute__((unused)) double flow_float_mod(double a, double b) { return flow_fx64_to_double(flow_fx64_mod(flow_fx64_from_double(a), flow_fx64_from_double(b))); } \
-static inline __attribute__((unused)) double flow_float_neg(double x) { return flow_fx64_to_double(flow_fx64_neg(flow_fx64_from_double(x))); } \
-static inline __attribute__((unused)) double flow_float_pow(double base, double exp) { return flow_fx64_to_double(flow_fx64_pow(flow_fx64_from_double(base), flow_fx64_from_double(exp))); } \
-static inline __attribute__((unused)) double flow_float_abs(double x) { return flow_fx64_to_double(flow_fx64_abs(flow_fx64_from_double(x))); } \
-static inline __attribute__((unused)) double flow_float_floor(double x) { return flow_fx64_to_double(flow_fx64_floor(flow_fx64_from_double(x))); } \
-static inline __attribute__((unused)) double flow_float_ceil(double x) { return flow_fx64_to_double(flow_fx64_ceil(flow_fx64_from_double(x))); } \
-static inline __attribute__((unused)) double flow_float_round(double x) { return flow_fx64_to_double(flow_fx64_round(flow_fx64_from_double(x))); } \
-static inline __attribute__((unused)) double flow_float_sqrt(double x) { return flow_fx64_to_double(flow_fx64_sqrt(flow_fx64_from_double(x))); } \
-static inline __attribute__((unused)) double flow_float_exp(double x) { return flow_fx64_to_double(flow_fx64_exp(flow_fx64_from_double(x))); } \
-static inline __attribute__((unused)) double flow_float_log(double x) { return flow_fx64_to_double(flow_fx64_log(flow_fx64_from_double(x))); } \
-static inline __attribute__((unused)) double flow_float_sin(double x) { return flow_fx64_to_double(flow_fx64_sin(flow_fx64_from_double(x))); } \
-static inline __attribute__((unused)) double flow_float_cos(double x) { return flow_fx64_to_double(flow_fx64_cos(flow_fx64_from_double(x))); } \
-static inline __attribute__((unused)) double flow_float_atan2(double y, double x) { return flow_fx64_to_double(flow_fx64_atan2(flow_fx64_from_double(y), flow_fx64_from_double(x))); } \
-static inline __attribute__((unused)) double flow_float_max(double a, double b) { return flow_fx64_to_double(flow_fx64_max(flow_fx64_from_double(a), flow_fx64_from_double(b))); } \
-static inline __attribute__((unused)) double flow_float_min(double a, double b) { return flow_fx64_to_double(flow_fx64_min(flow_fx64_from_double(a), flow_fx64_from_double(b))); } \
-static inline __attribute__((unused)) double flow_float_of_nat(uint64_t x) { return flow_fx64_to_double(flow_fx64_of_nat(x)); } \
-static inline __attribute__((unused)) double flow_float_of_int(int64_t x) { return flow_fx64_to_double(flow_fx64_of_int(x)); } \
+static inline __attribute__((unused)) double flow_float_add(double a, double b) { return a + b; } \
+static inline __attribute__((unused)) double flow_float_sub(double a, double b) { return a - b; } \
+static inline __attribute__((unused)) double flow_float_mul(double a, double b) { return a * b; } \
+static inline __attribute__((unused)) double flow_float_div(double a, double b) { return b == 0.0 ? 0.0 : (a / b); } \
+static inline __attribute__((unused)) double flow_float_mod(double a, double b) { return b == 0.0 ? 0.0 : __builtin_fmod(a, b); } \
+static inline __attribute__((unused)) double flow_float_neg(double x) { return -x; } \
+static inline __attribute__((unused)) double flow_float_pow(double base, double exp) { return __builtin_pow(base, exp); } \
+static inline __attribute__((unused)) double flow_float_abs(double x) { return __builtin_fabs(x); } \
+static inline __attribute__((unused)) double flow_float_floor(double x) { return __builtin_floor(x); } \
+static inline __attribute__((unused)) double flow_float_ceil(double x) { return __builtin_ceil(x); } \
+static inline __attribute__((unused)) double flow_float_round(double x) { return __builtin_round(x); } \
+static inline __attribute__((unused)) double flow_float_sqrt(double x) { return x <= 0.0 ? 0.0 : __builtin_sqrt(x); } \
+static inline __attribute__((unused)) double flow_float_exp(double x) { return __builtin_exp(x); } \
+static inline __attribute__((unused)) double flow_float_log(double x) { return x <= 0.0 ? 0.0 : __builtin_log(x); } \
+static inline __attribute__((unused)) double flow_float_sin(double x) { return __builtin_sin(x); } \
+static inline __attribute__((unused)) double flow_float_cos(double x) { return __builtin_cos(x); } \
+static inline __attribute__((unused)) double flow_float_atan2(double y, double x) { return __builtin_atan2(y, x); } \
+static inline __attribute__((unused)) double flow_float_max(double a, double b) { return a > b ? a : b; } \
+static inline __attribute__((unused)) double flow_float_min(double a, double b) { return a < b ? a : b; } \
+static inline __attribute__((unused)) double flow_float_of_nat(uint64_t x) { return (double)x; } \
+static inline __attribute__((unused)) double flow_float_of_int(int64_t x) { return (double)x; } \
 static inline __attribute__((unused)) uint64_t flow_quantize(double val, double min_v, double max_v, uint32_t bits) { \
-    if (!__builtin_isfinite(val) || !__builtin_isfinite(min_v) || !__builtin_isfinite(max_v)) return 0ULL; \
-    return flow_quantize_fx(flow_fx64_from_double(val), flow_fx64_from_double(min_v), flow_fx64_from_double(max_v), bits); \
+    if (!__builtin_isfinite(val) || !__builtin_isfinite(min_v) || !__builtin_isfinite(max_v) || max_v <= min_v || bits == 0 || bits > 32U) return 0ULL; \
+    uint64_t max_q = (bits == 32U) ? 0xFFFFFFFFULL : ((1ULL << bits) - 1ULL); \
+    double c = val < min_v ? min_v : (val > max_v ? max_v : val); \
+    return (uint64_t)(((c - min_v) / (max_v - min_v)) * (double)max_q + 0.5); \
 } \
 static inline __attribute__((unused)) double flow_dequantize(uint64_t code, double min_v, double max_v, uint32_t bits) { \
-    if (!__builtin_isfinite(min_v) || !__builtin_isfinite(max_v)) return 0.0; \
-    return flow_fx64_to_double(flow_dequantize_fx(code, flow_fx64_from_double(min_v), flow_fx64_from_double(max_v), bits)); \
+    if (!__builtin_isfinite(min_v) || !__builtin_isfinite(max_v) || max_v <= min_v || bits == 0 || bits > 32U) return 0.0; \
+    uint64_t max_q = (bits == 32U) ? 0xFFFFFFFFULL : ((1ULL << bits) - 1ULL); \
+    uint64_t c = code > max_q ? max_q : code; \
+    return min_v + ((double)c / (double)max_q) * (max_v - min_v); \
 }
 
 FLOW_EXACT_CODEC_C17

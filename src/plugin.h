@@ -56,6 +56,7 @@ typedef struct FlowPluginDescriptor { uint32_t abi_major, abi_minor; size_t desc
 typedef const FlowPluginDescriptor *(*FlowPluginEntryFn)(void);
 #ifdef FLOW_PLUGIN_DSO
 #define FLOW_DEFINE_PLUGIN_DSO_ENTRY_(DescVar) \
+    const FlowPluginDescriptor *flow_plugin_entry_v1(void); \
     const FlowPluginDescriptor *flow_plugin_entry_v1(void) { return &(DescVar); }
 #else
 #define FLOW_DEFINE_PLUGIN_DSO_ENTRY_(DescVar)

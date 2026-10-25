@@ -30,8 +30,8 @@ typedef enum { FLOW_ERR_STATUS_CODE, FLOW_ERR_RESULT_STRUCT, FLOW_ERR_NULLABLE, 
 typedef struct { FlowMemoryMode mode; size_t min_length, required_alignment; int require_mutable, require_relocatable, require_prevalidated; FlowOwnership expected_ownership; FlowAliasingPolicy aliasing_policy; uint64_t required_lifetime_epoch; } FlowViewContract;
 typedef struct { FlowReentrancyPolicy reentrancy; uint32_t effects; FlowErrorPolicy error_policy; int allows_pointer_escape, allows_exception_unwind, is_thread_affine; } FlowControlContract;
 typedef struct { char name[64]; FlowType type; FlowOwnership ownership; char description[128]; } FlowParam;
-#define FLOW_ABI_MAX_PARAMS 8
-#define FLOW_ABI_MAX_FUNCTIONS 8
+#define FLOW_ABI_MAX_PARAMS 32
+#define FLOW_ABI_MAX_FUNCTIONS 32
 typedef struct { char name[64]; FlowParam params[FLOW_ABI_MAX_PARAMS]; size_t param_count; FlowType return_type; FlowOwnership return_ownership; FlowErrorPolicy error_policy; uint32_t effects; char docstring[256]; } FlowFunctionSignature;
 typedef struct { char component_id[64], module_name[64], version[32]; int thread_safe; size_t max_memory_bytes, function_count; FlowMemoryMode default_memory_mode; FlowControlContract control_contract; FlowViewContract input_view_contract, output_view_contract; FlowFunctionSignature create_fn, destroy_fn, primary_fn, functions[FLOW_ABI_MAX_FUNCTIONS]; const SemanticIR *ir; } FlowComponentABI;
 int flow_abi_build_for_component(const SemanticIR *ir, const Component *comp, FlowComponentABI *abi);

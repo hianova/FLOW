@@ -144,21 +144,21 @@ int flow_registry_resolve_plugin(const char *mod_name) {
         bases[base_count++] = "flow_plugin_example";
         bases[base_count++] = "rust_simd_plugin";
     }
-    static const char *const fmts[16] = {
-        "build/libflow_%s.so", "build/libflow_%s.dylib",
-        "libflow_%s.so", "libflow_%s.dylib",
-        "build/lib%s.so", "build/lib%s.dylib",
-        "lib%s.so", "lib%s.dylib",
-        "target/debug/lib%s.so", "target/debug/lib%s.dylib",
-        "target/release/lib%s.so", "target/release/lib%s.dylib",
-        "target/debug/libflow_%s.so", "target/debug/libflow_%s.dylib",
-        "target/release/libflow_%s.so", "target/release/libflow_%s.dylib"
+    static const struct { const char *prefix, *suffix; } dso_pats[16] = {
+        {"build/libflow_", ".so"}, {"build/libflow_", ".dylib"},
+        {"libflow_", ".so"}, {"libflow_", ".dylib"},
+        {"build/lib", ".so"}, {"build/lib", ".dylib"},
+        {"lib", ".so"}, {"lib", ".dylib"},
+        {"target/debug/lib", ".so"}, {"target/debug/lib", ".dylib"},
+        {"target/release/lib", ".so"}, {"target/release/lib", ".dylib"},
+        {"target/debug/libflow_", ".so"}, {"target/debug/libflow_", ".dylib"},
+        {"target/release/libflow_", ".so"}, {"target/release/libflow_", ".dylib"}
     };
     char path[256], err[256] = {0};
     for (size_t b = 0; b < base_count; ++b) {
         if (!bases[b]) continue;
         for (int i = 0; i < 16; ++i) {
-            snprintf(path, sizeof(path), fmts[i], bases[b]);
+            snprintf(path, sizeof(path), "%s%s%s", dso_pats[i].prefix, bases[b], dso_pats[i].suffix);
             if (flow_registry_load_dso(path, err, sizeof(err))) return 1;
         }
     }

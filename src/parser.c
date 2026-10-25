@@ -66,9 +66,28 @@ static int parse_constraint(FlowConstraint *c, const char *line) { char name[FLO
         }
         strncpy(spec->flow_nodes[spec->flow_node_count++].name, node, FLOW_NAME - 1); } } static int is_lean_kw(const char *line) {
     return !strcmp(line, "lean_certified") || !strcmp(line, "proof_carrying") || !strcmp(line, "no_sorry"); }
+static const char *normalize_lean_type_token(const char *t) {
+    if (!t) return "";
+    if (!strcmp(t, "\xe2\x84\x9d") || !strcmp(t, "Real")) return "Float";
+    return t;
+}
+static int is_lean_erased_proof_field(const char *t_expr) {
+    if (!t_expr) return 1;
+    while (*t_expr && isspace((unsigned char)*t_expr)) ++t_expr;
+    if (!*t_expr) return 1;
+    if (!strcmp(t_expr, "Prop") || !strncmp(t_expr, "Prop ", 5) || !strcmp(t_expr, "True") || !strcmp(t_expr, "False")) return 1;
+    if (islower((unsigned char)t_expr[0])) return 1;
+    if (strchr(t_expr, '<') || strchr(t_expr, '>') || strchr(t_expr, '=') ||
+        strstr(t_expr, "\xe2\x89\xa4") || strstr(t_expr, "\xe2\x89\xa5") || strstr(t_expr, "\xe2\x89\xa0") ||
+        strstr(t_expr, "\xe2\x88\xa7") || strstr(t_expr, "\xe2\x88\xa8") || strstr(t_expr, "\xc2\xac") ||
+        strstr(t_expr, "\xe2\x86\x92") || strstr(t_expr, "\xe2\x86\x94") || strstr(t_expr, "\xe2\x88\x80") ||
+        strstr(t_expr, "\xe2\x88\x83") || strstr(t_expr, "->")) return 1;
+    return 0;
+}
 static size_t parse_lean_type_bytes(const char *t) {
     if (!t || !*t) return 0;
-    if (!strncmp(t, "UInt64", 6) || !strncmp(t, "Int64", 5) || !strncmp(t, "Float", 5) || !strncmp(t, "Nat", 3) || !strncmp(t, "USize", 5)) return 8;
+    if (!strncmp(t, "UInt64", 6) || !strncmp(t, "Int64", 5) || !strncmp(t, "Float", 5) ||
+        !strncmp(t, "\xe2\x84\x9d", 3) || !strncmp(t, "Real", 4) || !strncmp(t, "Nat", 3) || !strncmp(t, "USize", 5)) return 8;
     if (!strncmp(t, "UInt32", 6) || !strncmp(t, "Int32", 5) || !strncmp(t, "Float32", 7)) return 4;
     if (!strncmp(t, "UInt16", 6) || !strncmp(t, "Int16", 5)) return 2;
     if (!strncmp(t, "UInt8", 5) || !strncmp(t, "Int8", 4) || !strncmp(t, "Bool", 4)) return 1;
@@ -86,7 +105,7 @@ static int is_internal_lean_def(const char *s) {
     return 0;
 }
 static int is_scalar_lean_type(const char *t) {
-    static const char *const S[] = {"Nat", "UInt64", "USize", "Int", "Int64", "UInt32", "Int32", "UInt16", "Int16", "UInt8", "Int8", "Bool", "Float", "Float32", NULL};
+    static const char *const S[] = {"Nat", "UInt64", "USize", "Int", "Int64", "UInt32", "Int32", "UInt16", "Int16", "UInt8", "Int8", "Bool", "Float", "Float32", "\xe2\x84\x9d", "Real", NULL};
     if (!t || !*t) return 0;
     for (int i = 0; S[i]; ++i) if (!strcmp(t, S[i])) return 1;
     return 0;
@@ -105,7 +124,7 @@ static const FlowLeanEnum *find_lean_enum(const FlowSpec *spec, const char *name
 }
 static void lean_type_to_c_info(const FlowSpec *spec, const char *lt, char *c_out, size_t c_sz, char *lean_out, size_t l_sz, size_t *bytes_out) {
     const char *ct = "uint64_t", *norm_lt = "UInt64"; size_t b = 8;
-    if (!strcmp(lt, "Float")) { ct = "double"; norm_lt = "Float"; b = 8; }
+    if (!strcmp(lt, "Float") || !strcmp(lt, "\xe2\x84\x9d") || !strcmp(lt, "Real")) { ct = "double"; norm_lt = "Float"; b = 8; }
     else if (!strcmp(lt, "Float32")) { ct = "float"; norm_lt = "Float32"; b = 4; }
     else if (!strcmp(lt, "UInt64") || !strcmp(lt, "Nat") || !strcmp(lt, "USize")) { ct = "uint64_t"; norm_lt = lt; b = 8; }
     else if (!strcmp(lt, "Int") || !strcmp(lt, "Int64")) { ct = "int64_t"; norm_lt = lt; b = 8; }
@@ -216,7 +235,23 @@ static void normalize_lean_body(const char *in, char *out, size_t max_len) {
         {"Float.max", 9, "flow_float_max", 14},
         {"Float.min", 9, "flow_float_min", 14},
         {"Float.ofNat", 11, "flow_float_of_nat", 17},
-        {"Float.ofInt", 11, "flow_float_of_int", 17}
+        {"Float.ofInt", 11, "flow_float_of_int", 17},
+        {"Real.abs", 8, "flow_float_abs", 14},
+        {"Real.floor", 10, "flow_float_floor", 16},
+        {"Real.ceil", 9, "flow_float_ceil", 15},
+        {"Real.round", 10, "flow_float_round", 16},
+        {"Real.sqrt", 9, "flow_float_sqrt", 15},
+        {"Real.exp", 8, "flow_float_exp", 14},
+        {"Real.log", 8, "flow_float_log", 14},
+        {"Real.sin", 8, "flow_float_sin", 14},
+        {"Real.cos", 8, "flow_float_cos", 14},
+        {"Real.atan2", 10, "flow_float_atan2", 16},
+        {"Real.pow", 8, "flow_float_pow", 14},
+        {"Real.max", 8, "flow_float_max", 14},
+        {"Real.min", 8, "flow_float_min", 14},
+        {"f_abs", 5, "flow_float_abs", 14},
+        {"f_max", 5, "flow_float_max", 14},
+        {"f_min", 5, "flow_float_min", 14}
     };
     size_t j = 0;
     for (size_t i = 0; in[i] && j + 20 < max_len; ) {
@@ -263,7 +298,7 @@ static void normalize_lean_body(const char *in, char *out, size_t max_len) {
 static uint64_t estimate_lean_ast_wcet_ns(const FlowLeanFunction *fn) {
     if (!fn) return FLOW_WCET_BASE_CALL_NS;
     uint64_t cost = FLOW_WCET_BASE_CALL_NS + FLOW_WCET_STRUCT_FIELD_NS * (uint64_t)fn->field_assign_count;
-    const char *b = fn->body;
+    const char *b = fn->is_struct_transform ? (fn->field_assign_count > 0 ? fn->field_assign_exprs[0] : "") : fn->body;
     for (size_t i = 0; b[i]; ++i) {
         if (b[i] == '+' || b[i] == '*' || b[i] == '&' || b[i] == '|' || b[i] == '<' || b[i] == '>' || b[i] == '=') cost += FLOW_WCET_ALU_OP_NS;
         else if (b[i] == '-' && b[i + 1] != '>') cost += FLOW_WCET_ALU_OP_NS;
@@ -429,8 +464,8 @@ static void parse_struct_record_fields(FlowLeanFunction *fn, const char *prefix,
         if (fexpr[0] == '{' && el >= 2 && fexpr[el - 1] == '}') {
             parse_struct_record_fields(fn, full_name, fexpr);
         } else if (fn->field_assign_count < FLOW_FIELD_MAX) {
-            strncpy(fn->field_assign_names[fn->field_assign_count], full_name, FLOW_NAME - 1);
-            strncpy(fn->field_assign_exprs[fn->field_assign_count], fexpr, FLOW_LINE - 1);
+            strncpy(fn->field_assign_names[fn->field_assign_count], full_name, sizeof(fn->field_assign_names[0]) - 1);
+            strncpy(fn->field_assign_exprs[fn->field_assign_count], fexpr, sizeof(fn->field_assign_exprs[0]) - 1);
             fn->field_assign_count++;
         }
     }
@@ -667,6 +702,105 @@ static int project_lean_tuple_component(const FlowSpec *spec, const char *s, siz
     }
     return 0;
 }
+static void inline_lean_scalar_calls(const FlowSpec *spec, char *expr, size_t max_len) {
+    if (!spec || !expr || !expr[0]) return;
+    for (int iter = 0; iter < 12; ++iter) {
+        int changed = 0;
+        for (size_t fi = 0; fi < spec->lean_function_count && !changed; ++fi) {
+            const FlowLeanFunction *callee = &spec->lean_functions[fi];
+            if (callee->is_struct_transform || callee->is_tuple_return || callee->param_count == 0) continue;
+            size_t fn_len = strlen(callee->name);
+            if (fn_len == 0) continue;
+            for (char *p = strstr(expr, callee->name); p; p = strstr(p + 1, callee->name)) {
+                int l_ok = (p == expr) || (!isalnum((unsigned char)p[-1]) && p[-1] != '_' && p[-1] != '.');
+                int r_ok = (p[fn_len] == ' ' || p[fn_len] == '\t' || p[fn_len] == '(');
+                if (!l_ok || !r_ok) continue;
+                const char *q = p + fn_len;
+                const char *arg_s[FLOW_LEAN_PARAM_MAX], *arg_e[FLOW_LEAN_PARAM_MAX];
+                size_t acnt = 0;
+                int args_ok = 1;
+                while (acnt < callee->param_count) {
+                    while (*q == ' ' || *q == '\t') ++q;
+                    if (!*q) { args_ok = 0; break; }
+                    if (*q == '(') {
+                        int d = 0;
+                        arg_s[acnt] = q + 1;
+                        while (*q) {
+                            if (*q == '(') d++;
+                            else if (*q == ')' && --d == 0) { arg_e[acnt] = q; ++q; break; }
+                            ++q;
+                        }
+                        if (d != 0) { args_ok = 0; break; }
+                        acnt++;
+                    } else if (isalnum((unsigned char)*q) || *q == '_') {
+                        arg_s[acnt] = q;
+                        while (isalnum((unsigned char)*q) || *q == '_' || *q == '.') {
+                            if ((*q == 'e' || *q == 'E') && isdigit((unsigned char)arg_s[acnt][0]) && (q[1] == '+' || q[1] == '-')) ++q;
+                            ++q;
+                        }
+                        arg_e[acnt] = q;
+                        size_t al = (size_t)(arg_e[acnt] - arg_s[acnt]);
+                        if ((al == 2 && (!strncmp(arg_s[acnt], "in", 2) || !strncmp(arg_s[acnt], "if", 2))) ||
+                            (al == 3 && !strncmp(arg_s[acnt], "let", 3)) ||
+                            (al == 4 && (!strncmp(arg_s[acnt], "then", 4) || !strncmp(arg_s[acnt], "else", 4) || !strncmp(arg_s[acnt], "with", 4))) ||
+                            (al == 5 && !strncmp(arg_s[acnt], "match", 5))) {
+                            args_ok = 0;
+                            break;
+                        }
+                        acnt++;
+                    } else {
+                        args_ok = 0;
+                        break;
+                    }
+                }
+                if (!args_ok || acnt != callee->param_count) continue;
+                char sub_body[FLOW_LEAN_BODY_MAX] = {0};
+                size_t j = 0;
+                const char *tpl = callee->body;
+                int sub_ok = 1;
+                for (size_t ti = 0; tpl[ti]; ) {
+                    if (j + 4 >= sizeof(sub_body)) { sub_ok = 0; break; }
+                    int matched = 0;
+                    if (isalpha((unsigned char)tpl[ti]) || tpl[ti] == '_') {
+                        int tl_ok = (ti == 0) || (!isalnum((unsigned char)tpl[ti - 1]) && tpl[ti - 1] != '_' && tpl[ti - 1] != '.');
+                        if (tl_ok) {
+                            for (size_t pi = 0; pi < callee->param_count; ++pi) {
+                                size_t plen = strlen(callee->param_names[pi]);
+                                if (plen > 0 && !strncmp(tpl + ti, callee->param_names[pi], plen) &&
+                                    !isalnum((unsigned char)tpl[ti + plen]) && tpl[ti + plen] != '_') {
+                                    size_t alen = (size_t)(arg_e[pi] - arg_s[pi]);
+                                    if (j + alen + 3 >= sizeof(sub_body)) { sub_ok = 0; break; }
+                                    sub_body[j++] = '(';
+                                    memcpy(sub_body + j, arg_s[pi], alen);
+                                    j += alen;
+                                    sub_body[j++] = ')';
+                                    ti += plen;
+                                    matched = 1;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (!sub_ok) break;
+                    if (!matched) sub_body[j++] = tpl[ti++];
+                }
+                if (!sub_ok || j == 0) continue;
+                sub_body[j] = '\0';
+                size_t pre_l = (size_t)(p - expr);
+                size_t post_l = strlen(q);
+                if (pre_l + j + post_l + 3 >= max_len) continue;
+                char next_buf[FLOW_LEAN_BODY_MAX] = {0};
+                if (pre_l + j + post_l + 3 >= sizeof(next_buf)) continue;
+                snprintf(next_buf, sizeof(next_buf), "%.*s(%s)%s", (int)pre_l, expr, sub_body, q);
+                strncpy(expr, next_buf, max_len - 1);
+                expr[max_len - 1] = '\0';
+                changed = 1;
+                break;
+            }
+        }
+        if (!changed) break;
+    }
+}
 static void try_add_lean_function(FlowSpec *spec, const char *sig_in, const char *body_in) {
     if (!spec || spec->lean_function_count >= FLOW_LEAN_FN_MAX || !sig_in || !body_in) return;
     char sig[FLOW_LEAN_BODY_MAX]; strncpy(sig, sig_in, sizeof(sig) - 1); sig[sizeof(sig) - 1] = '\0';
@@ -710,7 +844,8 @@ static void try_add_lean_function(FlowSpec *spec, const char *sig_in, const char
         for (char *tok = strtok_r(tcopy, "*", &sp); tok; tok = strtok_r(NULL, "*", &sp)) {
             char *tt = trim(tok);
             if (!*tt || fn.tuple_arity >= FLOW_TUPLE_MAX || !is_scalar_lean_type(tt)) { fn.tuple_arity = 0; break; }
-            strncpy(fn.tuple_types[fn.tuple_arity++], tt, sizeof(fn.tuple_types[0]) - 1);
+            const char *norm_tt = normalize_lean_type_token(tt);
+            strncpy(fn.tuple_types[fn.tuple_arity++], norm_tt, sizeof(fn.tuple_types[0]) - 1);
         }
         if (fn.tuple_arity >= 2) {
             ret_is_tuple = 1;
@@ -721,10 +856,11 @@ static void try_add_lean_function(FlowSpec *spec, const char *sig_in, const char
     if (!ret_is_tuple) {
         char ret_t[FLOW_NAME] = {0}, extra[16] = {0};
         if (sscanf(ret_raw, "%63s %15s", ret_t, extra) != 1) return;
-        ret_is_struct = (find_lean_struct(spec, ret_t) != NULL);
-        ret_is_scalar = is_scalar_lean_type(ret_t) || (find_lean_enum(spec, ret_t) != NULL);
+        const char *norm_ret = normalize_lean_type_token(ret_t);
+        ret_is_struct = (find_lean_struct(spec, norm_ret) != NULL);
+        ret_is_scalar = is_scalar_lean_type(norm_ret) || (find_lean_enum(spec, norm_ret) != NULL);
         if (!ret_is_struct && !ret_is_scalar) return;
-        strncpy(fn.return_type, ret_t, sizeof(fn.return_type) - 1);
+        strncpy(fn.return_type, norm_ret, sizeof(fn.return_type) - 1);
     }
     for (char *p = first_lp; p && p < last_rp; ) {
         char *lp = strchr(p, '('); if (!lp || lp >= last_rp) break;
@@ -733,43 +869,67 @@ static void try_add_lean_function(FlowSpec *spec, const char *sig_in, const char
         if (glen >= sizeof(grp)) return;
         memcpy(grp, lp + 1, glen);
         char *colon = strchr(grp, ':'); if (!colon) return;
-        *colon = '\0'; char pt[FLOW_NAME] = {0}, pextra[16] = {0};
-        if (sscanf(colon + 1, "%63s %15s", pt, pextra) != 1) return;
-        if (!is_scalar_lean_type(pt) && !find_lean_struct(spec, pt) && !find_lean_enum(spec, pt)) return;
+        *colon = '\0';
+        char *p_rhs = trim(colon + 1);
+        if (is_lean_erased_proof_field(p_rhs)) { p = rp + 1; continue; }
+        char pt[FLOW_NAME] = {0}, pextra[16] = {0};
+        if (sscanf(p_rhs, "%63s %15s", pt, pextra) != 1) return;
+        const char *norm_pt = normalize_lean_type_token(pt);
+        if (!is_scalar_lean_type(norm_pt) && !find_lean_struct(spec, norm_pt) && !find_lean_enum(spec, norm_pt)) return;
         for (char *tok = strtok(grp, " \t\n\r"); tok; tok = strtok(NULL, " \t\n\r")) {
             if (fn.param_count >= FLOW_LEAN_PARAM_MAX) return;
-            strncpy(fn.param_names[fn.param_count], tok, FLOW_NAME - 1);
-            strncpy(fn.param_types[fn.param_count], pt, sizeof(fn.param_types[0]) - 1);
+            strncpy(fn.param_names[fn.param_count], tok, sizeof(fn.param_names[0]) - 1);
+            strncpy(fn.param_types[fn.param_count], norm_pt, sizeof(fn.param_types[0]) - 1);
             fn.param_count++;
         }
         p = rp + 1;
     }
     if (fn.param_count == 0) return;
-    normalize_lean_body(body_in, fn.body, sizeof(fn.body));
+    char norm_body[FLOW_LEAN_BODY_MAX] = {0};
+    normalize_lean_body(body_in, norm_body, sizeof(norm_body));
+    inline_lean_scalar_calls(spec, norm_body, sizeof(norm_body));
     if (ret_is_struct) {
         fn.is_struct_transform = 1;
-        parse_struct_record_fields(&fn, "", fn.body);
+        parse_struct_record_fields(&fn, "", norm_body);
         if (fn.field_assign_count == 0) return;
+        for (size_t ai = 0; ai < fn.field_assign_count; ++ai)
+            inline_lean_scalar_calls(spec, fn.field_assign_exprs[ai], sizeof(fn.field_assign_exprs[ai]));
     } else if (ret_is_tuple) {
         for (size_t ti = 0; ti < fn.tuple_arity; ++ti) {
-            if (!project_lean_tuple_component(spec, fn.body, strlen(fn.body), ti, fn.tuple_arity, fn.tuple_exprs[ti], sizeof(fn.tuple_exprs[ti])))
+            if (!project_lean_tuple_component(spec, norm_body, strlen(norm_body), ti, fn.tuple_arity, fn.tuple_exprs[ti], sizeof(fn.tuple_exprs[ti])))
                 return;
+            inline_lean_scalar_calls(spec, fn.tuple_exprs[ti], sizeof(fn.tuple_exprs[ti]));
             if (!is_valid_scalar_lean_body_str(spec, &fn, fn.tuple_exprs[ti]))
                 return;
         }
-        strncpy(fn.body, fn.tuple_exprs[0], sizeof(fn.body) - 1);
     } else {
+        strncpy(fn.body, norm_body, sizeof(fn.body) - 1);
         if (strstr(fn.body, "let (") != NULL) {
             char desugared[FLOW_LEAN_BODY_MAX] = {0};
             if (project_lean_tuple_component(spec, fn.body, strlen(fn.body), 0, 1, desugared, sizeof(desugared)) && desugared[0])
                 strncpy(fn.body, desugared, sizeof(fn.body) - 1);
+            inline_lean_scalar_calls(spec, fn.body, sizeof(fn.body));
         }
         if (!is_valid_scalar_lean_body(spec, &fn)) return;
     }
     fn.estimated_wcet_ns = estimate_lean_ast_wcet_ns(&fn);
     spec->lean_functions[spec->lean_function_count++] = fn;
 }
+static char *strip_lean_decl_modifiers(char *line) {
+    if (!line) return line;
+    for (;;) {
+        if (starts_with(line, "public ")) line = trim(line + 7);
+        else if (starts_with(line, "private ")) line = trim(line + 8);
+        else if (starts_with(line, "noncomputable ")) line = trim(line + 14);
+        else if (starts_with(line, "protected ")) line = trim(line + 10);
+        else if (starts_with(line, "@[inline] ")) line = trim(line + 10);
+        else if (starts_with(line, "@[simp] ")) line = trim(line + 8);
+        else break;
+    }
+    return line;
+}
 static int is_lean_top_decl(const char *line) {
+    if (!strcmp(line, "section") || !strcmp(line, "end") || !strcmp(line, "noncomputable section")) return 1;
     static const char *const P[] = {
         "def ", "theorem ", "lemma ", "abbrev ", "axiom ", "noncomputable ",
         "structure ", "inductive ", "namespace ", "section ", "variable ",
@@ -824,14 +984,340 @@ static int strip_lean_comments(const char *src, char *clean_out, char *nostr_out
 typedef struct {
     char const_names[64][FLOW_NAME];
     int64_t const_vals[64];
+    double const_fvals[64];
     int const_is_nat[64];
+    int const_is_float[64];
     size_t const_count;
-    char var_names[32][FLOW_NAME];
-    int64_t var_vals[32];
-    int var_is_nat[32];
+    char var_names[64][FLOW_NAME];
+    int64_t var_vals[64];
+    double var_fvals[64];
+    int var_is_nat[64];
+    int var_is_float[64];
     size_t var_count;
     const FlowSpec *spec;
 } LeanEvalEnv;
+static int lean_eval_slice(const char *s, size_t len, const LeanEvalEnv *env, int is_nat_ctx, int depth, int64_t *out);
+static int slice_has_float_semantics(const char *s, size_t len, const LeanEvalEnv *env) {
+    for (size_t i = 0; i < len; ++i) {
+        if (isdigit((unsigned char)s[i])) {
+            size_t k = i;
+            while (k < len && (isdigit((unsigned char)s[k]) || s[k] == '_')) ++k;
+            if (k + 1 < len && s[k] == '.' && isdigit((unsigned char)s[k + 1])) return 1;
+            if (k + 1 < len && (s[k] == 'e' || s[k] == 'E') &&
+                (isdigit((unsigned char)s[k + 1]) || ((s[k + 1] == '+' || s[k + 1] == '-') && k + 2 < len && isdigit((unsigned char)s[k + 2]))))
+                return 1;
+            i = k;
+            continue;
+        }
+        if (isalpha((unsigned char)s[i]) || s[i] == '_') {
+            size_t k = i;
+            while (k < len && (isalnum((unsigned char)s[k]) || s[k] == '_' || s[k] == '.')) ++k;
+            size_t ilen = k - i;
+            if (ilen > 11 && !strncmp(s + i, "flow_float_", 11)) return 1;
+            if (ilen == 15 && !strncmp(s + i, "flow_dequantize", 15)) return 1;
+            if (env && ilen < FLOW_NAME) {
+                char id[FLOW_NAME] = {0};
+                memcpy(id, s + i, ilen); id[ilen] = '\0';
+                for (size_t vi = env->var_count; vi > 0; --vi)
+                    if (!strcmp(env->var_names[vi - 1], id)) { if (env->var_is_float[vi - 1]) return 1; break; }
+                for (size_t ci = 0; ci < env->const_count; ++ci)
+                    if (!strcmp(env->const_names[ci], id) && env->const_is_float[ci]) return 1;
+                if (env->spec) {
+                    for (size_t fi = 0; fi < env->spec->lean_function_count; ++fi) {
+                        const FlowLeanFunction *fn = &env->spec->lean_functions[fi];
+                        if (!strcmp(fn->name, id) && (!strcmp(fn->return_type, "Float") || !strcmp(fn->return_type, "Float32")))
+                            return 1;
+                    }
+                }
+            }
+            i = k - 1;
+        }
+    }
+    return 0;
+}
+static int lean_eval_float_slice(const char *s, size_t len, const LeanEvalEnv *env, int depth, double *out) {
+    if (depth > 32 || !out) return 0;
+    while (len > 0 && isspace((unsigned char)*s)) { ++s; --len; }
+    while (len > 0 && isspace((unsigned char)s[len - 1])) --len;
+    if (!len) return 0;
+    while (len >= 2 && s[0] == '(' && s[len - 1] == ')') {
+        int d = 0, match_end = 1;
+        for (size_t i = 0; i < len - 1; ++i) {
+            if (s[i] == '(') d++;
+            else if (s[i] == ')' && --d == 0) { match_end = 0; break; }
+        }
+        if (!match_end) break;
+        ++s; len -= 2;
+        while (len > 0 && isspace((unsigned char)*s)) { ++s; --len; }
+        while (len > 0 && isspace((unsigned char)s[len - 1])) --len;
+    }
+    const char *end = s + len;
+    if (len > 3 && !strncmp(s, "if ", 3)) {
+        int pd = 0, id_depth = 0; const char *th = NULL, *el = NULL;
+        for (const char *p = s + 3; p < end; ++p) {
+            if (*p == '(') pd++; else if (*p == ')') pd--;
+            if (pd == 0 && (p == s || isspace((unsigned char)p[-1]))) {
+                if (!strncmp(p, "if ", 3)) id_depth++;
+                else if (!strncmp(p, "then", 4) && (p + 4 == end || isspace((unsigned char)p[4])) && id_depth == 0 && !th) th = p;
+                else if (!strncmp(p, "else", 4) && (p + 4 == end || isspace((unsigned char)p[4])) && th) {
+                    if (id_depth == 0) { el = p; break; } else id_depth--;
+                }
+            }
+        }
+        if (th && el) {
+            int64_t cval = 0;
+            if (!lean_eval_slice(s + 3, (size_t)(th - (s + 3)), env, 0, depth + 1, &cval)) return 0;
+            if (cval != 0) return lean_eval_float_slice(th + 4, (size_t)(el - (th + 4)), env, depth + 1, out);
+            return lean_eval_float_slice(el + 4, (size_t)(end - (el + 4)), env, depth + 1, out);
+        }
+    }
+    if (len > 4 && !strncmp(s, "let ", 4)) {
+        const char *ce = NULL, *sep = NULL; int pd = 0, skip = 0;
+        for (const char *p = s + 4; p + 1 < end; ++p) {
+            if (*p == '(') pd++; else if (*p == ')') pd--;
+            if (pd == 0 && !ce && p[0] == ':' && p[1] == '=') ce = p;
+        }
+        if (ce) {
+            pd = 0; int ld = 0;
+            for (const char *p = ce + 2; p < end; ++p) {
+                if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
+                else if (pd == 0 && is_kw_tok(p, ce + 2, end, "let", 3)) ld++;
+                else if (pd == 0 && is_kw_tok(p, ce + 2, end, "in", 2)) {
+                    if (ld == 0) { sep = p; skip = 2; break; }
+                    ld--;
+                }
+            }
+            if (!sep) {
+                const char *r0 = ce + 2;
+                while (r0 < end && isspace((unsigned char)*r0)) ++r0;
+                pd = 0; int id = 0;
+                for (const char *p = r0; p < end; ++p) {
+                    if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
+                    else if (pd == 0 && is_kw_tok(p, r0, end, "if", 2)) id++;
+                    else if (pd == 0 && is_kw_tok(p, r0, end, "else", 4) && id > 0) id--;
+                    else if (pd == 0 && id == 0 && (*p == ';' || *p == '\n')) { sep = p; skip = 1; break; }
+                }
+            }
+        }
+        if (ce && sep) {
+            char vname[FLOW_NAME] = {0};
+            const char *vs = s + 4; while (vs < ce && isspace((unsigned char)*vs)) ++vs;
+            size_t vl = 0; while (vs + vl < ce && !isspace((unsigned char)vs[vl]) && vs[vl] != ':') ++vl;
+            if (vl > 0 && vl < sizeof(vname)) {
+                memcpy(vname, vs, vl);
+                double rhs_fval = 0.0;
+                if (!lean_eval_float_slice(ce + 2, (size_t)(sep - (ce + 2)), env, depth + 1, &rhs_fval)) return 0;
+                LeanEvalEnv next_env = *env;
+                if (next_env.var_count < 64) {
+                    strncpy(next_env.var_names[next_env.var_count], vname, FLOW_NAME - 1);
+                    next_env.var_fvals[next_env.var_count] = rhs_fval;
+                    next_env.var_vals[next_env.var_count] = (int64_t)rhs_fval;
+                    next_env.var_is_float[next_env.var_count] = 1;
+                    next_env.var_is_nat[next_env.var_count] = 0;
+                    next_env.var_count++;
+                }
+                return lean_eval_float_slice(sep + skip, (size_t)(end - (sep + skip)), &next_env, depth + 1, out);
+            }
+        }
+    }
+    for (int pass = 8; pass <= 10; ++pass) {
+        if (pass == 10) {
+            int pd = 0;
+            for (const char *p = s + 1; p < end - 1; ++p) {
+                if (*p == '(') pd++; else if (*p == ')') pd--;
+                if (pd != 0) continue;
+                if (p[0] == '^' && p[-1] != '^' && p[1] != '^') {
+                    double a = 0.0, b = 0.0;
+                    if (!lean_eval_float_slice(s, (size_t)(p - s), env, depth + 1, &a) ||
+                        !lean_eval_float_slice(p + 1, (size_t)(end - (p + 1)), env, depth + 1, &b)) return 0;
+                    *out = __builtin_pow(a, b);
+                    return 1;
+                }
+            }
+            continue;
+        }
+        int pd = 0;
+        for (const char *p = end - 1; p > s; --p) {
+            if (*p == ')') pd++; else if (*p == '(') pd--;
+            if (pd != 0) continue;
+            if (pass == 8 && (*p == '+' || *p == '-')) {
+                const char *prev = p - 1;
+                if ((*prev == 'e' || *prev == 'E') && prev > s && (isdigit((unsigned char)prev[-1]) || prev[-1] == '.')) continue;
+                while (prev > s && isspace((unsigned char)*prev)) --prev;
+                if (*p == '-' && (prev == s && (*prev == '+' || *prev == '-' || *prev == '*' || *prev == '/' || *prev == '%' || *prev == '^' || *prev == '=' || *prev == '<' || *prev == '>' || *prev == '!'))) continue;
+                if (*p == '-' && (*prev == '+' || *prev == '-' || *prev == '*' || *prev == '/' || *prev == '%' || *prev == '^' || *prev == '=' || *prev == '<' || *prev == '>' || *prev == '&' || *prev == '|' || *prev == '!')) continue;
+                double a = 0.0, b = 0.0;
+                if (!lean_eval_float_slice(s, (size_t)(p - s), env, depth + 1, &a) ||
+                    !lean_eval_float_slice(p + 1, (size_t)(end - (p + 1)), env, depth + 1, &b)) return 0;
+                *out = (*p == '+') ? (a + b) : (a - b);
+                return 1;
+            }
+            if (pass == 9 && (*p == '*' || *p == '/' || *p == '%')) {
+                double a = 0.0, b = 0.0;
+                if (!lean_eval_float_slice(s, (size_t)(p - s), env, depth + 1, &a) ||
+                    !lean_eval_float_slice(p + 1, (size_t)(end - (p + 1)), env, depth + 1, &b)) return 0;
+                if (*p == '*') *out = a * b;
+                else if (*p == '/') *out = (b == 0.0) ? 0.0 : (a / b);
+                else *out = (b == 0.0) ? 0.0 : __builtin_fmod(a, b);
+                return 1;
+            }
+        }
+    }
+    if (s[0] == '-' && len > 1) {
+        double v = 0.0;
+        if (!lean_eval_float_slice(s + 1, len - 1, env, depth + 1, &v)) return 0;
+        *out = -v;
+        return 1;
+    }
+    const char *tok_s[FLOW_LEAN_PARAM_MAX + 2]; size_t tok_l[FLOW_LEAN_PARAM_MAX + 2], tok_cnt = 0;
+    for (const char *p = s; p < end && tok_cnt < FLOW_LEAN_PARAM_MAX + 2; ) {
+        while (p < end && isspace((unsigned char)*p)) ++p;
+        if (p >= end) break;
+        const char *ts = p;
+        if (*p == '(') {
+            int pd = 0;
+            while (p < end) { if (*p == '(') pd++; else if (*p == ')' && --pd == 0) { ++p; break; } ++p; }
+        } else {
+            while (p < end && !isspace((unsigned char)*p) && *p != '(' && *p != ')') ++p;
+        }
+        tok_s[tok_cnt] = ts; tok_l[tok_cnt] = (size_t)(p - ts); tok_cnt++;
+    }
+    if (tok_cnt > 1) {
+        if (tok_l[0] >= 14 && !strncmp(tok_s[0], "flow_float_", 11)) {
+            const char *op = tok_s[0] + 11;
+            size_t opl = tok_l[0] - 11;
+            if (tok_cnt == 2) {
+                double a = 0.0;
+                if (!lean_eval_float_slice(tok_s[1], tok_l[1], env, depth + 1, &a)) return 0;
+                if (opl == 3 && !strncmp(op, "abs", 3)) *out = __builtin_fabs(a);
+                else if (opl == 3 && !strncmp(op, "neg", 3)) *out = -a;
+                else if (opl == 4 && !strncmp(op, "sqrt", 4)) *out = a <= 0.0 ? 0.0 : __builtin_sqrt(a);
+                else if (opl == 3 && !strncmp(op, "exp", 3)) *out = __builtin_exp(a);
+                else if (opl == 3 && !strncmp(op, "log", 3)) *out = a <= 0.0 ? 0.0 : __builtin_log(a);
+                else if (opl == 3 && !strncmp(op, "sin", 3)) *out = __builtin_sin(a);
+                else if (opl == 3 && !strncmp(op, "cos", 3)) *out = __builtin_cos(a);
+                else if (opl == 5 && !strncmp(op, "floor", 5)) *out = __builtin_floor(a);
+                else if (opl == 4 && !strncmp(op, "ceil", 4)) *out = __builtin_ceil(a);
+                else if (opl == 5 && !strncmp(op, "round", 5)) *out = __builtin_round(a);
+                else if (opl == 6 && (!strncmp(op, "of_nat", 6) || !strncmp(op, "of_int", 6))) *out = a;
+                else return 0;
+                return 1;
+            }
+            if (tok_cnt == 3) {
+                double a = 0.0, b = 0.0;
+                if (!lean_eval_float_slice(tok_s[1], tok_l[1], env, depth + 1, &a) ||
+                    !lean_eval_float_slice(tok_s[2], tok_l[2], env, depth + 1, &b)) return 0;
+                if (opl == 3 && !strncmp(op, "min", 3)) *out = a < b ? a : b;
+                else if (opl == 3 && !strncmp(op, "max", 3)) *out = a > b ? a : b;
+                else if (opl == 3 && !strncmp(op, "pow", 3)) *out = __builtin_pow(a, b);
+                else if (opl == 5 && !strncmp(op, "atan2", 5)) *out = __builtin_atan2(a, b);
+                else if (opl == 3 && !strncmp(op, "add", 3)) *out = a + b;
+                else if (opl == 3 && !strncmp(op, "sub", 3)) *out = a - b;
+                else if (opl == 3 && !strncmp(op, "mul", 3)) *out = a * b;
+                else if (opl == 3 && !strncmp(op, "div", 3)) *out = b == 0.0 ? 0.0 : (a / b);
+                else if (opl == 3 && !strncmp(op, "mod", 3)) *out = b == 0.0 ? 0.0 : __builtin_fmod(a, b);
+                else return 0;
+                return 1;
+            }
+        }
+        if ((tok_l[0] == 13 && !strncmp(tok_s[0], "flow_quantize", 13)) && tok_cnt == 5) {
+            double a = 0.0, b = 0.0, c = 0.0, d = 0.0;
+            if (!lean_eval_float_slice(tok_s[1], tok_l[1], env, depth + 1, &a) ||
+                !lean_eval_float_slice(tok_s[2], tok_l[2], env, depth + 1, &b) ||
+                !lean_eval_float_slice(tok_s[3], tok_l[3], env, depth + 1, &c) ||
+                !lean_eval_float_slice(tok_s[4], tok_l[4], env, depth + 1, &d)) return 0;
+            int64_t bits = (int64_t)d;
+            if (c <= b || bits <= 0 || bits > 32) { *out = 0.0; return 1; }
+            double dv = a < b ? b : (a > c ? c : a);
+            uint64_t max_code = (bits == 32) ? 0xFFFFFFFFULL : ((1ULL << bits) - 1ULL);
+            *out = (double)(uint64_t)(((dv - b) / (c - b)) * (double)max_code + 0.5);
+            return 1;
+        }
+        if ((tok_l[0] == 15 && !strncmp(tok_s[0], "flow_dequantize", 15)) && tok_cnt == 5) {
+            double a = 0.0, b = 0.0, c = 0.0, d = 0.0;
+            if (!lean_eval_float_slice(tok_s[1], tok_l[1], env, depth + 1, &a) ||
+                !lean_eval_float_slice(tok_s[2], tok_l[2], env, depth + 1, &b) ||
+                !lean_eval_float_slice(tok_s[3], tok_l[3], env, depth + 1, &c) ||
+                !lean_eval_float_slice(tok_s[4], tok_l[4], env, depth + 1, &d)) return 0;
+            int64_t bits = (int64_t)d;
+            if (c <= b || bits <= 0 || bits > 32) { *out = 0.0; return 1; }
+            uint64_t max_code = (bits == 32) ? 0xFFFFFFFFULL : ((1ULL << bits) - 1ULL);
+            uint64_t raw = (uint64_t)a > max_code ? max_code : (uint64_t)a;
+            *out = b + ((double)raw / (double)max_code) * (c - b);
+            return 1;
+        }
+        if (env && env->spec) {
+            for (size_t fi = 0; fi < env->spec->lean_function_count; ++fi) {
+                const FlowLeanFunction *fn = &env->spec->lean_functions[fi];
+                if (!fn->is_struct_transform && strlen(fn->name) == tok_l[0] && !strncmp(tok_s[0], fn->name, tok_l[0]) && tok_cnt == fn->param_count + 1) {
+                    LeanEvalEnv fn_env = *env; fn_env.var_count = 0;
+                    for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                        const FlowLeanStruct *pst = find_lean_struct(env->spec, fn->param_types[pi]);
+                        if (pst) {
+                            char arg_id[FLOW_NAME] = {0};
+                            if (tok_l[pi + 1] < sizeof(arg_id)) {
+                                memcpy(arg_id, tok_s[pi + 1], tok_l[pi + 1]); arg_id[tok_l[pi + 1]] = '\0';
+                                for (size_t sf = 0; sf < pst->field_count && fn_env.var_count < 64; ++sf) {
+                                    char src_v[FLOW_NAME] = {0};
+                                    snprintf(src_v, sizeof(src_v), "%s.%s", arg_id, pst->fields[sf].name);
+                                    int64_t ival = 0; double fval = 0.0; int is_flt = 0;
+                                    for (size_t vi = 0; vi < env->var_count; ++vi)
+                                        if (!strcmp(env->var_names[vi], src_v)) { ival = env->var_vals[vi]; fval = env->var_fvals[vi]; is_flt = env->var_is_float[vi]; break; }
+                                    snprintf(fn_env.var_names[fn_env.var_count], FLOW_NAME, "%s.%s", fn->param_names[pi], pst->fields[sf].name);
+                                    fn_env.var_vals[fn_env.var_count] = ival;
+                                    fn_env.var_fvals[fn_env.var_count] = is_flt ? fval : (double)ival;
+                                    fn_env.var_is_float[fn_env.var_count] = is_flt;
+                                    fn_env.var_is_nat[fn_env.var_count] = !strcmp(pst->fields[sf].lean_type, "Nat");
+                                    fn_env.var_count++;
+                                }
+                            }
+                        } else {
+                            double faval = 0.0;
+                            if (!lean_eval_float_slice(tok_s[pi + 1], tok_l[pi + 1], env, depth + 1, &faval)) return 0;
+                            if (fn_env.var_count < 64) {
+                                strncpy(fn_env.var_names[fn_env.var_count], fn->param_names[pi], FLOW_NAME - 1);
+                                fn_env.var_fvals[fn_env.var_count] = faval;
+                                fn_env.var_vals[fn_env.var_count] = (int64_t)faval;
+                                fn_env.var_is_float[fn_env.var_count] = 1;
+                                fn_env.var_is_nat[fn_env.var_count] = !strcmp(fn->param_types[pi], "Nat");
+                                fn_env.var_count++;
+                            }
+                        }
+                    }
+                    return lean_eval_float_slice(fn->body, strlen(fn->body), &fn_env, depth + 1, out);
+                }
+            }
+        }
+        return 0;
+    }
+    char atom[128] = {0};
+    if (len >= sizeof(atom)) return 0;
+    memcpy(atom, s, len); atom[len] = '\0';
+    if (!strcmp(atom, "true")) { *out = 1.0; return 1; }
+    if (!strcmp(atom, "false")) { *out = 0.0; return 1; }
+    if (isdigit((unsigned char)atom[0])) {
+        char cleaned[128]; size_t cj = 0;
+        for (size_t ci = 0; atom[ci] && cj + 1 < sizeof(cleaned); ++ci) if (atom[ci] != '_') cleaned[cj++] = atom[ci];
+        cleaned[cj] = '\0';
+        char *ep = NULL;
+        double dv = strtod(cleaned, &ep);
+        if (ep && *ep == '\0') { *out = dv; return 1; }
+        return 0;
+    }
+    if (env) {
+        for (size_t vi = env->var_count; vi > 0; --vi)
+            if (!strcmp(env->var_names[vi - 1], atom)) {
+                *out = env->var_is_float[vi - 1] ? env->var_fvals[vi - 1] : (double)env->var_vals[vi - 1];
+                return 1;
+            }
+        for (size_t ci = 0; ci < env->const_count; ++ci)
+            if (!strcmp(env->const_names[ci], atom)) {
+                *out = env->const_is_float[ci] ? env->const_fvals[ci] : (double)env->const_vals[ci];
+                return 1;
+            }
+    }
+    return 0;
+}
 static int lean_eval_slice(const char *s, size_t len, const LeanEvalEnv *env, int is_nat_ctx, int depth, int64_t *out) {
     if (depth > 32 || !out) return 0;
     while (len > 0 && isspace((unsigned char)*s)) { ++s; --len; }
@@ -902,14 +1388,29 @@ static int lean_eval_slice(const char *s, size_t len, const LeanEvalEnv *env, in
             size_t vl = 0; while (vs + vl < ce && !isspace((unsigned char)vs[vl]) && vs[vl] != ':') ++vl;
             if (vl > 0 && vl < sizeof(vname)) {
                 memcpy(vname, vs, vl);
-                int64_t rhs_val = 0;
-                if (!lean_eval_slice(ce + 2, (size_t)(sep - (ce + 2)), env, is_nat_ctx, depth + 1, &rhs_val)) return 0;
                 LeanEvalEnv next_env = *env;
-                if (next_env.var_count < 32) {
-                    strncpy(next_env.var_names[next_env.var_count], vname, FLOW_NAME - 1);
-                    next_env.var_vals[next_env.var_count] = rhs_val;
-                    next_env.var_is_nat[next_env.var_count] = is_nat_ctx;
-                    next_env.var_count++;
+                if (slice_has_float_semantics(ce + 2, (size_t)(sep - (ce + 2)), env)) {
+                    double rhs_fval = 0.0;
+                    if (!lean_eval_float_slice(ce + 2, (size_t)(sep - (ce + 2)), env, depth + 1, &rhs_fval)) return 0;
+                    if (next_env.var_count < 64) {
+                        strncpy(next_env.var_names[next_env.var_count], vname, FLOW_NAME - 1);
+                        next_env.var_fvals[next_env.var_count] = rhs_fval;
+                        next_env.var_vals[next_env.var_count] = (int64_t)rhs_fval;
+                        next_env.var_is_float[next_env.var_count] = 1;
+                        next_env.var_is_nat[next_env.var_count] = 0;
+                        next_env.var_count++;
+                    }
+                } else {
+                    int64_t rhs_val = 0;
+                    if (!lean_eval_slice(ce + 2, (size_t)(sep - (ce + 2)), env, is_nat_ctx, depth + 1, &rhs_val)) return 0;
+                    if (next_env.var_count < 64) {
+                        strncpy(next_env.var_names[next_env.var_count], vname, FLOW_NAME - 1);
+                        next_env.var_vals[next_env.var_count] = rhs_val;
+                        next_env.var_fvals[next_env.var_count] = (double)rhs_val;
+                        next_env.var_is_float[next_env.var_count] = 0;
+                        next_env.var_is_nat[next_env.var_count] = is_nat_ctx;
+                        next_env.var_count++;
+                    }
                 }
                 return lean_eval_slice(sep + skip, (size_t)(end - (sep + skip)), &next_env, is_nat_ctx, depth + 1, out);
             }
@@ -988,6 +1489,20 @@ static int lean_eval_slice(const char *s, size_t len, const LeanEvalEnv *env, in
                     op = p; op_len = 1;
                 }
                 if (op) {
+                    if (slice_has_float_semantics(s, len, env)) {
+                        double fa = 0.0, fb = 0.0;
+                        if (lean_eval_float_slice(s, (size_t)(p - s), env, depth + 1, &fa) &&
+                            lean_eval_float_slice(p + op_len, (size_t)(end - (p + op_len)), env, depth + 1, &fb)) {
+                            double tol = 1e-12 * (__builtin_fabs(fa) + __builtin_fabs(fb) + 1.0);
+                            if ((op_len == 1 && op[0] == '=') || !strncmp(op, "==", 2)) *out = (fa == fb || __builtin_fabs(fa - fb) <= tol);
+                            else if (!strncmp(op, "!=", 2)) *out = (fa != fb && __builtin_fabs(fa - fb) > tol);
+                            else if (!strncmp(op, "<=", 2)) *out = (fa <= fb + tol);
+                            else if (!strncmp(op, ">=", 2)) *out = (fa + tol >= fb);
+                            else if (op[0] == '<') *out = (fa < fb);
+                            else *out = (fa > fb);
+                            return 1;
+                        }
+                    }
                     int64_t a = 0, b = 0;
                     if (!lean_eval_slice(s, (size_t)(p - s), env, is_nat_ctx, depth + 1, &a) ||
                         !lean_eval_slice(p + op_len, (size_t)(end - (p + op_len)), env, is_nat_ctx, depth + 1, &b)) return 0;
@@ -1068,8 +1583,8 @@ static int lean_eval_slice(const char *s, size_t len, const LeanEvalEnv *env, in
         if (!lean_eval_slice(s + 1, len - 1, env, is_nat_ctx, depth + 1, &v)) return 0;
         *out = is_nat_ctx ? 0 : -v; return 1;
     }
-    const char *tok_s[16]; size_t tok_l[16], tok_cnt = 0;
-    for (const char *p = s; p < end && tok_cnt < 16; ) {
+    const char *tok_s[FLOW_LEAN_PARAM_MAX + 2]; size_t tok_l[FLOW_LEAN_PARAM_MAX + 2], tok_cnt = 0;
+    for (const char *p = s; p < end && tok_cnt < FLOW_LEAN_PARAM_MAX + 2; ) {
         while (p < end && isspace((unsigned char)*p)) ++p;
         if (p >= end) break;
         const char *ts = p;
@@ -1150,27 +1665,45 @@ static int lean_eval_slice(const char *s, size_t len, const LeanEvalEnv *env, in
                             char arg_id[FLOW_NAME] = {0};
                             if (tok_l[pi + 1] < sizeof(arg_id)) {
                                 memcpy(arg_id, tok_s[pi + 1], tok_l[pi + 1]); arg_id[tok_l[pi + 1]] = '\0';
-                                for (size_t sf = 0; sf < pst->field_count && fn_env.var_count < 32; ++sf) {
+                                for (size_t sf = 0; sf < pst->field_count && fn_env.var_count < 64; ++sf) {
                                     char src_v[FLOW_NAME] = {0};
                                     snprintf(src_v, sizeof(src_v), "%s.%s", arg_id, pst->fields[sf].name);
-                                    int64_t fval = 0;
+                                    int64_t fval = 0; double ffval = 0.0; int is_flt = 0;
                                     for (size_t vi = 0; vi < env->var_count; ++vi)
-                                        if (!strcmp(env->var_names[vi], src_v)) { fval = env->var_vals[vi]; break; }
+                                        if (!strcmp(env->var_names[vi], src_v)) { fval = env->var_vals[vi]; ffval = env->var_fvals[vi]; is_flt = env->var_is_float[vi]; break; }
                                     snprintf(fn_env.var_names[fn_env.var_count], FLOW_NAME, "%s.%s", fn->param_names[pi], pst->fields[sf].name);
                                     fn_env.var_vals[fn_env.var_count] = fval;
+                                    fn_env.var_fvals[fn_env.var_count] = ffval;
+                                    fn_env.var_is_float[fn_env.var_count] = is_flt;
                                     fn_env.var_is_nat[fn_env.var_count] = !strcmp(pst->fields[sf].lean_type, "Nat");
                                     fn_env.var_count++;
                                 }
                             }
                         } else {
                             int p_nat = !strcmp(fn->param_types[pi], "Nat");
-                            int64_t aval = 0;
-                            if (!lean_eval_slice(tok_s[pi + 1], tok_l[pi + 1], env, p_nat, depth + 1, &aval)) return 0;
-                            if (fn_env.var_count < 32) {
-                                strncpy(fn_env.var_names[fn_env.var_count], fn->param_names[pi], FLOW_NAME - 1);
-                                fn_env.var_vals[fn_env.var_count] = aval;
-                                fn_env.var_is_nat[fn_env.var_count] = p_nat;
-                                fn_env.var_count++;
+                            int p_flt = !strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32");
+                            if (p_flt) {
+                                double faval = 0.0;
+                                if (!lean_eval_float_slice(tok_s[pi + 1], tok_l[pi + 1], env, depth + 1, &faval)) return 0;
+                                if (fn_env.var_count < 64) {
+                                    strncpy(fn_env.var_names[fn_env.var_count], fn->param_names[pi], FLOW_NAME - 1);
+                                    fn_env.var_fvals[fn_env.var_count] = faval;
+                                    fn_env.var_vals[fn_env.var_count] = (int64_t)faval;
+                                    fn_env.var_is_float[fn_env.var_count] = 1;
+                                    fn_env.var_is_nat[fn_env.var_count] = 0;
+                                    fn_env.var_count++;
+                                }
+                            } else {
+                                int64_t aval = 0;
+                                if (!lean_eval_slice(tok_s[pi + 1], tok_l[pi + 1], env, p_nat, depth + 1, &aval)) return 0;
+                                if (fn_env.var_count < 64) {
+                                    strncpy(fn_env.var_names[fn_env.var_count], fn->param_names[pi], FLOW_NAME - 1);
+                                    fn_env.var_vals[fn_env.var_count] = aval;
+                                    fn_env.var_fvals[fn_env.var_count] = (double)aval;
+                                    fn_env.var_is_float[fn_env.var_count] = 0;
+                                    fn_env.var_is_nat[fn_env.var_count] = p_nat;
+                                    fn_env.var_count++;
+                                }
                             }
                         }
                     }
@@ -1212,10 +1745,26 @@ static void try_eval_lean_const_def(LeanEvalEnv *env, const char *def_sig, const
     if (sscanf(def_sig + 4, "%63[^ :\t] : %31[^ :=\t]", cname, ctype) < 1 || !cname[0]) return;
     for (size_t i = 0; i < env->const_count; ++i) if (!strcmp(env->const_names[i], cname)) return;
     char norm_rhs[FLOW_LEAN_BODY_MAX]; normalize_lean_body(def_body, norm_rhs, sizeof(norm_rhs));
-    int64_t cval = 0; int is_nat = !strcmp(ctype, "Nat");
+    const char *norm_ct = normalize_lean_type_token(ctype);
+    int is_flt = !strcmp(norm_ct, "Float") || !strcmp(norm_ct, "Float32") || slice_has_float_semantics(norm_rhs, strlen(norm_rhs), env);
+    if (is_flt) {
+        double fval = 0.0;
+        if (lean_eval_float_slice(norm_rhs, strlen(norm_rhs), env, 0, &fval)) {
+            strncpy(env->const_names[env->const_count], cname, FLOW_NAME - 1);
+            env->const_fvals[env->const_count] = fval;
+            env->const_vals[env->const_count] = (int64_t)fval;
+            env->const_is_float[env->const_count] = 1;
+            env->const_is_nat[env->const_count] = 0;
+            env->const_count++;
+            return;
+        }
+    }
+    int64_t cval = 0; int is_nat = !strcmp(norm_ct, "Nat");
     if (lean_eval_slice(norm_rhs, strlen(norm_rhs), env, is_nat, 0, &cval)) {
         strncpy(env->const_names[env->const_count], cname, FLOW_NAME - 1);
         env->const_vals[env->const_count] = cval;
+        env->const_fvals[env->const_count] = (double)cval;
+        env->const_is_float[env->const_count] = 0;
         env->const_is_nat[env->const_count] = is_nat;
         env->const_count++;
     }
@@ -1379,6 +1928,12 @@ static void rewrite_struct_projections(const FlowSpec *spec, char *expr, size_t 
         if (!changed) break;
     }
 }
+typedef struct {
+    FlowSpec tmp_spec;
+    LeanEvalEnv env;
+    char thm_lines[FLOW_LEAN_THEOREM_MAX][FLOW_LEAN_BODY_MAX];
+} FlowVerifyScratch;
+
 int flow_verify_lean_theorems(const char *lean_source, char *err_msg, size_t err_size) {
     if (err_msg && err_size) err_msg[0] = '\0';
     if (!lean_source || !lean_source[0]) return 0;
@@ -1388,37 +1943,42 @@ int flow_verify_lean_theorems(const char *lean_source, char *err_msg, size_t err
     if (!strip_lean_comments(lean_source, clean, nostr, slen + 1, err_msg, err_size)) {
         free(clean); free(nostr); return 0;
     }
-    FlowSpec tmp_spec; memset(&tmp_spec, 0, sizeof(tmp_spec));
-    LeanEvalEnv env; memset(&env, 0, sizeof(env)); env.spec = &tmp_spec;
+    FlowVerifyScratch *scratch = (FlowVerifyScratch *)calloc(1, sizeof(FlowVerifyScratch));
+    if (!scratch) { free(clean); free(nostr); return 0; }
+    scratch->env.spec = &scratch->tmp_spec;
     char def_sig[FLOW_LEAN_BODY_MAX] = {0}, def_body[FLOW_LEAN_BODY_MAX] = {0}; int in_def = 0;
-    char thm_lines[64][FLOW_LEAN_BODY_MAX]; size_t thm_cnt = 0; int in_thm = 0;
+    size_t thm_cnt = 0; int in_thm = 0;
     FlowLeanStruct *cur_st = NULL; FlowLeanEnum *cur_en = NULL;
     char *saveptr = NULL;
     for (char *raw_line = strtok_r(clean, "\n", &saveptr); raw_line; raw_line = strtok_r(NULL, "\n", &saveptr)) {
-        char *line = trim(raw_line); if (!*line) continue;
-        while (starts_with(line, "public ") || starts_with(line, "private ")) line = trim(line + (starts_with(line, "public ") ? 7 : 8));
+        char *line = strip_lean_decl_modifiers(raw_line); if (!*line) continue;
         if (in_def && is_lean_top_decl(line)) {
-            if (in_def == 2) { try_add_lean_function(&tmp_spec, def_sig, def_body); try_eval_lean_const_def(&env, def_sig, def_body); }
+            if (in_def == 2) { try_add_lean_function(&scratch->tmp_spec, def_sig, def_body); try_eval_lean_const_def(&scratch->env, def_sig, def_body); }
             in_def = 0; def_sig[0] = '\0'; def_body[0] = '\0';
         }
         if (in_thm && is_lean_top_decl(line)) in_thm = 0;
         if (cur_st && is_lean_top_decl(line)) cur_st = NULL;
         if (cur_en && is_lean_top_decl(line)) cur_en = NULL;
         if (cur_st) {
-            char fn[FLOW_NAME] = {0}, ft[FLOW_NAME] = {0};
-            if (sscanf(line, "%63s : %63s", fn, ft) == 2) {
-                add_lean_struct_field(&tmp_spec, cur_st, fn, ft, 0, NULL);
+            char fn[FLOW_NAME] = {0}, ft[FLOW_LINE] = {0};
+            if (sscanf(line, "%63s : %511[^\r\n]", fn, ft) == 2) {
+                char *ce_f = strstr(ft, ":="); if (ce_f) *ce_f = '\0';
+                char *tft = trim(ft);
+                if (is_lean_erased_proof_field(tft)) continue;
+                char ft_tok[FLOW_NAME] = {0};
+                sscanf(tft, "%63s", ft_tok);
+                add_lean_struct_field(&scratch->tmp_spec, cur_st, fn, normalize_lean_type_token(ft_tok), 0, NULL);
                 continue;
             }
         }
         if (cur_en && line[0] == '|') {
-            (void)parse_lean_inductive_variants(cur_en, &env, line, 0);
+            (void)parse_lean_inductive_variants(cur_en, &scratch->env, line, 0);
             continue;
         }
         char sym_name[FLOW_NAME] = {0};
         if (sscanf(line, "structure %63s where", sym_name) == 1 && !is_builtin_lean_struct(sym_name)) {
-            if (tmp_spec.lean_struct_count < FLOW_LEAN_STRUCT_MAX) {
-                cur_st = &tmp_spec.lean_structs[tmp_spec.lean_struct_count++];
+            if (scratch->tmp_spec.lean_struct_count < FLOW_LEAN_STRUCT_MAX) {
+                cur_st = &scratch->tmp_spec.lean_structs[scratch->tmp_spec.lean_struct_count++];
                 memset(cur_st, 0, sizeof(*cur_st));
                 strncpy(cur_st->name, sym_name, FLOW_NAME - 1);
                 cur_st->align_bytes = 8;
@@ -1426,11 +1986,11 @@ int flow_verify_lean_theorems(const char *lean_source, char *err_msg, size_t err
             continue;
         }
         if (sscanf(line, "inductive %63s", sym_name) == 1) {
-            if (tmp_spec.lean_enum_count < FLOW_LEAN_ENUM_MAX) {
-                cur_en = &tmp_spec.lean_enums[tmp_spec.lean_enum_count++];
+            if (scratch->tmp_spec.lean_enum_count < FLOW_LEAN_ENUM_MAX) {
+                cur_en = &scratch->tmp_spec.lean_enums[scratch->tmp_spec.lean_enum_count++];
                 memset(cur_en, 0, sizeof(*cur_en));
                 strncpy(cur_en->name, sym_name, FLOW_NAME - 1);
-                (void)parse_lean_inductive_variants(cur_en, &env, line, 0);
+                (void)parse_lean_inductive_variants(cur_en, &scratch->env, line, 0);
             }
             continue;
         }
@@ -1443,19 +2003,19 @@ int flow_verify_lean_theorems(const char *lean_source, char *err_msg, size_t err
             size_t bl = strlen(def_body);
             if (bl + 1 + strlen(line) < sizeof(def_body)) { if (bl > 0) def_body[bl++] = '\n'; strncpy(def_body + bl, line, sizeof(def_body) - bl - 1); }
         } else if (in_thm && thm_cnt > 0) {
-            size_t tl = strlen(thm_lines[thm_cnt - 1]);
-            if (tl + 1 + strlen(line) < sizeof(thm_lines[0])) { thm_lines[thm_cnt - 1][tl] = ' '; strncpy(thm_lines[thm_cnt - 1] + tl + 1, line, sizeof(thm_lines[0]) - tl - 2); }
+            size_t tl = strlen(scratch->thm_lines[thm_cnt - 1]);
+            if (tl + 1 + strlen(line) < sizeof(scratch->thm_lines[0])) { scratch->thm_lines[thm_cnt - 1][tl] = ' '; strncpy(scratch->thm_lines[thm_cnt - 1] + tl + 1, line, sizeof(scratch->thm_lines[0]) - tl - 2); }
         }
         if (starts_with(line, "def ") && !strstr(line, ": Prop") && !strstr(line, ": Type")) {
             char *ce = strstr(line, ":=");
             char *lp = strchr(line, '(');
-            if (ce && (!lp || lp > ce) && env.const_count < 60) {
+            if (ce && (!lp || lp > ce) && scratch->env.const_count < 60) {
                 char cname[FLOW_NAME] = {0}, ctype[32] = {0};
                 if (sscanf(line + 4, "%63[^ :\t] : %31[^ :=\t]", cname, ctype) >= 1 && cname[0]) {
                     char *rhs = trim(ce + 2);
                     if (rhs[0] == '{') {
                         const char *p = rhs + 1;
-                        while (p && *p && env.const_count < 60) {
+                        while (p && *p && scratch->env.const_count < 60) {
                             char fname[FLOW_NAME] = {0}; unsigned long long fval = 0;
                             const char * next_ce = strstr(p, ":=");
                             if (!next_ce) break;
@@ -1466,23 +2026,52 @@ int flow_verify_lean_theorems(const char *lean_source, char *err_msg, size_t err
                             size_t fl = (size_t)(fe - fs);
                             if (fl > 0 && fl < sizeof(fname)) {
                                 memcpy(fname, fs, fl); fname[fl] = '\0';
-                                if (sscanf(next_ce + 2, " %llu", &fval) == 1) {
-                                    snprintf(env.const_names[env.const_count], FLOW_NAME, "%s.%s", cname, fname);
-                                    env.const_vals[env.const_count] = (int64_t)fval;
-                                    env.const_is_nat[env.const_count] = 1;
-                                    env.const_count++;
+                                const char *vp = next_ce + 2;
+                                while (*vp && isspace((unsigned char)*vp)) ++vp;
+                                char *end_d = NULL; double fdval = strtod(vp, &end_d);
+                                int is_f_lit = 0;
+                                if (end_d && end_d > vp) {
+                                    for (const char *scan = vp; scan < end_d; ++scan)
+                                        if (*scan == '.' || *scan == 'e' || *scan == 'E') { is_f_lit = 1; break; }
+                                }
+                                if (is_f_lit) {
+                                    snprintf(scratch->env.const_names[scratch->env.const_count], FLOW_NAME, "%s.%s", cname, fname);
+                                    scratch->env.const_fvals[scratch->env.const_count] = fdval;
+                                    scratch->env.const_vals[scratch->env.const_count] = (int64_t)fdval;
+                                    scratch->env.const_is_nat[scratch->env.const_count] = 0;
+                                    scratch->env.const_is_float[scratch->env.const_count] = 1;
+                                    scratch->env.const_count++;
+                                } else if (sscanf(vp, "%llu", &fval) == 1) {
+                                    snprintf(scratch->env.const_names[scratch->env.const_count], FLOW_NAME, "%s.%s", cname, fname);
+                                    scratch->env.const_vals[scratch->env.const_count] = (int64_t)fval;
+                                    scratch->env.const_fvals[scratch->env.const_count] = (double)fval;
+                                    scratch->env.const_is_nat[scratch->env.const_count] = 1;
+                                    scratch->env.const_is_float[scratch->env.const_count] = 0;
+                                    scratch->env.const_count++;
                                 }
                             }
                             p = next_ce + 2;
                         }
                     } else if (rhs[0] != '\0') {
                         char norm_rhs[FLOW_LEAN_BODY_MAX]; normalize_lean_body(rhs, norm_rhs, sizeof(norm_rhs));
-                        int64_t cval = 0; int is_nat = !strcmp(ctype, "Nat");
-                        if (lean_eval_slice(norm_rhs, strlen(norm_rhs), &env, is_nat, 0, &cval)) {
-                            strncpy(env.const_names[env.const_count], cname, FLOW_NAME - 1);
-                            env.const_vals[env.const_count] = cval;
-                            env.const_is_nat[env.const_count] = is_nat;
-                            env.const_count++;
+                        const char *norm_ct = normalize_lean_type_token(ctype);
+                        int is_nat = !strcmp(norm_ct, "Nat");
+                        int is_flt = !strcmp(norm_ct, "Float") || !strcmp(norm_ct, "Float32") || slice_has_float_semantics(norm_rhs, strlen(norm_rhs), &scratch->env);
+                        double cfval = 0.0; int64_t cval = 0;
+                        if (is_flt && lean_eval_float_slice(norm_rhs, strlen(norm_rhs), &scratch->env, 0, &cfval)) {
+                            strncpy(scratch->env.const_names[scratch->env.const_count], cname, FLOW_NAME - 1);
+                            scratch->env.const_fvals[scratch->env.const_count] = cfval;
+                            scratch->env.const_vals[scratch->env.const_count] = (int64_t)cfval;
+                            scratch->env.const_is_nat[scratch->env.const_count] = 0;
+                            scratch->env.const_is_float[scratch->env.const_count] = 1;
+                            scratch->env.const_count++;
+                        } else if (lean_eval_slice(norm_rhs, strlen(norm_rhs), &scratch->env, is_nat, 0, &cval)) {
+                            strncpy(scratch->env.const_names[scratch->env.const_count], cname, FLOW_NAME - 1);
+                            scratch->env.const_vals[scratch->env.const_count] = cval;
+                            scratch->env.const_fvals[scratch->env.const_count] = (double)cval;
+                            scratch->env.const_is_nat[scratch->env.const_count] = is_nat;
+                            scratch->env.const_is_float[scratch->env.const_count] = 0;
+                            scratch->env.const_count++;
                         }
                     }
                 }
@@ -1496,15 +2085,15 @@ int flow_verify_lean_theorems(const char *lean_source, char *err_msg, size_t err
             } else {
                 strncpy(def_sig, line, sizeof(def_sig) - 1); def_body[0] = '\0'; in_def = 1;
             }
-        } else if (starts_with(line, "theorem ") && thm_cnt < 64) {
-            strncpy(thm_lines[thm_cnt++], line, sizeof(thm_lines[0]) - 1);
-            thm_lines[thm_cnt - 1][sizeof(thm_lines[0]) - 1] = '\0';
+        } else if (starts_with(line, "theorem ") && thm_cnt < FLOW_LEAN_THEOREM_MAX) {
+            strncpy(scratch->thm_lines[thm_cnt++], line, sizeof(scratch->thm_lines[0]) - 1);
+            scratch->thm_lines[thm_cnt - 1][sizeof(scratch->thm_lines[0]) - 1] = '\0';
             in_thm = 1;
         }
     }
-    if (in_def == 2) { try_add_lean_function(&tmp_spec, def_sig, def_body); try_eval_lean_const_def(&env, def_sig, def_body); }
+    if (in_def == 2) { try_add_lean_function(&scratch->tmp_spec, def_sig, def_body); try_eval_lean_const_def(&scratch->env, def_sig, def_body); }
     for (size_t ti = 0; ti < thm_cnt; ++ti) {
-        char *tline = thm_lines[ti];
+        char *tline = scratch->thm_lines[ti];
         char tname[FLOW_NAME] = {0};
         if (sscanf(tline + 8, "%63[^ (:{\t]", tname) != 1) continue;
         char *ce = strstr(tline, ":=");
@@ -1521,39 +2110,51 @@ int flow_verify_lean_theorems(const char *lean_source, char *err_msg, size_t err
             else if (pd == 0 && *p == ':') { prop_colon = p; break; }
         }
         if (!prop_colon) continue;
-        LeanEvalEnv thm_env = env;
-        char hyp_props[8][256]; size_t hyp_cnt = 0;
+        LeanEvalEnv thm_env = scratch->env;
+        char hyp_props[16][256]; size_t hyp_cnt = 0;
         for (char *p = tline + 8; p < prop_colon; ) {
             char *lp = strchr(p, '('); if (!lp || lp >= prop_colon) break;
-            char *rp = strchr(lp + 1, ')'); if (!rp || rp > prop_colon) break;
+            char *rp = lp + 1;
+            for (int d = 1; *rp && rp < prop_colon && d > 0; ++rp) {
+                if (*rp == '(') d++;
+                else if (*rp == ')') { d--; if (d == 0) break; }
+            }
+            if (!*rp || rp >= prop_colon || *rp != ')') break;
             char grp[256] = {0}; size_t gl = (size_t)(rp - (lp + 1));
             if (gl < sizeof(grp)) {
                 memcpy(grp, lp + 1, gl);
                 char *col = strchr(grp, ':');
                 if (col) {
                     *col = '\0';
-                    char *ptype = trim(col + 1);
-                    const FlowLeanStruct *pst = find_lean_struct(&tmp_spec, ptype);
+                    char *raw_ptype = trim(col + 1);
+                    const char *ptype = normalize_lean_type_token(raw_ptype);
+                    const FlowLeanStruct *pst = find_lean_struct(&scratch->tmp_spec, ptype);
                     if (pst) {
                         for (char *tok = strtok(grp, " \t"); tok; tok = strtok(NULL, " \t")) {
-                            for (size_t fi = 0; fi < pst->field_count && thm_env.var_count < 32; ++fi) {
+                            for (size_t fi = 0; fi < pst->field_count && thm_env.var_count < 64; ++fi) {
                                 snprintf(thm_env.var_names[thm_env.var_count], FLOW_NAME, "%s.%s", tok, pst->fields[fi].name);
                                 thm_env.var_vals[thm_env.var_count] = 1;
+                                thm_env.var_fvals[thm_env.var_count] = 1.0;
                                 thm_env.var_is_nat[thm_env.var_count] = !strcmp(pst->fields[fi].lean_type, "Nat") || !strncmp(pst->fields[fi].lean_type, "UInt", 4);
+                                thm_env.var_is_float[thm_env.var_count] = !strcmp(pst->fields[fi].lean_type, "Float") || !strcmp(pst->fields[fi].lean_type, "Float32");
                                 thm_env.var_count++;
                             }
                         }
-                    } else if (is_scalar_lean_type(ptype) || find_lean_enum(&tmp_spec, ptype)) {
+                    } else if (is_scalar_lean_type(ptype) || find_lean_enum(&scratch->tmp_spec, ptype)) {
                         int v_nat = !strcmp(ptype, "Nat");
-                        for (char *tok = strtok(grp, " \t"); tok && thm_env.var_count < 32; tok = strtok(NULL, " \t")) {
+                        int v_flt = !strcmp(ptype, "Float") || !strcmp(ptype, "Float32");
+                        for (char *tok = strtok(grp, " \t"); tok && thm_env.var_count < 64; tok = strtok(NULL, " \t")) {
                             strncpy(thm_env.var_names[thm_env.var_count], tok, FLOW_NAME - 1);
                             thm_env.var_vals[thm_env.var_count] = 1;
+                            thm_env.var_fvals[thm_env.var_count] = 1.0;
                             thm_env.var_is_nat[thm_env.var_count] = v_nat;
+                            thm_env.var_is_float[thm_env.var_count] = v_flt;
                             thm_env.var_count++;
                         }
-                    } else if (hyp_cnt < 8) {
-                        normalize_lean_body(ptype, hyp_props[hyp_cnt], sizeof(hyp_props[0]));
-                        rewrite_struct_projections(&tmp_spec, hyp_props[hyp_cnt], sizeof(hyp_props[0]));
+                    } else if (hyp_cnt < 16) {
+                        normalize_lean_body(raw_ptype, hyp_props[hyp_cnt], sizeof(hyp_props[0]));
+                        rewrite_struct_projections(&scratch->tmp_spec, hyp_props[hyp_cnt], sizeof(hyp_props[0]));
+                        inline_lean_scalar_calls(&scratch->tmp_spec, hyp_props[hyp_cnt], sizeof(hyp_props[0]));
                         hyp_cnt++;
                     }
                 }
@@ -1562,12 +2163,14 @@ int flow_verify_lean_theorems(const char *lean_source, char *err_msg, size_t err
         }
         char norm_prop[FLOW_LEAN_BODY_MAX];
         normalize_lean_body(prop_colon + 1, norm_prop, sizeof(norm_prop));
-        rewrite_struct_projections(&tmp_spec, norm_prop, sizeof(norm_prop));
+        rewrite_struct_projections(&scratch->tmp_spec, norm_prop, sizeof(norm_prop));
+        inline_lean_scalar_calls(&scratch->tmp_spec, norm_prop, sizeof(norm_prop));
         static const int64_t TEST_VECS[4][4] = {{1, 1, 1, 1}, {0, 0, 0, 0}, {2, 1, 3, 2}, {7, 3, 5, 1}};
         size_t n_trials = (thm_env.var_count > 0) ? 4 : 1;
         for (size_t tr = 0; tr < n_trials; ++tr) {
             for (size_t vi = 0; vi < thm_env.var_count; ++vi) {
                 thm_env.var_vals[vi] = TEST_VECS[tr][vi & 3];
+                thm_env.var_fvals[vi] = (double)TEST_VECS[tr][vi & 3];
             }
             int hyp_ok = 1;
             for (size_t hi = 0; hi < hyp_cnt; ++hi) {
@@ -1581,14 +2184,21 @@ int flow_verify_lean_theorems(const char *lean_source, char *err_msg, size_t err
             if (lean_eval_slice(norm_prop, strlen(norm_prop), &thm_env, 1, 0, &val)) {
                 if (val == 0) {
                     if (err_msg && err_size) snprintf(err_msg, err_size, "Lean theorem '%s' evaluated to FALSE (counterexample refuted proposition)", tname);
-                    free(clean); free(nostr); return 0;
+                    free(scratch); free(clean); free(nostr); return 0;
                 }
             }
         }
     }
-    free(clean); free(nostr);
+    free(scratch); free(clean); free(nostr);
     return 1;
 }
+typedef struct {
+    char fns[FLOW_LEAN_FN_MAX][FLOW_NAME];
+    char bodies[FLOW_LEAN_FN_MAX][FLOW_LINE];
+    int is_u32[FLOW_LEAN_FN_MAX];
+    int in_thm[FLOW_LEAN_FN_MAX];
+} LeanParseCands;
+
 static int parse_lean_spec(FILE *input, FlowSpec *spec) {
     fseek(input, 0, SEEK_END); long fsz = ftell(input); rewind(input);
     if (fsz <= 0 || fsz > 4 * 1024 * 1024) return 0;
@@ -1608,9 +2218,9 @@ static int parse_lean_spec(FILE *input, FlowSpec *spec) {
         free(full_src); free(clean_src); free(nostr_src); return 0;
     }
     free(full_src); free(nostr_src);
+    LeanParseCands *cands = (LeanParseCands *)calloc(1, sizeof(LeanParseCands));
+    if (!cands) { free(clean_src); return 0; }
     char sym[FLOW_NAME] = {0}, cand_fn[FLOW_NAME] = {0}, cand_body[FLOW_LINE] = {0};
-    char cand_fns[32][FLOW_NAME] = {{0}}, cand_bodies[32][FLOW_LINE] = {{0}};
-    int cand_is_u32[32] = {0}, cand_in_thm[32] = {0};
     size_t cand_count = 0;
     char def_sig[FLOW_LEAN_BODY_MAX] = {0}, def_body[FLOW_LEAN_BODY_MAX] = {0};
     unsigned long long v = 0; int saw_lean = 0, in_struct = 0, explicit_stride = 0, explicit_export = 0, awaiting_body = 0, in_u32_body = 0, in_def = 0, active_thm = -1, is_ext_lib = 0; size_t struct_bytes = 0;
@@ -1622,10 +2232,12 @@ static int parse_lean_spec(FILE *input, FlowSpec *spec) {
     for (char *raw_line = strtok_r(clean_src, "\n", &saveptr); raw_line; raw_line = strtok_r(NULL, "\n", &saveptr)) {
         char *line = trim(raw_line); if (!*line) continue;
         if (!strcmp(line, "module") || starts_with(line, "module ") || starts_with(line, "import Cedar")) is_ext_lib = 1;
-        while (starts_with(line, "public ") || starts_with(line, "private ")) line = trim(line + (starts_with(line, "public ") ? 7 : 8));
+        if (starts_with(line, "noncomputable ")) saw_lean = 1;
+        line = strip_lean_decl_modifiers(line); if (!*line) continue;
+        if (!strcmp(line, "section") || starts_with(line, "section ")) { saw_lean = 1; continue; }
         if (in_def && is_lean_top_decl(line)) {
             if (in_def == 2) {
-                if (!is_ext_lib && !check_lean_rt_def_gate(def_sig, def_body)) { free(clean_src); return 0; }
+                if (!is_ext_lib && !check_lean_rt_def_gate(def_sig, def_body)) { free(cands); free(clean_src); return 0; }
                 try_add_lean_function(spec, def_sig, def_body);
             }
             in_def = 0; def_sig[0] = '\0'; def_body[0] = '\0';
@@ -1650,7 +2262,7 @@ static int parse_lean_spec(FILE *input, FlowSpec *spec) {
         }
         if (awaiting_body) {
             strncpy(cand_body, line, FLOW_LINE - 1);
-            if (cand_count > 0) strncpy(cand_bodies[cand_count - 1], cand_body, FLOW_LINE - 1);
+            if (cand_count > 0) strncpy(cands->bodies[cand_count - 1], cand_body, FLOW_LINE - 1);
             if (spec->extern_kernel[0]) strncpy(spec->extern_kernel_body, cand_body, FLOW_LINE - 1);
             awaiting_body = 0; continue;
         }
@@ -1658,30 +2270,32 @@ static int parse_lean_spec(FILE *input, FlowSpec *spec) {
             size_t cur = strlen(cand_body);
             if (cur + 1 + strlen(line) < FLOW_LINE) {
                 cand_body[cur] = ' '; strncpy(cand_body + cur + 1, line, FLOW_LINE - cur - 2);
-                if (cand_count > 0) strncpy(cand_bodies[cand_count - 1], cand_body, FLOW_LINE - 1);
+                if (cand_count > 0) strncpy(cands->bodies[cand_count - 1], cand_body, FLOW_LINE - 1);
                 if (spec->extern_kernel[0]) strncpy(spec->extern_kernel_body, cand_body, FLOW_LINE - 1);
             }
             continue;
         }
         in_u32_body = 0;
         if (cur_en && line[0] == '|') {
-            if (!parse_lean_inductive_variants(cur_en, NULL, line, !is_ext_lib)) { free(clean_src); return 0; }
+            if (!parse_lean_inductive_variants(cur_en, NULL, line, !is_ext_lib)) { free(cands); free(clean_src); return 0; }
             continue;
         }
         if (in_struct) {
-            char fn[FLOW_NAME] = {0}, ft[FLOW_NAME] = {0};
+            char fn[FLOW_NAME] = {0}, ft[FLOW_LINE] = {0};
             if (is_lean_top_decl(line)) {
                 in_struct = 0; cur_st = NULL;
-            } else if (sscanf(line, "%63s : %63[^\r\n]", fn, ft) == 2) {
+            } else if (sscanf(line, "%63s : %511[^\r\n]", fn, ft) == 2) {
+                char *ce_f = strstr(ft, ":="); if (ce_f) *ce_f = '\0';
                 char *tft = trim(ft);
+                if (is_lean_erased_proof_field(tft)) continue;
                 if (!is_ext_lib && (has_word_match(tft, "List") || has_word_match(tft, "Array") || has_word_match(tft, "ByteArray"))) {
                     fprintf(stderr, "flowc: [Lean-RT Zero-GC Gate] rejected '%s' in '%s.%s': dynamic heap allocation / closure / recursion violates hard real-time zero-GC invariants; use fixed-size 'structure' instead.\n",
                             tft, cur_st ? cur_st->name : "structure", fn);
-                    free(clean_src); return 0;
+                    free(cands); free(clean_src); return 0;
                 }
                 char ft_tok[FLOW_NAME] = {0};
                 sscanf(tft, "%63s", ft_tok);
-                add_lean_struct_field(spec, cur_st, fn, ft_tok, 1, &struct_bytes);
+                add_lean_struct_field(spec, cur_st, fn, normalize_lean_type_token(ft_tok), 1, &struct_bytes);
                 continue;
             }
         }
@@ -1700,7 +2314,7 @@ static int parse_lean_spec(FILE *input, FlowSpec *spec) {
                 cur_en = &spec->lean_enums[spec->lean_enum_count++];
                 memset(cur_en, 0, sizeof(*cur_en));
                 strncpy(cur_en->name, sym, FLOW_NAME - 1);
-                if (!parse_lean_inductive_variants(cur_en, NULL, line, !is_ext_lib)) { free(clean_src); return 0; }
+                if (!parse_lean_inductive_variants(cur_en, NULL, line, !is_ext_lib)) { free(cands); free(clean_src); return 0; }
             }
         } else if (sscanf(line, "namespace %63s", sym) == 1) {
             const char *leaf = strrchr(sym, '.');
@@ -1762,10 +2376,10 @@ static int parse_lean_spec(FILE *input, FlowSpec *spec) {
                     } else {
                         strncpy(cand_body, "if stride > 0 && epoch > 0 && baseOff + byteLen >= baseOff then 0 else 1", FLOW_LINE - 1);
                     }
-                    if (cand_count < 32) {
-                        strncpy(cand_fns[cand_count], cand_fn, FLOW_NAME - 1);
-                        strncpy(cand_bodies[cand_count], cand_body, FLOW_LINE - 1);
-                        cand_is_u32[cand_count] = is_u32;
+                    if (cand_count < FLOW_LEAN_FN_MAX) {
+                        strncpy(cands->fns[cand_count], cand_fn, FLOW_NAME - 1);
+                        strncpy(cands->bodies[cand_count], cand_body, FLOW_LINE - 1);
+                        cands->is_u32[cand_count] = is_u32;
                         cand_count++;
                     }
                 }
@@ -1796,7 +2410,7 @@ static int parse_lean_spec(FILE *input, FlowSpec *spec) {
                 }
             }
             for (size_t ci = 0; ci < cand_count; ++ci) {
-                if (has_word_match(line, cand_fns[ci])) cand_in_thm[ci] = 1;
+                if (has_word_match(line, cands->fns[ci])) cands->in_thm[ci] = 1;
             }
         } else {
             if (active_thm >= 0 && !spec->lean_theorems[active_thm].anchored_fn[0]) {
@@ -1808,32 +2422,33 @@ static int parse_lean_spec(FILE *input, FlowSpec *spec) {
                 }
             }
             for (size_t ci = 0; ci < cand_count; ++ci) {
-                if (has_word_match(line, cand_fns[ci])) cand_in_thm[ci] = 1;
+                if (has_word_match(line, cands->fns[ci])) cands->in_thm[ci] = 1;
             }
         }
     }
     free(clean_src);
     if (in_def == 2) {
-        if (!is_ext_lib && !check_lean_rt_def_gate(def_sig, def_body)) return 0;
+        if (!is_ext_lib && !check_lean_rt_def_gate(def_sig, def_body)) { free(cands); return 0; }
         try_add_lean_function(spec, def_sig, def_body);
     }
     if (!explicit_stride && struct_bytes > 0) spec->input_stride_bytes = (struct_bytes + 7u) & ~7u;
     if (explicit_export && spec->extern_kernel[0]) {
         for (size_t ci = 0; ci < cand_count; ++ci) {
-            if (!strcmp(cand_fns[ci], spec->extern_kernel)) {
-                strncpy(spec->extern_kernel_body, cand_bodies[ci], FLOW_LINE - 1);
+            if (!strcmp(cands->fns[ci], spec->extern_kernel)) {
+                strncpy(spec->extern_kernel_body, cands->bodies[ci], FLOW_LINE - 1);
                 break;
             }
         }
     } else if (cand_count > 0) {
         ssize_t picked = -1;
-        for (size_t ci = cand_count; ci > 0; --ci) if (cand_is_u32[ci - 1] && cand_in_thm[ci - 1]) { picked = (ssize_t)(ci - 1); break; }
-        if (picked < 0) for (size_t ci = cand_count; ci > 0; --ci) if (cand_is_u32[ci - 1]) { picked = (ssize_t)(ci - 1); break; }
-        if (picked < 0) for (size_t ci = cand_count; ci > 0; --ci) if (cand_in_thm[ci - 1]) { picked = (ssize_t)(ci - 1); break; }
+        for (size_t ci = cand_count; ci > 0; --ci) if (cands->is_u32[ci - 1] && cands->in_thm[ci - 1]) { picked = (ssize_t)(ci - 1); break; }
+        if (picked < 0) for (size_t ci = cand_count; ci > 0; --ci) if (cands->is_u32[ci - 1]) { picked = (ssize_t)(ci - 1); break; }
+        if (picked < 0) for (size_t ci = cand_count; ci > 0; --ci) if (cands->in_thm[ci - 1]) { picked = (ssize_t)(ci - 1); break; }
         if (picked < 0) picked = (ssize_t)(cand_count - 1);
-        strncpy(spec->extern_kernel, cand_fns[picked], FLOW_NAME - 1);
-        strncpy(spec->extern_kernel_body, cand_bodies[picked], FLOW_LINE - 1);
+        strncpy(spec->extern_kernel, cands->fns[picked], FLOW_NAME - 1);
+        strncpy(spec->extern_kernel_body, cands->bodies[picked], FLOW_LINE - 1);
     }
+    free(cands);
     if (!strcmp(spec->domain_name, "embodied")) {
         snprintf(spec->flow_expression, sizeof(spec->flow_expression), "lean_stream -> flow_embodied_run -> top(3)");
     } else {
@@ -1915,7 +2530,7 @@ int parse_spec(FILE *input, FlowSpec *spec) {
     int is_literate = 0, is_lean_doc = 0, has_flow_kw = 0, in_code_block = 0, flow_block_completed = 0; long start_pos = ftell(input); if (start_pos >= 0) { while (fgets(raw, sizeof(raw), input)) {
             char *p = trim(raw); if (!strncmp(p, "```flow", 7) || !strncmp(p, "~~~flow", 7)) { is_literate = 1; break; }
             if (starts_with(p, "project ") || starts_with(p, "flow ") || starts_with(p, "bind ") || starts_with(p, "input ") || starts_with(p, "@quota") || starts_with(p, "@embodied") || starts_with(p, "@reload") || starts_with(p, "@patchbay") || starts_with(p, "patchbay ") || !strcmp(p, "patchbay {") || !strcmp(p, "require {")) has_flow_kw = 1;
-            if (starts_with(p, "namespace ") || starts_with(p, "theorem ") || starts_with(p, "@[export ") || starts_with(p, "inductive ") || (starts_with(p, "structure ") && strstr(p, " where")) || starts_with(p, "def ")) is_lean_doc = 1; } fseek(input, start_pos, SEEK_SET);
+            if (starts_with(p, "namespace ") || starts_with(p, "theorem ") || starts_with(p, "@[export ") || starts_with(p, "inductive ") || (starts_with(p, "structure ") && strstr(p, " where")) || starts_with(p, "def ") || starts_with(p, "noncomputable ") || !strcmp(p, "section") || starts_with(p, "section ")) is_lean_doc = 1; } fseek(input, start_pos, SEEK_SET);
         if (is_lean_doc && !has_flow_kw && !is_literate) return parse_lean_spec(input, spec); }
     memset(spec, 0, sizeof(*spec)); while (fgets(raw, sizeof(raw), input)) { ++line_number; char *line = trim(raw); if (is_literate) { if (!in_code_block) {
                 if (!strncmp(line, "```flow", 7) || !strncmp(line, "~~~flow", 7)) { if (flow_block_completed) break; in_code_block = 1; } continue;

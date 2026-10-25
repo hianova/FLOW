@@ -32,6 +32,7 @@ static void flowc_print_usage(FILE *out) { fprintf(out, "FLOW Modern Declarative
     if (!module) { fprintf(stderr, "flowc: imported domain module '%s' not registered\n", mod_name); return 0; } flow_plugin_lower_semantics(spec, ir, module);
     if (!flow_component_validate_contract(ir, module, err_msg, sizeof(err_msg))) {
         fprintf(stderr, "flowc: module '%s' contract validation failed: %s\n", mod_name, err_msg[0] ? err_msg : "invalid domain contract"); return 0; } return 1; }
+int flowc_main(int argc, char **argv);
 int flowc_main(int argc, char **argv) { const char *input_path = NULL, *output_path = NULL, *profile_path = NULL, *profile_out = NULL;
     const char *component_override = NULL, *target_c_header = NULL, *target_rust = NULL;
     const char *target_python = NULL, *target_lean = NULL, *target_mlir = NULL, *target_llvm_ir = NULL, *apply_fvec_path = NULL;

@@ -11,10 +11,10 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
-static int run_argv_sync(char *const argv[]) {
+static int run_argv_sync(const char *const argv[]) {
     pid_t pid = fork();
     if (pid < 0) return EXIT_FAILURE;
-    if (pid == 0) { execvp(argv[0], argv); _exit(127); }
+    if (pid == 0) { union { const char *const *c; char *const *m; } u = { argv }; execvp(argv[0], u.m); _exit(127); }
     int st = 0;
     if (waitpid(pid, &st, 0) < 0) return EXIT_FAILURE;
     return WIFEXITED(st) ? WEXITSTATUS(st) : EXIT_FAILURE;
@@ -52,19 +52,19 @@ static int flowy_build_cmd(int argc, char **argv, int and_run) {
         snprintf(py_path, sizeof(py_path), "build/%s_abi.py", stem);
         snprintf(rs_path, sizeof(rs_path), "build/%s_abi.rs", stem);
         snprintf(m_path, sizeof(m_path), "build/flow_%s.m", stem);
-        char *fc_sh_argv[] = {(char *)flowc_bin, (char *)spec_file, "-o", temp_c, "--target-c-header", h_path, "--target-python", py_path, "--target-rust", rs_path, "--target-matlab", m_path, NULL};
+        const char *fc_sh_argv[] = {flowc_bin, spec_file, "-o", temp_c, "--target-c-header", h_path, "--target-python", py_path, "--target-rust", rs_path, "--target-matlab", m_path, NULL};
         if (run_argv_sync(fc_sh_argv) != 0) { fprintf(stderr, "flowy build --shared: failed to compile %s\n", spec_file); remove(temp_c); return EXIT_FAILURE; }
     } else {
-        char *fc_argv[] = {(char *)flowc_bin, (char *)spec_file, "-o", temp_c, NULL};
+        const char *fc_argv[] = {flowc_bin, spec_file, "-o", temp_c, NULL};
         if (run_argv_sync(fc_argv) != 0) { fprintf(stderr, "flowy %s: failed to compile %s\n", and_run ? "run" : "build", spec_file); remove(temp_c); return EXIT_FAILURE; }
     }
     const char *cc = getenv("CC"); if (!cc || !cc[0]) cc = "clang";
     int ret = 0;
     if (is_shared) {
-        char *cc_sh1[] = {(char *)cc, "-std=c17", "-O3", "-shared", "-fPIC", "-DFLOW_SHARED_LIB", "-pthread", temp_c, "-o", (char *)out_bin, "-lm", NULL};
+        const char *cc_sh1[] = {cc, "-std=c17", "-O3", "-shared", "-fPIC", "-DFLOW_SHARED_LIB", "-pthread", temp_c, "-o", out_bin, "-lm", NULL};
         ret = run_argv_sync(cc_sh1);
         if (ret != 0) {
-            char *cc_sh2[] = {(char *)cc, "-std=c17", "-O3", "-shared", "-fPIC", "-DFLOW_SHARED_LIB", temp_c, "-o", (char *)out_bin, "-lm", NULL};
+            const char *cc_sh2[] = {cc, "-std=c17", "-O3", "-shared", "-fPIC", "-DFLOW_SHARED_LIB", temp_c, "-o", out_bin, "-lm", NULL};
             ret = run_argv_sync(cc_sh2);
         }
         remove(temp_c);
@@ -72,10 +72,10 @@ static int flowy_build_cmd(int argc, char **argv, int and_run) {
         printf("  ✓ [FLOW SDK Bundle] Built %s + %s + %s + %s + %s\n", out_bin, h_path, py_path, rs_path, m_path);
         return EXIT_SUCCESS;
     }
-    char *cc_argv1[] = {(char *)cc, "-O3", temp_c, "-o", (char *)out_bin, "-lpthread", "-lm", NULL};
+    const char *cc_argv1[] = {cc, "-O3", temp_c, "-o", out_bin, "-lpthread", "-lm", NULL};
     ret = run_argv_sync(cc_argv1);
     if (ret != 0) {
-        char *cc_argv2[] = {(char *)cc, "-O3", temp_c, "-o", (char *)out_bin, "-lm", NULL};
+        const char *cc_argv2[] = {cc, "-O3", temp_c, "-o", out_bin, "-lm", NULL};
         ret = run_argv_sync(cc_argv2);
     }
     remove(temp_c);
@@ -84,7 +84,7 @@ static int flowy_build_cmd(int argc, char **argv, int and_run) {
     if (and_run) {
         char exec_path[512];
         snprintf(exec_path, sizeof(exec_path), "%s%s", (out_bin[0] == '/' || (out_bin[0] == '.' && out_bin[1] == '/')) ? "" : "./", out_bin);
-        char *run_argv[128]; int r_argc = 0;
+        const char *run_argv[128]; int r_argc = 0;
         run_argv[r_argc++] = exec_path;
         for (int i = extra_arg_start; i < argc && r_argc < 127; ++i) run_argv[r_argc++] = argv[i];
         run_argv[r_argc] = NULL;
@@ -150,12 +150,12 @@ static int flowy_ui_cmd(int argc, char **argv) {
     snprintf(so_path, sizeof(so_path), "build/lib%s_ui.so", stem);
     snprintf(selftest_str, sizeof(selftest_str), "%d", selftest);
     snprintf(port_str, sizeof(port_str), "%d", port);
-    char *fc_argv[] = {(char *)flowc_bin, (char *)spec_file, "-o", c_path, "--target-python", py_path, "--target-ui", ui_path, NULL};
+    const char *fc_argv[] = {flowc_bin, spec_file, "-o", c_path, "--target-python", py_path, "--target-ui", ui_path, NULL};
     if (run_argv_sync(fc_argv) != 0) { fprintf(stderr, "flowy ui: failed to compile %s\n", spec_file); return EXIT_FAILURE; }
     const char *cc = getenv("CC"); if (!cc || !cc[0]) cc = "clang";
-    char *cc_argv1[] = {(char *)cc, "-std=c17", "-O2", "-shared", "-fPIC", "-DFLOW_SHARED_LIB", "-pthread", c_path, "-o", so_path, "-lm", NULL};
+    const char *cc_argv1[] = {cc, "-std=c17", "-O2", "-shared", "-fPIC", "-DFLOW_SHARED_LIB", "-pthread", c_path, "-o", so_path, "-lm", NULL};
     if (run_argv_sync(cc_argv1) != 0) {
-        char *cc_argv2[] = {(char *)cc, "-std=c17", "-O2", "-shared", "-fPIC", "-DFLOW_SHARED_LIB", c_path, "-o", so_path, "-lm", NULL};
+        const char *cc_argv2[] = {cc, "-std=c17", "-O2", "-shared", "-fPIC", "-DFLOW_SHARED_LIB", c_path, "-o", so_path, "-lm", NULL};
         if (run_argv_sync(cc_argv2) != 0) { fprintf(stderr, "flowy ui: failed to build shared library %s\n", so_path); return EXIT_FAILURE; }
     }
     static const char *const py_script =
@@ -210,7 +210,7 @@ static int flowy_ui_cmd(int argc, char **argv) {
         "        except Exception as e: return self._json({'ok':False,'error':str(e)}, 400)\n"
         "print(f'▶ FLOW Schema-Driven Control Plane listening on http://127.0.0.1:{port}')\n"
         "http.server.ThreadingHTTPServer(('127.0.0.1', port), H).serve_forever()\n";
-    char *py_argv[] = {"python3", "-B", "-c", (char *)py_script, py_path, so_path, ui_path, selftest_str, port_str, NULL};
+    const char *py_argv[] = {"python3", "-B", "-c", py_script, py_path, so_path, ui_path, selftest_str, port_str, NULL};
     return run_argv_sync(py_argv) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 static void flowy_print_usage(FILE *out) { fprintf(out, "FLOW 2.0 Living System & Declarative Toolchain (flowy) v2.5.0\nUsage: flowy <command> [options...]\n\n"
@@ -239,7 +239,7 @@ static void flowy_print_usage(FILE *out) { fprintf(out, "FLOW 2.0 Living System 
             char bin_path[512];
             snprintf(bin_path, sizeof(bin_path), "%s/test-%s", build_dir, suites[i]);
             printf("▶ Running Suite [%s] (%s)...\n", suites[i], bin_path);
-            char *t_argv[] = {bin_path, NULL};
+            const char *t_argv[] = {bin_path, NULL};
             int ret = run_argv_sync(t_argv);
             if (ret != 0) { fprintf(stderr, "❌ Suite [%s] failed with exit code %d\n", suites[i], ret); return EXIT_FAILURE; }
         }
@@ -254,7 +254,7 @@ static void flowy_print_usage(FILE *out) { fprintf(out, "FLOW 2.0 Living System 
             char bin_path[512];
             snprintf(bin_path, sizeof(bin_path), "%s/test-%s", build_dir, suites[i]);
             printf("▶ Running Suite [%s] (%s)...\n", suites[i], bin_path);
-            char *t_argv[] = {bin_path, NULL};
+            const char *t_argv[] = {bin_path, NULL};
             return (run_argv_sync(t_argv) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
         }
     }

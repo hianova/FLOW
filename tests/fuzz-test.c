@@ -13,6 +13,9 @@
 
 #define FUZZ_CHECK(cond) if (!(cond)) { fprintf(stderr, "fuzz-test assertion failed at %s:%d: %s\n", __FILE__, __LINE__, #cond); exit(1); }
 
+int LLVMFuzzerInitialize(int *argc, char ***argv);
+int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
+
 int LLVMFuzzerInitialize(int *argc, char ***argv) {
     (void)argc;
     (void)argv;

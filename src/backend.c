@@ -48,7 +48,8 @@ static void flow_emit_metadata(FILE *output, const SemanticIR *ir, const Compone
                 ir->domain_name, ir->fallback_policy, cand->latency_score, cand->memory_score,
                 cand->supports_parallelizable, cand->memory_fixed_bytes, cand->memory_bytes_per_capacity, p ? p->name : "", i + 1 == count ? "" : ","); }
     double cap_d = (double)(ir->input_max_count > 0 ? ir->input_max_count : 64); fprintf(output,
-        "};\nconst FlowGeneratedCandidatePlan *flow_generated_candidate_plans(size_t *count_out) { if (count_out) *count_out = FLOW_GENERATED_CANDIDATE_COUNT; return FLOW_GENERATED_CANDIDATES; }\n"
+        "};\nconst FlowGeneratedCandidatePlan *flow_generated_candidate_plans(size_t *count_out);\n"
+        "const FlowGeneratedCandidatePlan *flow_generated_candidate_plans(size_t *count_out) { if (count_out) *count_out = FLOW_GENERATED_CANDIDATE_COUNT; return FLOW_GENERATED_CANDIDATES; }\n"
         "typedef struct { size_t dim; double omega, barrier_mu, q_saturation, moreau_kappa; } FlowJetSynthesizedLandscape;\n"
         "static const FlowJetSynthesizedLandscape FLOW_JET_SYNTHESIZED_LANDSCAPE __attribute__((unused)) = { .dim = 16, .omega = %.6f, .barrier_mu = %.8f, .q_saturation = %.6f, .moreau_kappa = 4.0 };\n\n",
         fmax(0.1, sqrt(cap_d) / 16.0), 1.0 / cap_d, 1.25 * cap_d); } static int emit_flowc_bootstrap_v2(FILE *output, const SemanticIR *ir) { fprintf(output,
@@ -113,7 +114,7 @@ static void emit_runtime_common(FILE *output, const SemanticIR *ir, const Compon
 static const char *lean_scalar_to_c_type(const char *t) {
     if (!t) return "uint64_t";
     if (!strcmp(t, "Bool")) return "bool";
-    if (!strcmp(t, "Float")) return "double";
+    if (!strcmp(t, "Float") || !strcmp(t, "\xe2\x84\x9d") || !strcmp(t, "Real")) return "double";
     if (!strcmp(t, "Float32")) return "float";
     if (!strcmp(t, "UInt32")) return "uint32_t";
     if (!strcmp(t, "Int32")) return "int32_t";
@@ -425,8 +426,8 @@ static void emit_norm_lean_slice(FILE *out, const char *s, size_t len, LeanExprM
             }
         }
     }
-    const char *tok_s[16]; size_t tok_l[16], tok_cnt = 0;
-    for (const char *p = s; p < end && tok_cnt < 16; ) {
+    const char *tok_s[FLOW_LEAN_PARAM_MAX + 2]; size_t tok_l[FLOW_LEAN_PARAM_MAX + 2], tok_cnt = 0;
+    for (const char *p = s; p < end && tok_cnt < FLOW_LEAN_PARAM_MAX + 2; ) {
         while (p < end && isspace((unsigned char)*p)) ++p;
         if (p >= end) break;
         const char *ts = p;
@@ -527,7 +528,23 @@ static void emit_lean_expr_as_c(FILE *out, const char *expr, LeanExprMode mode) 
         {"Float.max", 9, "flow_float_max", 14},
         {"Float.min", 9, "flow_float_min", 14},
         {"Float.ofNat", 11, "flow_float_of_nat", 17},
-        {"Float.ofInt", 11, "flow_float_of_int", 17}
+        {"Float.ofInt", 11, "flow_float_of_int", 17},
+        {"Real.abs", 8, "flow_float_abs", 14},
+        {"Real.floor", 10, "flow_float_floor", 16},
+        {"Real.ceil", 9, "flow_float_ceil", 15},
+        {"Real.round", 10, "flow_float_round", 16},
+        {"Real.sqrt", 9, "flow_float_sqrt", 15},
+        {"Real.exp", 8, "flow_float_exp", 14},
+        {"Real.log", 8, "flow_float_log", 14},
+        {"Real.sin", 8, "flow_float_sin", 14},
+        {"Real.cos", 8, "flow_float_cos", 14},
+        {"Real.atan2", 10, "flow_float_atan2", 16},
+        {"Real.pow", 8, "flow_float_pow", 14},
+        {"Real.max", 8, "flow_float_max", 14},
+        {"Real.min", 8, "flow_float_min", 14},
+        {"f_abs", 5, "flow_float_abs", 14},
+        {"f_max", 5, "flow_float_max", 14},
+        {"f_min", 5, "flow_float_min", 14}
     };
     char norm[4096]; size_t j = 0;
     for (size_t i = 0; expr[i] && j + 20 < sizeof(norm); ) {
@@ -600,11 +617,17 @@ static void emit_single_lean_fn_c(FILE *output, const SemanticIR *ir, const Flow
         if (!is_header_inline && ir->extern_kernel[0] && !strcmp(fn->name, ir->extern_kernel) && kernel_name_collides)
             *kernel_name_collides = 1;
         const FlowLeanStruct *out_st = find_ir_lean_struct(ir, fn->return_type);
+        if (!is_header_inline) {
+            fprintf(output, "%s %s(", ret_c, fn->name);
+            for (size_t pi = 0; pi < fn->param_count; ++pi)
+                fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
+            fprintf(output, ");\n");
+        }
         fprintf(output, "%s%s %s%s(", is_header_inline ? "static inline __attribute__((unused)) " : "", ret_c, is_header_inline ? "flowc_" : "", fn->name);
         for (size_t pi = 0; pi < fn->param_count; ++pi)
             fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
         fprintf(output, ") {\n");
-        if (!is_header_inline && fi < 64)
+        if (!is_header_inline && fi < FLOW_LEAN_FN_MAX)
             fprintf(output, "    atomic_fetch_add_explicit(&_flow_ab_fn_calls[%zu], 1ULL, memory_order_relaxed);\n", fi);
         for (size_t pi = 0; pi < fn->param_count; ++pi) {
             fprintf(output, "    (void)%s;\n", fn->param_names[pi]);
@@ -619,7 +642,7 @@ static void emit_single_lean_fn_c(FILE *output, const SemanticIR *ir, const Flow
                 fprintf(output, "    if (!isfinite(%s)) %s = 0.0;\n", fn->param_names[pi], fn->param_names[pi]);
             }
         }
-        fprintf(output, "    %s _out = {0};\n", ret_c);
+        fprintf(output, "    %s _out; __builtin_memset(&_out, 0, sizeof(_out));\n", ret_c);
         if (out_st) {
             for (size_t sfi = 0; sfi < out_st->field_count; ++sfi) {
                 const char *fname = out_st->fields[sfi].name;
@@ -655,6 +678,14 @@ static void emit_single_lean_fn_c(FILE *output, const SemanticIR *ir, const Flow
             if (!strcmp(fn->tuple_types[ti], "Float") || !strcmp(fn->tuple_types[ti], "Float32")) is_fx_tuple = 1;
         if (is_fx_tuple) {
             const char *ret_fx_c = lean_type_to_fx_c_type(ir, fn->return_type);
+            if (!is_header_inline) {
+                fprintf(output, "%s %s_fx(", ret_fx_c, fn->name);
+                for (size_t pi = 0; pi < fn->param_count; ++pi)
+                    fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_fx_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
+                for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                    fprintf(output, "%s%s *out_%zu", (fn->param_count > 0 || ti > 0) ? ", " : "", lean_type_to_fx_c_type(ir, fn->tuple_types[ti]), ti);
+                fprintf(output, ");\n");
+            }
             fprintf(output, "%s%s %s%s_fx(", is_header_inline ? "static inline __attribute__((unused)) " : "", ret_fx_c, is_header_inline ? "flowc_" : "", fn->name);
             for (size_t pi = 0; pi < fn->param_count; ++pi)
                 fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_fx_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
@@ -692,13 +723,21 @@ static void emit_single_lean_fn_c(FILE *output, const SemanticIR *ir, const Flow
             }
             fprintf(output, "    return (%s)_flow_t0;\n}\n", ret_fx_c);
         }
+        if (!is_header_inline) {
+            fprintf(output, "%s %s(", ret_c, fn->name);
+            for (size_t pi = 0; pi < fn->param_count; ++pi)
+                fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
+            for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                fprintf(output, "%s%s *out_%zu", (fn->param_count > 0 || ti > 0) ? ", " : "", lean_type_to_c_type(ir, fn->tuple_types[ti]), ti);
+            fprintf(output, ");\n");
+        }
         fprintf(output, "%s%s %s%s(", is_header_inline ? "static inline __attribute__((unused)) " : "", ret_c, is_header_inline ? "flowc_" : "", fn->name);
         for (size_t pi = 0; pi < fn->param_count; ++pi)
             fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
         for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
             fprintf(output, "%s%s *out_%zu", (fn->param_count > 0 || ti > 0) ? ", " : "", lean_type_to_c_type(ir, fn->tuple_types[ti]), ti);
         fprintf(output, ") {\n");
-        if (!is_header_inline && fi < 64)
+        if (!is_header_inline && fi < FLOW_LEAN_FN_MAX)
             fprintf(output, "    atomic_fetch_add_explicit(&_flow_ab_fn_calls[%zu], 1ULL, memory_order_relaxed);\n", fi);
         int float_param_cnt = 0;
         for (size_t pi = 0; pi < fn->param_count; ++pi) {
@@ -718,30 +757,6 @@ static void emit_single_lean_fn_c(FILE *output, const SemanticIR *ir, const Flow
             for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
                 fprintf(output, "        if (out_%zu) *out_%zu = (%s)0;\n", ti, ti, lean_type_to_c_type(ir, fn->tuple_types[ti]));
             fprintf(output, "        return (%s)0;\n    }\n", ret_c);
-        }
-        if (is_fx_tuple) {
-            for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
-                fprintf(output, "    %s _fx_out_%zu = 0;\n", lean_type_to_fx_c_type(ir, fn->tuple_types[ti]), ti);
-            fprintf(output, "    (void)%s%s_fx(", is_header_inline ? "flowc_" : "", fn->name);
-            for (size_t pi = 0; pi < fn->param_count; ++pi) {
-                if (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32"))
-                    fprintf(output, "%sflow_fx64_from_double((double)%s)", pi > 0 ? ", " : "", fn->param_names[pi]);
-                else
-                    fprintf(output, "%s%s", pi > 0 ? ", " : "", fn->param_names[pi]);
-            }
-            for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
-                fprintf(output, "%s&_fx_out_%zu", (fn->param_count > 0 || ti > 0) ? ", " : "", ti);
-            fprintf(output, ");\n");
-            for (size_t ti = 0; ti < fn->tuple_arity; ++ti) {
-                const char *tc = lean_type_to_c_type(ir, fn->tuple_types[ti]);
-                if (!strcmp(tc, "double") || !strcmp(tc, "float"))
-                    fprintf(output, "    %s _flow_t%zu = (%s)flow_fx64_to_double(_fx_out_%zu);\n", tc, ti, tc, ti);
-                else
-                    fprintf(output, "    %s _flow_t%zu = (%s)_fx_out_%zu;\n", tc, ti, tc, ti);
-                fprintf(output, "    if (out_%zu) *out_%zu = _flow_t%zu;\n", ti, ti, ti);
-            }
-            fprintf(output, "    return (%s)_flow_t0;\n}\n", ret_c);
-            return;
         }
         for (size_t ti = 0; ti < fn->tuple_arity; ++ti) {
             const char *tc = lean_type_to_c_type(ir, fn->tuple_types[ti]);
@@ -767,6 +782,12 @@ static void emit_single_lean_fn_c(FILE *output, const SemanticIR *ir, const Flow
     }
     if (fmode == LEAN_EXPR_FLOAT && !has_struct_param) {
         const char *ret_fx_c = lean_type_to_fx_c_type(ir, fn->return_type);
+        if (!is_header_inline) {
+            fprintf(output, "%s %s_fx(", ret_fx_c, fn->name);
+            for (size_t pi = 0; pi < fn->param_count; ++pi)
+                fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_fx_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
+            fprintf(output, ");\n");
+        }
         fprintf(output, "%s%s %s%s_fx(", is_header_inline ? "static inline __attribute__((unused)) " : "", ret_fx_c, is_header_inline ? "flowc_" : "", fn->name);
         for (size_t pi = 0; pi < fn->param_count; ++pi)
             fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_fx_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
@@ -796,50 +817,18 @@ static void emit_single_lean_fn_c(FILE *output, const SemanticIR *ir, const Flow
             emit_lean_expr_as_c(output, fn->body, LEAN_EXPR_FX64);
             fprintf(output, ");\n}\n");
         }
-        fprintf(output, "%s%s %s%s(", is_header_inline ? "static inline __attribute__((unused)) " : (is_kern ? "__attribute__((weak)) " : ""), ret_c, is_header_inline ? "flowc_" : "", fn->name);
+    }
+    if (!is_header_inline) {
+        fprintf(output, "%s%s %s(", is_kern ? "__attribute__((weak)) " : "", ret_c, fn->name);
         for (size_t pi = 0; pi < fn->param_count; ++pi)
             fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
-        fprintf(output, ") {\n    ");
-        if (!is_header_inline && fi < 64)
-            fprintf(output, "atomic_fetch_add_explicit(&_flow_ab_fn_calls[%zu], 1ULL, memory_order_relaxed); ", fi);
-        int float_param_cnt = 0;
-        for (size_t pi = 0; pi < fn->param_count; ++pi) {
-            fprintf(output, "(void)%s; ", fn->param_names[pi]);
-            if (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32")) float_param_cnt++;
-        }
-        if (float_param_cnt > 0) {
-            fprintf(output, "\n    if (");
-            int seen_fp = 0;
-            for (size_t pi = 0; pi < fn->param_count; ++pi) {
-                if (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32")) {
-                    fprintf(output, "%s!isfinite(%s)", seen_fp ? " || " : "", fn->param_names[pi]);
-                    seen_fp++;
-                }
-            }
-            fprintf(output, ") return (%s)0;", ret_c);
-        }
-        if (!strcmp(fn->return_type, "Float") || !strcmp(fn->return_type, "Float32")) {
-            fprintf(output, "\n    return (%s)flow_fx64_to_double(%s%s_fx(", ret_c, is_header_inline ? "flowc_" : "", fn->name);
-        } else {
-            fprintf(output, "\n    return (%s)%s%s_fx(", ret_c, is_header_inline ? "flowc_" : "", fn->name);
-        }
-        for (size_t pi = 0; pi < fn->param_count; ++pi) {
-            if (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32"))
-                fprintf(output, "%sflow_fx64_from_double((double)%s)", pi > 0 ? ", " : "", fn->param_names[pi]);
-            else
-                fprintf(output, "%s%s", pi > 0 ? ", " : "", fn->param_names[pi]);
-        }
-        if (!strcmp(fn->return_type, "Float") || !strcmp(fn->return_type, "Float32"))
-            fprintf(output, "));\n}\n");
-        else
-            fprintf(output, ");\n}\n");
-        return;
+        fprintf(output, ");\n");
     }
     fprintf(output, "%s%s %s%s(", is_header_inline ? "static inline __attribute__((unused)) " : (is_kern ? "__attribute__((weak)) " : ""), ret_c, is_header_inline ? "flowc_" : "", fn->name);
     for (size_t pi = 0; pi < fn->param_count; ++pi)
         fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
     fprintf(output, ") {\n    ");
-    if (!is_header_inline && fi < 64)
+    if (!is_header_inline && fi < FLOW_LEAN_FN_MAX)
         fprintf(output, "atomic_fetch_add_explicit(&_flow_ab_fn_calls[%zu], 1ULL, memory_order_relaxed); ", fi);
     int float_param_cnt = 0;
     for (size_t pi = 0; pi < fn->param_count; ++pi) {
@@ -888,10 +877,15 @@ void flow_emit_inline_lean_kernels(FILE *output, const SemanticIR *ir) {
         "#endif\n",
         output);
     if (ir && ir->lean_function_count > 0) {
-        fprintf(output, "/* Zero-Overhead Static Inline C17 Operators (%zu) */\n", ir->lean_function_count);
+        fprintf(output,
+            "/* Zero-Overhead Static Inline C17 Operators (%zu) */\n"
+            "#if defined(__clang__)\n#pragma clang diagnostic push\n#pragma clang diagnostic ignored \"-Wtautological-unsigned-zero-compare\"\n"
+            "#elif defined(__GNUC__)\n#pragma GCC diagnostic push\n#pragma GCC diagnostic ignored \"-Wtype-limits\"\n#endif\n",
+            ir->lean_function_count);
         for (size_t fi = 0; fi < ir->lean_function_count; ++fi) {
             emit_single_lean_fn_c(output, ir, &ir->lean_functions[fi], fi, 1, NULL, NULL);
         }
+        fputs("#if defined(__clang__)\n#pragma clang diagnostic pop\n#elif defined(__GNUC__)\n#pragma GCC diagnostic pop\n#endif\n", output);
     }
 }
 void flow_emit_abi_exports(FILE *output, const SemanticIR *ir, const Component *c, size_t cap) {
@@ -948,13 +942,18 @@ void flow_emit_abi_exports(FILE *output, const SemanticIR *ir, const Component *
         "_Static_assert(sizeof(FlowExtentDescriptor) == 64, \"FlowExtentDescriptor must be 64 bytes\");\n"
         "#endif\n"
         "#ifndef FLOW_AB_SHADOW_TELEMETRY_DEFINED\n#define FLOW_AB_SHADOW_TELEMETRY_DEFINED\n"
+        "__attribute__((weak)) void flow_ab_shadow_record(uint32_t kernel_id, double primary_val, double shadow_val, double tol);\n"
+        "__attribute__((weak)) uint64_t flow_ab_shadow_get_calls(void);\n"
+        "__attribute__((weak)) uint64_t flow_ab_shadow_get_mismatches(void);\n"
+        "__attribute__((weak)) uint64_t flow_ab_shadow_get_fn_calls(uint32_t kernel_id);\n"
+        "__attribute__((weak)) void flow_ab_shadow_reset(void);\n"
         "__attribute__((weak)) _Atomic uint64_t _flow_ab_shadow_calls = 0ULL;\n"
         "__attribute__((weak)) _Atomic uint64_t _flow_ab_shadow_mismatches = 0ULL;\n"
-        "__attribute__((weak)) _Atomic uint64_t _flow_ab_fn_calls[64] = {0};\n"
-        "__attribute__((weak)) _Atomic uint64_t _flow_ab_record_fn_calls[64] = {0};\n"
+        "__attribute__((weak)) _Atomic uint64_t _flow_ab_fn_calls[128] = {0};\n"
+        "__attribute__((weak)) _Atomic uint64_t _flow_ab_record_fn_calls[128] = {0};\n"
         "__attribute__((weak)) void flow_ab_shadow_record(uint32_t kernel_id, double primary_val, double shadow_val, double tol) {\n"
         "    atomic_fetch_add_explicit(&_flow_ab_shadow_calls, 1ULL, memory_order_relaxed);\n"
-        "    if (kernel_id < 64U) atomic_fetch_add_explicit(&_flow_ab_record_fn_calls[kernel_id], 1ULL, memory_order_relaxed);\n"
+        "    if (kernel_id < 128U) atomic_fetch_add_explicit(&_flow_ab_record_fn_calls[kernel_id], 1ULL, memory_order_relaxed);\n"
         "    double diff = __builtin_fabs(primary_val - shadow_val);\n"
         "    double thr = tol > 0.0 ? tol : 1e-9;\n"
         "    if (!isfinite(primary_val) || !isfinite(shadow_val) || diff > thr)\n"
@@ -964,14 +963,14 @@ void flow_emit_abi_exports(FILE *output, const SemanticIR *ir, const Component *
         "    uint64_t c = atomic_load_explicit(&_flow_ab_shadow_calls, memory_order_relaxed);\n"
         "    if (c > 0ULL) return c;\n"
         "    uint64_t sum = 0ULL;\n"
-        "    for (uint32_t i = 0; i < 64U; ++i) sum += atomic_load_explicit(&_flow_ab_fn_calls[i], memory_order_relaxed);\n"
+        "    for (uint32_t i = 0; i < 128U; ++i) sum += atomic_load_explicit(&_flow_ab_fn_calls[i], memory_order_relaxed);\n"
         "    return sum;\n"
         "}\n"
         "__attribute__((weak)) uint64_t flow_ab_shadow_get_mismatches(void) {\n"
         "    return atomic_load_explicit(&_flow_ab_shadow_mismatches, memory_order_relaxed);\n"
         "}\n"
         "__attribute__((weak)) uint64_t flow_ab_shadow_get_fn_calls(uint32_t kernel_id) {\n"
-        "    if (kernel_id >= 64U) return 0ULL;\n"
+        "    if (kernel_id >= 128U) return 0ULL;\n"
         "    uint64_t direct = atomic_load_explicit(&_flow_ab_fn_calls[kernel_id], memory_order_relaxed);\n"
         "    uint64_t rec = atomic_load_explicit(&_flow_ab_record_fn_calls[kernel_id], memory_order_relaxed);\n"
         "    return direct >= rec ? direct : rec;\n"
@@ -979,7 +978,7 @@ void flow_emit_abi_exports(FILE *output, const SemanticIR *ir, const Component *
         "__attribute__((weak)) void flow_ab_shadow_reset(void) {\n"
         "    atomic_store_explicit(&_flow_ab_shadow_calls, 0ULL, memory_order_relaxed);\n"
         "    atomic_store_explicit(&_flow_ab_shadow_mismatches, 0ULL, memory_order_relaxed);\n"
-        "    for (uint32_t i = 0; i < 64U; ++i) {\n"
+        "    for (uint32_t i = 0; i < 128U; ++i) {\n"
         "        atomic_store_explicit(&_flow_ab_fn_calls[i], 0ULL, memory_order_relaxed);\n"
         "        atomic_store_explicit(&_flow_ab_record_fn_calls[i], 0ULL, memory_order_relaxed);\n"
         "    }\n"
@@ -1009,6 +1008,8 @@ void flow_emit_abi_exports(FILE *output, const SemanticIR *ir, const Component *
     int estop_en = (ir && strcmp(ir->fallback_policy, "emergency_stop") == 0) ? 1 : 0;
     int kernel_emitted = 0, kernel_name_collides = 0;
     const char *step_kern_fn = (ir && ir->extern_kernel[0]) ? ir->extern_kernel : "";
+    fputs("#if defined(__clang__)\n#pragma clang diagnostic push\n#pragma clang diagnostic ignored \"-Wtautological-unsigned-zero-compare\"\n"
+          "#elif defined(__GNUC__)\n#pragma GCC diagnostic push\n#pragma GCC diagnostic ignored \"-Wtype-limits\"\n#endif\n", output);
     if (ir && ir->lean_function_count > 0) {
         for (size_t fi = 0; fi < ir->lean_function_count; ++fi) {
             emit_single_lean_fn_c(output, ir, &ir->lean_functions[fi], fi, 0, &kernel_emitted, &kernel_name_collides);
@@ -1049,14 +1050,16 @@ void flow_emit_abi_exports(FILE *output, const SemanticIR *ir, const Component *
             emit_lean_expr_as_c(output, gbody, LEAN_EXPR_UINT);
             fprintf(output, ";\n}\n");
         } else if (ir->extern_kernel_body[0]) {
-            fprintf(output, "__attribute__((weak)) uint32_t %s(uint64_t baseOff, uint64_t byteLen, uint64_t stride, uint64_t epoch) {\n"
-                            "    (void)baseOff; (void)byteLen; (void)stride; (void)epoch;\n    return (uint32_t)", ir->extern_kernel);
+            fprintf(output, "__attribute__((weak)) uint32_t %s(uint64_t baseOff, uint64_t byteLen, uint64_t stride, uint64_t epoch);\n"
+                            "__attribute__((weak)) uint32_t %s(uint64_t baseOff, uint64_t byteLen, uint64_t stride, uint64_t epoch) {\n"
+                            "    (void)baseOff; (void)byteLen; (void)stride; (void)epoch;\n    return (uint32_t)", ir->extern_kernel, ir->extern_kernel);
             emit_lean_expr_as_c(output, ir->extern_kernel_body, LEAN_EXPR_UINT);
             fprintf(output, ";\n}\n");
         } else {
             fprintf(output, "extern uint32_t %s(uint64_t base_off, uint64_t byte_len, uint64_t stride, uint64_t epoch) __attribute__((weak));\n", ir->extern_kernel);
         }
     }
+    fputs("#if defined(__clang__)\n#pragma clang diagnostic pop\n#elif defined(__GNUC__)\n#pragma GCC diagnostic pop\n#endif\n", output);
     fprintf(output,
         "void *flow_%s_create(void);\nvoid *%s_bind_context(void *handle);\n"
         "uint64_t flow_%s_acquire_epoch(void *handle);\nvoid flow_%s_release_epoch(void *handle, uint64_t epoch);\n"
@@ -1259,6 +1262,7 @@ void flow_emit_abi_exports(FILE *output, const SemanticIR *ir, const Component *
         "    .module_name = \"%s\", .module_version = \"1.0.0\", .module_hash = UINT64_C(0xF104C17000000001),\n"
         "    .plugin = (const void *)&_flow_synth_plugin_%s, .abi_v2 = NULL\n"
         "};\n"
+        "__attribute__((weak)) const FlowPluginDescriptor *flow_plugin_entry_v1(void);\n"
         "__attribute__((weak)) const FlowPluginDescriptor *flow_plugin_entry_v1(void) { return &_flow_synth_plugin_desc_%s; }\n",
         c->id, c->id, mod_name, c->id, mod_name, c->id, c->id);
 }

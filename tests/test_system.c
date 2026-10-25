@@ -3015,6 +3015,88 @@ int main(void) {
         remove(rs_runner);
         remove("/tmp/flow_s20_runner");
 
+        /* 7. FlowFinance Regression: noncomputable section, ℝ -> double, Proof Erasure, >8 Params, >32 Theorems & 0-ULP Extreme Powers */
+        {
+            const char *ff_lean = "/tmp/flow_finance_reg.lean";
+            FILE *ff = fopen(ff_lean, "w");
+            FLOW_ASSERT_TRUE(ff != NULL);
+            fputs("namespace FlowFinance.Pricing\n"
+                  "noncomputable section\n"
+                  "structure MarketQuote where\n"
+                  "  spot   : ℝ\n"
+                  "  strike : ℝ\n"
+                  "  vol    : ℝ\n"
+                  "  h_spot : spot > 0\n"
+                  "  h_vol  : vol ≥ 0\n"
+                  "  h_prop : Prop\n"
+                  "noncomputable def clamp_spread (x : ℝ) (lo : ℝ) (hi : ℝ) : ℝ :=\n"
+                  "  f_min (f_max (f_abs x) lo) hi\n"
+                  "noncomputable def extreme_compound (base : ℝ) (years : ℝ) (notional : ℝ) : ℝ :=\n"
+                  "  notional + (base ^ years)\n"
+                  "noncomputable def multi_factor_12\n"
+                  "    (p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12 : ℝ)\n"
+                  "    (h_pos : p1 > 0) : ℝ :=\n"
+                  "  clamp_spread p1 p2 p3 + p4 + p5 + p6 + p7 + p8 + p9 + p10 + p11 + p12\n", ff);
+            for (int ti = 0; ti < 38; ++ti) {
+                fprintf(ff, "theorem fin_thm_%d : clamp_spread (-2.5) 1.0 5.0 = 2.5 := by decide\n", ti);
+            }
+            fputs("theorem frac_exact_thm : 1.5 + 2.25 = 3.75 := by rfl\n"
+                  "theorem extreme_pow_thm : extreme_compound 2.0 10.0 1000.0 = 2024.0 := by decide\n"
+                  "end FlowFinance.Pricing\n", ff);
+            fclose(ff);
+
+            FILE *ff_in = fopen(ff_lean, "r");
+            FLOW_ASSERT_TRUE(ff_in != NULL);
+            FlowSpec *ff_spec = (FlowSpec *)calloc(1, sizeof(FlowSpec));
+            FLOW_ASSERT_TRUE(ff_spec != NULL);
+            FLOW_ASSERT_TRUE(parse_spec(ff_in, ff_spec));
+            fclose(ff_in);
+
+            /* Verify MarketQuote erased 3 proof fields -> exactly 3 double fields (24 bytes) */
+            FLOW_ASSERT_EQ(ff_spec->lean_struct_count, 1);
+            FLOW_ASSERT_EQ(ff_spec->lean_structs[0].field_count, 3);
+            FLOW_ASSERT_EQ(ff_spec->lean_structs[0].byte_size, 24);
+            FLOW_ASSERT_EQ(ff_spec->state_field_count, 3);
+            /* Verify multi_factor_12 parsed 12 ℝ parameters and erased proof parameter h_pos */
+            FLOW_ASSERT_EQ(ff_spec->lean_function_count, 3);
+            FLOW_ASSERT_EQ(ff_spec->lean_functions[2].param_count, 12);
+            /* Verify all 40 theorems (>32 limit) were registered and verified */
+            FLOW_ASSERT_EQ(ff_spec->lean_theorem_count, 40);
+            free(ff_spec);
+
+            char ff_cmd[1024];
+            snprintf(ff_cmd, sizeof(ff_cmd),
+                     "%s/flowc %s -o /tmp/flow_ff.c --target-python /tmp/flow_ff_abi.py",
+                     FLOW_BUILD_DIR, ff_lean);
+            FLOW_ASSERT_EQ(system(ff_cmd), 0);
+#ifdef __APPLE__
+            FLOW_ASSERT_EQ(system("cc -std=c17 -Wall -Wextra -Werror -O2 -shared -fPIC -DFLOW_SHARED_LIB /tmp/flow_ff.c -o /tmp/libflow_ff.dylib -lm"), 0);
+#else
+            FLOW_ASSERT_EQ(system("cc -std=c17 -Wall -Wextra -Werror -O2 -shared -fPIC -DFLOW_SHARED_LIB /tmp/flow_ff.c -o /tmp/libflow_ff.so -lm"), 0);
+#endif
+            const char *py_ff_cmd =
+                "python3 -c \""
+                "import sys, math; sys.path.insert(0, '/tmp'); "
+                "import flow_ff_abi as m; "
+                "cls = next(v for v in vars(m).values() if isinstance(v, type) and hasattr(v, 'LEAN_FUNCTIONS')); "
+                "eng = cls('/tmp/libflow_ff.dylib' if sys.platform == 'darwin' else '/tmp/libflow_ff.so'); "
+                "assert len(eng.LEAN_THEOREMS) == 40; "
+                "assert eng.clamp_spread(-3.25, 1.0, 5.0) == 3.25; "
+                "ref_pow = 1e12 + math.pow(1.10, 250.0); "
+                "got_pow = eng.extreme_compound(1.10, 250.0, 1e12); "
+                "assert got_pow == ref_pow, f'0-ULP mismatch: {got_pow!r} != {ref_pow!r}'; "
+                "res12 = eng.multi_factor_12(-4.0, 1.0, 10.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0); "
+                "assert res12 == 58.0; "
+                "eng.close()\"";
+            FLOW_ASSERT_EQ(system(py_ff_cmd), 0);
+
+            remove(ff_lean);
+            remove("/tmp/flow_ff.c");
+            remove("/tmp/flow_ff_abi.py");
+            remove("/tmp/libflow_ff.dylib");
+            remove("/tmp/libflow_ff.so");
+        }
+
         printf("  ✓ Stage 20 Passed: Self-bootstrapping codebase auditor, 7 Component Scopes, Rust plugin DSO lifecycle, 256-bit secp256k1 & 7-language polyglot live gate verified.\n\n");
     }
 

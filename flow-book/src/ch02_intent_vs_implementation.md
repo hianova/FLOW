@@ -74,7 +74,7 @@ bind "plugins/embodied.lean"
 - `stage <name> bind "<lean_path>" fn <fn_name> in <InStruct> out <OutStruct> wcet <time>`
 - `wire <stage_1> -> <stage_2> -> <stage_3>`
 
-`flowc` 會在編譯期自動驗證相鄰階段之 `OutStruct == InStruct` 與 byte stride 一致性、以 AST 指令成本模型推導靜態 WCET 下界，並由 SMT 證明總和延遲 $\sum \text{wcet}_i \le \text{deadline}$。同時，在將 `.lean` 的 `Float` 函數與結構轉換函數降階為 C17 時，會自動映射至無損近似 $Q32.32$ 定點數核心（`FlowExactNumerics`：`flow_fx64_t` / `FlowU256`，以 128-bit 中間精度與 `FLOW_FX64_NONE` 故障隔離取代有損 IEEE-754 浮點運算）、**自動注入 `!isfinite()` NaN/Inf 防火牆**，並合成零開銷 `--target-c-header` `static inline` 雙軌算子（`flowc_<fn>` 與純定點 `flowc_<fn>_fx`）與具名相空間視圖 `FlowJetView_<flow_name>`（`view.q->hipPitch`）。
+`flowc` 會在編譯期自動驗證相鄰階段之 `OutStruct == InStruct` 與 byte stride 一致性、以 AST 指令成本模型推導靜態 WCET 下界，並由 SMT 證明總和延遲 $\sum \text{wcet}_i \le \text{deadline}$。同時，在將 `.lean` 的 `Float` / `ℝ` 函數與結構轉換函數降階為 C17 時，採**雙軌數值架構**：預設 `flow_<id>_<fn>` 與 `flowc_<fn>` 直接生成 **0-ULP 原生 IEEE-754 `double`** 硬體浮點指令（支援 $10^{\pm 308}$ 全動態範圍與極端次方項），同時為每個浮點算子同步生成純定點數版本 `flow_<id>_<fn>_fx` 與 `flowc_<fn>_fx`（`FlowExactNumerics`：`flow_fx64_t` / `FlowU256`，以 128-bit 中間精度與 `FLOW_FX64_NONE` 故障隔離提供跨平台位元級確定性）、**自動注入 `!isfinite()` NaN/Inf 防火牆**，並合成具名相空間視圖 `FlowJetView_<flow_name>`（`view.q->hipPitch`）。
 
 ### 2.1.1 `@keyword` 與 `.flow` / `.lean` 宣告式語法全集速查表
 
@@ -93,18 +93,19 @@ bind "plugins/embodied.lean"
 
 為了讓人類開發者與 AI Agent **一次編譯通過（零重試、不浪費推理 Token）**，撰寫 FLOW `.lean` 時請直接遵循以下四條鐵律：
 
-### 鐵律 1：遵守 `Lean-RT` 零 GC 實時子集、巢狀 `structure` 展平與硬體編解碼內建函數
-- **禁止外部套件與動態配置（`Lean-RT` Zero-GC Gate）**：不要寫 `import Mathlib`，且嚴格禁止 `List`、`Array`、`ByteArray`、`String`、高階閉包（`fun x =>`）、自遞迴函數或遞迴 `inductive` 型別。這確保所有算子皆為 O(1) 堆疊記憶體與零 GC 暫停。
-- **C17 與七語言型別直接映射、巢狀 `structure` / 有限 `inductive` / Tuple 回傳與關鍵字轉義**：
+### 鐵律 1：遵守 `Lean-RT` 零 GC 實時子集、證明欄位自動擦除、巢狀 `structure` 展平與雙軌數值內建函數
+- **禁止動態配置（`Lean-RT` Zero-GC Gate）**：支援 `noncomputable section` 與 `noncomputable def` 修飾詞，但嚴格禁止 `sorry`、自訂 `axiom`、`List`、`Array`、`ByteArray`、`String`、高階閉包（`fun x =>`）、自遞迴函數或遞迴 `inductive` 型別。這確保所有算子皆為 O(1) 堆疊記憶體與零 GC 暫停（支援單一規格最多 `32` 個參數／欄位、`64` 個函數與 `128` 條定理）。
+- **C17 與七語言型別直接映射、證明擦除、巢狀 `structure` / 有限 `inductive` / Tuple 回傳與關鍵字轉義**：
   - `UInt64` / `Nat` $\longrightarrow$ `uint64_t` (8 bytes)
   - `USize` $\longrightarrow$ `size_t` / Rust `usize` / Python `ctypes.c_size_t` / Julia `Csize_t`
   - `UInt32` $\longrightarrow$ `uint32_t` (4 bytes)
   - `Bool` $\longrightarrow$ `bool`
-  - `Float` $\longrightarrow$ `double` (8 bytes，底層映射至無損確定性 $Q32.32$ 定點數 `flow_fx64_t`)
+  - `Float` / `ℝ` / `Real` $\longrightarrow$ `double` (8 bytes，預設 `flowc_<fn>` 執行 0-ULP 原生 IEEE-754 `double` 運算，並同步提供 `flowc_<fn>_fx` 確定性 $Q32.32$ 定點數 `flow_fx64_t` 介面)
+  - **證明欄位與證明參數自動擦除（Proof Erasure）**：`structure` 或 `def` 中的命題／不等式證明欄位（如 `h_spot : spot > 0`、`h_vol : vol ≥ 0`、`h_prop : Prop`）會在降階時**自動擦除為 0 bytes**，不佔用 C `struct` 記憶體或 ABI 參數槽位
   - 有限列舉 `inductive Mode | Idle | Torque` $\longrightarrow$ `uint32_t` (`0, 1, ...`)
   - 多回傳值 Tuple `(Float * Float)` $\longrightarrow$ C/CUDA `double *out_0, double *out_1` 指標輸出，並於 Rust、Python、JS、MATLAB 與 Julia 自動解構為原生 Tuple / 多回傳值
   - 巢狀 `structure`（如 `GaitFrame` 內含 `ImuSample`）與鏈式欄位存取（`f.imu.ax`）會自動展平為自然對齊之 C ABI 結構（`f.imu_ax`），且各目標語言保留字（如 `in`、`type`、`from`、`var`）會自動安全轉義（Rust `r#in` / Python/JS/Julia `in_`）。
-- **硬體量化與反量化內建函數**：直接呼叫 `flow_quantize val scale offset min_q max_q`（`Float -> UInt64`）與 `flow_dequantize q scale offset`（`UInt64 -> Float`），`flowc` 會自動降階為無分支飽和 C17 硬體轉換指令。
+- **數學與硬體量化內建函數**：支援 `Float.*`、`Real.*` 與簡寫 `f_abs`、`f_max`、`f_min`，以及硬體量化 `flow_quantize val scale offset min_q max_q`（`Float -> UInt64`）與 `flow_dequantize q scale offset`（`UInt64 -> Float`），`flowc` 會自動降階為無分支飽和 C17 硬體轉換指令。
 - **最佳實踐**：將主狀態 `structure` 設計為 **8 個 `UInt64`/`Float` 欄位（共 64 bytes）**，剛好對齊單一 CPU Cache Line（`stride = 64, align = 8`）。
 
 ### 鐵律 2：用 `:= by decide` 與 `:= by omega` 一行秒殺證明（注意 `Nat` 減法陷阱！）
