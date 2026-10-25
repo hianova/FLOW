@@ -258,16 +258,20 @@ FlowSMTResult flow_axiom_verify_smt(const FlowUnifiedSection *sec, FlowSMTProofA
 
 const char *flow_hott_lang_origin_name(FlowHoTTLangOrigin origin) {
     switch (origin) {
-        case FLOW_HOTT_LANG_LEAN:     return "Lean4";
-        case FLOW_HOTT_LANG_C17:      return "C17";
-        case FLOW_HOTT_LANG_RUST:     return "Rust";
-        case FLOW_HOTT_LANG_POLYGLOT: return "Polyglot";
-        default:                      return "Unknown";
+        case FLOW_HOTT_LANG_LEAN: return "Lean4";
+        case FLOW_HOTT_LANG_C17:  return "C17";
+        default:                  return "Unknown";
     }
 }
 
 FlowHoTTUniverse *flow_hott_universe_global(void) {
     static FlowHoTTUniverse g_universe_u0;
+    static int seeded = 0;
+    if (!seeded) {
+        seeded = 1;
+        flow_hott_register_type(&g_universe_u0, "FlowExtentDescriptor", FLOW_HOTT_LANG_LEAN, 10, 64, 8, 32, FLOW_SIEVE_SECURITY_CANONICAL_MASK);
+        flow_hott_register_type(&g_universe_u0, "FlowExtentDescriptor", FLOW_HOTT_LANG_C17,  10, 64, 8, 32, FLOW_SIEVE_SECURITY_CANONICAL_MASK);
+    }
     return &g_universe_u0;
 }
 

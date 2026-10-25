@@ -4,7 +4,6 @@
 #include "smt.h"
 #include "registry.h"
 #include "flow_jet.h"
-#include "topology.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -464,7 +463,7 @@ int main(void) {
     /* ========================================================================= */
     FLOW_STAGE_BEGIN(6, "3-Tier Mask Superposition: Safety, Contract & Dynamic Canvas");
     {
-        SemanticIR ir;
+        static SemanticIR ir;
         memset(&ir, 0, sizeof(ir));
         strncpy(ir.flow_name, "mask_test_flow", sizeof(ir.flow_name) - 1);
         ir.input_max_count = 1024;
@@ -546,7 +545,7 @@ int main(void) {
         FLOW_ASSERT_TRUE(arena.cursor >= 768);
 
         /* Initialize Wavefront Ring and Bind Arena */
-        SemanticIR ir;
+        static SemanticIR ir;
         memset(&ir, 0, sizeof(ir));
         strncpy(ir.flow_name, "wavefront_concur_flow", sizeof(ir.flow_name) - 1);
         ir.input_max_count = 1000;
@@ -622,7 +621,7 @@ int main(void) {
         FLOW_ASSERT_EQ(flow_reload_generation(ctx), 2ULL);
 
         /* 2. Bind Wavefront Ring and Generational Bump Arena */
-        SemanticIR ir;
+        static SemanticIR ir;
         memset(&ir, 0, sizeof(ir));
         strncpy(ir.flow_name, "topological_reload_flow", sizeof(ir.flow_name) - 1);
         ir.input_max_count = 500;

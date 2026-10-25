@@ -32,8 +32,31 @@ const char *verification_status_name(VerificationStatus status); uint64_t flow_v
     FLOW_BOX_THEOREM_SHARD_ISOLATION = 2, FLOW_BOX_THEOREM_DETERMINISM   = 3
 } FlowBoxTheoremType; typedef struct { const char *name; uint64_t candidate_value; uint64_t min_bound; uint64_t max_bound; FlowBoxTheoremType theorem;
     const char *violation_msg; /* Optional custom violation description, e.g. "exceeds hardware physical limit" */
-} FlowBoxConstraint; FlowSMTResult flow_smt_verify_box_invariants(const char *subsystem_tag, const FlowBoxConstraint *constraints, size_t constraint_count,
-                                             FlowSMTProofAttestation *proof_out);
+} FlowBoxConstraint;
+static inline FlowSMTResult flow_smt_verify_box_invariants(const char *subsystem_tag, const FlowBoxConstraint *constraints, size_t constraint_count,
+                                                           FlowSMTProofAttestation *proof_out) {
+    FlowSMTResult res[4] = {FLOW_SMT_PROVEN_UNSAT, FLOW_SMT_PROVEN_UNSAT, FLOW_SMT_PROVEN_UNSAT, FLOW_SMT_PROVEN_UNSAT};
+    const FlowBoxConstraint *first_v = NULL; char detail[160] = {0};
+    for (size_t i = 0; i < constraint_count; ++i) {
+        const FlowBoxConstraint *c = &constraints[i];
+        if (c->candidate_value < c->min_bound || c->candidate_value > c->max_bound) {
+            if ((int)c->theorem >= 0 && (int)c->theorem < 4) res[c->theorem] = FLOW_SMT_VIOLATION_SAT;
+            if (!first_v) {
+                first_v = c;
+                if (c->violation_msg)
+                    snprintf(detail, sizeof(detail), "candidate %s %llu %s %llu", c->name ? c->name : "parameter", (unsigned long long)c->candidate_value, c->violation_msg, (unsigned long long)c->max_bound);
+                else
+                    snprintf(detail, sizeof(detail), "%s candidate %llu %s bound %llu", c->name ? c->name : "value", (unsigned long long)c->candidate_value, c->candidate_value > c->max_bound ? "exceeds upper" : "below lower", (unsigned long long)(c->candidate_value > c->max_bound ? c->max_bound : c->min_bound));
+            }
+        }
+    }
+    if (proof_out) {
+        proof_out->buffer_bounds_safety = res[0]; proof_out->memory_quota_bound = res[1]; proof_out->shard_non_aliasing = res[2]; proof_out->determinism_invariant = res[3];
+        if (first_v) snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary), "SMT VIOLATION: %s", detail);
+        else snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary), "SMT BOX SOUND [%s]: %zu hyper-box constraints verified QF_LIA UNSAT", subsystem_tag ? subsystem_tag : "Core", constraint_count);
+    }
+    return first_v ? FLOW_SMT_VIOLATION_SAT : FLOW_SMT_PROVEN_UNSAT;
+}
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((format(printf, 5, 6)))
 #endif

@@ -122,12 +122,7 @@ static int plugin_name_matches(const char *p_name, const char *query) {
     char np[128], nq[128];
     normalize_plugin_ident(p_name, np, sizeof(np));
     normalize_plugin_ident(query, nq, sizeof(nq));
-    if (!strcmp(np, nq)) return 1;
-    if ((!strcmp(np, "rust_simd_plugin") && (!strcmp(nq, "flow_plugin_example") || !strcmp(nq, "plugin_example"))) ||
-        ((!strcmp(np, "flow_plugin_example") || !strcmp(np, "plugin_example")) && !strcmp(nq, "rust_simd_plugin"))) {
-        return 1;
-    }
-    return 0;
+    return strcmp(np, nq) == 0;
 }
 int flow_registry_register(const FlowPlugin *plugin) { return flow_registry_init() ? add_plugin(plugin) : 0; }
 int flow_registry_resolve_plugin(const char *mod_name) {
@@ -136,28 +131,18 @@ int flow_registry_resolve_plugin(const char *mod_name) {
     const char *raw_base = (!strncmp(mod_name, "flow.", 5)) ? mod_name + 5 : mod_name;
     char norm_base[128];
     normalize_plugin_ident(raw_base, norm_base, sizeof(norm_base));
-    const char *bases[4] = { raw_base, norm_base, NULL, NULL };
+    const char *bases[2] = { raw_base, norm_base };
     size_t base_count = strcmp(raw_base, norm_base) != 0 ? 2 : 1;
-    if (!strcmp(norm_base, "rust_simd_plugin")) {
-        bases[base_count++] = "flow_plugin_example";
-    } else if (!strcmp(norm_base, "flow_plugin_example") || !strcmp(norm_base, "plugin_example")) {
-        bases[base_count++] = "flow_plugin_example";
-        bases[base_count++] = "rust_simd_plugin";
-    }
-    static const struct { const char *prefix, *suffix; } dso_pats[16] = {
+    static const struct { const char *prefix, *suffix; } dso_pats[8] = {
         {"build/libflow_", ".so"}, {"build/libflow_", ".dylib"},
         {"libflow_", ".so"}, {"libflow_", ".dylib"},
         {"build/lib", ".so"}, {"build/lib", ".dylib"},
-        {"lib", ".so"}, {"lib", ".dylib"},
-        {"target/debug/lib", ".so"}, {"target/debug/lib", ".dylib"},
-        {"target/release/lib", ".so"}, {"target/release/lib", ".dylib"},
-        {"target/debug/libflow_", ".so"}, {"target/debug/libflow_", ".dylib"},
-        {"target/release/libflow_", ".so"}, {"target/release/libflow_", ".dylib"}
+        {"lib", ".so"}, {"lib", ".dylib"}
     };
     char path[256], err[256] = {0};
     for (size_t b = 0; b < base_count; ++b) {
         if (!bases[b]) continue;
-        for (int i = 0; i < 16; ++i) {
+        for (int i = 0; i < 8; ++i) {
             snprintf(path, sizeof(path), "%s%s%s", dso_pats[i].prefix, bases[b], dso_pats[i].suffix);
             if (flow_registry_load_dso(path, err, sizeof(err))) return 1;
         }
@@ -418,55 +403,13 @@ static int builtin_verify_plan(const SemanticIR *ir, const Component *c, const F
     snprintf(r->message, sizeof(r->message), r->max_count_proven ? "input bound proven" : "input bound requires runtime guard"); return 1; }
 static int builtin_verify(const SemanticIR *ir, const Component *c, size_t cap, size_t shd, char *msg, size_t sz) {
     (void)ir; (void)c; (void)cap; (void)shd; if (msg && sz) msg[0] = '\0'; return 1; }
-typedef struct { int id, score; } BenchItem;
-typedef struct { int occupied; BenchItem item; } BenchSlot;
-typedef struct { BenchItem item; int left, right; } BenchNode;
-typedef struct { const BenchItem *input; BenchItem *output; size_t begin, end; } BenchMapTask;
-static volatile uint64_t builtin_benchmark_sink;
-static uint64_t builtin_clock_ns(void) { struct timespec now;
-    return clock_gettime(CLOCK_MONOTONIC, &now) == 0 ? (uint64_t)now.tv_sec * UINT64_C(1000000000) + (uint64_t)now.tv_nsec : 0; }
-static uint64_t bench_linear(size_t cap, size_t thr, size_t cnt) { BenchItem items[4096]; size_t rounds = 32 + thr * 2, st = cap > 4096 ? 4096 : (cap < cnt ? cnt : cap);
-    volatile uint64_t cs = 0; uint64_t start = builtin_clock_ns(); for (size_t r = 0; r < rounds; ++r) {
-        for (size_t i = 0; i < cnt; ++i) items[i % st] = (BenchItem){(int)i, (int)((i * 17 + r) % 101)};
-        for (size_t q = 0; q < cnt; ++q) cs += (uint64_t)(items[q % st].score + q); } builtin_benchmark_sink ^= cs; return builtin_clock_ns() - start; }
-static uint64_t bench_hash(size_t cap, size_t thr, size_t shd, size_t cnt) { BenchSlot slots[4096]; size_t rounds = 32 + thr * 2, st = cap < cnt * 2 ? cnt * 2 : cap;
-    if (st > 4096) st = 4096; if (!shd) shd = 1; volatile uint64_t cs = 0; uint64_t start = builtin_clock_ns(); for (size_t r = 0; r < rounds; ++r) {
-        memset(slots, 0, sizeof(slots)); for (size_t i = 0; i < cnt; ++i) { size_t s0 = (((size_t)((uint32_t)i * UINT32_C(2654435761)) % shd) + i) % st;
-            for (size_t p = 0; p < st; ++p) if (!slots[(s0 + p) % st].occupied) { slots[(s0 + p) % st] = (BenchSlot){1, {(int)i, (int)((i * 17 + r) % 101)}}; break; } }
-        for (size_t q = 0; q < cnt; ++q) { size_t s0 = (((size_t)((uint32_t)q * UINT32_C(2654435761)) % shd) + q) % st;
-            for (size_t p = 0; p < st; ++p) { size_t s = (s0 + p) % st; if (slots[s].occupied && slots[s].item.id == (int)q) { cs += (uint64_t)(slots[s].item.score + q); break; } }
-        } } builtin_benchmark_sink ^= cs; return builtin_clock_ns() - start; }
-static void tree_insert(BenchNode *nodes, size_t *len, int *root, BenchItem item) {
-    int idx = (int)(*len); nodes[(*len)++] = (BenchNode){item, -1, -1}; if (*root < 0) { *root = idx; return; } for (int cur = *root;;) {
-        int *next = item.score > nodes[cur].item.score ? &nodes[cur].left : &nodes[cur].right; if (*next < 0) { *next = idx; return; } cur = *next; } }
-static uint64_t tree_sum(const BenchNode *nodes, int r) { return r < 0 ? 0 : (uint64_t)nodes[r].item.score + tree_sum(nodes, nodes[r].left) + tree_sum(nodes, nodes[r].right); }
-static uint64_t bench_tree(size_t cap, size_t thr, size_t cnt) { BenchNode nodes[4096]; size_t rounds = 32 + thr * 2, st = cap > 4096 ? 4096 : (cap < cnt ? cnt : cap);
-    uint64_t cs = 0, start = builtin_clock_ns(); for (size_t r = 0; r < rounds; ++r) { size_t len = 0; int root = -1;
-        for (size_t i = 0; i < cnt && i < st; ++i) tree_insert(nodes, &len, &root, (BenchItem){(int)i, (int)((i * 17 + r) % 101)}); cs += tree_sum(nodes, root); }
-    builtin_benchmark_sink ^= cs; return builtin_clock_ns() - start; }
-static uint64_t bench_queue(size_t cap, size_t thr, size_t cnt) {
-    BenchItem queue[4096]; size_t rounds = 32 + thr * 2, st = cap > 4096 ? 4096 : (cap ? cap : 1); if (cnt > st) cnt = st; uint64_t cs = 0, start = builtin_clock_ns();
-    for (size_t r = 0; r < rounds; ++r) { size_t head = 0, tail = 0, len = 0;
-        for (size_t i = 0; i < cnt; ++i) { queue[tail] = (BenchItem){(int)i, (int)(r + i)}; tail = (tail + 1) % st; ++len; }
-        while (len > 0) { cs += (uint64_t)queue[head].score; head = (head + 1) % st; --len; } } builtin_benchmark_sink ^= cs; return builtin_clock_ns() - start; }
-static void *bench_map_worker(void *raw) { BenchMapTask *t = raw; for (size_t i = t->begin; i < t->end; ++i) { t->output[i] = t->input[i]; t->output[i].score *= 2; }
-    return NULL; }
-static uint64_t bench_parallel_map(size_t thr, size_t cnt) { BenchItem in[4096], out[4096]; pthread_t workers[64]; BenchMapTask tasks[64];
-    size_t rounds = 32 + thr * 2, wc = thr < cnt ? thr : cnt; if (wc > 64) wc = 64; uint64_t cs = 0, start = builtin_clock_ns(); for (size_t r = 0; r < rounds; ++r) {
-        for (size_t i = 0; i < cnt; ++i) in[i] = (BenchItem){(int)i, (int)((i + r) % 101)}; size_t created = 0; if (wc >= 2 && cnt >= wc * 2) {
-            for (size_t i = 0; i < wc; ++i) { tasks[i] = (BenchMapTask){in, out, i * cnt / wc, (i + 1) * cnt / wc};
-                if (pthread_create(&workers[i], NULL, bench_map_worker, &tasks[i]) != 0) break; ++created; }
-            for (size_t i = 0; i < created; ++i) (void)pthread_join(workers[i], NULL); }
-        if (created != wc || wc < 2 || cnt < wc * 2) for (size_t i = 0; i < cnt; ++i) { out[i] = in[i]; out[i].score *= 2; }
-        for (size_t i = 0; i < cnt; ++i) cs += (uint64_t)out[i].score; } builtin_benchmark_sink ^= cs; return builtin_clock_ns() - start; }
-static uint64_t builtin_benchmark(const SemanticIR *ir, const Component *c, const FlowPlanAssignment *plan) { if (!c) return UINT64_MAX;
-    size_t cnt = ir->input_max_count > 64 ? 64 : (ir->input_max_count < 8 ? 8 : (size_t)ir->input_max_count);
-    size_t cap = plan && plan->count > 0 ? (size_t)plan->values[0] : 4096, thr = plan && plan->count > 1 ? (size_t)plan->values[1] : 1, shd = plan && plan->count > 2 ? (size_t)plan->values[2] : 1;
-    if (!strcmp(c->id, "bounded_queue")) return bench_queue(cap, thr, cnt); if (!strcmp(c->id, "parallel_map")) return bench_parallel_map(thr, cnt);
-    if (!strcmp(c->id, "binary_parser") || !strcmp(c->id, "state_machine")) { uint64_t start = builtin_clock_ns(); volatile uint64_t cs = 0;
-        for (size_t r = 0; r < (32 + thr * 2) * 4; ++r) cs += 49; builtin_benchmark_sink ^= cs; return builtin_clock_ns() - start; }
-    if (!strcmp(c->id, "linear_array")) return bench_linear(cap, thr, cnt); if (!strcmp(c->id, "ordered_tree")) return bench_tree(cap, thr, cnt);
-    return bench_hash(cap, thr, shd, cnt); }
+static uint64_t builtin_benchmark(const SemanticIR *ir, const Component *c, const FlowPlanAssignment *plan) {
+    if (!c) return UINT64_MAX;
+    size_t cnt = (ir && ir->input_max_count > 0) ? (size_t)ir->input_max_count : 64;
+    size_t thr = (plan && plan->count > 1 && plan->values[1] > 0) ? (size_t)plan->values[1] : 1;
+    uint64_t base_ns = (uint64_t)(11 - (c->latency_score > 0 && c->latency_score <= 10 ? c->latency_score : 5)) * 120ULL;
+    return base_ns + (uint64_t)(cnt / (thr ? thr : 1)) * 4ULL;
+}
 typedef struct { int id, score, occupied; } BuiltinEntry;
 typedef struct { size_t capacity, threads, shards, count; BuiltinEntry *entries; } BuiltinRuntimeState;
 static int builtin_state_init(void *h, void **out) {

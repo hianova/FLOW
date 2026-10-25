@@ -278,7 +278,7 @@ typedef struct {
             fputs(spec_src, mem); \
             rewind(mem); \
         } \
-        FlowSpec spec; \
+        static FlowSpec spec; \
         memset(&spec, 0, sizeof(spec)); \
         if (!mem || !parse_spec(mem, &spec)) { \
             fprintf(stderr, "❌ parse_spec failed\n"); \
@@ -286,7 +286,7 @@ typedef struct {
             exit(1); \
         } \
         fclose(mem); \
-        SemanticIR ir; \
+        static SemanticIR ir; \
         memset(&ir, 0, sizeof(ir)); \
         lower_to_ir(&spec, &ir); \
         __VA_ARGS__ \

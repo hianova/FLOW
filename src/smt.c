@@ -61,26 +61,6 @@ int flow_smt_verify_with_budget(const SemanticIR *ir, const Component *c, const 
                    !(ir->input_align_bytes > 0 && ir->input_stride_bytes > 0 && (ir->input_stride_bytes % ir->input_align_bytes) != 0);
     int det_ok = (!ir->fact_deterministic || !ir->fact_unordered || c->supports_unordered) &&
                  !(ir->fact_deterministic && thr > 1 && ir->flow_parallelizable && !c->supports_parallelizable && !c->supports_shared);
-    if (ir->patchbay_stage_count > 0) {
-        uint64_t total_wcet_ns = 0;
-        for (size_t i = 0; i < ir->patchbay_stage_count; ++i) {
-            const FlowPatchbayStage *stg = &ir->patchbay_stages[i];
-            uint64_t stage_wcet = stg->wcet_ns > 0 ? stg->wcet_ns : stg->ast_wcet_ns;
-            if (stg->wcet_ns > 0 && stg->wcet_ns < stg->ast_wcet_ns) det_ok = 0;
-            total_wcet_ns += stage_wcet;
-            if (i + 1 < ir->patchbay_stage_count) {
-                const FlowPatchbayStage *nxt = &ir->patchbay_stages[i + 1];
-                if (stg->out_bytes == 0 || nxt->in_bytes == 0 ||
-                    stg->out_bytes != nxt->in_bytes ||
-                    strcmp(stg->out_struct, nxt->in_struct) != 0) {
-                    alias_ok = 0;
-                }
-            }
-        }
-        if (ir->sla_latency_ns > 0 && total_wcet_ns > ir->sla_latency_ns) {
-            det_ok = 0;
-        }
-    }
     proof_out->buffer_bounds_safety = (cap >= in_len) ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
     proof_out->memory_quota_bound = (lim == 0 || mem <= lim) ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
     proof_out->shard_non_aliasing = alias_ok ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
@@ -104,34 +84,6 @@ int verify_candidate(const SemanticIR *ir, const Component *c, const SearchResul
     *r = (VerificationReport){.capacity = cap};
     FlowCompositionSpec cs = { .ir = ir, .component = c, .plan = s ? &s->assignment : NULL, .metrics = s ? &s->metrics : NULL, .concurrency_threads = s ? (size_t)s->threads : 1, .read_only_ownership = ir ? ir->fact_mutability_read_only : 0 };
     if (flow_security_check_composition_gate(&cs, r->message, sizeof(r->message)) != FLOW_SECURITY_PASS) { r->status = VERIFIER_COMPILE_ERROR; return 0; }
-    if (ir && ir->patchbay_stage_count > 0) {
-        uint64_t total_wcet_ns = 0;
-        for (size_t i = 0; i < ir->patchbay_stage_count; ++i) {
-            const FlowPatchbayStage *stg = &ir->patchbay_stages[i];
-            uint64_t stage_wcet = stg->wcet_ns > 0 ? stg->wcet_ns : stg->ast_wcet_ns;
-            if (stg->wcet_ns > 0 && stg->wcet_ns < stg->ast_wcet_ns) {
-                r->status = VERIFIER_COMPILE_ERROR;
-                snprintf(r->message, sizeof(r->message), "patchbay stage '%s' declared WCET (%lluns) below AST bound (%lluns)", stg->stage_name, (unsigned long long)stg->wcet_ns, (unsigned long long)stg->ast_wcet_ns);
-                return 0;
-            }
-            total_wcet_ns += stage_wcet;
-            if (i + 1 < ir->patchbay_stage_count) {
-                const FlowPatchbayStage *nxt = &ir->patchbay_stages[i + 1];
-                if (stg->out_bytes == 0 || nxt->in_bytes == 0 ||
-                    stg->out_bytes != nxt->in_bytes ||
-                    strcmp(stg->out_struct, nxt->in_struct) != 0) {
-                    r->status = VERIFIER_COMPILE_ERROR;
-                    snprintf(r->message, sizeof(r->message), "patchbay wire schema/stride mismatch between stages '%s' (%s:%zuB) and '%s' (%s:%zuB)", stg->stage_name, stg->out_struct, stg->out_bytes, nxt->stage_name, nxt->in_struct, nxt->in_bytes);
-                    return 0;
-                }
-            }
-        }
-        if (ir->sla_latency_ns > 0 && total_wcet_ns > ir->sla_latency_ns) {
-            r->status = VERIFIER_COMPILE_ERROR;
-            snprintf(r->message, sizeof(r->message), "patchbay total WCET (%lluns) exceeds @quota deadline (%lluns)", (unsigned long long)total_wcet_ns, (unsigned long long)ir->sla_latency_ns);
-            return 0;
-        }
-    }
     if (s && s->assignment.count > 0) {
         if (!flow_component_verify_plan(ir, c, &s->assignment, r)) { r->status = VERIFIER_COMPILE_ERROR; if (!r->message[0]) snprintf(r->message, sizeof(r->message), "plugin verification failed"); return 0; }
         est = r->estimated_bytes; cap = r->capacity; } else {
@@ -163,18 +115,6 @@ uint64_t flow_verifier_get_resource_mask(const SemanticIR *ir, const Component *
         } else if (!strcmp(d->name, "arena_bytes") && d->kind == FLOW_DIM_LINEAR) {
             uint64_t step = d->step ? d->step : 1, max_raw = (lim / 2) >= d->min_val ? ((lim / 2) - d->min_val) / step : 0;
             for (unsigned b = 0; b < bits; ++b) if (((uint64_t)1 << b) > max_raw) mask &= ~(UINT64_C(1) << (shift + b)); } shift += bits; } return mask; }
-FlowSMTResult flow_smt_verify_box_invariants(const char *subsystem_tag, const FlowBoxConstraint *constraints, size_t constraint_count, FlowSMTProofAttestation *proof_out) {
-    FlowSMTResult res[4] = {FLOW_SMT_PROVEN_UNSAT, FLOW_SMT_PROVEN_UNSAT, FLOW_SMT_PROVEN_UNSAT, FLOW_SMT_PROVEN_UNSAT};
-    const FlowBoxConstraint *first_v = NULL; char detail[160] = {0}; for (size_t i = 0; i < constraint_count; ++i) { const FlowBoxConstraint *c = &constraints[i];
-        if (c->candidate_value < c->min_bound || c->candidate_value > c->max_bound) { if (c->theorem >= 0 && c->theorem < 4) res[c->theorem] = FLOW_SMT_VIOLATION_SAT;
-            if (!first_v) { first_v = c;
-                if (c->violation_msg) snprintf(detail, sizeof(detail), "candidate %s %llu %s %llu", c->name ? c->name : "parameter", (unsigned long long)c->candidate_value, c->violation_msg, (unsigned long long)c->max_bound);
-                else snprintf(detail, sizeof(detail), "%s candidate %llu %s bound %llu", c->name ? c->name : "value", (unsigned long long)c->candidate_value, c->candidate_value > c->max_bound ? "exceeds upper" : "below lower", (unsigned long long)(c->candidate_value > c->max_bound ? c->max_bound : c->min_bound));
-            } } } if (proof_out) {
-        proof_out->buffer_bounds_safety = res[0]; proof_out->memory_quota_bound = res[1]; proof_out->shard_non_aliasing = res[2]; proof_out->determinism_invariant = res[3];
-        if (first_v) snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary), "SMT VIOLATION: %s", detail);
-        else snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary), "SMT BOX SOUND [%s]: %zu hyper-box constraints verified QF_LIA UNSAT", subsystem_tag ? subsystem_tag : "Core", constraint_count);
-    } return first_v ? FLOW_SMT_VIOLATION_SAT : FLOW_SMT_PROVEN_UNSAT; }
 
 /* ============================================================================
  * Capability Security, Composition Gates & MTD Layout (folded into smt.c)

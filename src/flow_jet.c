@@ -198,7 +198,7 @@ int flow_jet_to_fvec(const FlowJet *jet, FlowVecHeader *hdr_out, FlowVecPayload 
     memset(payload_out, 0, sizeof(*payload_out)); memcpy(payload_out->features, jet->payload.q, FLOW_VAULT_DIM * sizeof(double));
     payload_out->pure_genome = jet->payload.pure_genome; payload_out->hard_composite_mask = jet->payload.hard_composite_mask;
     payload_out->soft_composite_bias = jet->payload.soft_composite_bias; payload_out->proof = jet->payload.proof;
-    payload_out->crc32 = flow_fvec_crc32(payload_out, offsetof(FlowVecPayload, crc32)); return 1; }
+    payload_out->crc32 = flow_crc32_ieee(payload_out, offsetof(FlowVecPayload, crc32)); return 1; }
 FlowSMTResult flow_jet_verify_symplectic_soundness_smt(const FlowJet *jet, FlowSMTProofAttestation *proof_out) { if (!jet) return FLOW_SMT_UNKNOWN;
     double H = flow_jet_hamiltonian(jet); bool energy_ok = !(H < 0.0 || H > 1.0e6 || isnan(H)), memory_ok = true;
     uint32_t eff_taps = jet->header.memory_taps ? jet->header.memory_taps : FLOW_JET_STANDARD_TAPS; if (eff_taps > FLOW_JET_MAX_TAPS) eff_taps = FLOW_JET_MAX_TAPS;

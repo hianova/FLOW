@@ -12,7 +12,6 @@
 #include <string.h>
 #include <math.h>
 
-#include "topology.h"
 #include "cubical_hott.h"
 int main(void) {
     FLOW_TEST_SUITE_BEGIN("Brain: Bit-Manifold Form, SMT Supreme Court & Algebraic Geometry");
@@ -24,7 +23,7 @@ int main(void) {
     /* ========================================================================= */
     FLOW_STAGE_BEGIN(1, "BMF BitSpace: 64-Bit Genome Decoding, Evaluation & Chaotic Mutation");
     {
-        SemanticIR ir;
+        static SemanticIR ir;
         memset(&ir, 0, sizeof(ir));
         strncpy(ir.flow_name, "brain_rank_flow", sizeof(ir.flow_name) - 1);
         ir.input_max_count = 100;
@@ -80,7 +79,8 @@ int main(void) {
         FLOW_ASSERT_TRUE(flipped_bit < space.bit_count);
 
         /* Hierarchical BitSpace for multi-candidate exploration */
-        SemanticIR multi_ir = ir;
+        static SemanticIR multi_ir;
+        multi_ir = ir;
         multi_ir.state_read_heavy = 0;
         multi_ir.fact_ordered = 1;
         multi_ir.fact_unordered = 0;
@@ -107,7 +107,7 @@ int main(void) {
     /* ========================================================================= */
     FLOW_STAGE_BEGIN(2, "SMT Supreme Court: QF_LIA 4-Theorems & Formal Invariant Soundness");
     {
-        SemanticIR ir;
+        static SemanticIR ir;
         memset(&ir, 0, sizeof(ir));
         strncpy(ir.flow_name, "brain_smt_pipeline", sizeof(ir.flow_name) - 1);
         ir.input_max_count = 1024;
@@ -361,17 +361,7 @@ int main(void) {
     /* ========================================================================= */
     FLOW_STAGE_BEGIN(7, "Workspace AST Scanner & Cubical HoTT Type Matching");
     {
-        FlowTopologyGraph graph;
-        flow_topology_build_codebase_graph(&graph);
-        FLOW_ASSERT_TRUE(graph.node_count > 10);
-        FLOW_ASSERT_TRUE(graph.edge_count > 10);
-
-        FlowTopologyAuditReport report;
-        flow_topology_audit(&graph, &report);
-        FLOW_ASSERT_EQ(report.cross_layer_leaks, 0);
-        FLOW_ASSERT_TRUE(report.total_loc > 1000);
-
-        SemanticIR ir;
+        static SemanticIR ir;
         memset(&ir, 0, sizeof(ir));
         ir.state_shared = 1;
         ir.state_read_heavy = 1;
@@ -385,8 +375,7 @@ int main(void) {
         FLOW_ASSERT_EQ(flow_cubical_match_types(ir_sieve, comp_sieve, &mismatch), 1);
         FLOW_ASSERT_EQ(mismatch, 0ULL);
 
-        printf("  ✓ Stage 7 Passed: AST workspace scanned (%zu LOC, 0 leaks) & Cubical HoTT type sieve matched.\n\n",
-               report.total_loc);
+        printf("  ✓ Stage 7 Passed: Cubical HoTT type sieve matched (%s).\n\n", comp->id);
     }
 
     FLOW_TEST_SUITE_END();

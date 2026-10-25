@@ -11,20 +11,18 @@
 #define FLOW_SAMPLE_MAX 32
 #define FLOW_CONSTRAINT_MAX 32
 #define FLOW_FIELD_MAX 32
-#define FLOW_LEAN_FN_MAX 64
+#define FLOW_LEAN_FN_MAX 128
 #define FLOW_LEAN_PARAM_MAX 32
 #define FLOW_LEAN_THEOREM_MAX 128
 #define FLOW_LEAN_BODY_MAX 2048
 #define FLOW_TUPLE_MAX 4
 #define FLOW_LEAN_STRUCT_MAX 24
 #define FLOW_LEAN_ENUM_MAX 24
-#define FLOW_PATCHBAY_STAGE_MAX 8
 typedef struct { char name[FLOW_NAME]; } FlowNode; typedef struct { int id; int score; } FlowSample;
 typedef struct { char name[FLOW_NAME]; size_t size_bytes; uint32_t flags; } FlowFieldSpec;
 typedef struct { char name[FLOW_NAME]; char c_type[16]; char lean_type[16]; size_t size_bytes; } FlowLeanStructField;
 typedef struct { char name[FLOW_NAME]; FlowLeanStructField fields[FLOW_FIELD_MAX]; size_t field_count; size_t byte_size; size_t align_bytes; } FlowLeanStruct;
 typedef struct { char name[FLOW_NAME]; char variants[16][FLOW_NAME]; size_t variant_count; } FlowLeanEnum;
-typedef struct { char stage_name[FLOW_NAME]; char lean_file[FLOW_LINE]; char fn_name[FLOW_NAME]; char in_struct[FLOW_NAME]; char out_struct[FLOW_NAME]; size_t in_bytes; size_t out_bytes; uint64_t wcet_ns; uint64_t ast_wcet_ns; } FlowPatchbayStage;
 typedef struct {
     char name[FLOW_NAME];
     char return_type[FLOW_NAME];
@@ -40,8 +38,10 @@ typedef struct {
     union {
         char body[FLOW_LEAN_BODY_MAX];
         char field_assign_exprs[FLOW_FIELD_MAX][64];
-        char tuple_exprs[FLOW_TUPLE_MAX][680];
     };
+    char precond_expr[256];
+    char postcond_expr[512];
+    int is_private;
     uint64_t estimated_wcet_ns;
 } FlowLeanFunction;
 typedef struct { char name[FLOW_NAME]; char anchored_fn[FLOW_NAME]; } FlowLeanTheorem;
@@ -89,8 +89,6 @@ typedef enum { FLOW_FACT_SHARED_STATE, FLOW_FACT_COLLECTION,
     FlowFieldSpec state_fields[FLOW_FIELD_MAX]; \
     size_t state_field_count; \
     uint64_t sla_latency_ns; \
-    char extern_kernel[FLOW_NAME]; \
-    char extern_kernel_body[FLOW_LINE]; \
     FlowLeanFunction lean_functions[FLOW_LEAN_FN_MAX]; \
     size_t lean_function_count; \
     FlowLeanTheorem lean_theorems[FLOW_LEAN_THEOREM_MAX]; \
@@ -99,14 +97,7 @@ typedef enum { FLOW_FACT_SHARED_STATE, FLOW_FACT_COLLECTION,
     size_t lean_struct_count; \
     FlowLeanEnum lean_enums[FLOW_LEAN_ENUM_MAX]; \
     size_t lean_enum_count; \
-    FlowPatchbayStage patchbay_stages[FLOW_PATCHBAY_STAGE_MAX]; \
-    size_t patchbay_stage_count; \
-    char reload_from_schema[FLOW_NAME]; \
-    char reload_to_schema[FLOW_NAME]; \
-    char kernel_source_lean[FLOW_LINE]; \
-    char ingress_driver[FLOW_NAME]; \
-    char egress_driver[FLOW_NAME]; \
-    char migrate_fn[FLOW_NAME]; \
+    int float_abi_ieee64; \
     uint64_t qsbr_timeout_ns; \
     size_t arena_limit_bytes; \
     char jet_coord_names[FLOW_FIELD_MAX][FLOW_NAME]; \

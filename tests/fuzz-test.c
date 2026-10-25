@@ -29,11 +29,11 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     FILE *mem = fmemopen((void *)data, size, "r");
     if (!mem) return 0;
 
-    FlowSpec spec;
+    static FlowSpec spec;
     memset(&spec, 0, sizeof(spec));
     int parsed = parse_spec(mem, &spec);
     if (parsed) {
-        SemanticIR ir;
+        static SemanticIR ir;
         memset(&ir, 0, sizeof(ir));
         lower_to_ir(&spec, &ir);
         FUZZ_CHECK(ir.input_max_count >= 0);
@@ -85,43 +85,27 @@ static uint64_t fuzz_prng(uint64_t *state) {
 int main(int argc, char **argv) {
     LLVMFuzzerInitialize(&argc, &argv);
 
-    /* 1. Corpus of valid, malformed, pathological and boundary inputs (.flow & .lean) */
+    /* 1. Corpus of valid, malformed, pathological and boundary pure .lean inputs */
     const char *corpus[] = {
-        /* Valid multi-line .flow manifests */
-        "project test\ninput s {\n  max_count 10\n}\nflow t {\n  s -> out\n}\nimport builtin\nrequire {\n  deterministic\n}\n",
-        "input s {\n  max_count 100\n}\nflow t {\n  s -> top(5)\n}\nimport builtin\n",
-        "input s {\n  max_count 10\n}\nflow t {\n  s -> parallel -> out\n}\nimport builtin\nrequire {\n  memory < 16mb\n}\nprefer {\n  throughput\n}\n",
-
-        /* Valid and malformed .lean specifications */
+        /* Valid pure .lean specifications */
         "structure ReflexState where\n  pos : UInt64\n  vel : UInt64\n\ndef stepKernel (pos : UInt64) (vel : UInt64) : UInt64 :=\n  if pos + vel > 100 then 0 else 1\n\ntheorem step_safe : stepKernel 10 20 = 1 := by decide\n",
         "def badSub (a : Nat) (b : Nat) : Nat :=\n  a - b\ntheorem sub_zero : badSub 3 10 = 0 := by decide\n",
+        "namespace Quant.Quote\nprivate def spread (x : Float) : Float := x * 0.5\ndef quote (m : Float) : Float := m + spread m\ntheorem q_ok (m : Float) (h : m > 0.0) : quote m > m := by decide\nend Quant.Quote\n",
 
-        /* Truncated & unclosed blocks */
-        "project",
-        "project {\n",
-        "input s {\n",
-        "flow t {\n  s ->\n",
-        "require {\n",
-        "prefer {\n",
-        "import\n",
-
-        /* Malformed values & boundaries */
-        "input s {\n  max_count -1\n}\n",
-        "input s {\n  max_count 0\n}\n",
-        "input s {\n  max_count 99999999999999999999999999999\n}\n",
-        "require {\n  memory < -1mb\n}\n",
-        "require {\n  memory < 0mb\n}\n",
-        "require {\n  memory < 999999999999mb\n}\n",
-        "flow t {\n  s -> top(-5)\n}\n",
-        "flow t {\n  s -> top(abc)\n}\n",
+        /* Retired @annotations & malformed .lean specifications */
+        "@quota {\n  deadline: 200us\n}\n",
+        "@embodied {\n  frequency 1000hz\n}\n",
+        "@reload {\n  version: 2\n}\n",
+        "@patchbay {\n  stage s1 fn f in S out S\n}\n",
+        "theorem bad_sorry : 1 = 2 := by sorry\n",
+        "axiom fake_axiom : False\n",
+        "def bad_rec (n : UInt64) : UInt64 := if n == 0 then 0 else bad_rec (n - 1)\n",
 
         /* Binary & null-byte junk */
         "\x00\x00\x00\x00",
         "\xff\xff\xfe\xfe\x12\x34\x56\x78",
-        "project \x00 test\n",
-        "\x7f\x45\x4c\x46\x02\x01\x01\x00", /* ELF magic */
-        "require {\n  \x80\x81\x82\x83\x84\x85\x86\x87\n}\n",
-        "import missing_plugin_that_does_not_exist_in_registry\n",
+        "def \x00 test\n",
+        "\x7f\x45\x4c\x46\x02\x01\x01\x00",
     };
 
     size_t corpus_count = sizeof(corpus) / sizeof(corpus[0]);

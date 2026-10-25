@@ -9,6 +9,7 @@ BUILD_DIR := build
 FLOWC := $(BUILD_DIR)/flowc
 FLOWY := $(BUILD_DIR)/flowy
 LIBFLOW_A := $(BUILD_DIR)/libflow.a
+LIBFLOW_RT_A := $(BUILD_DIR)/libflow_rt.a
 
 SRC_LIB_ROOT    := $(filter-out src/flowc.c src/flowy_main.c,$(wildcard src/*.c))
 SRC_LIB_PLUGINS := $(wildcard plugins/*.c)
@@ -17,6 +18,12 @@ SRC_LIB := $(SRC_LIB_ROOT) $(SRC_LIB_PLUGINS)
 LIB_OBJS := \
   $(patsubst src/%.c,              $(BUILD_DIR)/obj/%.o,          $(SRC_LIB_ROOT)) \
   $(patsubst plugins/%.c,          $(BUILD_DIR)/obj/plugin_%.o,   $(SRC_LIB_PLUGINS))
+
+RT_OBJS := \
+  $(BUILD_DIR)/obj/flow_jet.o \
+  $(BUILD_DIR)/obj/reload.o \
+  $(BUILD_DIR)/obj/cubical_hott.o \
+  $(BUILD_DIR)/obj/polyhedral.o
 
 AR ?= ar
 RANLIB ?= ranlib
@@ -27,21 +34,22 @@ INCLUDEDIR ?= $(PREFIX)/include/flow
 
 PLUGINS_SO := $(BUILD_DIR)/libflow_embodied.so
 
-.PHONY: all clean test test-cli security-test install uninstall fuzz test-build test-run test-asan test-tsan plugins flowy libflow
+.PHONY: all clean test test-cli security-test install uninstall fuzz test-build test-run test-asan test-tsan plugins flowy libflow libflow_rt
 
-all: $(LIBFLOW_A) $(FLOWC) $(FLOWY) plugins
+all: $(LIBFLOW_A) $(LIBFLOW_RT_A) $(FLOWC) $(FLOWY) plugins
 
-install: $(FLOWC) $(FLOWY) $(LIBFLOW_A)
+install: $(FLOWC) $(FLOWY) $(LIBFLOW_A) $(LIBFLOW_RT_A)
 	mkdir -p $(DESTDIR)$(BINDIR)
 	install -m 755 $(FLOWC) $(DESTDIR)$(BINDIR)/flowc
 	install -m 755 $(FLOWY) $(DESTDIR)$(BINDIR)/flowy
 	mkdir -p $(DESTDIR)$(PREFIX)/lib
 	install -m 644 $(LIBFLOW_A) $(DESTDIR)$(PREFIX)/lib/libflow.a
+	install -m 644 $(LIBFLOW_RT_A) $(DESTDIR)$(PREFIX)/lib/libflow_rt.a
 	mkdir -p $(DESTDIR)$(INCLUDEDIR)
 	install -m 644 src/*.h plugins/*.h $(DESTDIR)$(INCLUDEDIR)
 
 uninstall:
-	rm -f $(DESTDIR)$(BINDIR)/flowc $(DESTDIR)$(BINDIR)/flowy $(DESTDIR)$(PREFIX)/lib/libflow.a
+	rm -f $(DESTDIR)$(BINDIR)/flowc $(DESTDIR)$(BINDIR)/flowy $(DESTDIR)$(PREFIX)/lib/libflow.a $(DESTDIR)$(PREFIX)/lib/libflow_rt.a
 	rm -rf $(DESTDIR)$(INCLUDEDIR)
 
 $(BUILD_DIR):
@@ -61,7 +69,12 @@ $(LIBFLOW_A): $(LIB_OBJS)
 	$(AR) rcs $@ $^
 	$(RANLIB) $@
 
+$(LIBFLOW_RT_A): $(RT_OBJS)
+	$(AR) rcs $@ $^
+	$(RANLIB) $@
+
 libflow: $(LIBFLOW_A)
+libflow_rt: $(LIBFLOW_RT_A)
 
 $(FLOWC): src/flowc.c $(LIBFLOW_A) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -Isrc src/flowc.c $(LIBFLOW_A) -o $@ $(LDLIBS) $(THREAD_FLAGS)
@@ -75,7 +88,6 @@ plugins: $(PLUGINS_SO)
 
 $(BUILD_DIR)/libflow_embodied.so: plugins/embodied.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -shared -fPIC -DFLOW_PLUGIN_DSO -undefined dynamic_lookup $(THREAD_FLAGS) -Isrc -Iplugins plugins/embodied.c -o $@ $(LDLIBS)
-	@if [ ! -f target/debug/libflow_plugin_example.dylib ] && [ ! -f target/debug/libflow_plugin_example.so ] && command -v cargo >/dev/null 2>&1; then cargo build --workspace --quiet && rm -f Cargo.lock; fi
 
 # ==============================================================================
 # Two-Stage Native Makefile Test Pipeline (Native Hermetic Barrier)
@@ -84,7 +96,7 @@ $(BUILD_DIR)/libflow_embodied.so: plugins/embodied.c | $(BUILD_DIR)
 # Tests locate sibling binaries (flowc/flowy) via FLOW_BUILD_DIR so that
 # sanitizer builds (BUILD_DIR=build/asan, build/tsan) are fully self-contained.
 TEST_DEFS := -DFLOW_BUILD_DIR=\"$(BUILD_DIR)\"
-TEST_DEPS := tests/flow_test_kit.h $(FLOWC) $(FLOWY) $(PLUGINS_SO) $(LIBFLOW_A)
+TEST_DEPS := tests/flow_test_kit.h $(FLOWC) $(FLOWY) $(PLUGINS_SO) $(LIBFLOW_A) $(LIBFLOW_RT_A)
 
 # 8 Consolidated Domain Test Suites + Fuzz Harness
 TEST_BINARIES := \
@@ -166,7 +178,7 @@ test-run: $(TEST_BINARIES)
 	@$(BUILD_DIR)/test-concurrency || echo test-concurrency >> $(BUILD_DIR)/.failed-suites
 	@echo "=== [4/8] Fvec & Swarm: Architectural Memory, Swarm Federation & Speculative Pre-Play ==="
 	@$(BUILD_DIR)/test-fvec-swarm || echo test-fvec-swarm >> $(BUILD_DIR)/.failed-suites
-	@echo "=== [5/8] System: Compiler Pipeline, Pure .lean Fusion, Plugin ABI & Polyglot Emitter ==="
+	@echo "=== [5/8] System: Pure Lean 4 -> C17 Isomorphism, Explicit C17 Runtime & Theorem Contracts ==="
 	@$(BUILD_DIR)/test-system || echo test-system >> $(BUILD_DIR)/.failed-suites
 	@echo "=== [6/8] Refactored Core: Thermal Contact-Jet, Quadratic Polyhedral & 64-Node Mesh ==="
 	@$(BUILD_DIR)/test-refactored-core || echo test-refactored-core >> $(BUILD_DIR)/.failed-suites
@@ -189,9 +201,6 @@ test-cli: $(FLOWC) $(FLOWY)
 	@$(FLOWY) --version >/dev/null
 	@$(FLOWY) audit >/dev/null
 	@$(FLOWY) topos >/dev/null
-	@$(FLOWY) inspect scope formal_sieve >/dev/null
-	@$(FLOWY) inspect scope rust_sdk >/dev/null
-	@if command -v cargo >/dev/null 2>&1; then cargo test --workspace --quiet && rm -f Cargo.lock && echo "  ✓ Rust Plugin SDK workspace unit tests passed (0 external crates)."; fi
 	@echo "  ✓ flowc & flowy CLI smoke tests passed."
 
 test: test-build
@@ -202,14 +211,14 @@ test: test-build
 	@echo "================================================================================"
 
 help:
-	@echo "FLOW Native C17 & Rust Build Pipeline (Makefile)"
-	@echo "  make -j4 all        Build libflow.a, flowc, flowy, and libflow_embodied.so"
+	@echo "FLOW Pure Lean 4 -> C17 Build Pipeline (Makefile)"
+	@echo "  make -j4 all        Build libflow.a, libflow_rt.a, flowc, flowy, and libflow_embodied.so"
 	@echo "  make -j4 test       Run all 8 domain test suites, fuzz harness, and CLI smoke tests"
 	@echo "  make test-asan      Run all suites under AddressSanitizer + UBSan"
 	@echo "  make test-tsan      Run all suites under ThreadSanitizer"
 	@echo "  make fuzz           Run LLVM libFuzzer (FUZZ_SECONDS=60)"
-	@echo "  make install        Install flowc, flowy, libflow.a, and headers to PREFIX=$(PREFIX)"
+	@echo "  make install        Install flowc, flowy, libflow.a, libflow_rt.a, and headers to PREFIX=$(PREFIX)"
 	@echo "  make clean          Remove build artifacts"
 
 clean:
-	rm -rf $(BUILD_DIR) build/asan build/tsan target Cargo.lock /tmp/flow_* /tmp/libflow_*
+	rm -rf $(BUILD_DIR) build/asan build/tsan /tmp/flow_* /tmp/libflow_*

@@ -105,9 +105,7 @@ uint64_t flow_cubical_project_text_intent(const char *text); uint64_t flow_cubic
 
 typedef enum {
     FLOW_HOTT_LANG_LEAN     = 0,
-    FLOW_HOTT_LANG_C17      = 1,
-    FLOW_HOTT_LANG_RUST     = 2,
-    FLOW_HOTT_LANG_POLYGLOT = 3
+    FLOW_HOTT_LANG_C17      = 1
 } FlowHoTTLangOrigin;
 
 typedef struct {
