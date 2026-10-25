@@ -1,53 +1,52 @@
-# 第一章：什麼是 FLOW？ (從分離式編譯到數學-AST 融合引擎)
+# 第一章：什麼是 FLOW？ (從分離式編譯到 Pure Lean 4 $\to$ C17 湧現引擎)
 
-> 「當數學證明本身就是 AST 的一部分，我們便不再需要手寫 FFI 膠水、防禦性分支與並發鎖樣板。」
-
----
-
-## 1.1 傳統系統開發的三重割裂（為什麼 AI 寫的 Code 還是會在 Production 出事？）
-
-在傳統系統與企業核心開發中，一個演算法或商業規則從需求走向生產環境，往往必須跨越三道人工鴻溝：
-1. **規格與實作割裂**：PM 或架構師寫在文件裡的規則（例如「折扣後毛利不得低於 5%」、「抽卡 90 抽內必出保底」），到了工程師或 AI 手上變成四散的 `if/else`。只要漏掉一個極端邊界，上線就會變成「標錯價之亂」或資金虧損。
-2. **FFI 標記與轉接負擔**：為了讓 Python (FastAPI)、Node.js/Bun、Rust 或 CUDA 共用同一套高速核心，開發者必須手動標註 `@[export]`、`extern "C"`，並小心翼翼地對齊每個欄位的 Byte Offset。
-3. **執行期並發與硬體調優硬編碼**：為了線上熱更新風控參數（Hot-Swap）或防止高負載停頓，核心算子被大量的 Mutex 讀寫鎖與記憶體管理程式碼淹沒。
+> 「當數學定理直接湧現為 C17 硬體保護殼，而硬體管線直接寫在顯式 C17 中，我們便不再需要任何第三種配置語言或樣板程式碼。」
 
 ---
 
-## 1.2 FLOW 的三層數學-AST 融合架構與七大元件作用域
+## 1.1 傳統系統開發的三重割裂
 
-FLOW 將核心引擎收斂為 **7 大正交元件作用域（`frontend`、`formal_sieve`、`exact_manifold`、`runtime_jet`、`polyglot_abi`、`introspection_ui`、`rust_sdk`）**，建立以 **「Pure `.lean` / `.flow` 意圖與證明」、「Cubical HoTT 單價宇宙 $\mathcal{U}_0$ × 精確流形」、「QSBR 零拷貝執行基底與七語同態投影」** 為核心的三位一體架構：
+在傳統系統與實時核心開發中，一個演算法從數學規格走向生產環境，往往必須跨越三道人工鴻溝：
+1. **規格與實作割裂**：規格寫在文件或定理證明器裡，到了工程師手上卻變成手寫的 C/C++ `if/else`。只要漏掉一個極端邊界或 NaN 檢查，上線就會變成重大事故。
+2. **手寫 FFI 與字串拼貼樣板**：為了把數學公式轉成 C 函式，傳統工具往往塞入大量硬編碼的名詞白名單或假管線模板。
+3. **過度設計的 `@` 註解配置語言**：用自創的 `@quota`、`@patchbay` DSL 去描述原本在 C17 `main.c` 裡只需 10 行就能寫清楚的 Ring Buffer 與執行緒配置。
+
+---
+
+## 1.2 FLOW 的四大數學同構映射（4 Pure Mathematical Isomorphisms）
+
+FLOW 的核心編譯器 `flowc`（[`src/parser.c`](../../src/parser.c)、[`src/backend.c`](../../src/backend.c)、[`src/abi.c`](../../src/abi.c)）拿掉了所有寫死的業務名詞與假管線模板，整個「Lean 4 湧現 C17」完全收斂為 **4 條純粹的數學同構映射**：
 
 ```text
-FLOW 三層無縫融合 (7 Component Scopes | Leaks = 0 | Modularity = 1.00):
-                 ┌───────────────────────────────────────────┐
-                 │  1. Pure .lean / .flow 單一真實來源       │
-                 │  • 原生 structure -> 自動推導 Stride/ABI  │
-                 │  • 定理錨定算子   -> 零 @[export] 綁定 def│
-                 └─────────────────────┬─────────────────────┘
-                                       │
-                     領域插件函子降階 (plugins/embodied.c)
-                                       ▼
-    ┌──────────────────────────────────────────────────────────────────────┐
-    │   2. 64-Bit Cubical HoTT 單價宇宙 U_0 + 精確流形 (`bitspace.c`)       │
-    │   • 內源性 HoTT U_0 單價海關 (Lean4 ~= C17 ~= Rust) + 外源性 topo 雷達│
-    │   • Q32.32 定點數 + 256-Bit Montgomery + 5-Stage Token Ring + .fvec   │
-    └──────────────────┬────────────────────────────────┬──────────────────┘
-                       │                                │
-           (SMT QF_LIA 四大定理守門)          (64B 快取行對齊原子切換)
-                       ▼                                ▼
-         ┌───────────────────────────┐    ┌───────────────────────────┐
-         │ 3a. 零 sorry + 四大定理   │    │ 3b. QSBR 世代鎖 + 七語言  │
-         │ buffer / memory / shard / │    │ 64B FlowExtentDescriptor  │
-         │ determinism UNSAT 證明    │    │ (C/Rust/Py/JS/CUDA/M/Jl)  │
-         └───────────────────────────┘    └───────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                    FLOW: 4 Pure Mathematical Isomorphisms (Lean 4 -> C17)              │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                        │
+│  1. 積型別湧現記憶體佈局 (Product Types -> C17 Structs)                                │
+│     • Lean `structure S` 與多回傳值 `(A × B)` -> C17 `typedef struct` (`<fn>_tuple_t`) │
+│     • 自動抹除 0-byte `Prop` 證明欄位，純數據欄位自然決定 alignment 與 byte stride     │
+│                                                                                        │
+│  2. 和型別湧現狀態空間 (Sum Types -> C17 Enums)                                        │
+│     • Lean `inductive E` -> C17 `typedef enum`                                         │
+│                                                                                        │
+│  3. 純函數複合湧現算子網路 (Pure Functions -> C17 Static Inline Graph)                 │
+│     • 每個 `def f` 一對一映射為 C17 算子 (`f`, `f_fx`, `flowc_f`, `flowc_f_fx`)        │
+│     • `let x := rhs in` 與 `let (a, b) := g x in` 直接映射為原生 C17 區域變數與函式呼叫│
+│                                                                                        │
+│  4. 定理湧現硬體級防護邊界 (Theorems -> C17 Hardware Contracts `lean_<fn>`)            │
+│     • 定理前提 (Hypotheses `(h : P x)` 或 `P x → Q (f x)`) -> `FLOW_LEAN_PRE_GUARD`    │
+│     • 定理結論 (Conclusion `Q (f x)`) -> `FLOW_LEAN_POST_GUARD`                        │
+│     • 多條定理針對同一算子 `f` 自動取邏輯交集：(/\ P_i) => (/\ Q_j)                    │
+│                                                                                        │
+└────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 工程師如何解讀 `flowc` 的編譯輸出？
 
-當你執行 `flowc spec.lean -o build/app.c` 時，終端機輸出的每一行都對應一項具體的工程保證：
+當你執行 `flowc spec.lean -o build/app.c --target-c-header build/app.h` 時，終端機輸出的每一行都對應一項具體的工程保證：
 
 | 編譯器輸出訊息 | 白話工程意義 |
 | :--- | :--- |
-| `verifier: status=proven capacity=1024 estimated_bytes=8192` | **邏輯與記憶體上限已證明**：所有 `.lean` 定理皆無 `sorry`，且編譯器保證該模組在執行期最多只會使用 **8 KB** 靜態記憶體（零 GC、零記憶體洩漏）。 |
-| `SMT proof: status=unsat_proven_sound (4/4 theorems verified UNSAT)` | **零反例保證（UNSAT = Unsatisfiable）**：SMT 求解器嘗試在所有可能輸入中尋找「能讓陣列越界、記憶體超標、多執行緒競爭或結果不一致」的反例，結果為「無法滿足（找不到任何漏洞）」。 |
-| `symplectic: omega=2.000 mu=0.000977 q_sat=1280.0` | **硬體節流與背壓保護**：編譯器已自動計算出最佳迴圈區塊（Tile）與佇列飽和門檻（`q_sat`），避免高併發時把 CPU 快取打爆。 |
+| `verifier: status=proven capacity=1024 estimated_bytes=8192` | **邏輯與記憶體上限已證明**：所有 `.lean` 定理皆無 `sorry` / 自訂 `axiom`，且通過 `Lean-RT` 零 GC 靜態閘門（零動態配置、零記憶體洩漏）。 |
+| `SMT proof: status=unsat_proven_sound (4/4 theorems verified UNSAT)` | **零反例保證（UNSAT = Unsatisfiable）**：SMT 求解器證明 `buffer_bounds`、`memory_quota`、`shard_isolation`、`determinism` 四大不變量在所有合法輸入下皆無反例。 |
+| `symplectic: omega=2.000 mu=0.000977 q_sat=1280.0` | **硬體節流與背壓參數**：根據資料對齊與容量推導出的多面體區塊與相空間阻尼參數。 |

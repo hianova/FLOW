@@ -1,162 +1,84 @@
-# 第二章：意圖 vs. 實作 (Pure `.lean` 零試錯撰寫規範與雙前端降階)
+# 第二章：意圖 vs. 實作 (Pure `.lean` 零配置撰寫規範與顯式 C17 管線)
 
-> 「在 FLOW 中，資料結構的定義即是記憶體 ABI，安全定理的證明即是算子核函數的錨點。」
+> 「數學與定理直接寫在 Lean 4，硬體與管線直接寫在 C17 —— 中間不需要任何第三種配置語言。」
 
 ---
 
-## 2.1 雙前端合一：Pure `.lean` 與宣告式 `.flow`
+## 2.1 為什麼徹底廢除 `.flow` 與 `@` 註解注入？
 
-FLOW 的語義剖析器（[`src/parser.c`](../../src/parser.c)）支援兩種完全無命令式樣板的輸入形式，並將其統一降階為強型別的 `FlowSpec` 與 `SemanticIR`：
+在「Lean 4 + C17」的架構裡：
+1. **`.lean` 永遠只寫 100% 純數學（Zero Annotations / Zero Config）**：
+   - 檔案內只有標準 Lean 4 的 `structure`、`inductive`、`def`、`theorem`。
+   - 嚴格拒絕 `@quota`、`@embodied`、`@reload`、`@patchbay` 等非標準註解（[`src/parser.c`](../../src/parser.c) 遇到退休的 `@` 註解會立即報錯攔截）。
+   - 不使用任何偽裝成 Lean 變數的硬體配置注入（例如寫死名稱的 `def slaLatencyNs` 在 `parser.c` 中僅被視為普通純函數，絕不偷偷修改編譯器內部硬體設定）。
+2. **C17 (`*.c`) 直接用顯式程式碼寫管線與硬體配置**：
+   - 頻率是 1kHz、Ring Buffer 是 64 格、先跑哪個算子再跑哪個算子——在 C17 的 `main.c` 裡本來就是 10 行一目了然的 `struct` 初始化與函式呼叫，直接連結 `libflow_rt.a` 即可。
 
-### 路徑 A：Pure `.lean`（領域意圖 + 形式化證明 + 算子核函數合一）
+---
 
-開發者或 AI 直接產出標準 Lean 4 檔案，**無需任何 `@[export]` 或 FLOW 專屬語法**：
+## 2.2 Pure `.lean` 的四大數學同構映射實例
+
+開發者直接撰寫標準 Lean 4 檔案（無需 `@[export]`）：
 
 ```lean
-namespace Embodied.GaitReflex
+namespace Embodied.Control
 
-structure JointState where
-  angle    : Float
-  velocity : Float
-  torque   : Float
-  deriving Repr
+inductive ControlMode where
+  | idle
+  | track
+  | fault
 
-def stepReflex (baseOff byteLen stride epoch : UInt64) : UInt32 :=
-  if stride >= 24 && epoch > 0 && baseOff + byteLen >= baseOff then 0 else 1
+structure Vec2 where
+  x : Float
+  y : Float
 
-theorem zmp_torque_safe : stepReflex 0 24 24 1 = 0 := by decide
+structure PoseFrame where
+  pos   : Vec2
+  ticks : UInt64
 
-end Embodied.GaitReflex
+private def half_dt : Float := 0.5
+
+def step_pose (p : PoseFrame) (vx : Float) (vy : Float) : PoseFrame :=
+  { pos := { x := p.pos.x + vx * half_dt, y := p.pos.y + vy * half_dt }, ticks := p.ticks + 1 }
+
+def bounded_gain (x : Float) (limit : Float) : Float :=
+  if x > limit then limit else x
+
+theorem bounded_gain_upper (x : Float) (limit : Float) (h_lim : limit > 0.0) :
+  bounded_gain x limit <= limit := by decide
+
+theorem bounded_gain_nonneg (x : Float) (limit : Float) :
+  x >= 0.0 → bounded_gain x limit >= 0.0 := by decide
+
+end Embodied.Control
 ```
 
-當 `parse_lean_spec()` 解析此檔案時，會自動完成三件事：
-1. **原生 `structure` 記憶體佈局推導**：掃描 `JointState` 的欄位型別（3 個 `Float` $\rightarrow$ $3 \times 8 = 24\text{ bytes}$），自動設定 `input_stride_bytes = 24`、`input_align_bytes = 8` 並填入熱重載 `state_fields[]`。
-2. **定理錨定算子推導（Theorem-Anchored Kernel Discovery）**：掃描所有非 `Prop` 的計算型 `def`（如 `stepReflex`），並在 `theorem zmp_torque_safe` 的型別與證明主體中檢驗其是否被引用驗證；一旦確認受定理保護，立即將 `stepReflex` 綁定為 `spec->extern_kernel`。
-3. **零 `sorry` 鐵門與領域標籤提取**：嚴格拒絕任何未完成的 `sorry` 或自訂 `axiom`，並從 `namespace Embodied.*` 與定理名稱提取領域意圖供 Plugin 降階。
+當執行 `flowc control.lean -o build/control.c --target-c-header build/control.h` 時，會自動湧現：
+
+1. **積型別與巢狀結構展平（`structure` $\to$ C17 `typedef struct`）**：
+   - `PoseFrame` 自動展平為包含 `double pos_x; double pos_y; uint64_t ticks;` 的 C17 `typedef struct PoseFrame`（24 bytes, 8-byte aligned）。
+   - 多回傳值函數 `def f (...) : (Float × Float)` 自動在標頭檔湧現 `typedef struct { double out_0; double out_1; } f_tuple_t;` 與雙指標輸出介面。
+2. **和型別（`inductive` $\to$ C17 `typedef enum`）**：
+   - `ControlMode` 直接湧現為 `typedef enum { idle = 0, track = 1, fault = 2 } ControlMode;`。
+3. **純函數與區域綁定（`def` / `private def` / `let ... in` $\to$ C17 算子網路）**：
+   - `private def half_dt` 僅在內部展開，絕不污染公開 C 標頭或匯出符號表。
+   - 非 `private` 的 `def` 自動生成雙軌 C17 算子：IEEE-754 `double` 版（`bounded_gain` / `flowc_bounded_gain`）與確定性 $Q32.32$ 定點數版（`bounded_gain_fx` / `flowc_bounded_gain_fx`）。
+   - 算子內的 `let x := rhs in` 與 `let (a, b) := callee ... in` 直接生成 C17 原生區域變數與函式呼叫。
+4. **多定理邏輯交集湧現硬體合約（`theorem` $\to$ `lean_<fn>` / `flowc_lean_<fn>`）**：
+   - `bounded_gain_upper` 的 `(h_lim : limit > 0.0)` 與 `bounded_gain_nonneg` 的蘊含前提 `x >= 0.0 →` 自動取交集合成為前置斷言：
+     `FLOW_LEAN_PRE_GUARD((limit > 0.0) && (x >= 0.0), 0.0);`
+   - 兩條定理的結論自動取交集合成為後置斷言：
+     `FLOW_LEAN_POST_GUARD((_ret <= limit) && (_ret >= 0.0), 0.0);`
 
 ---
 
-### 路徑 B：宣告式 `.flow` 硬體與執行期清單（Where & How：90% 純 `.lean` vs. 10% `.lean` + `.flow`）
+## 2.3 Pure `.lean` 零試錯撰寫鐵律（`Lean-RT` Zero-GC Subset）
 
-對於 90% 的純演算法、金融定價與權限引擎，**單一 `.lean` 檔案即為全部**；而當系統需要綁定實體感測器驅動（IMU / SocketCAN）、嚴格微秒級 SLA 預算或自訂 QSBR 熱重載策略時，只需撰寫宣告式 `.flow` 清單（如 [`plugins/embodied.flow`](../../plugins/embodied.flow)），透過 `bind` 直接吸收 `.lean` 的純數學核心，徹底分離 **What（數學定律）** 與 **Where & How（硬體拓樸與執行期約束）**：
-
-```flow
-project embodied_reflex
-bind "plugins/embodied.lean"
-
-@quota {
-    deterministic
-    lean_certified
-    deadline 200us
-    arena 64kb
-    memory < 16mb
-    fallback emergency_stop
-}
-
-@embodied {
-    frequency 1khz
-    symplectic
-    max_drift 0.5%
-    zmp_margin 0.02
-    ingress sensor_imu_6dof
-    egress socketcan_fd
-    coordinates [hipPitch, hipRoll, kneePitch, anklePitch, ankleRoll, torsoYaw, comX, comY]
-}
-
-@reload {
-    schema_version 2
-    qsbr_timeout 5ms
-    migrate embodiedStepKernel
-}
-```
-
-此外，`@reload` 支援跨結構形式化狀態遷移（`from_schema StateV1`、`to_schema StateV2` 與 `migrate migrateV1ToV2`），而當多個實時 `.lean` 模組（例如感測器濾波、步態反射、扭矩限幅）需串接為零拷貝流水線時，可在 `.flow` 中使用 `@patchbay` 區塊宣告拓樸與各階段 WCET 預算：
-- `stage <name> bind "<lean_path>" fn <fn_name> in <InStruct> out <OutStruct> wcet <time>`
-- `wire <stage_1> -> <stage_2> -> <stage_3>`
-
-`flowc` 會在編譯期自動驗證相鄰階段之 `OutStruct == InStruct` 與 byte stride 一致性、以 AST 指令成本模型推導靜態 WCET 下界，並由 SMT 證明總和延遲 $\sum \text{wcet}_i \le \text{deadline}$。同時，在將 `.lean` 的 `Float` / `ℝ` 函數與結構轉換函數降階為 C17 時，採**雙軌數值架構**：預設 `flow_<id>_<fn>` 與 `flowc_<fn>` 直接生成 **0-ULP 原生 IEEE-754 `double`** 硬體浮點指令（支援 $10^{\pm 308}$ 全動態範圍與極端次方項），同時為每個浮點算子同步生成純定點數版本 `flow_<id>_<fn>_fx` 與 `flowc_<fn>_fx`（`FlowExactNumerics`：`flow_fx64_t` / `FlowU256`，以 128-bit 中間精度與 `FLOW_FX64_NONE` 故障隔離提供跨平台位元級確定性）、**自動注入 `!isfinite()` NaN/Inf 防火牆**，並合成具名相空間視圖 `FlowJetView_<flow_name>`（`view.q->hipPitch`）。
-
-### 2.1.1 `@keyword` 與 `.flow` / `.lean` 宣告式語法全集速查表
-
-| `@keyword` / 指令 | 所屬層級 | 核心子指令與語法 | 編譯器與執行期語義 |
-| :--- | :--- | :--- | :--- |
-| **`@quota { ... }`**<br>*(別名：`quota`, `require`)* | `.flow` 硬體與預算契約 | `deterministic`, `lean_certified`, `deadline <time>`, `arena <size>`, `memory < <n>mb`, `fallback <policy>` | 強制零 `sorry` 證明與 $Q32.32$ 確定性定點運算；預配置 64B 對齊 + Page Pre-Faulting + `mlock` 靜態 Arena；啟動硬體週期看門狗（超時觸發 `-4` 緊急停機閂鎖）。 |
-| **`@embodied [name] { ... }`**<br>*(別名：`embodied`, `jet`)* | `.flow` 具身相空間與 I/O | `frequency <hz>`, `symplectic`, `max_drift <val>`, `zmp_margin <val>`, `dt <time>`, `dim <n>`, `ingress <drv>`, `egress <drv>`, `coordinates [...]` | 自動綁定 `flow.embodied` 領域插件与 `zmp_torque_safe` 合約；執行辛幾何多面體配速並合成零偏移具名座標視圖 `FlowJetView_<id>`。 |
-| **`@reload { ... }`**<br>*(別名：`reload`)* | `.flow` 無鎖熱重載與遷移 | `schema_version <int>`, `qsbr_timeout <time>`, `from_schema <S1>`, `to_schema <S2>`, `migrate <lean_fn>` | 配置 64B 快取行對齊之 QSBR 世代租約（含 **發布前預留空間 Reservation-Before-Publication** 上限 `FLOW_RELOAD_MAX_RETIRED_DEPTH = 64`）；自動降階經定理驗證之 `S1 -> S2` 狀態遷移算子。 |
-| **`@patchbay { ... }`**<br>*(別名：`patchbay`)* | `.flow` 多階段零拷貝流水線 | `stage <name> bind "<.lean>" [fn <f>] [in <S1>] [out <S2>] [wcet <= <t>]`<br>`wire <s1> -> <s2> -> ...` | 串接多個 `.lean` 核函數為 DAG 流水線；編譯期靜態驗證相鄰階段型別與 Stride 一致性、AST WCET 下界，並由 SMT 證明總和延遲 $\sum \text{wcet}_i \le \text{deadline}$。 |
-| **`@[export <sym>]`** | `.lean` 屬性標註 *(選用)* | `@[export myStepKernel]` | 顯式指定 `spec->extern_kernel` 主算子名稱（預設無需撰寫，`flowc` 會自動從 `theorem` 錨定推導並匯出所有純函數）。 |
-| **`project` / `bind` / `import` / `thermal`** | `.flow` 頂層指令 | `project <name>`, `bind "<.lean>"`, `import <plugin>`, `thermal { max_temp, target_temp, power_limit, r_thermal, c_thermal }` | 宣告專案名稱、綁定純 `.lean` 數學核心、載入領域插件，以及定義硬體熱力學包絡線參數。 |
-
----
-
-## 2.2 Pure `.lean` 零試錯撰寫鐵律（Zero-CoT Authoring Rules）
-
-為了讓人類開發者與 AI Agent **一次編譯通過（零重試、不浪費推理 Token）**，撰寫 FLOW `.lean` 時請直接遵循以下四條鐵律：
-
-### 鐵律 1：遵守 `Lean-RT` 零 GC 實時子集、證明欄位自動擦除、巢狀 `structure` 展平與雙軌數值內建函數
-- **禁止動態配置（`Lean-RT` Zero-GC Gate）**：支援 `noncomputable section` 與 `noncomputable def` 修飾詞，但嚴格禁止 `sorry`、自訂 `axiom`、`List`、`Array`、`ByteArray`、`String`、高階閉包（`fun x =>`）、自遞迴函數或遞迴 `inductive` 型別。這確保所有算子皆為 O(1) 堆疊記憶體與零 GC 暫停（支援單一規格最多 `32` 個參數／欄位、`64` 個函數與 `128` 條定理）。
-- **C17 與七語言型別直接映射、證明擦除、巢狀 `structure` / 有限 `inductive` / Tuple 回傳與關鍵字轉義**：
-  - `UInt64` / `Nat` $\longrightarrow$ `uint64_t` (8 bytes)
-  - `USize` $\longrightarrow$ `size_t` / Rust `usize` / Python `ctypes.c_size_t` / Julia `Csize_t`
-  - `UInt32` $\longrightarrow$ `uint32_t` (4 bytes)
-  - `Bool` $\longrightarrow$ `bool`
-  - `Float` / `ℝ` / `Real` $\longrightarrow$ `double` (8 bytes，預設 `flowc_<fn>` 執行 0-ULP 原生 IEEE-754 `double` 運算，並同步提供 `flowc_<fn>_fx` 確定性 $Q32.32$ 定點數 `flow_fx64_t` 介面)
-  - **證明欄位與證明參數自動擦除（Proof Erasure）**：`structure` 或 `def` 中的命題／不等式證明欄位（如 `h_spot : spot > 0`、`h_vol : vol ≥ 0`、`h_prop : Prop`）會在降階時**自動擦除為 0 bytes**，不佔用 C `struct` 記憶體或 ABI 參數槽位
-  - 有限列舉 `inductive Mode | Idle | Torque` $\longrightarrow$ `uint32_t` (`0, 1, ...`)
-  - 多回傳值 Tuple `(Float * Float)` $\longrightarrow$ C/CUDA `double *out_0, double *out_1` 指標輸出，並於 Rust、Python、JS、MATLAB 與 Julia 自動解構為原生 Tuple / 多回傳值
-  - 巢狀 `structure`（如 `GaitFrame` 內含 `ImuSample`）與鏈式欄位存取（`f.imu.ax`）會自動展平為自然對齊之 C ABI 結構（`f.imu_ax`），且各目標語言保留字（如 `in`、`type`、`from`、`var`）會自動安全轉義（Rust `r#in` / Python/JS/Julia `in_`）。
-- **數學與硬體量化內建函數**：支援 `Float.*`、`Real.*` 與簡寫 `f_abs`、`f_max`、`f_min`，以及硬體量化 `flow_quantize val scale offset min_q max_q`（`Float -> UInt64`）與 `flow_dequantize q scale offset`（`UInt64 -> Float`），`flowc` 會自動降階為無分支飽和 C17 硬體轉換指令。
-- **最佳實踐**：將主狀態 `structure` 設計為 **8 個 `UInt64`/`Float` 欄位（共 64 bytes）**，剛好對齊單一 CPU Cache Line（`stride = 64, align = 8`）。
-
-### 鐵律 2：用 `:= by decide` 與 `:= by omega` 一行秒殺證明（注意 `Nat` 減法陷阱！）
-- **常數驗收（Concrete Vectors）**：只要定理中全部是具體數字（例如驗證邊界測試向量），一律在結尾寫 `:= by decide`。
-- **通用代數與不等式（Universal `∀` Bounds）**：只要涉及變數加減與大小比較，一律在結尾寫 `:= by omega`。
-- **⚠️ 唯一常見陷阱（`Nat` 無號數減法截斷）**：
-  - 在 Lean 4 中，自然數 `Nat` 當 `a < b` 時，`a - b` 會截斷為 `0`，因此 `(a - b) + b = a` **不一定成立**，直接跑 `by omega` 會報錯！
-  - **標準解法**：凡是定理中出現 `a - b`，務必在參數中加入前提 `(h : b ≤ a)`，例如：
-    ```lean
-    def remainingQuota (total consumed : Nat) : Nat := total - consumed
-
-    theorem quota_conservation (total consumed : Nat) (h : consumed ≤ total) :
-        remainingQuota total consumed + consumed = total := by
-      unfold remainingQuota
-      omega
-    ```
-
-### 鐵律 3：三個可直接複製貼上的實戰設計模式（Copy-Paste Patterns）
-
-1. **模式一：電商折價 / 金融風控防漏閥門（Monotonic Gate）**
-   ```lean
-   def isInvoiceSafe (grossCents discountCents floorCents : Nat) : Bool :=
-     decide (discountCents ≤ grossCents ∧ grossCents - discountCents ≥ floorCents)
-
-   theorem invoice_never_below_floor (gross disc floor : Nat) :
-       isInvoiceSafe gross disc floor = true → gross - disc ≥ floor := by
-     unfold isInvoiceSafe
-     intro h
-      revert h; decide +revert
-   ```
-2. **模式二：企業三態狀態機與最小反例修復（Tri-State & Min-Cut Remedy）**
-   ```lean
-   -- 0 = AUTO_PASS (自動放行), 1 = FORENSIC_HOLD (轉高管簽核), 2 = HARD_BLOCK (硬體級阻斷)
-   def classifyOrder (driftBps budgetBps maxOverrideBps : Nat) : Nat :=
-     if driftBps ≤ budgetBps then 0
-     else if driftBps ≤ budgetBps + maxOverrideBps then 1
-     else 2
-
-   def minCutReduction (driftBps budgetBps : Nat) : Nat :=
-     driftBps - budgetBps
-
-   theorem min_cut_restores_budget (drift budget : Nat) (h : budget ≤ drift) :
-       drift - minCutReduction drift budget = budget := by
-     unfold minCutReduction
-     omega
-   ```
-3. **模式三：檔案末尾的 1PB 零拷貝定理錨定核函數（Theorem-Anchored Kernel）**
-   - 將檔案最後一個 `def` 寫成 64B `FlowExtentDescriptor` 檢查器，並用一條 `theorem` 引用它，`flowc` 就會自動將其綁定為 C17 主算子：
-   ```lean
-   def appStepKernel (baseOff byteLen stride epoch : UInt64) : UInt32 :=
-     if stride >= 64 && byteLen >= 64 && baseOff + byteLen >= baseOff then 0 else 1
-
-   theorem app_kernel_sound : appStepKernel 0 64 64 1 = 0 := by decide
-   ```
+1. **遵守 `Lean-RT` 零 GC 實時子集與零作弊鐵門**：
+   - 嚴格禁止 `sorry`、`admit`、`sorryAx`、`native_decide`、自訂 `axiom` 與未閉合的 `/-` 區塊註解。
+   - 嚴格禁止動態堆積配置與無界遞迴：`List`、`Array`、`ByteArray`、`++`、高階閉包（`fun x =>`）、自遞迴函數與遞迴 `inductive` 型別。
+   - 支援最多 `128` 個函數（`FLOW_LEAN_FN_MAX`）、`128` 條定理（`FLOW_LEAN_THEOREM_MAX`）與 `32` 個參數／欄位。
+2. **證明欄位與證明參數自動抹除（Proof Erasure）**：
+   - `structure` 或 `def` 中的 `Prop` 命題與不等式欄位（如 `(h_lim : limit > 0.0)`）在 C17 `struct` 與函式簽名中自動抹除為 0 bytes，同時自動收斂至 `lean_<fn>` 的前置斷言。
+3. **內建數學與硬體量化原語**：
+   - `Float.abs` (`f_abs`)、`Float.sqrt`、`Float.exp`、`Float.log`、`Float.sin`、`Float.cos`、`Float.atan2`、`Float.pow`、`Float.floor`、`Float.ceil`、`Float.round`、`Float.max` (`f_max`)、`Float.min` (`f_min`)、`Float.ofNat`、`Float.ofInt`、`Nat.min`、`Nat.max`，以及硬體量化 `flow_quantize` / `flow_dequantize`，皆直接映射為零開銷 C17 內聯算子與 $Q32.32$ 定點算子。

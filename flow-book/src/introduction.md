@@ -1,17 +1,18 @@
-# 前言：意圖驅動的奧卡姆剃刀與 Pure `.lean` 數學融合
+# 前言：純粹數學與顯式硬體的奧卡姆剃刀
 
 ## 給開發者的 30 秒白話定位：FLOW 解決什麼問題？
 
-在日常工程中，我們經常面對三種無法靠傳統 Unit Test 根治的痛點：
-1. **商業與計價邏輯漏洞**（例如：電商多重折價券疊加導致「標錯價虧本」、跨階梯返利讓「買 100 件比買 99 件還便宜」）：Unit Test 只能測你想得到的幾組數字，卻無法窮舉所有邊界。
-2. **高頻風控與韌體邊界失守**（例如：量化交易毫秒級部位檢查、工業感測器與機器人控制迴圈）：用 Python/JS 寫太慢且有 GC 停頓；用 C/C++ 手寫又極易發生無號數下溢（Underflow）或記憶體越界。
-3. **跨語言 FFI 與熱更新樣板地獄**：為了讓核心算子同時給 Python 後端、Rust 服務、Node.js 與 C/CUDA 呼叫，工程師被迫維護好幾份 Struct 定義、`extern "C"` 膠水碼與讀寫鎖。
+在日常工程中，我們經常面對三種無法靠傳統 Unit Test 或配置 DSL 根治的痛點：
+1. **商業與計價邏輯漏洞**（例如：多重折價疊加導致標錯價虧本、跨階梯返利邊界失守）：Unit Test 只能測你想得到的幾組數字，卻無法窮舉所有邊界。
+2. **高頻風控與韌體邊界失守**（例如：量化交易毫秒級部位檢查、工業感測器與機器人控制迴圈）：用高階 GC 語言寫太慢且有停頓；用 C/C++ 手寫又極易發生無號數下溢（Underflow）、NaN 擴散或邊界條件遺漏。
+3. **配置注入 DSL 與黑盒樣板地獄**：許多框架發明了類似 Spring Boot XML/Annotation 的中間配置語言（`@quota`、`@patchbay`），在背後吐出沒人想看的樣板 C 代碼與多語言膠水碼。
 
-**FLOW 的解法非常直接**：你（或你的 AI 助手）只需要寫**一個標準的 `.lean` 檔案**（包含資料結構 `structure`、計算函數 `def`、以及幾行驗證邊界的 `theorem`）。FLOW 的 C17 與 Rust 引擎（`src/` 12 個核心函式庫模組 + `flowc.c` + `flowy_main.c`、`plugins/embodied.{h,c,lean,flow}` 與 `crates/flow-plugin*`，劃分為 **7 大元件作用域 `FlowComponentScope`**，跨層洩漏 `Leaks = 0`，模組化指數 $Q = 1.00$）會自動幫你完成三件事：
+**FLOW 的解法非常直接：徹底廢除第三種配置/注入語言，回歸「Lean 4 純數學 + C17 顯式工程」的雙核正交架構**：
 
-1. **單一真實來源（Pure `.lean` / `.flow` Single Source of Truth）**：
-   - 無需標註任何 `@[export]`。引擎自動從 `structure` 推導 64-byte 快取行對齊的記憶體佈局（`stride`、`align`），並透過**定理錨定（Theorem-Anchored Kernel Discovery）**自動把受 `theorem` 保護的 `def` 變成 C17 主算子，同時將浮點運算降階為無損確定性 $Q32.32$ 定點數與 256-bit Montgomery 大數（`FlowExactNumerics`）。
+1. **`.lean` 永遠只寫 100% 純數學（Zero Annotations / Zero Config）**：
+   - 裡面只有標準 Lean 4 的四個東西：`structure`、`inductive`、`def`、`theorem`。
+   - **連 `@[export]` 都不用寫**：`flowc` 直接透過 **4 條純粹的數學同構映射（Isomorphisms）**，將積型別映射為 C17 `struct`、和型別映射為 C17 `enum`、純函數複合映射為 C17 `static inline` 算子網路（雙軌支援 0-ULP IEEE-754 `double` 與確定性 $Q32.32$ 定點數 `flow_fx64_t`），並將證明該 `def` 的 `theorem` 自動提取前提與結論（$\bigwedge_i P_i \implies \bigwedge_j Q_j$），湧現為包裹在 `lean_<fn>()` 外層的零開銷硬體前後置斷言。
 2. **形式化防呆、同倫型別宇宙 $\mathcal{U}_0$ 與多面體合成（Compiler Brain — 編譯器在背景自動完成）**：
-   - 開發者**不需要自己懂辛幾何或同倫型別論**。編譯器在背景透過 64-Bit Cubical HoTT 型別篩（$\mathbb{I}^{64}$）、內源性全局型別宇宙 `FlowHoTTUniverse`（$\mathcal{U}_0$ 單價公理 $A \simeq B \implies A = B$ 跨語言佈局檢驗）、5 階段 Token Ring 與 SMT 四大安全定理（`buffer_bounds`、`memory_quota`、`shard_isolation`、`determinism`），在 0.02 秒內窮舉所有可能輸入，確認 **0 反例（`UNSAT`）** 且 **0 `sorry`** 後才允許產出二進位檔。
-3. **無鎖世代執行與 1PB 七語言零拷貝基底（QSBR & 64B Extent Runtime）**：
-   - 一鍵輸出 **C17、Rust、Python、JS/Bun、CUDA、MATLAB 與 Julia** 的零拷貝綁定（`FlowExtentDescriptor`），內建跨 DSO 影子 A/B 對照探針（`flow_ab_shadow_*`），並自動套上 `< 100ns` 的無鎖 QSBR 熱更新與發布前預留空間（Reservation-Before-Publication）保護。
+   - 編譯器在背景透過 **零 `sorry` 反作弊掃描**、**`Lean-RT` 零 GC 靜態閘門**、64-Bit Cubical HoTT 型別篩（$\mathbb{I}^{64}$）、內生全域型別宇宙 `FlowHoTTUniverse`（$\mathcal{U}_0$ 單價公理 $A \simeq B \implies A = B$ Lean4 $\leftrightarrow$ C17 同構檢驗）與 SMT 四大安全定理（`buffer_bounds`、`memory_quota`、`shard_isolation`、`determinism`），確認 **0 反例（`UNSAT`）** 後才產出 C17 程式碼。
+3. **C17 (`*.c`) 直接用顯式程式碼寫管線與硬體配置（Explicit Code over `@` Magic）**：
+   - `libflow_rt.a` 提供乾淨透明的 C17 原語（[`flow_spsc.h`](../../src/flow_spsc.h)、[`flow_jet.h`](../../src/flow_jet.h)、[`reload.h`](../../src/reload.h)、[`cubical_hott.h`](../../src/cubical_hott.h)、[`polyhedral.h`](../../src/polyhedral.h)），讓應用層直接以 10 行一目了然的 C17 `struct` 初始化與函式呼叫組裝 SPSC 環形緩衝區、`< 100ns` 無鎖 QSBR 熱替換與辛幾何相空間配速，不做任何黑盒接線。
