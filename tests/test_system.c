@@ -2652,6 +2652,7 @@ int main(void) {
         /* Verify all redundant C & Rust wrapper files have been folded into core pillars and deleted */
         FLOW_ASSERT_TRUE(access("build.rs", F_OK) != 0);
         FLOW_ASSERT_TRUE(access("src/main.rs", F_OK) != 0);
+        FLOW_ASSERT_TRUE(access("Cargo.lock", F_OK) != 0);
         FLOW_ASSERT_TRUE(access("src/builtin_plugin.c", F_OK) != 0);
         FLOW_ASSERT_TRUE(access("src/flowy_fvec.h", F_OK) != 0);
         FLOW_ASSERT_TRUE(access("src/flowy_fvec.c", F_OK) != 0);

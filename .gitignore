@@ -2,6 +2,7 @@
 *.plist
 build/
 target/
+Cargo.lock
 *.o
 *.so
 *.dylib

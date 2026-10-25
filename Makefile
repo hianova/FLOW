@@ -75,7 +75,7 @@ plugins: $(PLUGINS_SO)
 
 $(BUILD_DIR)/libflow_embodied.so: plugins/embodied.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -shared -fPIC -DFLOW_PLUGIN_DSO -undefined dynamic_lookup $(THREAD_FLAGS) -Isrc -Iplugins plugins/embodied.c -o $@ $(LDLIBS)
-	@if [ ! -f target/debug/libflow_plugin_example.dylib ] && [ ! -f target/debug/libflow_plugin_example.so ] && command -v cargo >/dev/null 2>&1; then cargo build --workspace --locked --quiet; fi
+	@if [ ! -f target/debug/libflow_plugin_example.dylib ] && [ ! -f target/debug/libflow_plugin_example.so ] && command -v cargo >/dev/null 2>&1; then cargo build --workspace --quiet && rm -f Cargo.lock; fi
 
 # ==============================================================================
 # Two-Stage Native Makefile Test Pipeline (Native Hermetic Barrier)
@@ -191,7 +191,7 @@ test-cli: $(FLOWC) $(FLOWY)
 	@$(FLOWY) topos >/dev/null
 	@$(FLOWY) inspect scope formal_sieve >/dev/null
 	@$(FLOWY) inspect scope rust_sdk >/dev/null
-	@if command -v cargo >/dev/null 2>&1; then cargo test --workspace --locked --quiet && echo "  ✓ Rust Plugin SDK workspace unit tests passed (0 external crates)."; fi
+	@if command -v cargo >/dev/null 2>&1; then cargo test --workspace --quiet && rm -f Cargo.lock && echo "  ✓ Rust Plugin SDK workspace unit tests passed (0 external crates)."; fi
 	@echo "  ✓ flowc & flowy CLI smoke tests passed."
 
 test: test-build
@@ -212,4 +212,4 @@ help:
 	@echo "  make clean          Remove build artifacts"
 
 clean:
-	rm -rf $(BUILD_DIR) build/asan build/tsan /tmp/flow_* /tmp/libflow_*
+	rm -rf $(BUILD_DIR) build/asan build/tsan target Cargo.lock /tmp/flow_* /tmp/libflow_*
