@@ -11,6 +11,7 @@ typedef enum { FLOW_SMT_UNINITIALIZED = 0, FLOW_SMT_PROVEN_UNSAT = 1, FLOW_SMT_V
 #endif
 typedef struct FlowSMTProofAttestation FlowSMTProofAttestation;
 #define FLOW_RELOAD_ABI_VERSION UINT32_C(3)
+#define FLOW_RELOAD_MAX_RETIRED_DEPTH (sizeof(uint64_t) * 8U)
 typedef struct FlowReloadContext FlowReloadContext; struct FlowPlanArtifact; struct SemanticIR; struct FlowWavefrontRing;
 typedef struct FlowBumpQsbrArena { uint8_t *buffer; size_t capacity, cursor, total_allocs, total_folds; uint64_t generation, bound_wavefront_epoch; uint32_t active_readers; } FlowBumpQsbrArena;
 int flow_bump_qsbr_init(FlowBumpQsbrArena *arena, void *backing_memory, size_t capacity);

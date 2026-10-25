@@ -108,6 +108,15 @@ typedef struct { FLOW_SPEC_CORE_FIELDS
 #define FLOW_GOLDEN_RATIO_64        0x9e3779b97f4a7c15ULL
 #define FLOW_DEFAULT_SEED           42U
 
+static inline uint64_t flow_prng_next(uint64_t *state) {
+    uint64_t x = (state && *state) ? *state : FLOW_GOLDEN_RATIO_64;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    if (state) *state = x;
+    return x;
+}
+
 static inline uint32_t flow_crc32_ieee(const void *data, size_t length) {
     const uint8_t *bytes = (const uint8_t *)data;
     uint32_t crc = 0xFFFFFFFFU;

@@ -205,10 +205,28 @@ int main(void) {
         FLOW_ASSERT_EQ(flow_qsbr_synchronize(ctx, 50000ULL), FLOW_RELOAD_BUSY);
         FLOW_ASSERT_EQ(flow_reload_reclaim(ctx), 0ULL);
 
+        /* Reservation-Before-Publication (qsbr.rs philosophy): saturate retired queue up to FLOW_RELOAD_MAX_RETIRED_DEPTH
+         * while reader remains pinned; the next publish/activate MUST abort with FLOW_RELOAD_JOURNAL_FULL
+         * without mutating current generation or state! */
+        for (size_t r_i = 2; r_i < FLOW_RELOAD_MAX_RETIRED_DEPTH; ++r_i) {
+            FLOW_ASSERT_EQ(flow_reload_activate(ctx, &v2), FLOW_RELOAD_OK);
+        }
+        uint64_t gen_at_cap = flow_reload_generation(ctx);
+        void *ovf_state = NULL;
+        FLOW_ASSERT_EQ(v2.init(NULL, &ovf_state), 0);
+        FLOW_ASSERT_EQ(flow_reload_publish(ctx, &v2, ovf_state), FLOW_RELOAD_JOURNAL_FULL);
+        FLOW_ASSERT_EQ(flow_reload_generation(ctx), gen_at_cap);
+        v2.drop(NULL, ovf_state);
+        FLOW_ASSERT_EQ(flow_reload_activate(ctx, &v2), FLOW_RELOAD_JOURNAL_FULL);
+        FLOW_ASSERT_EQ(flow_reload_generation(ctx), gen_at_cap);
+
         flow_reload_end(&pin_inv);
+        /* Once reader unpins, publish immediately succeeds via inline opportunistic reclamation! */
+        FLOW_ASSERT_EQ(flow_reload_activate(ctx, &v2), FLOW_RELOAD_OK);
+        FLOW_ASSERT_EQ(flow_reload_generation(ctx), gen_at_cap + 1ULL);
         flow_qsbr_checkpoint(&pin_reader);
         FLOW_ASSERT_EQ(flow_qsbr_synchronize(ctx, 100000000ULL), FLOW_RELOAD_OK);
-        FLOW_ASSERT_TRUE(flow_reload_reclaim(ctx) >= 1ULL);
+        (void)flow_reload_reclaim(ctx);
         FLOW_ASSERT_EQ(flow_reload_reader_unregister(&pin_reader), FLOW_RELOAD_OK);
         /* Double unregister must fail safely */
         FLOW_ASSERT_EQ(flow_reload_reader_unregister(&pin_reader), FLOW_RELOAD_INVALID);

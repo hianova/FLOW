@@ -4,6 +4,7 @@
 #include "smt.h"
 #include "hardware_telemetry.h"
 #include "topology.h"
+#include "cubical_hott.h"
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -13,11 +14,11 @@ typedef struct FlowReloadGeneration { const FlowUnit *unit; void *state; uint64_
 struct FlowReloadContext { void *host_context; _Atomic(FlowReloadGeneration *) current; _Atomic uint64_t epoch, anon_pin_epoch; _Atomic int quiescence_waiters, stopping;
     uint64_t next_generation; pthread_mutex_t lock; pthread_cond_t quiesced; FlowReloadReader *readers; FlowReloadGeneration *retired;
     const FlowWavefrontRing *bound_wavefront_ring; FlowBumpQsbrArena *bound_arena; };
-static uint64_t schema_mix(uint64_t h, const void *d, size_t sz) { const unsigned char *b = d; for (size_t i = 0; i < sz; ++i) h = (h ^ b[i]) * UINT64_C(1099511628211); return h; }
+static uint64_t schema_mix(uint64_t h, const void *d, size_t sz) { const unsigned char *b = d; for (size_t i = 0; i < sz; ++i) h = (h ^ b[i]) * FLOW_FNV1A_64_PRIME; return h; }
 static uint64_t schema_str(uint64_t h, const char *v) { static const unsigned char sep = 0; return v ? schema_mix(schema_mix(h, v, strlen(v)), &sep, 1) : schema_mix(h, &sep, 1); }
 static uint64_t schema_u32(uint64_t h, uint32_t v) { unsigned char b[4] = {(unsigned char)v, (unsigned char)(v >> 8), (unsigned char)(v >> 16), (unsigned char)(v >> 24)}; return schema_mix(h, b, 4); }
 uint64_t flow_schema_hash(const FlowSchema *s) { if (!s || !s->name || (s->field_count && !s->fields)) return 0;
-    uint64_t h = schema_u32(schema_str(UINT64_C(1469598103934665603), s->name), s->version); for (size_t i = 0; i < s->field_count; ++i) {
+    uint64_t h = schema_u32(schema_str(FLOW_FNV1A_64_OFFSET, s->name), s->version); for (size_t i = 0; i < s->field_count; ++i) {
         if (!s->fields[i].name || !s->fields[i].type) return 0; h = schema_u32(schema_str(schema_str(h, s->fields[i].name), s->fields[i].type), s->fields[i].flags); } return h; }
 int flow_schema_migration_compatible(const FlowSchema *o, const FlowSchema *n) {
     if (!o || !n || !o->name || !n->name || strcmp(o->name, n->name) != 0 || n->version <= o->version || n->field_count < o->field_count) return 0;
@@ -35,11 +36,41 @@ FlowReloadContext *flow_reload_create(void *host_context) { FlowReloadContext *c
     ctx->host_context = host_context; atomic_init(&ctx->epoch, 1); atomic_init(&ctx->anon_pin_epoch, 0);
     pthread_mutex_init(&ctx->lock, NULL); pthread_cond_init(&ctx->quiesced, NULL); return ctx; }
 static void drop_generation(FlowReloadContext *ctx, FlowReloadGeneration *g) { if (g && g->unit && g->unit->drop && g->state) { g->unit->drop(ctx->host_context, g->state); g->state = NULL; } }
+static size_t free_generation_list(FlowReloadContext *ctx, FlowReloadGeneration *head) {
+    size_t n = 0;
+    while (head) { FlowReloadGeneration *next = head->next; drop_generation(ctx, head); free(head); head = next; ++n; }
+    return n;
+}
+static int generation_safe(FlowReloadContext *ctx, const FlowReloadGeneration *cand) {
+    uint64_t retire_epoch = cand->retire_epoch;
+    if (atomic_load_explicit(&ctx->anon_pin_epoch, memory_order_seq_cst) > 0 ||
+        atomic_load_explicit(&cand->pin_count, memory_order_seq_cst) > 0) return 0;
+    if (ctx->bound_wavefront_ring && retire_epoch > ctx->bound_wavefront_ring->quiescent_generation) return 0;
+    for (const FlowReloadReader *r = ctx->readers; r; r = r->next) {
+        if (!atomic_load_explicit(&r->registered, memory_order_acquire) ||
+            atomic_load_explicit(&r->is_offline, memory_order_acquire) ||
+            atomic_load_explicit(&r->is_quarantined, memory_order_acquire)) continue;
+        uint64_t active = atomic_load_explicit(&r->active_epoch, memory_order_seq_cst);
+        if (active && active <= retire_epoch) return 0;
+    }
+    return 1;
+}
+static FlowReloadGeneration *reclaim_safe_locked(FlowReloadContext *ctx, size_t *remaining_depth_out) {
+    FlowReloadGeneration *ready = NULL;
+    size_t rem = 0;
+    for (FlowReloadGeneration **cur = &ctx->retired; *cur; ) {
+        FlowReloadGeneration *cand = *cur;
+        if (generation_safe(ctx, cand)) { *cur = cand->next; cand->next = ready; ready = cand; }
+        else { ++rem; cur = &cand->next; }
+    }
+    if (remaining_depth_out) *remaining_depth_out = rem;
+    return ready;
+}
 int flow_reload_destroy(FlowReloadContext *ctx) { if (!ctx) return FLOW_RELOAD_INVALID; pthread_mutex_lock(&ctx->lock);
     atomic_store_explicit(&ctx->stopping, 1, memory_order_release); if (ctx->readers) { pthread_mutex_unlock(&ctx->lock); return FLOW_RELOAD_BUSY; }
     FlowReloadGeneration *gen = atomic_load_explicit(&ctx->current, memory_order_acquire), *retired = ctx->retired;
     atomic_store_explicit(&ctx->current, NULL, memory_order_release); ctx->retired = NULL; pthread_mutex_unlock(&ctx->lock); if (gen) { drop_generation(ctx, gen); free(gen); }
-    while (retired) { FlowReloadGeneration *next = retired->next; drop_generation(ctx, retired); free(retired); retired = next; }
+    (void)free_generation_list(ctx, retired);
     pthread_cond_destroy(&ctx->quiesced); pthread_mutex_destroy(&ctx->lock); free(ctx); return FLOW_RELOAD_OK; }
 int flow_reload_reader_register(FlowReloadContext *ctx, FlowReloadReader *r) { if (!ctx || !r) return FLOW_RELOAD_INVALID; pthread_mutex_lock(&ctx->lock);
     if (ctx->stopping) { pthread_mutex_unlock(&ctx->lock); return FLOW_RELOAD_BUSY; } r->context = ctx; r->next = ctx->readers;
@@ -57,9 +88,20 @@ int flow_reload_publish(FlowReloadContext *ctx, const FlowUnit *unit, void *stat
     if (atomic_load_explicit(&ctx->stopping, memory_order_acquire)) { pthread_mutex_unlock(&ctx->lock); free(next); return FLOW_RELOAD_BUSY; }
     FlowReloadGeneration *old = atomic_load_explicit(&ctx->current, memory_order_acquire);
     if (old && !flow_reload_compatible(old->unit, unit)) { pthread_mutex_unlock(&ctx->lock); free(next); return FLOW_RELOAD_INCOMPATIBLE; }
+    FlowReloadGeneration *reclaimed_head = NULL;
+    if (old) {
+        size_t r_depth = 0;
+        for (FlowReloadGeneration *g = ctx->retired; g; g = g->next) ++r_depth;
+        if (r_depth >= FLOW_RELOAD_MAX_RETIRED_DEPTH) reclaimed_head = reclaim_safe_locked(ctx, &r_depth);
+        if (r_depth >= FLOW_RELOAD_MAX_RETIRED_DEPTH) {
+            pthread_mutex_unlock(&ctx->lock); free(next); (void)free_generation_list(ctx, reclaimed_head);
+            return FLOW_RELOAD_JOURNAL_FULL;
+        }
+    }
     if (old && old->state && unit->migrate) {
         if (unit->migrate(ctx->host_context, old->state, state) != 0) {
-            pthread_mutex_unlock(&ctx->lock); free(next); return FLOW_RELOAD_INCOMPATIBLE;
+            pthread_mutex_unlock(&ctx->lock); free(next); (void)free_generation_list(ctx, reclaimed_head);
+            return FLOW_RELOAD_INCOMPATIBLE;
         }
     }
     uint64_t t_swap_start = flow_clock_monotonic_ns();
@@ -72,17 +114,21 @@ int flow_reload_publish(FlowReloadContext *ctx, const FlowUnit *unit, void *stat
     uint64_t swap_elapsed = flow_clock_monotonic_ns() - t_swap_start;
     if (old) {
         old->next = ctx->retired; ctx->retired = old;
+        uint32_t g_bit = (uint32_t)(next->generation % FLOW_RELOAD_MAX_RETIRED_DEPTH);
+        uint64_t lease_mask = UINT64_C(1) << FLOW_SIEVE_BIT_QSBR_EPOCH_LEASE;
         FlowDecisionEvent ev = {
             .timestamp_ns = flow_clock_monotonic_ns(), .trigger_type = FLOW_DECISION_TRIGGER_STRAGGLER_QUARANTINE, .observed_metric_value = (double)next->generation,
-            .threshold_limit_value = (double)(next->generation - 1), .flipped_genome_bit = (uint32_t)(next->generation % 64), .pre_state_mask = (1ULL << 61),
-            .post_state_mask = (1ULL << 61) | (1ULL << (next->generation % 64)), .hot_swap_grace_ns = swap_elapsed ? swap_elapsed : 1,
+            .threshold_limit_value = (double)(next->generation - 1), .flipped_genome_bit = g_bit, .pre_state_mask = lease_mask,
+            .post_state_mask = lease_mask | (UINT64_C(1) << g_bit), .hot_swap_grace_ns = swap_elapsed ? swap_elapsed : 1,
             .trigger_source = "qsbr_epoch_migration", .metric_unit = "gen", .violated_constraint = "QSBR Zero-Downtime Epoch Upgrade" };
         snprintf(ev.pre_topology, sizeof(ev.pre_topology), "%s", (old->unit && old->unit->name) ? old->unit->name : "old_generation");
         snprintf(ev.post_topology, sizeof(ev.post_topology), "%s", (next->unit && next->unit->name) ? next->unit->name : "new_generation");
         snprintf(ev.causal_rationale, sizeof(ev.causal_rationale), "QSBR epoch %llu: '%s' -> '%s'", (unsigned long long)next->retire_epoch, ev.pre_topology, ev.post_topology);
         flow_decision_logger_record(flow_decision_logger_default(), &ev);
     }
-    pthread_mutex_unlock(&ctx->lock); return FLOW_RELOAD_OK; }
+    pthread_mutex_unlock(&ctx->lock);
+    (void)free_generation_list(ctx, reclaimed_head);
+    return FLOW_RELOAD_OK; }
 int flow_reload_activate(FlowReloadContext *ctx, const FlowUnit *unit) { void *state = NULL;
     if (!ctx || !unit_valid(unit) || !unit->init || unit->init(ctx->host_context, &state) != 0 || !state) return FLOW_RELOAD_INVALID;
     int res = flow_reload_publish(ctx, unit, state); if (res != FLOW_RELOAD_OK) unit->drop(ctx->host_context, state); return res; }
@@ -103,29 +149,14 @@ void flow_reload_end(FlowInvocation *inv) { if (!inv || !inv->active || !inv->re
         pthread_mutex_lock(&inv->context->lock); pthread_cond_broadcast(&inv->context->quiesced); pthread_mutex_unlock(&inv->context->lock); } *inv = (FlowInvocation){0}; }
 int flow_reload_call(FlowReloadContext *ctx, FlowReloadReader *r, const void *in, void *out) { FlowInvocation inv = {0}; int res = flow_reload_begin(ctx, r, &inv);
     if (res != FLOW_RELOAD_OK) return res; res = inv.unit->run(ctx->host_context, inv.state, in, out); flow_reload_end(&inv); return res; }
-static int generation_safe(FlowReloadContext *ctx, const FlowReloadGeneration *cand) {
-    uint64_t retire_epoch = cand->retire_epoch;
-    if (atomic_load_explicit(&ctx->anon_pin_epoch, memory_order_seq_cst) > 0 ||
-        atomic_load_explicit(&cand->pin_count, memory_order_seq_cst) > 0) return 0;
-    if (ctx->bound_wavefront_ring && retire_epoch > ctx->bound_wavefront_ring->quiescent_generation) return 0;
-    for (const FlowReloadReader *r = ctx->readers; r; r = r->next) {
-        if (!atomic_load_explicit(&r->registered, memory_order_acquire) ||
-            atomic_load_explicit(&r->is_offline, memory_order_acquire) ||
-            atomic_load_explicit(&r->is_quarantined, memory_order_acquire)) continue;
-        uint64_t active = atomic_load_explicit(&r->active_epoch, memory_order_seq_cst);
-        if (active && active <= retire_epoch) return 0;
-    }
-    return 1;
-}
 uint64_t flow_reload_generation(const FlowReloadContext *ctx) { const FlowReloadGeneration *curr = ctx ? atomic_load_explicit(&ctx->current, memory_order_acquire) : NULL; return curr ? curr->generation : 0; }
-size_t flow_reload_reclaim(FlowReloadContext *ctx) { if (!ctx) return 0; FlowReloadGeneration *ready = NULL; size_t reclaimed = 0; int any_active = 0;
+size_t flow_reload_reclaim(FlowReloadContext *ctx) { if (!ctx) return 0; int any_active = 0;
     pthread_mutex_lock(&ctx->lock);
-    for (FlowReloadGeneration **cur = &ctx->retired; *cur; ) { FlowReloadGeneration *cand = *cur;
-        if (!generation_safe(ctx, cand)) { cur = &cand->next; continue; } *cur = cand->next; cand->next = ready; ready = cand; }
+    FlowReloadGeneration *ready = reclaim_safe_locked(ctx, NULL);
     for (const FlowReloadReader *r = ctx->readers; r; r = r->next)
         if (atomic_load_explicit(&r->active_epoch, memory_order_seq_cst) != 0) { any_active = 1; break; }
     pthread_mutex_unlock(&ctx->lock);
-    while (ready) { FlowReloadGeneration *next = ready->next; drop_generation(ctx, ready); free(ready); ready = next; ++reclaimed; }
+    size_t reclaimed = free_generation_list(ctx, ready);
     if (ctx->bound_arena && reclaimed > 0 && !any_active) flow_bump_qsbr_quiescent_fold(ctx->bound_arena);
     return reclaimed; }
 void flow_qsbr_checkpoint(FlowReloadReader *r) {

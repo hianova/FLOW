@@ -25,20 +25,32 @@ static const FlowLeanEnum *abi_find_lean_enum(const SemanticIR *ir, const char *
         if (strcmp(ir->lean_enums[i].name, name) == 0) return &ir->lean_enums[i];
     return NULL;
 }
-static const char *abi_lean_c_type(const char *t) {
-    if (!t) return "uint64_t";
-    if (!strcmp(t, "Bool")) return "bool";
-    if (!strcmp(t, "Float")) return "double";
-    if (!strcmp(t, "Float32")) return "float";
-    if (!strcmp(t, "UInt32")) return "uint32_t";
-    if (!strcmp(t, "Int32")) return "int32_t";
-    if (!strcmp(t, "UInt16")) return "uint16_t";
-    if (!strcmp(t, "Int16")) return "int16_t";
-    if (!strcmp(t, "UInt8")) return "uint8_t";
-    if (!strcmp(t, "Int8")) return "int8_t";
-    if (!strcmp(t, "Int") || !strcmp(t, "Int64")) return "int64_t";
-    return "uint64_t";
+typedef struct { const char *lean; const char *c; const char *rust; const char *ctypes; } AbiScalarTypeEntry;
+static const AbiScalarTypeEntry ABI_SCALAR_TYPES[] = {
+    { "Bool",    "bool",     "bool", "ctypes.c_bool"   },
+    { "Float",   "double",   "f64",  "ctypes.c_double" },
+    { "Float32", "float",    "f32",  "ctypes.c_float"  },
+    { "UInt32",  "uint32_t", "u32",  "ctypes.c_uint32" },
+    { "Int32",   "int32_t",  "i32",  "ctypes.c_int32"  },
+    { "UInt16",  "uint16_t", "u16",  "ctypes.c_uint16" },
+    { "Int16",   "int16_t",  "i16",  "ctypes.c_int16"  },
+    { "UInt8",   "uint8_t",  "u8",   "ctypes.c_uint8"  },
+    { "Int8",    "int8_t",   "i8",   "ctypes.c_int8"   },
+    { "Int",     "int64_t",  "i64",  "ctypes.c_int64"  },
+    { "Int64",   "int64_t",  "i64",  "ctypes.c_int64"  },
+    { "UInt64",  "uint64_t", "u64",  "ctypes.c_uint64" }
+};
+static const AbiScalarTypeEntry *abi_lookup_scalar_by_lean(const char *t) {
+    if (t) for (size_t i = 0; i < sizeof(ABI_SCALAR_TYPES) / sizeof(ABI_SCALAR_TYPES[0]); ++i)
+        if (!strcmp(t, ABI_SCALAR_TYPES[i].lean)) return &ABI_SCALAR_TYPES[i];
+    return &ABI_SCALAR_TYPES[sizeof(ABI_SCALAR_TYPES) / sizeof(ABI_SCALAR_TYPES[0]) - 1];
 }
+static const AbiScalarTypeEntry *abi_lookup_scalar_by_c(const char *ct) {
+    if (ct) for (size_t i = 0; i < sizeof(ABI_SCALAR_TYPES) / sizeof(ABI_SCALAR_TYPES[0]); ++i)
+        if (!strcmp(ct, ABI_SCALAR_TYPES[i].c)) return &ABI_SCALAR_TYPES[i];
+    return &ABI_SCALAR_TYPES[sizeof(ABI_SCALAR_TYPES) / sizeof(ABI_SCALAR_TYPES[0]) - 1];
+}
+static const char *abi_lean_c_type(const char *t) { return abi_lookup_scalar_by_lean(t)->c; }
 static const char *abi_lean_c_type_ir(const SemanticIR *ir, const char *t) {
     if (abi_find_lean_struct(ir, t) || abi_find_lean_enum(ir, t)) return t;
     return abi_lean_c_type(t);
@@ -48,72 +60,20 @@ static const char *abi_lean_fx_c_type_ir(const SemanticIR *ir, const char *t) {
     if (!strcmp(t, "Float") || !strcmp(t, "Float32")) return "flow_fx64_t";
     return abi_lean_c_type_ir(ir, t);
 }
-static const char *abi_lean_rust_type(const char *t) {
-    if (!t) return "u64";
-    if (!strcmp(t, "Bool")) return "bool";
-    if (!strcmp(t, "Float")) return "f64";
-    if (!strcmp(t, "Float32")) return "f32";
-    if (!strcmp(t, "UInt32")) return "u32";
-    if (!strcmp(t, "Int32")) return "i32";
-    if (!strcmp(t, "UInt16")) return "u16";
-    if (!strcmp(t, "Int16")) return "i16";
-    if (!strcmp(t, "UInt8")) return "u8";
-    if (!strcmp(t, "Int8")) return "i8";
-    if (!strcmp(t, "Int") || !strcmp(t, "Int64")) return "i64";
-    return "u64";
-}
+static const char *abi_lean_rust_type(const char *t) { return abi_lookup_scalar_by_lean(t)->rust; }
 static const char *abi_lean_rust_type_ir(const SemanticIR *ir, const char *t) {
     if (abi_find_lean_struct(ir, t)) return t;
     if (abi_find_lean_enum(ir, t)) return "u32";
     return abi_lean_rust_type(t);
 }
-static const char *abi_c_type_to_rust_type(const char *ct) {
-    if (!ct) return "u64";
-    if (!strcmp(ct, "bool")) return "bool";
-    if (!strcmp(ct, "double")) return "f64";
-    if (!strcmp(ct, "float")) return "f32";
-    if (!strcmp(ct, "uint32_t")) return "u32";
-    if (!strcmp(ct, "int32_t")) return "i32";
-    if (!strcmp(ct, "uint16_t")) return "u16";
-    if (!strcmp(ct, "int16_t")) return "i16";
-    if (!strcmp(ct, "uint8_t")) return "u8";
-    if (!strcmp(ct, "int8_t")) return "i8";
-    if (!strcmp(ct, "int64_t")) return "i64";
-    return "u64";
-}
-static const char *abi_lean_ctypes_type(const char *t) {
-    if (!t) return "ctypes.c_uint64";
-    if (!strcmp(t, "Bool")) return "ctypes.c_bool";
-    if (!strcmp(t, "Float")) return "ctypes.c_double";
-    if (!strcmp(t, "Float32")) return "ctypes.c_float";
-    if (!strcmp(t, "UInt32")) return "ctypes.c_uint32";
-    if (!strcmp(t, "Int32")) return "ctypes.c_int32";
-    if (!strcmp(t, "UInt16")) return "ctypes.c_uint16";
-    if (!strcmp(t, "Int16")) return "ctypes.c_int16";
-    if (!strcmp(t, "UInt8")) return "ctypes.c_uint8";
-    if (!strcmp(t, "Int8")) return "ctypes.c_int8";
-    if (!strcmp(t, "Int") || !strcmp(t, "Int64")) return "ctypes.c_int64";
-    return "ctypes.c_uint64";
-}
+static const char *abi_c_type_to_rust_type(const char *ct) { return abi_lookup_scalar_by_c(ct)->rust; }
+static const char *abi_lean_ctypes_type(const char *t) { return abi_lookup_scalar_by_lean(t)->ctypes; }
 static const char *abi_lean_ctypes_type_ir(const SemanticIR *ir, const char *t) {
     if (abi_find_lean_struct(ir, t)) return t;
     if (abi_find_lean_enum(ir, t)) return "ctypes.c_uint32";
     return abi_lean_ctypes_type(t);
 }
-static const char *abi_c_type_to_ctypes(const char *ct) {
-    if (!ct) return "ctypes.c_uint64";
-    if (!strcmp(ct, "bool")) return "ctypes.c_bool";
-    if (!strcmp(ct, "double")) return "ctypes.c_double";
-    if (!strcmp(ct, "float")) return "ctypes.c_float";
-    if (!strcmp(ct, "uint32_t")) return "ctypes.c_uint32";
-    if (!strcmp(ct, "int32_t")) return "ctypes.c_int32";
-    if (!strcmp(ct, "uint16_t")) return "ctypes.c_uint16";
-    if (!strcmp(ct, "int16_t")) return "ctypes.c_int16";
-    if (!strcmp(ct, "uint8_t")) return "ctypes.c_uint8";
-    if (!strcmp(ct, "int8_t")) return "ctypes.c_int8";
-    if (!strcmp(ct, "int64_t")) return "ctypes.c_int64";
-    return "ctypes.c_uint64";
-}
+static const char *abi_c_type_to_ctypes(const char *ct) { return abi_lookup_scalar_by_c(ct)->ctypes; }
 int flow_abi_build_for_component(const SemanticIR *ir, const Component *comp, FlowComponentABI *abi) { if (!ir || !comp || !abi) return 0; memset(abi, 0, sizeof(*abi));
     abi->ir = ir;
     snprintf(abi->component_id, sizeof(abi->component_id), "%s", comp->id); const FlowPlugin *plugin = flow_component_plugin(comp);

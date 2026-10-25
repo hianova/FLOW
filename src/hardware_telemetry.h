@@ -28,8 +28,6 @@ static inline uint64_t flow_hardware_cycles(void) {
 }
 static inline uint64_t flow_clock_monotonic_ns(void) { struct timespec ts;
     return clock_gettime(CLOCK_MONOTONIC, &ts) == 0 ? (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec : 0; }
-static inline uint64_t flow_prng_next(uint64_t *state) { uint64_t x = (state && *state) ? *state : FLOW_GOLDEN_RATIO_64; x ^= x << 13; x ^= x >> 7; x ^= x << 17;
-    if (state) *state = x; return x; }
 uint64_t flow_hardware_timer_frequency_hz(void); double flow_hardware_energy_uj(void);
 void flow_hardware_probe_start(FlowPhysicalProbe *probe); void flow_hardware_probe_stop(FlowPhysicalProbe *probe);
 struct FlowThermalState; void flow_hardware_probe_update_thermal(const FlowPhysicalProbe *probe, struct FlowThermalState *thermal, double dt_sec);

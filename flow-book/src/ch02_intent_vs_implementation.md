@@ -74,7 +74,18 @@ bind "plugins/embodied.lean"
 - `stage <name> bind "<lean_path>" fn <fn_name> in <InStruct> out <OutStruct> wcet <time>`
 - `wire <stage_1> -> <stage_2> -> <stage_3>`
 
-`flowc` 會在編譯期自動驗證相鄰階段之 `OutStruct == InStruct` 與 byte stride 一致性、以 AST 指令成本模型推導靜態 WCET 下界，並由 SMT 證明總和延遲 $\sum \text{wcet}_i \le \text{deadline}$。同時，在將 `.lean` 的 `Float` 函數與結構轉換函數降階為 C17 時，會**自動注入 `!isfinite()` NaN/Inf 防火牆**與具名相空間視圖 `FlowJetView_<flow_name>`（`view.q->hipPitch`）。
+`flowc` 會在編譯期自動驗證相鄰階段之 `OutStruct == InStruct` 與 byte stride 一致性、以 AST 指令成本模型推導靜態 WCET 下界，並由 SMT 證明總和延遲 $\sum \text{wcet}_i \le \text{deadline}$。同時，在將 `.lean` 的 `Float` 函數與結構轉換函數降階為 C17 時，會自動映射至無損近似 $Q32.32$ 定點數核心（`FlowExactNumerics`：`flow_fx64_t` / `FlowU256`，以 128-bit 中間精度與 `FLOW_FX64_NONE` 故障隔離取代有損 IEEE-754 浮點運算）、**自動注入 `!isfinite()` NaN/Inf 防火牆**，並合成零開銷 `--target-c-header` `static inline` 雙軌算子（`flowc_<fn>` 與純定點 `flowc_<fn>_fx`）與具名相空間視圖 `FlowJetView_<flow_name>`（`view.q->hipPitch`）。
+
+### 2.1.1 `@keyword` 與 `.flow` / `.lean` 宣告式語法全集速查表
+
+| `@keyword` / 指令 | 所屬層級 | 核心子指令與語法 | 編譯器與執行期語義 |
+| :--- | :--- | :--- | :--- |
+| **`@quota { ... }`**<br>*(別名：`quota`, `require`)* | `.flow` 硬體與預算契約 | `deterministic`, `lean_certified`, `deadline <time>`, `arena <size>`, `memory < <n>mb`, `fallback <policy>` | 強制零 `sorry` 證明與 $Q32.32$ 確定性定點運算；預配置 64B 對齊 + Page Pre-Faulting + `mlock` 靜態 Arena；啟動硬體週期看門狗（超時觸發 `-4` 緊急停機閂鎖）。 |
+| **`@embodied [name] { ... }`**<br>*(別名：`embodied`, `jet`)* | `.flow` 具身相空間與 I/O | `frequency <hz>`, `symplectic`, `max_drift <val>`, `zmp_margin <val>`, `dt <time>`, `dim <n>`, `ingress <drv>`, `egress <drv>`, `coordinates [...]` | 自動綁定 `flow.embodied` 領域插件与 `zmp_torque_safe` 合約；執行辛幾何多面體配速並合成零偏移具名座標視圖 `FlowJetView_<id>`。 |
+| **`@reload { ... }`**<br>*(別名：`reload`)* | `.flow` 無鎖熱重載與遷移 | `schema_version <int>`, `qsbr_timeout <time>`, `from_schema <S1>`, `to_schema <S2>`, `migrate <lean_fn>` | 配置 64B 快取行對齊之 QSBR 世代租約（含 **發布前預留空間 Reservation-Before-Publication** 上限 `FLOW_RELOAD_MAX_RETIRED_DEPTH = 64`）；自動降階經定理驗證之 `S1 -> S2` 狀態遷移算子。 |
+| **`@patchbay { ... }`**<br>*(別名：`patchbay`)* | `.flow` 多階段零拷貝流水線 | `stage <name> bind "<.lean>" [fn <f>] [in <S1>] [out <S2>] [wcet <= <t>]`<br>`wire <s1> -> <s2> -> ...` | 串接多個 `.lean` 核函數為 DAG 流水線；編譯期靜態驗證相鄰階段型別與 Stride 一致性、AST WCET 下界，並由 SMT 證明總和延遲 $\sum \text{wcet}_i \le \text{deadline}$。 |
+| **`@[export <sym>]`** | `.lean` 屬性標註 *(選用)* | `@[export myStepKernel]` | 顯式指定 `spec->extern_kernel` 主算子名稱（預設無需撰寫，`flowc` 會自動從 `theorem` 錨定推導並匯出所有純函數）。 |
+| **`project` / `bind` / `import` / `thermal`** | `.flow` 頂層指令 | `project <name>`, `bind "<.lean>"`, `import <plugin>`, `thermal { max_temp, target_temp, power_limit, r_thermal, c_thermal }` | 宣告專案名稱、綁定純 `.lean` 數學核心、載入領域插件，以及定義硬體熱力學包絡線參數。 |
 
 ---
 

@@ -9,12 +9,21 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#define FNV64_OFFSET UINT64_C(14695981039346656037)
-#define FNV64_PRIME  UINT64_C(1099511628211)
+#define FLOW_BMF_DEFAULT_CAPACITY        4096U
+#define FLOW_BMF_MIN_CAPACITY            1024U
+#define FLOW_BMF_DEFAULT_BUFFER_BYTES    16384U
+#define FLOW_BMF_DEFAULT_INITIAL_CAP     4U
+#define FLOW_BMF_DEFAULT_GROWTH_PCT      150U
+#define FLOW_BMF_HARD_GATE_PENALTY       1.0e12
+#define FLOW_BMF_SOFT_BIAS_WEIGHT        0.35
+#define FLOW_SWARM_BIAS_WEIGHT           0.65
+#define FLOW_SWARM_EVAPORATION_RATE      0.92
+#define FLOW_SWARM_REINFORCEMENT_WEIGHT  2.5
+#define FLOW_SWARM_STAGNATION_LIMIT      8U
 static uint64_t hash_bytes(uint64_t hash, const void *ptr, size_t size) { const uint8_t *bytes = (const uint8_t *)ptr;
-    for (size_t i = 0; i < size; ++i) hash = (hash ^ bytes[i]) * FNV64_PRIME; return hash; }
+    for (size_t i = 0; i < size; ++i) hash = (hash ^ bytes[i]) * FLOW_FNV1A_64_PRIME; return hash; }
 static uint64_t hash_str(uint64_t hash, const char *str) { return str ? hash_bytes(hash, str, strlen(str)) : hash; }
-uint64_t flow_compute_contract_hash(const SemanticIR *ir) { uint64_t h = FNV64_OFFSET; if (!ir) return h;
+uint64_t flow_compute_contract_hash(const SemanticIR *ir) { uint64_t h = FLOW_FNV1A_64_OFFSET; if (!ir) return h;
     const char * const strs[] = { ir->flow_name, ir->domain_name, ir->contract_name, ir->output_name, ir->resource_name, ir->capability_name, ir->fallback_policy };
     for (size_t i = 0; i < 7; ++i) h = hash_str(h, strs[i]);
     h = hash_bytes(hash_bytes(hash_bytes(h, &ir->input_max_count, sizeof(ir->input_max_count)), &ir->top_n, sizeof(ir->top_n)), &ir->memory_limit_mb, sizeof(ir->memory_limit_mb));
@@ -147,20 +156,20 @@ uint64_t flow_bitspace_encode(const FlowBitSpace *space, size_t cand_idx, const 
     const FlowPlanDimensionSet *dims = &space->candidate_dims[cand_idx]; for (size_t i = 0, shift = space->selector_bits; i < dims->count && i < plan->count; ++i) {
         const FlowPlanDimension *d = &dims->dimensions[i]; unsigned bits = dimension_bits(d); uint64_t mask = (bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << bits) - 1);
         genome |= (encode_dim_raw(d, plan->values[i], 0) & mask) << shift; shift += bits; } return genome; }
-static uint64_t encode_candidate_heuristic(const FlowBitSpace *space, size_t cand_idx, int is_default) { uint64_t genome = (uint64_t)cand_idx;
+static uint64_t encode_candidate_canonical(const FlowBitSpace *space, size_t cand_idx, int is_default) { uint64_t genome = (uint64_t)cand_idx;
     const FlowPlanDimensionSet *dims = &space->candidate_dims[cand_idx]; for (size_t i = 0, shift = space->selector_bits; i < dims->count; ++i) {
         const FlowPlanDimension *d = &dims->dimensions[i]; unsigned bits = dimension_bits(d); uint64_t val = is_default ? d->default_val : d->min_val;
         int val_is_exp = is_default && (d->kind == FLOW_DIM_EXPONENT); if (space->ir) { if (!strcmp(d->name, "capacity")) {
-                size_t req_cap = space->ir->input_max_count > 0 ? (size_t)space->ir->input_max_count : (is_default ? 4096 : 1024);
+                size_t req_cap = space->ir->input_max_count > 0 ? (size_t)space->ir->input_max_count : (is_default ? FLOW_BMF_DEFAULT_CAPACITY : FLOW_BMF_MIN_CAPACITY);
                 if (is_default && space->ir->top_n > 0 && req_cap < (size_t)space->ir->top_n) req_cap = (size_t)space->ir->top_n; val = req_cap; val_is_exp = 0;
             } else if ((!strcmp(d->name, "threads") || !strcmp(d->name, "shards")) && d->kind == FLOW_DIM_EXPONENT) {
                 uint64_t exp = (!strcmp(d->name, "threads") && space->ir->flow_parallelizable) ? 2 : (space->ir->state_shared ? 4 : 0);
                 val = exp < d->min_val ? d->min_val : (exp > d->max_val ? d->max_val : exp); val_is_exp = 1; } }
         uint64_t mask = (bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << bits) - 1); genome |= (encode_dim_raw(d, val, val_is_exp) & mask) << shift; shift += bits; } return genome; }
 uint64_t flow_bitspace_default_genome(const FlowBitSpace *space) { if (!space || !space->candidate_count) return 0; size_t cand_idx = 0; if (space->ir) {
-        const Component *heur = select_component(space->ir);
-        if (heur) for (size_t c = 0; c < space->candidate_count; ++c) if (space->candidates[c] == heur) { cand_idx = c; break; } }
-    return encode_candidate_heuristic(space, cand_idx, 1); }
+        const Component *canonical_comp = select_component(space->ir);
+        if (canonical_comp) for (size_t c = 0; c < space->candidate_count; ++c) if (space->candidates[c] == canonical_comp) { cand_idx = c; break; } }
+    return encode_candidate_canonical(space, cand_idx, 1); }
 int flow_bitspace_search(const FlowBitSpace *space, size_t iterations, uint32_t seed, int measured, const FlowPlan *seed_plan, FlowBitSearchResult *result_out) {
     if (!space || !result_out || !space->candidate_count) return 0; memset(result_out, 0, sizeof(*result_out));
     result_out->iterations = iterations ? iterations : 1; result_out->seed = seed; result_out->measured = measured; FlowPlan best_plan = {0};
@@ -168,18 +177,18 @@ int flow_bitspace_search(const FlowBitSpace *space, size_t iterations, uint32_t 
         space->evaluate(space, &best_plan, &best_plan.eval); FlowGateFailureReason r = FLOW_GATE_PASS;
         best_plan.eval.hard_gate_passed = hierarchical_hard_gate_reason(space, &best_plan, &best_plan.eval, &r); result_out->heatmap.total_mutations++;
         if (best_plan.eval.hard_gate_passed) pareto_update_bitspace(result_out, &best_plan);
-        else { best_plan.eval.energy += 1.0e12; result_out->heatmap.total_failures++; result_out->heatmap.failure_counts[r]++; } }
-    for (size_t c = 0; c < space->candidate_count; ++c) { FlowPlan cand; if (space->decode(space, encode_candidate_heuristic(space, c, 0), &cand)) {
+        else { best_plan.eval.energy += FLOW_BMF_HARD_GATE_PENALTY; result_out->heatmap.total_failures++; result_out->heatmap.failure_counts[r]++; } }
+    for (size_t c = 0; c < space->candidate_count; ++c) { FlowPlan cand; if (space->decode(space, encode_candidate_canonical(space, c, 0), &cand)) {
             space->evaluate(space, &cand, &cand.eval); FlowGateFailureReason cr = FLOW_GATE_PASS;
             cand.eval.hard_gate_passed = hierarchical_hard_gate_reason(space, &cand, &cand.eval, &cr); result_out->heatmap.total_mutations++; if (cand.eval.hard_gate_passed) {
                 pareto_update_bitspace(result_out, &cand); if (!best_plan.eval.hard_gate_passed || cand.eval.energy < best_plan.eval.energy) best_plan = cand;
             } else { result_out->heatmap.total_failures++; result_out->heatmap.failure_counts[cr]++; } } }
-    uint64_t rng = seed ? (uint64_t)seed : UINT64_C(0x9E3779B97F4A7C15);
+    uint64_t rng = seed ? (uint64_t)seed : FLOW_GOLDEN_RATIO_64;
     uint64_t walk_genome = best_plan.eval.hard_gate_passed ? best_plan.genome : current_genome;
-    size_t max_steps = iterations > 4096 ? 4096 : iterations;
+    size_t max_steps = iterations > FLOW_BMF_DEFAULT_CAPACITY ? FLOW_BMF_DEFAULT_CAPACITY : iterations;
     for (size_t step = 0; step < max_steps; ++step) {
         uint32_t mbit = 0xFFFFFFFF;
-        uint64_t next_g = flow_bitspace_mutate_1bit_superposed(space, walk_genome, &space->global_canvas, 0.35, &rng, &mbit);
+        uint64_t next_g = flow_bitspace_mutate_1bit_superposed(space, walk_genome, &space->global_canvas, FLOW_BMF_SOFT_BIAS_WEIGHT, &rng, &mbit);
         (void)mbit;
         FlowPlan cand = {0};
         if (space->decode(space, next_g, &cand)) {
@@ -271,16 +280,16 @@ uint64_t flow_plan_get_value(const FlowPlanDimensionSet *dims, const FlowPlanAss
         if (!strcmp(dims->dimensions[i].name, name)) return plan->values[i];
     return default_val; }
 FlowTuning flow_default_tuning(const SemanticIR *ir, const Component *comp) { (void)comp;
-    return (FlowTuning){.buffer_bytes = 16384, .initial_capacity = 4, .growth_percent = 150, .batch_size = 16384, .arena_bytes = (ir && ir->arena_limit_bytes > 0) ? ir->arena_limit_bytes : 0}; }
+    return (FlowTuning){.buffer_bytes = FLOW_BMF_DEFAULT_BUFFER_BYTES, .initial_capacity = FLOW_BMF_DEFAULT_INITIAL_CAP, .growth_percent = FLOW_BMF_DEFAULT_GROWTH_PCT, .batch_size = FLOW_BMF_DEFAULT_BUFFER_BYTES, .arena_bytes = (ir && ir->arena_limit_bytes > 0) ? ir->arena_limit_bytes : 0}; }
 int flow_polyhedral_solve_plan(const SemanticIR *ir, const FlowBitSpace *space, FlowPlan *plan_out) { if (!ir || !plan_out) return 0; memset(plan_out, 0, sizeof(*plan_out));
-    size_t cand_idx = 0; if (space && space->candidate_count > 0) { const Component *heur = select_component(ir);
-        if (heur) for (size_t c = 0; c < space->candidate_count; ++c) if (space->candidates[c] == heur) { cand_idx = c; break; }
+    size_t cand_idx = 0; if (space && space->candidate_count > 0) { const Component *canonical_comp = select_component(ir);
+        if (canonical_comp) for (size_t c = 0; c < space->candidate_count; ++c) if (space->candidates[c] == canonical_comp) { cand_idx = c; break; }
         plan_out->component = space->candidates[cand_idx]; plan_out->dimension_set = space->candidate_dims[cand_idx];
     } else if (!(plan_out->component = select_component(ir))) return 0; FlowPolyhedron poly; flow_polyhedral_init(&poly, 2);
-    int64_t cap = ir->input_max_count > 0 ? (int64_t)ir->input_max_count : 4096;
-    if (ir->top_n > 0 && cap < (int64_t)ir->top_n) cap = (int64_t)ir->top_n; flow_polyhedral_set_box_bounds(&poly, 0, 0, cap); flow_polyhedral_set_box_bounds(&poly, 1, 0, 64);
-    FlowPolyhedralSchedule sched = {0}; flow_polyhedral_solve_schedule(&poly, 64, 16, &sched); long online = sysconf(_SC_NPROCESSORS_ONLN);
-    online = online < 1 ? 1 : (online > 64 ? 64 : online); size_t target_threads = ir->flow_parallelizable ? 4 : (ir->state_shared ? 16 : 1);
+    int64_t cap = ir->input_max_count > 0 ? (int64_t)ir->input_max_count : (int64_t)FLOW_BMF_DEFAULT_CAPACITY;
+    if (ir->top_n > 0 && cap < (int64_t)ir->top_n) cap = (int64_t)ir->top_n; flow_polyhedral_set_box_bounds(&poly, 0, 0, cap); flow_polyhedral_set_box_bounds(&poly, 1, 0, (int64_t)FLOW_WORD_BITS);
+    FlowPolyhedralSchedule sched = {0}; flow_polyhedral_solve_schedule(&poly, (int64_t)FLOW_WORD_BITS, 16, &sched); long online = sysconf(_SC_NPROCESSORS_ONLN);
+    online = online < 1 ? 1 : (online > (long)FLOW_WORD_BITS ? (long)FLOW_WORD_BITS : online); size_t target_threads = ir->flow_parallelizable ? 4 : (ir->state_shared ? 16 : 1);
     if (target_threads > (size_t)online) target_threads = (size_t)online; if (!target_threads) target_threads = 1; size_t target_shards = ir->state_shared ? 16 : 1;
     const FlowPlanDimensionSet *dims = &plan_out->dimension_set; plan_out->assignment.count = dims->count; for (size_t i = 0; i < dims->count; ++i) {
         const FlowPlanDimension *d = &dims->dimensions[i]; uint64_t val = d->default_val;
@@ -293,8 +302,8 @@ int flow_polyhedral_solve_plan(const SemanticIR *ir, const FlowBitSpace *space, 
             }
         }
         else if (!strcmp(d->name, "threads")) val = target_threads; else if (!strcmp(d->name, "shards")) val = target_shards;
-        else if (!strcmp(d->name, "buffer_bytes") || !strcmp(d->name, "batch_size")) val = sched.optimal_tile_size > 0 ? sched.optimal_tile_size * 256 : 16384;
-        else if (!strcmp(d->name, "initial_capacity")) val = 4; else if (!strcmp(d->name, "growth_percent")) val = 150; else if (!strcmp(d->name, "arena_bytes")) val = ir->arena_limit_bytes;
+        else if (!strcmp(d->name, "buffer_bytes") || !strcmp(d->name, "batch_size")) val = sched.optimal_tile_size > 0 ? sched.optimal_tile_size * 256 : FLOW_BMF_DEFAULT_BUFFER_BYTES;
+        else if (!strcmp(d->name, "initial_capacity")) val = FLOW_BMF_DEFAULT_INITIAL_CAP; else if (!strcmp(d->name, "growth_percent")) val = FLOW_BMF_DEFAULT_GROWTH_PCT; else if (!strcmp(d->name, "arena_bytes")) val = ir->arena_limit_bytes;
         uint64_t lo = (d->kind != FLOW_DIM_EXPONENT) ? d->min_val : ((uint64_t)1 << d->min_val);
         uint64_t hi = (d->kind != FLOW_DIM_EXPONENT) ? d->max_val : ((uint64_t)1 << d->max_val); plan_out->assignment.values[i] = val < lo ? lo : (val > hi ? hi : val); }
     plan_out->genome = space ? flow_bitspace_encode(space, cand_idx, &plan_out->assignment) : (uint64_t)cand_idx;
@@ -343,12 +352,12 @@ void flow_plan_to_search_result(const FlowPlan *plan, const SemanticIR *ir, uint
     out->tuning.batch_size = flow_plan_get_value(&plan->dimension_set, &plan->assignment, "batch_size", out->tuning.batch_size);
     out->tuning.arena_bytes = flow_plan_get_value(&plan->dimension_set, &plan->assignment, "arena_bytes", out->tuning.arena_bytes); }
 static void eval_particle_plan(const FlowBitSpace *space, uint64_t genome, FlowPlan *plan) { space->decode(space, genome, plan); space->evaluate(space, plan, &plan->eval);
-    plan->eval.hard_gate_passed = space->hard_gate(space, plan, &plan->eval); if (!plan->eval.hard_gate_passed) plan->eval.energy += 1.0e12; }
+    plan->eval.hard_gate_passed = space->hard_gate(space, plan, &plan->eval); if (!plan->eval.hard_gate_passed) plan->eval.energy += FLOW_BMF_HARD_GATE_PENALTY; }
 int flow_swarm_init(FlowSwarmCluster *cluster, const FlowBitSpace *space, size_t particle_count, uint32_t base_seed) { if (!cluster || !space || !particle_count) return 0;
     if (particle_count > FLOW_SWARM_MAX_PARTICLES) particle_count = FLOW_SWARM_MAX_PARTICLES; *cluster = (FlowSwarmCluster){ .space = space, .particle_count = particle_count,
-        .rng_state = base_seed ? (uint64_t)base_seed : UINT64_C(0x1928374650afbecd), .pheromone = { .evaporation_rate = 0.92, .reinforcement_weight = 2.5,
-                       .consensus_mask = (space->bit_count >= 64) ? ~0ULL : ((1ULL << space->bit_count) - 1ULL) } };
-    for (int b = 0; b < 64; ++b) cluster->pheromone.bit_intensity[b] = 1.0; if (space->env_mask) cluster->pheromone.consensus_mask &= space->env_mask;
+        .rng_state = base_seed ? (uint64_t)base_seed : FLOW_GOLDEN_RATIO_64, .pheromone = { .evaporation_rate = FLOW_SWARM_EVAPORATION_RATE, .reinforcement_weight = FLOW_SWARM_REINFORCEMENT_WEIGHT,
+                       .consensus_mask = (space->bit_count >= FLOW_WORD_BITS) ? ~0ULL : ((1ULL << space->bit_count) - 1ULL) } };
+    for (int b = 0; b < (int)FLOW_WORD_BITS; ++b) cluster->pheromone.bit_intensity[b] = 1.0; if (space->env_mask) cluster->pheromone.consensus_mask &= space->env_mask;
     uint64_t def_genome = flow_bitspace_default_genome(space); for (size_t i = 0; i < particle_count; ++i) { FlowSwarmParticle *p = &cluster->particles[i];
         p->id = (uint32_t)i; p->current_genome = def_genome ^ (i > 0 ? (1ULL << (flow_prng_next(&cluster->rng_state) % (space->bit_count ? space->bit_count : 1))) : 0ULL);
         p->best_genome = p->current_genome; p->local_mask = space->env_mask; eval_particle_plan(space, p->current_genome, &p->best_plan);
@@ -356,7 +365,7 @@ int flow_swarm_init(FlowSwarmCluster *cluster, const FlowBitSpace *space, size_t
         if (i == 0 || (p->best_plan.eval.hard_gate_passed && (!cluster->global_best_plan.eval.hard_gate_passed || p->best_energy < cluster->global_best_energy))) {
             cluster->global_best_plan = p->best_plan; cluster->global_best_energy = p->best_energy; } } return 1; }
 int flow_swarm_diffuse_pheromone(FlowSwarmCluster *cluster) { if (!cluster || !cluster->space) return 0;
-    uint32_t bits = (cluster->space->bit_count > 0 && cluster->space->bit_count <= 64) ? cluster->space->bit_count : (cluster->space->bit_count > 64 ? 64 : 16);
+    uint32_t bits = (cluster->space->bit_count > 0 && cluster->space->bit_count <= FLOW_WORD_BITS) ? cluster->space->bit_count : (cluster->space->bit_count > FLOW_WORD_BITS ? FLOW_WORD_BITS : 16);
     double sum = 0.0; for (uint32_t b = 0; b < bits; ++b) {
         cluster->pheromone.bit_intensity[b] = fmax(0.1, cluster->pheromone.bit_intensity[b] * cluster->pheromone.evaporation_rate); sum += cluster->pheromone.bit_intensity[b];
     } double avg = bits > 0 ? sum / (double)bits : 1.0; uint64_t mask = 0, semilattice = 0;
@@ -365,23 +374,23 @@ int flow_swarm_diffuse_pheromone(FlowSwarmCluster *cluster) { if (!cluster || !c
         if (cluster->particles[i].best_plan.eval.hard_gate_passed)
             semilattice |= (cluster->particles[i].best_genome & cluster->particles[i].local_mask);
     mask |= semilattice;
-    if (!mask) mask = (bits >= 64) ? ~0ULL : ((1ULL << bits) - 1ULL); if (cluster->space->env_mask) mask &= cluster->space->env_mask; cluster->pheromone.consensus_mask = mask;
+    if (!mask) mask = (bits >= FLOW_WORD_BITS) ? ~0ULL : ((1ULL << bits) - 1ULL); if (cluster->space->env_mask) mask &= cluster->space->env_mask; cluster->pheromone.consensus_mask = mask;
     return 1; }
 int flow_swarm_step(FlowSwarmCluster *cluster, size_t steps_per_particle) { if (!cluster || !cluster->space) return 0;
-    const FlowBitSpace *space = cluster->space; uint32_t bits = (space->bit_count > 0 && space->bit_count <= 64) ? space->bit_count : (space->bit_count > 64 ? 64 : 16);
+    const FlowBitSpace *space = cluster->space; uint32_t bits = (space->bit_count > 0 && space->bit_count <= FLOW_WORD_BITS) ? space->bit_count : (space->bit_count > FLOW_WORD_BITS ? FLOW_WORD_BITS : 16);
     FlowMaskCanvas swarm_canvas = space->global_canvas; swarm_canvas.soft_composite_bias |= cluster->pheromone.consensus_mask;
     if (swarm_canvas.hard_composite_mask) swarm_canvas.soft_composite_bias &= swarm_canvas.hard_composite_mask;
     for (size_t p_idx = 0; p_idx < cluster->particle_count; ++p_idx) { FlowSwarmParticle *p = &cluster->particles[p_idx];
         for (size_t step = 0; step < steps_per_particle; ++step) { cluster->total_swarm_mutations++; uint32_t mutated_bit = 0;
-            uint64_t cand_genome = flow_bitspace_mutate_1bit_superposed(space, p->current_genome, &swarm_canvas, 0.65, &cluster->rng_state, &mutated_bit);
+            uint64_t cand_genome = flow_bitspace_mutate_1bit_superposed(space, p->current_genome, &swarm_canvas, FLOW_SWARM_BIAS_WEIGHT, &cluster->rng_state, &mutated_bit);
             if (mutated_bit == 0xFFFFFFFF || mutated_bit >= bits) continue; FlowPlan cand_plan; eval_particle_plan(space, cand_genome, &cand_plan);
             if (cand_plan.eval.energy < p->current_energy || !p->best_plan.eval.hard_gate_passed) { p->current_genome = cand_genome; p->current_energy = cand_plan.eval.energy;
                 if (cand_plan.eval.hard_gate_passed && (!p->best_plan.eval.hard_gate_passed || cand_plan.eval.energy < p->best_energy)) {
                     double gain = p->best_energy - cand_plan.eval.energy;
-                    p->best_energy = cand_plan.eval.energy; p->best_genome = cand_genome; p->best_plan = cand_plan; p->stagnation_steps = 0; if (mutated_bit < 64)
+                    p->best_energy = cand_plan.eval.energy; p->best_genome = cand_genome; p->best_plan = cand_plan; p->stagnation_steps = 0; if (mutated_bit < FLOW_WORD_BITS)
                         cluster->pheromone.bit_intensity[mutated_bit] += cluster->pheromone.reinforcement_weight * ((gain > 0.0) ? (gain / (cand_plan.eval.energy + 1.0)) : 1.0);
                     if (!cluster->global_best_plan.eval.hard_gate_passed || p->best_energy < cluster->global_best_energy) {
-                        cluster->global_best_plan = cand_plan; cluster->global_best_energy = p->best_energy; } } } else if (++p->stagnation_steps >= 8) {
+                        cluster->global_best_plan = cand_plan; cluster->global_best_energy = p->best_energy; } } } else if (++p->stagnation_steps >= FLOW_SWARM_STAGNATION_LIMIT) {
                 cluster->total_saddle_point_escapes++;
                 uint64_t base_g = cluster->global_best_plan.eval.hard_gate_passed ? cluster->global_best_plan.genome : flow_bitspace_default_genome(space);
                 p->current_genome = base_g ^ (1ULL << (flow_prng_next(&cluster->rng_state) % bits)); space->decode(space, p->current_genome, &p->best_plan);
@@ -547,25 +556,25 @@ int flow_u256_div_rem(FlowU256 a, FlowU256 b, FlowU256 *q_out, FlowU256 *r_out) 
 uint64_t flow_u256_inv_word(const FlowU256 *n) {
     if (!n || (n->w[0] & 1ULL) == 0ULL) return 0ULL;
     uint64_t x = n->w[0], inv = x;
-    for (int i = 0; i < 6; ++i) inv = inv * (2ULL - x * inv);
+    for (int i = 0; i < FLOW_NEWTON_64BIT_ITERS; ++i) inv = inv * (2ULL - x * inv);
     return 0ULL - inv;
 }
-FlowU256 flow_u256_mont_reduce(const uint64_t t_in[8], const FlowU256 *modulus, uint64_t n0_inv) {
-    uint64_t t[8];
+FlowU256 flow_u256_mont_reduce(const uint64_t t_in[FLOW_U512_LIMBS], const FlowU256 *modulus, uint64_t n0_inv) {
+    uint64_t t[FLOW_U512_LIMBS];
     memcpy(t, t_in, sizeof(t));
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < FLOW_U256_LIMBS; ++i) {
         uint64_t m = t[i] * n0_inv;
         flow_u128_t carry = 0;
-        for (int j = 0; j < 4; ++j) {
+        for (int j = 0; j < FLOW_U256_LIMBS; ++j) {
             flow_u128_t prod = (flow_u128_t)m * (flow_u128_t)modulus->w[j] + (flow_u128_t)t[i + j] + carry;
             t[i + j] = (uint64_t)prod;
-            carry = prod >> 64U;
+            carry = prod >> FLOW_WORD_BITS;
         }
-        int j = i + 4;
-        while (carry > 0 && j < 8) {
+        int j = i + FLOW_U256_LIMBS;
+        while (carry > 0 && j < FLOW_U512_LIMBS) {
             flow_u128_t sum = (flow_u128_t)t[j] + carry;
             t[j] = (uint64_t)sum;
-            carry = sum >> 64U;
+            carry = sum >> FLOW_WORD_BITS;
             j++;
         }
     }
@@ -603,16 +612,16 @@ FlowU256 flow_u256_mod_pow(FlowU256 base, FlowU256 exp, FlowU256 modulus) {
     }
     uint64_t n0_inv = flow_u256_inv_word(&modulus);
     FlowU256 r = one;
-    for (int i = 0; i < 256; ++i) {
+    for (uint32_t i = 0; i < FLOW_U256_BITS; ++i) {
         r = flow_u256_shl1(r);
         if (flow_u256_cmp(&r, &modulus) >= 0) r = flow_u256_overflowing_sub(r, modulus, NULL);
     }
     FlowU256 r2 = r;
-    for (int i = 0; i < 256; ++i) {
+    for (uint32_t i = 0; i < FLOW_U256_BITS; ++i) {
         r2 = flow_u256_shl1(r2);
         if (flow_u256_cmp(&r2, &modulus) >= 0) r2 = flow_u256_overflowing_sub(r2, modulus, NULL);
     }
-    uint64_t wide[8];
+    uint64_t wide[FLOW_U512_LIMBS];
     flow_u256_mul_wide(base, r2, wide);
     FlowU256 b_mont = flow_u256_mont_reduce(wide, &modulus, n0_inv);
     FlowU256 res_mont = r;
@@ -653,14 +662,14 @@ int flow_u256_is_probably_prime(const FlowU256 *n, const uint64_t *bases, size_t
     return 1;
 }
 static uint64_t flow_splitmix64_seed(uint64_t state) {
-    state += UINT64_C(0x9e3779b97f4a7c15);
+    state += FLOW_GOLDEN_RATIO_64;
     uint64_t z = state;
-    z = (z ^ (z >> 30U)) * UINT64_C(0xbf58476d1ce4e5b9);
-    z = (z ^ (z >> 27U)) * UINT64_C(0x94d049bb133111eb);
+    z = (z ^ (z >> 30U)) * FLOW_SPLITMIX64_MUL1;
+    z = (z ^ (z >> 27U)) * FLOW_SPLITMIX64_MUL2;
     return z ^ (z >> 31U);
 }
 static inline uint64_t flow_rotl64(uint64_t x, int k) {
-    return (x << k) | (x >> (64 - k));
+    return (x << k) | (x >> ((int)FLOW_WORD_BITS - k));
 }
 void flow_xoshiro256ss_init(FlowXoshiro256SS *rng, uint64_t seed) {
     if (!rng) return;

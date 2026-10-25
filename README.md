@@ -39,10 +39,10 @@ FLOW fuses **Domain Intent**, **Formal Proof**, and **Native Hardware Execution*
 | Dimension | Traditional Systems / FFI Stack | FLOW Pure `.lean` × `.flow` Fusion |
 | :--- | :--- | :--- |
 | **Source of Truth** | Separate YAML config + C/Rust kernel + Python/JS FFI bindings + unit tests | **Pure `.lean`** (`What`: Math, `structure`, `def`, `theorem`) + Optional **`.flow` Manifest** (`Where & How`: `@quota`, `@embodied`, `@reload`, `@patchbay`) |
-| **FFI & NaN Safety** | Manual `@[export]`, `extern "C"`, struct marshaling & hand-written `isfinite()` guards | **Zero `@[export]` & Auto `isfinite()` Firewall** — compiler emits `#[repr(C)]` / `ctypes.Structure`, `flow_quantize`/`flow_dequantize`, and named `FlowJetView` lenses (`view.q->hipPitch`) |
+| **FFI, Exact Math & NaN Safety** | Manual `@[export]`, `extern "C"`, lossy IEEE-754 float drift & hand-written `isfinite()` guards | **Zero `@[export]` + `FlowExactNumerics` ($Q32.32$ / `FlowU256`)** — lowers Lean `Float` (`+ - * / % ^ sqrt exp log sin cos atan2 floor ceil round`) to deterministic 128-bit-intermediate $Q32.32$ fixed-point (`FLOW_FX64_NONE` fault isolation), emits dual `flowc_<fn>` (`double`) & `flowc_<fn>_fx` (`flow_fx64_t`) static inline headers (`~0.68 ns`), and destructures tuple returns (`(Float × Float)` $\to$ `double *out_0, double *out_1`) |
 | **Correctness & Real-Time Gate** | Runtime assertions, GC pauses, or detached proofs | **Zero-`sorry` Lean 4 proof** + **`Lean-RT` Zero-GC Gate** (rejects `List`, `Array`, closures, recursion) + **QF_LIA 4-Theorem SMT Gate** (including compositional `@patchbay` WCET & wire stride proofs) |
-| **Concurrency & Hot-Swap** | Manual mutexes / RW-locks, unverified migrations, or process restarts | Automatic **64B cache-line-aligned QSBR** epoch lease (`< 100ns` hot-swap), **Theorem-Verified State Migration** (`StateV1 -> StateV2`), and `mlock` pre-faulted arena with `-4` WCET latch |
-| **Polyglot Interop** | Per-language wrapper maintenance | Single-command 64B `FlowExtentDescriptor` & typed `structure` zero-copy emission for C, Rust, Python, JS, CUDA, MATLAB & Julia |
+| **Concurrency & Hot-Swap** | Manual mutexes / RW-locks, unbounded retirement queues, or process restarts | Automatic **64B cache-line-aligned QSBR** epoch lease (`< 100ns` hot-swap) with **Reservation-Before-Publication** (`FLOW_RELOAD_MAX_RETIRED_DEPTH = 64`), **Theorem-Verified State Migration** (`StateV1 -> StateV2`), and `mlock` pre-faulted arena with `-4` WCET latch |
+| **Polyglot Interop & Shadow A/B** | Per-language wrapper maintenance & ad-hoc telemetry | Single-command 64B `FlowExtentDescriptor` & typed `structure` zero-copy emission for C, Rust, Python, JS, CUDA, MATLAB & Julia + built-in cross-DLL process-wide Shadow A/B verification (`flow_ab_shadow_*`) |
 
 ### 🧭 `.lean` (What: Pure Math) × `.flow` (Where & How: Hardware Manifest)
 
@@ -57,10 +57,80 @@ When authoring a new FLOW project in pure `.lean`, follow these **4 deterministi
 
 | Rule | Specification & Exact Convention |
 | :--- | :--- |
-| **1. `Lean-RT` Zero-GC Subset & Nested `structure`** | • Use zero-dependency Core Lean 4 only (**do not** `import Mathlib`; **never** use `sorry`, custom `axiom`, `List`, `Array`, `String`, closures `fun x =>`, or recursive functions/inductives).<br>• Primitive types map directly to C17: `UInt64` / `Nat` $\to$ `uint64_t`, `UInt32` $\to$ `uint32_t`, `Bool` $\to$ `bool`, `Float` $\to$ `double`. Finite `inductive` enums map to `uint32_t`, and nested `structure`s flatten automatically (`a.b.c` $\to$ `a.b_c`).<br>• Built-in hardware codec intrinsics `flow_quantize (val scale offset min_q max_q)` and `flow_dequantize (q scale offset)` lower directly to branchless C17 helpers. |
-| **2. Zero-`@[export]` Kernel, Scalar & Struct `def` Lowering** | • `flowc` scans the AST for the **last computational `def` referenced inside a `theorem`** (`spec->extern_kernel`) AND automatically lowers **all** pure scalar `def`s and struct-to-struct `def`s (`def f (s : InStruct) : OutStruct := { ... }`) into exported C17 functions (with `flow_nat_sub`, `flow_nat_div`, and `isfinite()` field sanitization), emitting typed `ctypes.Structure` (Python) and `#[repr(C)] pub struct` (Rust).<br>• Standard 1PB zero-copy kernel signature (returns `0` for PASS, `1` for REJECT):<br>`def myStepKernel (baseOff byteLen stride epoch : UInt64) : UInt32 := if stride >= 64 && ... then 0 else 1` |
+| **1. `Lean-RT` Zero-GC Subset, Nested `structure` & `FlowExactNumerics`** | • Use zero-dependency Core Lean 4 only (**do not** `import Mathlib`; **never** use `sorry`, custom `axiom`, `List`, `Array`, `String`, closures `fun x =>`, or recursive functions/inductives).<br>• Primitive types map directly to C17: `UInt64` / `Nat` $\to$ `uint64_t`, `UInt32` $\to$ `uint32_t`, `Bool` $\to$ `bool`, `Float` $\to$ `double` (backed by deterministic $Q32.32$ fixed-point `flow_fx64_t`). Finite `inductive` enums map to `uint32_t`, and nested `structure`s flatten automatically (`a.b.c` $\to$ `a.b_c`).<br>• Built-in math & hardware codec intrinsics (`Float.abs`, `Float.floor`, `Float.ceil`, `Float.round`, `Float.sqrt`, `Float.exp`, `Float.log`, `Float.sin`, `Float.cos`, `Float.atan2`, `Float.pow`, `Float.max`, `Float.min`, `Float.ofNat`, `Float.ofInt`, `flow_quantize`, `flow_dequantize`) lower directly to exact $Q32.32$ 128-bit-intermediate C17 helpers (`flow_float_*` / `flow_fx64_*`). |
+| **2. Zero-`@[export]` Kernel, Scalar, Tuple & Struct `def` Lowering** | • `flowc` scans the AST for the **last computational `def` referenced inside a `theorem`** (`spec->extern_kernel`) AND automatically lowers **all** pure scalar `def`s (including multi-line signatures, nested `let ... in`, `let (a, b) := ...`), tuple-returning `def`s (`(Float × Float)` $\to$ `double *out_0, double *out_1`), and struct-to-struct `def`s (`def f (s : InStruct) : OutStruct := { ... }`) into exported C17 functions (`flow_<id>_<fn>`) AND zero-overhead `--target-c-header` `static inline` functions (`flowc_<fn>` for `double` and `flowc_<fn>_fx` for pure `flow_fx64_t`).<br>• Standard 1PB zero-copy kernel signature (returns `0` for PASS, `1` for REJECT):<br>`def myStepKernel (baseOff byteLen stride epoch : UInt64) : UInt32 := if stride >= 64 && ... then 0 else 1` |
 | **3. Zero-Retry Proof Tactics (`decide` & `omega`)** | • **Concrete test vectors / boundary checks**: Use `:= by decide` (e.g., `theorem kernel_ok : myStepKernel 0 64 64 1 = 0 := by decide`).<br>• **Universal linear arithmetic (`∀`) & State Migration Conservation**: Use `:= by omega` (e.g., `theorem conserve (s : StateV1) : (migrateV1ToV2 s).accum = s.accum := by rfl`). **Crucial `Nat` Subtraction Rule**: Lean 4 `Nat` subtraction truncates at `0` (`a - b = 0` when `a < b`). Every theorem containing `a - b` **must** include `(h : b ≤ a)` in its signature. |
-| **4. 5-Line Zero-Copy FFI, `@patchbay` & Schema-Driven UI** | Compile via `flowc spec.lean -o build/app.c --target-python build/app.py --target-rust build/app.rs --target-ui build/app_ui.html` (or launch live via `flowy ui spec.lean`), then call any Lean `def`, `migrate_state`, `run_patchbay`, or extent in Python/Rust/JS:<br>`with app.LinearArray("build/libapp.so") as eng:`<br>`    out_ext = eng.process_descriptor(app.FlowExtentDescriptor(0, 1 << 50, 0, 64, 8, 1, 0))` |
+| **4. 5-Line Zero-Copy FFI, `@patchbay` & Schema-Driven UI** | Compile via `flowc spec.lean -o build/app.c --target-c-header build/app.h --target-python build/app.py --target-rust build/app.rs --target-ui build/app_ui.html` (or launch live via `flowy ui spec.lean`), then call any Lean `def`, `migrate_state`, `run_patchbay`, or extent in C/Python/Rust/JS:<br>`with app.LinearArray("build/libapp.so") as eng:`<br>`    out_ext = eng.process_descriptor(app.FlowExtentDescriptor(0, 1 << 50, 0, 64, 8, 1, 0))` |
+
+---
+
+## 🏷️ Complete `@keyword` & `.flow` / `.lean` Directive Reference
+
+FLOW separates **What** (pure `.lean` mathematical definitions & proofs) from **Where & How** (declarative `.flow` hardware & runtime manifests). Below is the complete reference for all `@keyword` blocks and directives supported by `src/parser.c`:
+
+### 1. Primary `@keyword` Blocks (`.flow` Manifests & `.lean` Attributes)
+
+| `@keyword` / Alias | Purpose | Supported Sub-Directives & Syntax | Compiler & Runtime Effect |
+| :--- | :--- | :--- | :--- |
+| **`@quota { ... }`**<br>*(Aliases: `quota`, `require`)* | **Hard Real-Time SLA, Memory Ceiling & Proof Gate** | • `deterministic`<br>• `lean_certified` *(or `proof_carrying`, `no_sorry`)*<br>• `deadline <time>` *(or `sla`, `latency`; units: `ns`, `us`, `ms`, `s`)*<br>• `arena <size>` *(units: `b`, `kb`, `mb`, `gb`)*<br>• `memory < <n>mb`<br>• `fallback <policy>` *(e.g. `emergency_stop`)* | • Enforces bitwise-deterministic $Q32.32$ `FlowExactNumerics` and zero-`sorry` Lean 4 verification.<br>• Pre-allocates a 64B-aligned static arena, page-prefaults every OS page, and locks physical RAM via `mlock`.<br>• Arms the hardware cycle watchdog (`flow_hardware_cycles()`); if a step exceeds `deadline`, atomically latches `watchdog_tripped = 1` and returns `-4` (`FLOW_ERR_WATCHDOG_ESTOP`). |
+| **`@embodied [name] { ... }`**<br>*(Aliases: `embodied`, `jet`)* | **Symplectic Contact Jet, ZMP Envelope & Hardware I/O** | • `frequency <hz>` *(or `target_frequency`; units: `hz`, `khz`, `mhz`)*<br>• `symplectic`<br>• `max_drift <val>` *(or `drift`; e.g. `0.5%`, `0.005`)*<br>• `zmp_margin <val>` *(or `zmp`; units: `m`, `cm`, `mm`)*<br>• `dt <time>` / `dim <n>`<br>• `ingress <driver>` *(e.g. `sensor_imu_6dof`)*<br>• `egress <driver>` *(e.g. `socketcan_fd`)*<br>• `coordinates [c1, c2, ...]` *(or `coord <c>`)* | • Automatically binds domain `embodied` (`flow.embodied`), `resource hardware`, `capability realtime`, and contract `zmp_torque_safe`.<br>• Shapes polyhedral loop tiles and symplectic phase-space pacing $(\omega, \mu, q_{\text{sat}})$.<br>• Synthesizes zero-offset named coordinate lenses `FlowJetView_<id>` (`view.q->hipPitch`, `view.p->hipPitch`). |
+| **`@reload { ... }`**<br>*(Alias: `reload`)* | **Lock-Free QSBR Hot-Swap & Verified State Migration** | • `schema_version <int>` *(or `version`)*<br>• `qsbr_timeout <time>` *(e.g. `5ms`, `500us`)*<br>• `from_schema <StructV1>` *(or `from`)*<br>• `to_schema <StructV2>` *(or `to`)*<br>• `migrate <lean_def_name>` | • Configures 64B cache-line-aligned QSBR epoch leases (`< 100ns` reader overhead) with **Reservation-Before-Publication** (`FLOW_RELOAD_MAX_RETIRED_DEPTH = 64`; rejects publication with `FLOW_RELOAD_JOURNAL_FULL = 5` if stalled readers pin all 64 slots).<br>• Lowers the theorem-verified Lean `def` (`StructV1 -> StructV2`) into `flow_<id>_migrate_buffer` and `flow_<id>_migrate_unit`. |
+| **`@patchbay { ... }`**<br>*(Alias: `patchbay`)* | **Compositional Multi-Stage Zero-Copy DAG & WCET Proof** | • `stage <name> bind "<file.lean>" [fn <def>] [in <InStruct>] [out <OutStruct>] [wcet <= <time>]`<br>• `wire <stage_1> -> <stage_2> -> ...` | • Binds multiple `.lean` kernels into a zero-copy pipeline.<br>• Statically verifies `OutStruct == InStruct` and `out_bytes == in_bytes` across every `wire` edge.<br>• Verifies each stage's `wcet` against the static AST instruction cost model and proves $\sum \text{wcet}_i \le \text{deadline}$ in SMT. |
+| **`@[export <sym>]`**<br>*(Inside `.lean` files)* | **Explicit Primary Kernel Override** *(Optional)* | • `@[export myStepKernel]` placed before `def myStepKernel ...` | • Explicitly pins `spec->extern_kernel` to `<sym>`. *(Optional: by default `flowc` automatically discovers the last `def` anchored inside a `theorem` and exports all pure `def`s.)* |
+
+### 2. Top-Level `.flow` Manifest Directives & Canonical `.lean` Constants
+
+| Directive / Constant | Context | Syntax & Usage |
+| :--- | :--- | :--- |
+| **`project <name>`** | `.flow` top-level | Names the project and sets the default `flow_name` if not explicitly declared. |
+| **`bind "<path.lean>"`** | `.flow` top-level | Absorbs all `structure`, `inductive`, `def`, and `theorem` declarations from `<path.lean>` into the `.flow` manifest. |
+| **`import <module>`** | `.flow` top-level | Loads a domain plugin module (e.g. `import flow.embodied`, `import flow.embodied.mz`). |
+| **`thermal [name] { ... }`** | `.flow` block | Configures hardware thermal envelope: `max_temp <C>`, `target_temp <C>`, `power_limit <W>`, `r_thermal <val>`, `c_thermal <val>`. |
+| **`input <name> { ... }`** | `.flow` block | Configures stream geometry: `max_count <n>`, `stride <bytes>`, `align <bytes>`, `sample <id> <score>`. |
+| **`state <name> { ... }`** | `.flow` block | Configures state topology: `shared`, `read_heavy`, `bounded`, `version <n>`, `field <name> <u64\|f64\|bytes> [persistent\|ordered\|defaultable]`. |
+| **`flow <name> { ... }`** | `.flow` block | Declares execution pipeline expression: e.g. `lean_stream -> extern("myKernel") -> top(3)`. |
+| **`ensure { ... }` / `prefer { ... }`** | `.flow` block | Post-conditions (`deterministic`, `lean_certified`) and optimization bias (`latency`, `throughput`, `memory`). |
+| **Canonical `.lean` `def` Overrides** | `.lean` top-level | Pure `.lean` files can optionally override runtime parameters without a `.flow` file via: `def inputMaxCount : Nat := ...`, `def inputStrideBytes : Nat := ...`, `def inputAlignBytes : Nat := ...`, `def stateSchemaVersion : Nat := ...`, `def slaLatencyNs : Nat := ...`, `def shardCount : Nat := ...`, `def memoryQuotaBytes : Nat := ...`. |
+
+### Minimal `.flow` + `.lean` Composition Example
+
+```yaml
+project humanoid_ankle_reflex
+bind "plugins/embodied.lean"
+
+@quota {
+    deterministic
+    lean_certified
+    deadline 200us
+    arena 64kb
+    memory < 16mb
+    fallback emergency_stop
+}
+
+@embodied {
+    frequency 1khz
+    symplectic
+    max_drift 0.5%
+    zmp_margin 0.02
+    ingress sensor_imu_6dof
+    egress socketcan_fd
+    coordinates [hipPitch, hipRoll, kneePitch, anklePitch, ankleRoll, torsoYaw, comX, comY]
+}
+
+@reload {
+    schema_version 2
+    qsbr_timeout 5ms
+    from_schema GaitStateV1
+    to_schema GaitStateV2
+    migrate migrateGaitV1ToV2
+}
+
+@patchbay {
+    stage imu_filter bind "plugins/embodied.lean" fn filterImu in RawImu out FilteredImu wcet <= 40us
+    stage zmp_reflex bind "plugins/embodied.lean" fn stepZmp   in FilteredImu out JointCmd wcet <= 80us
+    wire imu_filter -> zmp_reflex
+}
+```
 
 ### Plain-Language Guide to `flowc` / `flowy` CLI Output
 
