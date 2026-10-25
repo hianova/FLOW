@@ -11,17 +11,17 @@ FLOW 將 `.lean` 提升為 **「領域意圖 + 數學證明 + 算子核函數」
    - 解析器執行 **`Lean-RT` 零 GC 靜態閘門** 與 **AST 靜態 WCET 成本推導（`estimated_wcet_ns`）**，將檔案內所有純量與結構轉換 `def`（含 `flow_quantize` / `flow_dequantize` 與欄位級 `isfinite()` 防火牆）編譯為 C17 原生函數，並自動在 C Header、Rust（`#[repr(C)] pub struct`）與 Python（`ctypes.Structure`、`migrate_state`、`run_patchbay`）產生強型別零拷貝綁定。
 2. **Plugin 領域意圖函子降階 ([`plugins/embodied.c`](../../plugins/embodied.c))**：
    - 當 `.lean` 宣告 `namespace Embodied.*` 與 `theorem zmp_torque_safe` 時，`EMBODIED_PLUGIN` 自動透過 `lower_domain_semantics` 展開 1kHz 實時迴圈 SLA、辛幾何（Symplectic Jet）相空間約束與 ZMP 穩定多邊形遮罩。
-3. **SMT QF_LIA 四大定理、`@patchbay` 組合式證明與零 `sorry` 鐵門 ([`src/smt.c`](../../src/smt.c), [`src/abi.c`](../../src/abi.c))**：
-   - 強制檢驗緩衝區邊界（`buffer_bounds`）、記憶體配額（`memory_quota`）、分片正交與 `@patchbay` 跨階段 Schema/Stride 相容性（`shard_isolation`），以及決定論與多階段時間預算 $\sum \text{wcet}_i \le \text{sla\_latency\_ns}$ 且 $\text{wcet}_i \ge \text{ast\_wcet}_i$（`determinism`）。
+3. **SMT QF_LIA 四大定理、`@patchbay` 組合式證明、DSO 能力簽章與零 `sorry` 鐵門 ([`src/smt.c`](../../src/smt.c), [`src/abi.c`](../../src/abi.c))**：
+   - 強制檢驗緩衝區邊界（`buffer_bounds`）、記憶體配額（`memory_quota`）、分片正交與 `@patchbay` 跨階段 Schema/Stride 相容性（`shard_isolation`），以及決定論與多階段時間預算 $\sum \text{wcet}_i \le \text{sla\_latency\_ns}$ 且 $\text{wcet}_i \ge \text{ast\_wcet}_i$（`determinism`）；同時整合動態插件路徑消毒、64-bit 能力位元遮罩與 FNV-1a 64-bit 簽章校驗（`flow_security_verify_dso_And_capabilities`）。
 
 ---
 
-## 4.2 標準 `build.sh`、Schema-Driven UI 與多語言零拷貝呼叫範本（Zero-Copy Polyglot FFI）
+## 4.2 標準 `build.sh`、Schema-Driven UI 與 7 語言零拷貝呼叫範本（Zero-Copy Polyglot FFI）
 
-任何基於 FLOW 的專案，只需一行 `flowc` 指令即可從 `src/app.lean` 同時產出 C17、Rust、Python、JS/Bun、CUDA、HTML5 控制面板（`--target-ui`）與 Lean 4 證明證書，或直接透過 `flowy ui src/app.lean` 啟動零依賴 C17 雙簽責任帳本與控制面板：
+任何基於 FLOW 的專案，只需一行 `flowc` 指令即可從 `src/app.lean` 同時產出 7 大語言綁定（C17、Rust、Python、JS/Bun、CUDA、MATLAB、Julia）、HTML5 控制面板（`--target-ui`）與 Lean 4 證明證書，或直接透過 `flowy build --shared src/app.lean` 一鍵打包 5 件式 SDK、透過 `flowy ui src/app.lean` 啟動零依賴 C17 雙簽責任帳本與控制面板：
 
 ```sh
-# 1. 從單一 .lean 合成全語言零拷貝介面與 HTML5 控制面板
+# 1. 從單一 .lean 合成 7 語言零拷貝介面、HTML5 控制面板與 Lean 4 證書
 flowc src/app.lean \
     -o build/app.c \
     --target-c-header build/app.h \
@@ -29,10 +29,12 @@ flowc src/app.lean \
     --target-python build/app.py \
     --target-js build/app.js \
     --target-cuda build/app.cuh \
+    --target-matlab build/app.m \
+    --target-julia build/app.jl \
     --target-ui build/app_ui.html \
     --target-lean build/app_cert.lean
 
-# 2. 編譯原生 C17 + QSBR 動態庫（或直接執行 flowy ui src/app.lean --selftest）
+# 2. 編譯原生 C17 + QSBR 動態庫（或直接執行 flowy build --shared src/app.lean）
 clang -std=c17 -O2 -shared -fPIC -DFLOW_SHARED_LIB -pthread build/app.c -o build/libapp.so -lm
 ```
 

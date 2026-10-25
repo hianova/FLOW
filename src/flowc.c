@@ -4,23 +4,30 @@
 #include "bitspace.h"
 #include "abi.h"
 #include "smt.h"
-#include "flowy_fvec.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <math.h>
-static void flowc_print_usage(FILE *out) { fprintf(out, "FLOW Modern Declarative Compiler (flowc) v2.5.0\n"
-        "Usage: flowc <input.flow> [-o <output.c>] [options]\n"
-        "  -o <output.c>            Target C source path (default: <input>.c)\n"
-        "  --apply-fvec <file.fvec> Apply pre-baked SMT-certified architecture weights\n"
-        "  --profile-out <file>     Export crystallized plan as .fvec lockfile or profile\n"
-        "  --search / --benchmark   Enable BMF combinatorial search / benchmarking\n"
-        "  --iterations <N>         Search iterations (default: 250)\n"
-        "  --seed <N>               Deterministic PRNG seed\n"
-        "  --component <id>         Manually pin component implementation\n"
-        "  --target-rust/python/c-header/lean/llvm-ir/mlir/ui <file>\n"); } static int validate_and_lower_module(const char *mod_name, const FlowSpec *spec, SemanticIR *ir) {
+static void flowc_print_usage(FILE *out) { fprintf(out, "FLOW Modern Declarative Compiler (flowc) v2.5.0 | Lean-RT, Cubical HoTT & QSBR\n"
+        "Usage: flowc <input.lean|input.flow> [-o <output.c>] [options]\n"
+        "  -o <output.c>              Target C17 source path (default: <input>.c)\n"
+        "  --target-c-header <file.h> Emit static inline double/fx64 C17 header & FlowStatusCode\n"
+        "  --target-rust <file.rs>    Emit zero-copy #[repr(C)] Rust FFI adapter\n"
+        "  --target-python <file.py>  Emit ctypes.Structure Python zero-copy adapter\n"
+        "  --target-js <file.mjs>     Emit Bun/Node.js TypedArray zero-copy adapter\n"
+        "  --target-cuda <file.cuh>   Emit CUDA host-launch & device extent header\n"
+        "  --target-matlab <file.m>   Emit IR-driven MATLAB handle class adapter\n"
+        "  --target-julia <file.jl>   Emit Julia ccall & @enum zero-copy adapter\n"
+        "  --target-ui <file.html>    Emit Algorithmic Control Plane & SoD Ledger HTML5 UI\n"
+        "  --target-lean <file.lean>  Emit & verify Lean 4 formal soundness certificate\n"
+        "  --target-llvm-ir / --target-mlir <file> Emit LLVM IR or MLIR module\n"
+        "  --apply-fvec <file.fvec>   Apply pre-baked SMT-certified architecture weights\n"
+        "  --profile-out <file>       Export crystallized plan as .fvec, .flowplan, or CSV\n"
+        "  --search / --benchmark     Enable BMF combinatorial search / benchmarking\n"
+        "  --iterations <N> / --seed <N> / --component <id> / --reload-adapter\n"
+        "  -v, --version / -h, --help Show version or usage information\n"); } static int validate_and_lower_module(const char *mod_name, const FlowSpec *spec, SemanticIR *ir) {
     flow_registry_resolve_plugin(mod_name); const FlowPlugin *module = flow_registry_lookup(mod_name); char err_msg[128] = {0};
     if (!module) { fprintf(stderr, "flowc: imported domain module '%s' not registered\n", mod_name); return 0; } flow_plugin_lower_semantics(spec, ir, module);
     if (!flow_component_validate_contract(ir, module, err_msg, sizeof(err_msg))) {
@@ -34,7 +41,9 @@ int flowc_main(int argc, char **argv) { const char *input_path = NULL, *output_p
     size_t iterations = 250, workload_bytes = 0; uint32_t seed = 0xC0F0123u;
     if (!flow_registry_init()) { fprintf(stderr, "flowc: failed to initialize plugin registry\n"); return EXIT_FAILURE; }
     if (argc < 2) { flowc_print_usage(stderr); return EXIT_FAILURE; }
-    if (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help") || !strcmp(argv[1], "help")) { flowc_print_usage(stdout); return EXIT_SUCCESS; } input_path = argv[1];
+    if (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help") || !strcmp(argv[1], "help")) { flowc_print_usage(stdout); return EXIT_SUCCESS; }
+    if (!strcmp(argv[1], "-v") || !strcmp(argv[1], "--version") || !strcmp(argv[1], "version")) {
+        printf("FLOW Modern Declarative Compiler (flowc) v2.5.0 | Lean-RT, Cubical HoTT & QSBR\n"); return EXIT_SUCCESS; } input_path = argv[1];
     for (int arg = 2; arg < argc; ++arg) { if (!strcmp(argv[arg], "-o") && arg + 1 < argc) output_path = argv[++arg]; else if (!strcmp(argv[arg], "--search")) use_search = 1;
         else if (!strcmp(argv[arg], "--benchmark")) { use_benchmark = 1; use_search = 1; } else if (!strcmp(argv[arg], "--reload-adapter")) use_reload_adapter = 1;
         else if (!strcmp(argv[arg], "--profile") && arg + 1 < argc) profile_path = argv[++arg];

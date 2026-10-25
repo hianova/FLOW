@@ -1,11 +1,7 @@
 #include "flow_test_kit.h"
 #include "bitspace.h"
-#include "hardware_telemetry.h"
 #include "embodied.h"
 #include "plugin.h"
-#include "driver_can.h"
-#include "driver_imu.h"
-#include "flow_embodied_mz.h"
 
 #include <stdio.h>
 #include <stdlib.h>

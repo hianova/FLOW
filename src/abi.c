@@ -25,20 +25,30 @@ static const FlowLeanEnum *abi_find_lean_enum(const SemanticIR *ir, const char *
         if (strcmp(ir->lean_enums[i].name, name) == 0) return &ir->lean_enums[i];
     return NULL;
 }
-typedef struct { const char *lean; const char *c; const char *rust; const char *ctypes; } AbiScalarTypeEntry;
+typedef struct {
+    const char *lean;
+    const char *c;
+    const char *rust;
+    const char *ctypes;
+    const char *js_ffi;
+    const char *julia;
+    const char *matlab;
+} AbiScalarTypeEntry;
 static const AbiScalarTypeEntry ABI_SCALAR_TYPES[] = {
-    { "Bool",    "bool",     "bool", "ctypes.c_bool"   },
-    { "Float",   "double",   "f64",  "ctypes.c_double" },
-    { "Float32", "float",    "f32",  "ctypes.c_float"  },
-    { "UInt32",  "uint32_t", "u32",  "ctypes.c_uint32" },
-    { "Int32",   "int32_t",  "i32",  "ctypes.c_int32"  },
-    { "UInt16",  "uint16_t", "u16",  "ctypes.c_uint16" },
-    { "Int16",   "int16_t",  "i16",  "ctypes.c_int16"  },
-    { "UInt8",   "uint8_t",  "u8",   "ctypes.c_uint8"  },
-    { "Int8",    "int8_t",   "i8",   "ctypes.c_int8"   },
-    { "Int",     "int64_t",  "i64",  "ctypes.c_int64"  },
-    { "Int64",   "int64_t",  "i64",  "ctypes.c_int64"  },
-    { "UInt64",  "uint64_t", "u64",  "ctypes.c_uint64" }
+    { "Bool",    "bool",      "bool",  "ctypes.c_bool",    "u8",  "Bool",     "uint8"  },
+    { "Float",   "double",    "f64",   "ctypes.c_double",  "f64", "Float64",  "double" },
+    { "Float32", "float",     "f32",   "ctypes.c_float",   "f32", "Float32",  "single" },
+    { "UInt32",  "uint32_t",  "u32",   "ctypes.c_uint32",  "u32", "UInt32",   "uint32" },
+    { "Int32",   "int32_t",   "i32",   "ctypes.c_int32",   "i32", "Int32",    "int32"  },
+    { "UInt16",  "uint16_t",  "u16",   "ctypes.c_uint16",  "u16", "UInt16",   "uint16" },
+    { "Int16",   "int16_t",   "i16",   "ctypes.c_int16",   "i16", "Int16",    "int16"  },
+    { "UInt8",   "uint8_t",   "u8",    "ctypes.c_uint8",   "u8",  "UInt8",    "uint8"  },
+    { "Int8",    "int8_t",    "i8",    "ctypes.c_int8",    "i8",  "Int8",     "int8"   },
+    { "USize",   "size_t",    "usize", "ctypes.c_size_t",  "u64", "Csize_t",  "uint64" },
+    { "ISize",   "ptrdiff_t", "isize", "ctypes.c_ssize_t", "i64", "Cssize_t", "int64"  },
+    { "Int",     "int64_t",   "i64",   "ctypes.c_int64",   "i64", "Int64",    "int64"  },
+    { "Int64",   "int64_t",   "i64",   "ctypes.c_int64",   "i64", "Int64",    "int64"  },
+    { "UInt64",  "uint64_t",  "u64",   "ctypes.c_uint64",  "u64", "UInt64",   "uint64" }
 };
 static const AbiScalarTypeEntry *abi_lookup_scalar_by_lean(const char *t) {
     if (t) for (size_t i = 0; i < sizeof(ABI_SCALAR_TYPES) / sizeof(ABI_SCALAR_TYPES[0]); ++i)
@@ -49,6 +59,20 @@ static const AbiScalarTypeEntry *abi_lookup_scalar_by_c(const char *ct) {
     if (ct) for (size_t i = 0; i < sizeof(ABI_SCALAR_TYPES) / sizeof(ABI_SCALAR_TYPES[0]); ++i)
         if (!strcmp(ct, ABI_SCALAR_TYPES[i].c)) return &ABI_SCALAR_TYPES[i];
     return &ABI_SCALAR_TYPES[sizeof(ABI_SCALAR_TYPES) / sizeof(ABI_SCALAR_TYPES[0]) - 1];
+}
+static int abi_fn_has_fx_variant(const SemanticIR *ir, const FlowLeanFunction *fn) {
+    if (!fn) return 0;
+    int has_float = (!strcmp(fn->return_type, "Float") || !strcmp(fn->return_type, "Float32"));
+    int has_struct = fn->is_struct_transform || (abi_find_lean_struct(ir, fn->return_type) != NULL);
+    for (size_t pi = 0; pi < fn->param_count; ++pi) {
+        if (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32")) has_float = 1;
+        if (abi_find_lean_struct(ir, fn->param_types[pi])) has_struct = 1;
+    }
+    if (fn->is_tuple_return && fn->tuple_arity >= 2) {
+        for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+            if (!strcmp(fn->tuple_types[ti], "Float") || !strcmp(fn->tuple_types[ti], "Float32")) has_float = 1;
+    }
+    return has_float && !has_struct;
 }
 static const char *abi_lean_c_type(const char *t) { return abi_lookup_scalar_by_lean(t)->c; }
 static const char *abi_lean_c_type_ir(const SemanticIR *ir, const char *t) {
@@ -62,9 +86,13 @@ static const char *abi_lean_fx_c_type_ir(const SemanticIR *ir, const char *t) {
 }
 static const char *abi_lean_rust_type(const char *t) { return abi_lookup_scalar_by_lean(t)->rust; }
 static const char *abi_lean_rust_type_ir(const SemanticIR *ir, const char *t) {
-    if (abi_find_lean_struct(ir, t)) return t;
-    if (abi_find_lean_enum(ir, t)) return "u32";
+    if (abi_find_lean_struct(ir, t) || abi_find_lean_enum(ir, t)) return t;
     return abi_lean_rust_type(t);
+}
+static const char *abi_lean_fx_rust_type_ir(const SemanticIR *ir, const char *t) {
+    if (!t) return "u64";
+    if (!strcmp(t, "Float") || !strcmp(t, "Float32")) return "i64";
+    return abi_lean_rust_type_ir(ir, t);
 }
 static const char *abi_c_type_to_rust_type(const char *ct) { return abi_lookup_scalar_by_c(ct)->rust; }
 static const char *abi_lean_ctypes_type(const char *t) { return abi_lookup_scalar_by_lean(t)->ctypes; }
@@ -73,7 +101,155 @@ static const char *abi_lean_ctypes_type_ir(const SemanticIR *ir, const char *t) 
     if (abi_find_lean_enum(ir, t)) return "ctypes.c_uint32";
     return abi_lean_ctypes_type(t);
 }
+static const char *abi_lean_fx_ctypes_type_ir(const SemanticIR *ir, const char *t) {
+    if (!t) return "ctypes.c_uint64";
+    if (!strcmp(t, "Float") || !strcmp(t, "Float32")) return "ctypes.c_int64";
+    return abi_lean_ctypes_type_ir(ir, t);
+}
 static const char *abi_c_type_to_ctypes(const char *ct) { return abi_lookup_scalar_by_c(ct)->ctypes; }
+static const char *abi_lean_js_ffi_type_ir(const SemanticIR *ir, const char *t) {
+    if (abi_find_lean_struct(ir, t)) return "ptr";
+    if (abi_find_lean_enum(ir, t)) return "u32";
+    return abi_lookup_scalar_by_lean(t)->js_ffi;
+}
+static const char *abi_lean_fx_js_ffi_type_ir(const SemanticIR *ir, const char *t) {
+    if (!t) return "u64";
+    if (!strcmp(t, "Float") || !strcmp(t, "Float32")) return "i64";
+    return abi_lean_js_ffi_type_ir(ir, t);
+}
+static const char *abi_lean_js_typed_array(const SemanticIR *ir, const char *t, int is_fx) {
+    if (!t) return "BigUint64Array";
+    if (is_fx && (!strcmp(t, "Float") || !strcmp(t, "Float32"))) return "BigInt64Array";
+    if (!strcmp(t, "Float")) return "Float64Array";
+    if (!strcmp(t, "Float32")) return "Float32Array";
+    if (!strcmp(t, "UInt32") || abi_find_lean_enum(ir, t)) return "Uint32Array";
+    if (!strcmp(t, "Int32")) return "Int32Array";
+    if (!strcmp(t, "UInt16")) return "Uint16Array";
+    if (!strcmp(t, "Int16")) return "Int16Array";
+    if (!strcmp(t, "UInt8") || !strcmp(t, "Bool")) return "Uint8Array";
+    if (!strcmp(t, "Int8")) return "Int8Array";
+    if (!strcmp(t, "Int") || !strcmp(t, "Int64") || !strcmp(t, "ISize")) return "BigInt64Array";
+    return "BigUint64Array";
+}
+static const char *abi_lean_julia_type_ir(const SemanticIR *ir, const char *t) {
+    if (abi_find_lean_struct(ir, t)) return t;
+    if (abi_find_lean_enum(ir, t)) return "UInt32";
+    return abi_lookup_scalar_by_lean(t)->julia;
+}
+static const char *abi_lean_fx_julia_type_ir(const SemanticIR *ir, const char *t) {
+    if (!t) return "UInt64";
+    if (!strcmp(t, "Float") || !strcmp(t, "Float32")) return "Int64";
+    return abi_lean_julia_type_ir(ir, t);
+}
+static const char *abi_c_type_to_julia_type(const char *ct) { return abi_lookup_scalar_by_c(ct)->julia; }
+static const char *abi_lean_matlab_ptr_type_ir(const SemanticIR *ir, const char *t, int is_fx) {
+    if (!t) return "uint64Ptr";
+    if (is_fx && (!strcmp(t, "Float") || !strcmp(t, "Float32"))) return "int64Ptr";
+    if (!strcmp(t, "Float")) return "doublePtr";
+    if (!strcmp(t, "Float32")) return "singlePtr";
+    if (!strcmp(t, "UInt32") || abi_find_lean_enum(ir, t)) return "uint32Ptr";
+    if (!strcmp(t, "Int32")) return "int32Ptr";
+    if (!strcmp(t, "UInt16")) return "uint16Ptr";
+    if (!strcmp(t, "Int16")) return "int16Ptr";
+    if (!strcmp(t, "UInt8") || !strcmp(t, "Bool")) return "uint8Ptr";
+    if (!strcmp(t, "Int8")) return "int8Ptr";
+    if (!strcmp(t, "Int") || !strcmp(t, "Int64") || !strcmp(t, "ISize")) return "int64Ptr";
+    return "uint64Ptr";
+}
+static const char *abi_escape_kw_suffix(const char *in, const char *const *kw, char *out, size_t max_len) {
+    if (!in || !in[0]) {
+        if (out && max_len > 0) snprintf(out, max_len, "_");
+        return out;
+    }
+    for (size_t i = 0; kw[i]; ++i) {
+        if (!strcmp(in, kw[i])) {
+            snprintf(out, max_len, "%s_", in);
+            return out;
+        }
+    }
+    snprintf(out, max_len, "%s", in);
+    return out;
+}
+static const char *abi_escape_c_ident(const char *in, char *out, size_t max_len) {
+    static const char *const C_KW[] = {
+        "auto", "break", "case", "catch", "char", "class", "const", "constexpr", "continue",
+        "default", "delete", "do", "double", "dynamic_cast", "else", "enum", "explicit",
+        "export", "extern", "false", "float", "for", "friend", "goto", "if", "inline",
+        "int", "long", "mutable", "namespace", "new", "noexcept", "nullptr", "operator",
+        "private", "protected", "public", "register", "reinterpret_cast", "restrict",
+        "return", "short", "signed", "sizeof", "static", "static_assert", "static_cast",
+        "struct", "switch", "template", "this", "thread_local", "throw", "true", "try",
+        "typedef", "typeid", "typename", "union", "unsigned", "using", "virtual", "void",
+        "volatile", "wchar_t", "while", NULL
+    };
+    return abi_escape_kw_suffix(in, C_KW, out, max_len);
+}
+static const char *abi_escape_rust_ident(const char *in, char *out, size_t max_len) {
+    if (!in || !in[0]) {
+        if (out && max_len > 0) snprintf(out, max_len, "_");
+        return out;
+    }
+    static const char *const RUST_KW[] = {
+        "as", "async", "await", "break", "const", "continue", "crate", "dyn",
+        "else", "enum", "extern", "false", "fn", "for", "if", "impl", "in",
+        "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return",
+        "self", "Self", "static", "struct", "super", "trait", "true", "type",
+        "unsafe", "use", "where", "while", "abstract", "become", "box", "do",
+        "final", "macro", "override", "priv", "try", "typeof", "unsized",
+        "virtual", "yield", NULL
+    };
+    for (size_t i = 0; RUST_KW[i]; ++i) {
+        if (!strcmp(in, RUST_KW[i])) {
+            if (!strcmp(in, "self") || !strcmp(in, "Self") || !strcmp(in, "super") || !strcmp(in, "crate"))
+                snprintf(out, max_len, "%s_", in);
+            else
+                snprintf(out, max_len, "r#%s", in);
+            return out;
+        }
+    }
+    snprintf(out, max_len, "%s", in);
+    return out;
+}
+static const char *abi_escape_py_ident(const char *in, char *out, size_t max_len) {
+    static const char *const PY_KW[] = {
+        "False", "None", "True", "and", "as", "assert", "async", "await", "break",
+        "class", "continue", "def", "del", "elif", "else", "except", "finally",
+        "for", "from", "global", "if", "import", "in", "is", "lambda", "nonlocal",
+        "not", "or", "pass", "raise", "return", "try", "while", "with", "yield",
+        "self", NULL
+    };
+    return abi_escape_kw_suffix(in, PY_KW, out, max_len);
+}
+static const char *abi_escape_js_ident(const char *in, char *out, size_t max_len) {
+    static const char *const JS_KW[] = {
+        "await", "break", "case", "catch", "class", "const", "continue", "debugger",
+        "default", "delete", "do", "else", "enum", "export", "extends", "false",
+        "finally", "for", "function", "if", "implements", "import", "in", "instanceof",
+        "interface", "let", "new", "null", "package", "private", "protected", "public",
+        "return", "static", "super", "switch", "this", "throw", "true", "try", "typeof",
+        "var", "void", "while", "with", "yield", "ptr", NULL
+    };
+    return abi_escape_kw_suffix(in, JS_KW, out, max_len);
+}
+static const char *abi_escape_matlab_ident(const char *in, char *out, size_t max_len) {
+    static const char *const MATLAB_KW[] = {
+        "break", "case", "catch", "classdef", "continue", "else", "elseif", "end",
+        "enumeration", "events", "for", "function", "global", "if", "methods",
+        "otherwise", "parfor", "persistent", "properties", "return", "spmd",
+        "switch", "try", "while", "obj", NULL
+    };
+    return abi_escape_kw_suffix(in, MATLAB_KW, out, max_len);
+}
+static const char *abi_escape_julia_ident(const char *in, char *out, size_t max_len) {
+    static const char *const JULIA_KW[] = {
+        "abstract", "baremodule", "begin", "break", "catch", "const", "continue",
+        "do", "else", "elseif", "end", "export", "false", "finally", "for",
+        "function", "global", "if", "import", "in", "isa", "let", "local",
+        "macro", "module", "mutable", "outer", "primitive", "quote", "return",
+        "struct", "true", "try", "type", "using", "where", "while", "lib", "h", NULL
+    };
+    return abi_escape_kw_suffix(in, JULIA_KW, out, max_len);
+}
 int flow_abi_build_for_component(const SemanticIR *ir, const Component *comp, FlowComponentABI *abi) { if (!ir || !comp || !abi) return 0; memset(abi, 0, sizeof(*abi));
     abi->ir = ir;
     snprintf(abi->component_id, sizeof(abi->component_id), "%s", comp->id); const FlowPlugin *plugin = flow_component_plugin(comp);
@@ -145,8 +321,10 @@ int flow_abi_emit_c_header(FILE *output, const FlowComponentABI *abi) { if (!out
         for (size_t si = 0; si < abi->ir->lean_struct_count; ++si) {
             const FlowLeanStruct *st = &abi->ir->lean_structs[si];
             fprintf(output, "#ifndef FLOW_LEAN_STRUCT_%s_DEFINED\n#define FLOW_LEAN_STRUCT_%s_DEFINED\ntypedef struct {\n", st->name, st->name);
-            for (size_t fi = 0; fi < st->field_count; ++fi)
-                fprintf(output, "    %s %s;\n", st->fields[fi].c_type, st->fields[fi].name);
+            for (size_t fi = 0; fi < st->field_count; ++fi) {
+                char f_ident[96];
+                fprintf(output, "    %s %s;\n", st->fields[fi].c_type, abi_escape_c_ident(st->fields[fi].name, f_ident, sizeof(f_ident)));
+            }
             fprintf(output, "} %s;\n#endif\n", st->name);
         }
     }
@@ -191,20 +369,12 @@ int flow_abi_emit_c_header(FILE *output, const FlowComponentABI *abi) { if (!out
         fprintf(output, "/* Pure .lean Exported Computational Operators (%zu) */\n", abi->ir->lean_function_count);
         for (size_t fi = 0; fi < abi->ir->lean_function_count; ++fi) {
             const FlowLeanFunction *fn = &abi->ir->lean_functions[fi];
-            int has_float = (!strcmp(fn->return_type, "Float") || !strcmp(fn->return_type, "Float32"));
-            int has_struct = fn->is_struct_transform ? 1 : 0;
-            for (size_t pi = 0; pi < fn->param_count; ++pi) {
-                if (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32")) has_float = 1;
-                if (abi_find_lean_struct(abi->ir, fn->param_types[pi])) has_struct = 1;
-            }
-            if (fn->is_tuple_return && fn->tuple_arity >= 2) {
-                for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
-                    if (!strcmp(fn->tuple_types[ti], "Float") || !strcmp(fn->tuple_types[ti], "Float32")) has_float = 1;
-            }
-            if (has_float && !has_struct) {
+            if (abi_fn_has_fx_variant(abi->ir, fn)) {
                 fprintf(output, "%s %s_fx(", abi_lean_fx_c_type_ir(abi->ir, fn->return_type), fn->name);
-                for (size_t pi = 0; pi < fn->param_count; ++pi)
-                    fprintf(output, "%s%s %s", pi > 0 ? ", " : "", abi_lean_fx_c_type_ir(abi->ir, fn->param_types[pi]), fn->param_names[pi]);
+                for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                    char p_ident[96];
+                    fprintf(output, "%s%s %s", pi > 0 ? ", " : "", abi_lean_fx_c_type_ir(abi->ir, fn->param_types[pi]), abi_escape_c_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                }
                 if (fn->is_tuple_return && fn->tuple_arity >= 2) {
                     for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
                         fprintf(output, "%s%s *out_%zu", (fn->param_count > 0 || ti > 0) ? ", " : "", abi_lean_fx_c_type_ir(abi->ir, fn->tuple_types[ti]), ti);
@@ -212,8 +382,10 @@ int flow_abi_emit_c_header(FILE *output, const FlowComponentABI *abi) { if (!out
                 fprintf(output, ");\n");
             }
             fprintf(output, "%s %s(", abi_lean_c_type_ir(abi->ir, fn->return_type), fn->name);
-            for (size_t pi = 0; pi < fn->param_count; ++pi)
-                fprintf(output, "%s%s %s", pi > 0 ? ", " : "", abi_lean_c_type_ir(abi->ir, fn->param_types[pi]), fn->param_names[pi]);
+            for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                char p_ident[96];
+                fprintf(output, "%s%s %s", pi > 0 ? ", " : "", abi_lean_c_type_ir(abi->ir, fn->param_types[pi]), abi_escape_c_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+            }
             if (fn->is_tuple_return && fn->tuple_arity >= 2) {
                 for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
                     fprintf(output, "%s%s *out_%zu", (fn->param_count > 0 || ti > 0) ? ", " : "", abi_lean_c_type_ir(abi->ir, fn->tuple_types[ti]), ti);
@@ -226,32 +398,106 @@ int flow_abi_emit_rust_adapter(FILE *output, const FlowComponentABI *abi) { if (
     sanitize_ident(abi->component_id, id_safe, sizeof(id_safe)); to_pascal_case(abi->component_id, pascal_name, sizeof(pascal_name));
     const char *mut_kw = abi->primary_fn.params[0].ownership == FLOW_OWN_MUT_BORROW ? "mut " : ""; size_t max_mem = abi->max_memory_bytes > 0 ? abi->max_memory_bytes : 65536;
     fprintf(output, "// Auto-generated by FLOW Language-Neutral Component ABI (%s v%s)\n"
+        "#![allow(non_camel_case_types, non_snake_case, dead_code, clashing_extern_declarations)]\n"
         "use std::os::raw::{c_int, c_void};\n#[repr(C)]\n#[derive(Debug, Copy, Clone)]\npub struct FlowHandle(*mut c_void);\n"
         "#[repr(C)]\n#[derive(Debug, Copy, Clone, Default)]\npub struct FlowExtentDescriptor {\n"
         "    pub base_offset: u64, pub byte_length: u64, pub qsbr_epoch: u64,\n"
         "    pub stride_bytes: u32, pub align_bytes: u32, pub schema_version: u32, pub flags: u32,\n"
         "    pub reserved: [u64; 3],\n}\n",
         abi->component_id, abi->version);
+    const FlowLeanFunction *migrate_struct_fn = NULL;
     if (abi->ir) {
+        for (size_t ei = 0; ei < abi->ir->lean_enum_count; ++ei) {
+            const FlowLeanEnum *en = &abi->ir->lean_enums[ei];
+            fprintf(output, "#[repr(u32)]\n#[derive(Debug, Copy, Clone, PartialEq, Eq)]\npub enum %s {\n", en->name);
+            for (size_t vi = 0; vi < en->variant_count; ++vi)
+                fprintf(output, "    %s = %zu,\n", en->variants[vi], vi);
+            fprintf(output, "}\nimpl Default for %s { fn default() -> Self { Self::%s } }\n",
+                    en->name, en->variant_count > 0 ? en->variants[0] : "Default");
+        }
         for (size_t si = 0; si < abi->ir->lean_struct_count; ++si) {
             const FlowLeanStruct *st = &abi->ir->lean_structs[si];
             fprintf(output, "#[repr(C)]\n#[derive(Debug, Copy, Clone, Default)]\npub struct %s {\n", st->name);
-            for (size_t fi = 0; fi < st->field_count; ++fi)
-                fprintf(output, "    pub %s: %s,\n", st->fields[fi].name, abi_c_type_to_rust_type(st->fields[fi].c_type));
+            for (size_t fi = 0; fi < st->field_count; ++fi) {
+                char f_ident[96];
+                const char *ft = st->fields[fi].lean_type[0]
+                    ? abi_lean_rust_type_ir(abi->ir, st->fields[fi].lean_type)
+                    : (abi_find_lean_struct(abi->ir, st->fields[fi].c_type) || abi_find_lean_enum(abi->ir, st->fields[fi].c_type)
+                        ? st->fields[fi].c_type
+                        : abi_c_type_to_rust_type(st->fields[fi].c_type));
+                fprintf(output, "    pub %s: %s,\n",
+                        abi_escape_rust_ident(st->fields[fi].name, f_ident, sizeof(f_ident)), ft);
+            }
             fputs("}\n", output);
         }
+        if (abi->ir->migrate_fn[0]) {
+            for (size_t fi = 0; fi < abi->ir->lean_function_count; ++fi) {
+                const FlowLeanFunction *mfn = &abi->ir->lean_functions[fi];
+                if (strcmp(mfn->name, abi->ir->migrate_fn) == 0 && mfn->is_struct_transform && mfn->param_count == 1) {
+                    migrate_struct_fn = mfn;
+                    break;
+                }
+            }
+        }
     }
+    int has_patchbay = (abi->ir && abi->ir->patchbay_stage_count > 0 &&
+                        abi->ir->patchbay_stages[0].in_struct[0] &&
+                        abi->ir->patchbay_stages[abi->ir->patchbay_stage_count - 1].out_struct[0]);
     fprintf(output,
         "extern \"C\" {\n    fn %s() -> FlowHandle;\n    fn %s(handle: FlowHandle, input: *const u8, input_len: usize, output: *mut u8, output_len: *mut usize) -> c_int;\n"
         "    fn flow_%s_process_descriptor(handle: FlowHandle, in_desc: *const FlowExtentDescriptor, out_desc: *mut FlowExtentDescriptor) -> c_int;\n"
-        "    fn %s(handle: FlowHandle);\n",
-        abi->create_fn.name, abi->primary_fn.name, id_safe, abi->destroy_fn.name);
+        "    fn flow_%s_trip_watchdog_for_test(handle: FlowHandle, simulated_elapsed_ns: u64) -> c_int;\n"
+        "    fn flow_%s_reset_watchdog(handle: FlowHandle) -> c_int;\n"
+        "    fn flow_%s_watchdog_breach_count(handle: FlowHandle) -> u64;\n"
+        "    fn %s(handle: FlowHandle);\n"
+        "    fn flow_ab_shadow_record(fn_id: u32, f64_val: f64, fx_as_f64: f64, tol: f64);\n"
+        "    fn flow_ab_shadow_get_calls() -> u64;\n"
+        "    fn flow_ab_shadow_get_mismatches() -> u64;\n"
+        "    fn flow_ab_shadow_get_fn_calls(fn_id: u32) -> u64;\n"
+        "    fn flow_ab_shadow_reset();\n",
+        abi->create_fn.name, abi->primary_fn.name, id_safe, id_safe, id_safe, id_safe, abi->destroy_fn.name);
+    if (migrate_struct_fn) {
+        fprintf(output, "    fn flow_%s_migrate_buffer(old_buf: *const c_void, old_len: usize, new_buf: *mut c_void, new_len: usize) -> c_int;\n", id_safe);
+    }
+    if (has_patchbay) {
+        fprintf(output, "    fn flow_%s_run_patchbay(handle: FlowHandle, in_frame: *const %s, out_frame: *mut %s) -> c_int;\n",
+                id_safe, abi->ir->patchbay_stages[0].in_struct, abi->ir->patchbay_stages[abi->ir->patchbay_stage_count - 1].out_struct);
+    }
     if (abi->ir && abi->ir->lean_function_count > 0) {
         for (size_t fi = 0; fi < abi->ir->lean_function_count; ++fi) {
             const FlowLeanFunction *fn = &abi->ir->lean_functions[fi];
-            fprintf(output, "    fn %s(", fn->name);
-            for (size_t pi = 0; pi < fn->param_count; ++pi)
-                fprintf(output, "%s%s: %s", pi > 0 ? ", " : "", fn->param_names[pi], abi_lean_rust_type_ir(abi->ir, fn->param_types[pi]));
+            char fn_ident[96];
+            int has_float = (!strcmp(fn->return_type, "Float") || !strcmp(fn->return_type, "Float32"));
+            int has_struct = fn->is_struct_transform ? 1 : 0;
+            for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                if (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32")) has_float = 1;
+                if (abi_find_lean_struct(abi->ir, fn->param_types[pi])) has_struct = 1;
+            }
+            if (fn->is_tuple_return && fn->tuple_arity >= 2) {
+                for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                    if (!strcmp(fn->tuple_types[ti], "Float") || !strcmp(fn->tuple_types[ti], "Float32")) has_float = 1;
+            }
+            if (has_float && !has_struct) {
+                fprintf(output, "    fn %s_fx(", fn->name);
+                for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                    char p_ident[96];
+                    fprintf(output, "%s%s: %s", pi > 0 ? ", " : "",
+                            abi_escape_rust_ident(fn->param_names[pi], p_ident, sizeof(p_ident)),
+                            abi_lean_fx_rust_type_ir(abi->ir, fn->param_types[pi]));
+                }
+                if (fn->is_tuple_return && fn->tuple_arity >= 2) {
+                    for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                        fprintf(output, "%sout_%zu: *mut %s", (fn->param_count > 0 || ti > 0) ? ", " : "", ti, abi_lean_fx_rust_type_ir(abi->ir, fn->tuple_types[ti]));
+                }
+                fprintf(output, ") -> %s;\n", abi_lean_fx_rust_type_ir(abi->ir, fn->return_type));
+            }
+            fprintf(output, "    fn %s(", abi_escape_rust_ident(fn->name, fn_ident, sizeof(fn_ident)));
+            for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                char p_ident[96];
+                fprintf(output, "%s%s: %s", pi > 0 ? ", " : "",
+                        abi_escape_rust_ident(fn->param_names[pi], p_ident, sizeof(p_ident)),
+                        abi_lean_rust_type_ir(abi->ir, fn->param_types[pi]));
+            }
             if (fn->is_tuple_return && fn->tuple_arity >= 2) {
                 for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
                     fprintf(output, "%sout_%zu: *mut %s", (fn->param_count > 0 || ti > 0) ? ", " : "", ti, abi_lean_rust_type_ir(abi->ir, fn->tuple_types[ti]));
@@ -270,16 +516,92 @@ int flow_abi_emit_rust_adapter(FILE *output, const FlowComponentABI *abi) { if (
         "        let res = unsafe { flow_%s_process_descriptor(self.handle, in_desc as *const _, &mut out_desc as *mut _) };\n"
         "        if res == 0 { Ok(out_desc) } else { Err(res) }\n    }\n"
         "    pub fn process(&%sself, input: &[u8]) -> Result<Vec<u8>, c_int> {\n"
-        "        let mut out_buf = vec![0u8; %zu]; let mut out_len = out_buf.len();\n"
+        "        let cap = (input.len().saturating_mul(2).max(4096)).min(%zu);\n"
+        "        let mut out_buf = vec![0u8; cap]; let mut out_len = out_buf.len();\n"
         "        let res = unsafe { %s(self.handle, input.as_ptr(), input.len(), out_buf.as_mut_ptr(), &mut out_len) };\n"
-        "        if res == 0 { out_buf.truncate(out_len); Ok(out_buf) } else { Err(res) }\n    }\n",
-        pascal_name, pascal_name, abi->create_fn.name, mut_kw, abi->primary_fn.name, mut_kw, id_safe, mut_kw, max_mem, abi->primary_fn.name);
+        "        if res == 0 { out_buf.truncate(out_len); Ok(out_buf) } else { Err(res) }\n    }\n"
+        "    pub fn trip_watchdog_for_test(&self, simulated_elapsed_ns: u64) -> c_int { unsafe { flow_%s_trip_watchdog_for_test(self.handle, simulated_elapsed_ns) } }\n"
+        "    pub fn reset_watchdog(&self) -> c_int { unsafe { flow_%s_reset_watchdog(self.handle) } }\n"
+        "    pub fn watchdog_breach_count(&self) -> u64 { unsafe { flow_%s_watchdog_breach_count(self.handle) } }\n"
+        "    pub fn ab_shadow_record(fn_id: u32, f64_val: f64, fx_as_f64: f64, tol: f64) { unsafe { flow_ab_shadow_record(fn_id, f64_val, fx_as_f64, tol) } }\n"
+        "    pub fn ab_shadow_get_calls() -> u64 { unsafe { flow_ab_shadow_get_calls() } }\n"
+        "    pub fn ab_shadow_get_mismatches() -> u64 { unsafe { flow_ab_shadow_get_mismatches() } }\n"
+        "    pub fn ab_shadow_get_fn_calls(fn_id: u32) -> u64 { unsafe { flow_ab_shadow_get_fn_calls(fn_id) } }\n"
+        "    pub fn ab_shadow_reset() { unsafe { flow_ab_shadow_reset() } }\n",
+        pascal_name, pascal_name, abi->create_fn.name, mut_kw, abi->primary_fn.name, mut_kw, id_safe, mut_kw, max_mem, abi->primary_fn.name, id_safe, id_safe, id_safe);
+    if (migrate_struct_fn) {
+        const char *in_t = migrate_struct_fn->param_types[0];
+        const char *out_t = migrate_struct_fn->return_type;
+        fprintf(output,
+            "    pub fn migrate_state(&self, old_state: &%s) -> Result<%s, c_int> {\n"
+            "        let mut new_state = %s::default();\n"
+            "        let res = unsafe { flow_%s_migrate_buffer(old_state as *const _ as *const c_void, std::mem::size_of::<%s>(), &mut new_state as *mut _ as *mut c_void, std::mem::size_of::<%s>()) };\n"
+            "        if res == 0 { Ok(new_state) } else { Err(res) }\n    }\n",
+            in_t, out_t, out_t, id_safe, in_t, out_t);
+    }
+    if (has_patchbay) {
+        const char *pb_in = abi->ir->patchbay_stages[0].in_struct;
+        const char *pb_out = abi->ir->patchbay_stages[abi->ir->patchbay_stage_count - 1].out_struct;
+        fprintf(output,
+            "    pub fn run_patchbay(&%sself, in_frame: &%s) -> Result<%s, c_int> {\n"
+            "        let mut out_frame = %s::default();\n"
+            "        let res = unsafe { flow_%s_run_patchbay(self.handle, in_frame as *const _, &mut out_frame as *mut _) };\n"
+            "        if res == 0 { Ok(out_frame) } else { Err(res) }\n    }\n",
+            mut_kw, pb_in, pb_out, pb_out, id_safe);
+    }
     if (abi->ir && abi->ir->lean_function_count > 0) {
         for (size_t fi = 0; fi < abi->ir->lean_function_count; ++fi) {
             const FlowLeanFunction *fn = &abi->ir->lean_functions[fi];
-            fprintf(output, "    pub fn %s(&self", fn->name);
-            for (size_t pi = 0; pi < fn->param_count; ++pi)
-                fprintf(output, ", %s: %s", fn->param_names[pi], abi_lean_rust_type_ir(abi->ir, fn->param_types[pi]));
+            char fn_ident[96];
+            abi_escape_rust_ident(fn->name, fn_ident, sizeof(fn_ident));
+            int has_float = (!strcmp(fn->return_type, "Float") || !strcmp(fn->return_type, "Float32"));
+            int has_struct = fn->is_struct_transform ? 1 : 0;
+            for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                if (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32")) has_float = 1;
+                if (abi_find_lean_struct(abi->ir, fn->param_types[pi])) has_struct = 1;
+            }
+            if (fn->is_tuple_return && fn->tuple_arity >= 2) {
+                for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                    if (!strcmp(fn->tuple_types[ti], "Float") || !strcmp(fn->tuple_types[ti], "Float32")) has_float = 1;
+            }
+            if (has_float && !has_struct) {
+                fprintf(output, "    pub fn %s_fx(&self", fn->name);
+                for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                    char p_ident[96];
+                    fprintf(output, ", %s: %s", abi_escape_rust_ident(fn->param_names[pi], p_ident, sizeof(p_ident)), abi_lean_fx_rust_type_ir(abi->ir, fn->param_types[pi]));
+                }
+                if (fn->is_tuple_return && fn->tuple_arity >= 2) {
+                    fprintf(output, ") -> (");
+                    for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                        fprintf(output, "%s%s", ti > 0 ? ", " : "", abi_lean_fx_rust_type_ir(abi->ir, fn->tuple_types[ti]));
+                    fprintf(output, ") { ");
+                    for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                        fprintf(output, "let mut _out_%zu: %s = Default::default(); ", ti, abi_lean_fx_rust_type_ir(abi->ir, fn->tuple_types[ti]));
+                    fprintf(output, "unsafe { %s_fx(", fn->name);
+                    for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                        char p_ident[96];
+                        fprintf(output, "%s%s", pi > 0 ? ", " : "", abi_escape_rust_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                    }
+                    for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                        fprintf(output, "%s&mut _out_%zu", (fn->param_count > 0 || ti > 0) ? ", " : "", ti);
+                    fprintf(output, "); } (");
+                    for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                        fprintf(output, "%s_out_%zu", ti > 0 ? ", " : "", ti);
+                    fprintf(output, ") }\n");
+                } else {
+                    fprintf(output, ") -> %s { unsafe { %s_fx(", abi_lean_fx_rust_type_ir(abi->ir, fn->return_type), fn->name);
+                    for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                        char p_ident[96];
+                        fprintf(output, "%s%s", pi > 0 ? ", " : "", abi_escape_rust_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                    }
+                    fprintf(output, ") } }\n");
+                }
+            }
+            fprintf(output, "    pub fn %s(&self", fn_ident);
+            for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                char p_ident[96];
+                fprintf(output, ", %s: %s", abi_escape_rust_ident(fn->param_names[pi], p_ident, sizeof(p_ident)), abi_lean_rust_type_ir(abi->ir, fn->param_types[pi]));
+            }
             if (fn->is_tuple_return && fn->tuple_arity >= 2) {
                 fprintf(output, ") -> (");
                 for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
@@ -287,9 +609,11 @@ int flow_abi_emit_rust_adapter(FILE *output, const FlowComponentABI *abi) { if (
                 fprintf(output, ") { ");
                 for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
                     fprintf(output, "let mut _out_%zu: %s = Default::default(); ", ti, abi_lean_rust_type_ir(abi->ir, fn->tuple_types[ti]));
-                fprintf(output, "unsafe { %s(", fn->name);
-                for (size_t pi = 0; pi < fn->param_count; ++pi)
-                    fprintf(output, "%s%s", pi > 0 ? ", " : "", fn->param_names[pi]);
+                fprintf(output, "unsafe { %s(", fn_ident);
+                for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                    char p_ident[96];
+                    fprintf(output, "%s%s", pi > 0 ? ", " : "", abi_escape_rust_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                }
                 for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
                     fprintf(output, "%s&mut _out_%zu", (fn->param_count > 0 || ti > 0) ? ", " : "", ti);
                 fprintf(output, "); } (");
@@ -297,16 +621,19 @@ int flow_abi_emit_rust_adapter(FILE *output, const FlowComponentABI *abi) { if (
                     fprintf(output, "%s_out_%zu", ti > 0 ? ", " : "", ti);
                 fprintf(output, ") }\n");
             } else {
-                fprintf(output, ") -> %s { unsafe { %s(", abi_lean_rust_type_ir(abi->ir, fn->return_type), fn->name);
-                for (size_t pi = 0; pi < fn->param_count; ++pi)
-                    fprintf(output, "%s%s", pi > 0 ? ", " : "", fn->param_names[pi]);
+                fprintf(output, ") -> %s { unsafe { %s(", abi_lean_rust_type_ir(abi->ir, fn->return_type), fn_ident);
+                for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                    char p_ident[96];
+                    fprintf(output, "%s%s", pi > 0 ? ", " : "", abi_escape_rust_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                }
                 fprintf(output, ") } }\n");
             }
         }
     }
     fprintf(output,
-        "}\nimpl Drop for %s { fn drop(&mut self) { if !self.handle.0.is_null() { unsafe { %s(self.handle); } self.handle.0 = std::ptr::null_mut(); } } }\n",
-        pascal_name, abi->destroy_fn.name);
+        "}\nimpl Drop for %s { fn drop(&mut self) { if !self.handle.0.is_null() { unsafe { %s(self.handle); } self.handle.0 = std::ptr::null_mut(); } } }\n"
+        "pub type FlowComponentAdapter = %s;\n",
+        pascal_name, abi->destroy_fn.name, pascal_name);
     if (abi->thread_safe) fprintf(output, "unsafe impl Send for %s {}\nunsafe impl Sync for %s {}\n", pascal_name, pascal_name); return ferror(output) == 0; }
 int flow_abi_emit_python_adapter(FILE *output, const FlowComponentABI *abi) { if (!output || !abi) return 0; char pascal_name[64], id_safe[64];
     sanitize_ident(abi->component_id, id_safe, sizeof(id_safe)); to_pascal_case(abi->component_id, pascal_name, sizeof(pascal_name)); fprintf(output,
@@ -319,14 +646,23 @@ int flow_abi_emit_python_adapter(FILE *output, const FlowComponentABI *abi) { if
     if (abi->ir) {
         for (size_t ei = 0; ei < abi->ir->lean_enum_count; ++ei) {
             const FlowLeanEnum *en = &abi->ir->lean_enums[ei];
+            fprintf(output, "class %s:\n", en->name);
+            if (en->variant_count == 0) fprintf(output, "    pass\n");
+            for (size_t vi = 0; vi < en->variant_count; ++vi)
+                fprintf(output, "    %s = %zu\n", en->variants[vi], vi);
             for (size_t vi = 0; vi < en->variant_count; ++vi)
                 fprintf(output, "%s = %zu\n", en->variants[vi], vi);
         }
         for (size_t si = 0; si < abi->ir->lean_struct_count; ++si) {
             const FlowLeanStruct *st = &abi->ir->lean_structs[si];
             fprintf(output, "class %s(ctypes.Structure):\n    _fields_ = [", st->name);
-            for (size_t fi = 0; fi < st->field_count; ++fi)
-                fprintf(output, "%s('%s', %s)", fi ? ", " : "", st->fields[fi].name, abi_c_type_to_ctypes(st->fields[fi].c_type));
+            for (size_t fi = 0; fi < st->field_count; ++fi) {
+                const char *ft = st->fields[fi].lean_type[0]
+                    ? abi_lean_ctypes_type_ir(abi->ir, st->fields[fi].lean_type)
+                    : (abi_find_lean_struct(abi->ir, st->fields[fi].c_type) ? st->fields[fi].c_type
+                        : (abi_find_lean_enum(abi->ir, st->fields[fi].c_type) ? "ctypes.c_uint32" : abi_c_type_to_ctypes(st->fields[fi].c_type)));
+                fprintf(output, "%s('%s', %s)", fi ? ", " : "", st->fields[fi].name, ft);
+            }
             fputs("]\n", output);
         }
     }
@@ -403,14 +739,24 @@ int flow_abi_emit_python_adapter(FILE *output, const FlowComponentABI *abi) { if
     if (abi->ir && abi->ir->lean_function_count > 0) {
         for (size_t fi = 0; fi < abi->ir->lean_function_count; ++fi) {
             const FlowLeanFunction *fn = &abi->ir->lean_functions[fi];
-            fprintf(output, "        if hasattr(self._lib, '%s'):\n            self._lib.%s.argtypes = [", fn->name, fn->name);
+            if (abi_fn_has_fx_variant(abi->ir, fn)) {
+                fprintf(output, "        if hasattr(self._lib, '%s_fx'):\n            getattr(self._lib, '%s_fx').argtypes = [", fn->name, fn->name);
+                for (size_t pi = 0; pi < fn->param_count; ++pi)
+                    fprintf(output, "%s%s", pi ? ", " : "", abi_lean_fx_ctypes_type_ir(abi->ir, fn->param_types[pi]));
+                if (fn->is_tuple_return && fn->tuple_arity >= 2) {
+                    for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                        fprintf(output, "%sctypes.POINTER(%s)", (fn->param_count > 0 || ti > 0) ? ", " : "", abi_lean_fx_ctypes_type_ir(abi->ir, fn->tuple_types[ti]));
+                }
+                fprintf(output, "]\n            getattr(self._lib, '%s_fx').restype = %s\n", fn->name, abi_lean_fx_ctypes_type_ir(abi->ir, fn->return_type));
+            }
+            fprintf(output, "        if hasattr(self._lib, '%s'):\n            getattr(self._lib, '%s').argtypes = [", fn->name, fn->name);
             for (size_t pi = 0; pi < fn->param_count; ++pi)
                 fprintf(output, "%s%s", pi ? ", " : "", abi_lean_ctypes_type_ir(abi->ir, fn->param_types[pi]));
             if (fn->is_tuple_return && fn->tuple_arity >= 2) {
                 for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
                     fprintf(output, "%sctypes.POINTER(%s)", (fn->param_count > 0 || ti > 0) ? ", " : "", abi_lean_ctypes_type_ir(abi->ir, fn->tuple_types[ti]));
             }
-            fprintf(output, "]\n            self._lib.%s.restype = %s\n", fn->name, abi_lean_ctypes_type_ir(abi->ir, fn->return_type));
+            fprintf(output, "]\n            getattr(self._lib, '%s').restype = %s\n", fn->name, abi_lean_ctypes_type_ir(abi->ir, fn->return_type));
         }
     }
     fprintf(output,
@@ -458,6 +804,16 @@ int flow_abi_emit_python_adapter(FILE *output, const FlowComponentABI *abi) { if
         "    def watchdog_breach_count(self) -> int:\n"
         "        if not self._handle: raise RuntimeError(\"Instance already closed\")\n"
         "        return int(self._lib.flow_%s_watchdog_breach_count(self._handle))\n"
+        "    def ab_shadow_record(self, fn_id: int, f64_val: float, fx_as_f64: float, tol: float = 1e-6) -> None:\n"
+        "        self._lib.flow_ab_shadow_record(int(fn_id), float(f64_val), float(fx_as_f64), float(tol))\n"
+        "    def ab_shadow_get_calls(self) -> int:\n"
+        "        return int(self._lib.flow_ab_shadow_get_calls())\n"
+        "    def ab_shadow_get_mismatches(self) -> int:\n"
+        "        return int(self._lib.flow_ab_shadow_get_mismatches())\n"
+        "    def ab_shadow_get_fn_calls(self, fn_id: int) -> int:\n"
+        "        return int(self._lib.flow_ab_shadow_get_fn_calls(int(fn_id)))\n"
+        "    def ab_shadow_reset(self) -> None:\n"
+        "        self._lib.flow_ab_shadow_reset()\n"
         "    def process_view(self, input_view, output_view) -> int:\n"
         "        if not self._handle: raise RuntimeError(\"Instance already closed\")\n"
         "        in_mv, out_mv = memoryview(input_view), memoryview(output_view)\n"
@@ -499,17 +855,61 @@ int flow_abi_emit_python_adapter(FILE *output, const FlowComponentABI *abi) { if
     if (abi->ir && abi->ir->lean_function_count > 0) {
         for (size_t fi = 0; fi < abi->ir->lean_function_count; ++fi) {
             const FlowLeanFunction *fn = &abi->ir->lean_functions[fi];
+            char fn_ident[96];
+            abi_escape_py_ident(fn->name, fn_ident, sizeof(fn_ident));
+            if (abi_fn_has_fx_variant(abi->ir, fn)) {
+                fprintf(output, "    def %s_fx(self", fn->name);
+                for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                    char p_ident[96];
+                    fprintf(output, ", %s", abi_escape_py_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                }
+                if (fn->is_tuple_return && fn->tuple_arity >= 2) {
+                    fprintf(output, ") -> tuple:\n        ");
+                    for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                        fprintf(output, "_out_%zu = %s(); ", ti, abi_lean_fx_ctypes_type_ir(abi->ir, fn->tuple_types[ti]));
+                    fprintf(output, "\n        getattr(self._lib, '%s_fx')(", fn->name);
+                    for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                        char p_ident[96];
+                        const char *pt = fn->param_types[pi];
+                        const char *conv = !strcmp(pt, "Bool") ? "bool" : "int";
+                        fprintf(output, "%s%s(%s)", pi ? ", " : "", conv, abi_escape_py_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                    }
+                    for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                        fprintf(output, "%sctypes.byref(_out_%zu)", (fn->param_count > 0 || ti > 0) ? ", " : "", ti);
+                    fprintf(output, ")\n        return (");
+                    for (size_t ti = 0; ti < fn->tuple_arity; ++ti) {
+                        const char *tt = fn->tuple_types[ti];
+                        const char *tpy = !strcmp(tt, "Bool") ? "bool" : "int";
+                        fprintf(output, "%s%s(_out_%zu.value)", ti ? ", " : "", tpy, ti);
+                    }
+                    fprintf(output, ")\n");
+                } else {
+                    const char *fx_ret = !strcmp(fn->return_type, "Bool") ? "bool" : "int";
+                    fprintf(output, ") -> %s:\n        return %s(getattr(self._lib, '%s_fx')(", fx_ret, fx_ret, fn->name);
+                    for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                        char p_ident[96];
+                        const char *pt = fn->param_types[pi];
+                        const char *conv = !strcmp(pt, "Bool") ? "bool" : "int";
+                        fprintf(output, "%s%s(%s)", pi ? ", " : "", conv, abi_escape_py_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                    }
+                    fputs("))\n", output);
+                }
+            }
             if (fn->is_tuple_return && fn->tuple_arity >= 2) {
-                fprintf(output, "    def %s(self", fn->name);
-                for (size_t pi = 0; pi < fn->param_count; ++pi) fprintf(output, ", %s", fn->param_names[pi]);
+                fprintf(output, "    def %s(self", fn_ident);
+                for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                    char p_ident[96];
+                    fprintf(output, ", %s", abi_escape_py_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                }
                 fprintf(output, ") -> tuple:\n        ");
                 for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
                     fprintf(output, "_out_%zu = %s(); ", ti, abi_lean_ctypes_type_ir(abi->ir, fn->tuple_types[ti]));
-                fprintf(output, "\n        self._lib.%s(", fn->name);
+                fprintf(output, "\n        getattr(self._lib, '%s')(", fn->name);
                 for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                    char p_ident[96];
                     const char *pt = fn->param_types[pi];
-                    const char *conv = !strcmp(pt, "Bool") ? "bool" : ((!strcmp(pt, "Float") || !strcmp(pt, "Float32")) ? "float" : ((!strcmp(pt, "Int") || !strcmp(pt, "Int64") || !strcmp(pt, "Int32") || !strcmp(pt, "Int16") || !strcmp(pt, "Int8")) ? "int" : "self._u64"));
-                    fprintf(output, "%s%s(%s)", pi ? ", " : "", conv, fn->param_names[pi]);
+                    const char *conv = !strcmp(pt, "Bool") ? "bool" : ((!strcmp(pt, "Float") || !strcmp(pt, "Float32")) ? "float" : ((!strcmp(pt, "Int") || !strcmp(pt, "Int64") || !strcmp(pt, "Int32") || !strcmp(pt, "Int16") || !strcmp(pt, "Int8") || !strcmp(pt, "ISize")) ? "int" : "self._u64"));
+                    fprintf(output, "%s%s(%s)", pi ? ", " : "", conv, abi_escape_py_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
                 }
                 for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
                     fprintf(output, "%sctypes.byref(_out_%zu)", (fn->param_count > 0 || ti > 0) ? ", " : "", ti);
@@ -524,28 +924,34 @@ int flow_abi_emit_python_adapter(FILE *output, const FlowComponentABI *abi) { if
             }
             int ret_is_struct = abi_find_lean_struct(abi->ir, fn->return_type) != NULL;
             const char *py_ret = ret_is_struct ? fn->return_type : (!strcmp(fn->return_type, "Bool") ? "bool" : ((!strcmp(fn->return_type, "Float") || !strcmp(fn->return_type, "Float32")) ? "float" : "int"));
-            fprintf(output, "    def %s(self", fn->name);
-            for (size_t pi = 0; pi < fn->param_count; ++pi) fprintf(output, ", %s", fn->param_names[pi]);
+            fprintf(output, "    def %s(self", fn_ident);
+            for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                char p_ident[96];
+                fprintf(output, ", %s", abi_escape_py_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+            }
             if (ret_is_struct) {
-                fprintf(output, ") -> %s:\n        return self._lib.%s(", py_ret, fn->name);
+                fprintf(output, ") -> %s:\n        return getattr(self._lib, '%s')(", py_ret, fn->name);
             } else {
-                fprintf(output, ") -> %s:\n        return %s(self._lib.%s(", py_ret, py_ret, fn->name);
+                fprintf(output, ") -> %s:\n        return %s(getattr(self._lib, '%s')(", py_ret, py_ret, fn->name);
             }
             for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                char p_ident[96];
+                abi_escape_py_ident(fn->param_names[pi], p_ident, sizeof(p_ident));
                 const char *pt = fn->param_types[pi];
                 if (abi_find_lean_struct(abi->ir, pt)) {
                     fprintf(output, "%s(%s(**%s) if isinstance(%s, dict) else (%s(*%s) if isinstance(%s, (list, tuple)) else (%s if isinstance(%s, %s) else %s())))",
-                            pi ? ", " : "", pt, fn->param_names[pi], fn->param_names[pi],
-                            pt, fn->param_names[pi], fn->param_names[pi],
-                            fn->param_names[pi], fn->param_names[pi], pt, pt);
+                            pi ? ", " : "", pt, p_ident, p_ident,
+                            pt, p_ident, p_ident,
+                            p_ident, p_ident, pt, pt);
                 } else {
-                    const char *conv = !strcmp(pt, "Bool") ? "bool" : ((!strcmp(pt, "Float") || !strcmp(pt, "Float32")) ? "float" : ((!strcmp(pt, "Int") || !strcmp(pt, "Int64") || !strcmp(pt, "Int32") || !strcmp(pt, "Int16") || !strcmp(pt, "Int8")) ? "int" : "self._u64"));
-                    fprintf(output, "%s%s(%s)", pi ? ", " : "", conv, fn->param_names[pi]);
+                    const char *conv = !strcmp(pt, "Bool") ? "bool" : ((!strcmp(pt, "Float") || !strcmp(pt, "Float32")) ? "float" : ((!strcmp(pt, "Int") || !strcmp(pt, "Int64") || !strcmp(pt, "Int32") || !strcmp(pt, "Int16") || !strcmp(pt, "Int8") || !strcmp(pt, "ISize")) ? "int" : "self._u64"));
+                    fprintf(output, "%s%s(%s)", pi ? ", " : "", conv, p_ident);
                 }
             }
             fputs(ret_is_struct ? ")\n" : "))\n", output);
         }
     }
+    fprintf(output, "FlowComponentAdapter = %s\n", pascal_name);
     return ferror(output) == 0; }
 int flow_abi_emit_lean_adapter(FILE *output, const SemanticIR *ir, const FlowComponentABI *abi, uint64_t genome, size_t capacity, size_t shards) {
     if (!output || !abi) return 0; char pascal_name[64], id_safe[64]; sanitize_ident(abi->component_id, id_safe, sizeof(id_safe));
@@ -756,10 +1162,44 @@ int flow_abi_emit_polyglot_adapter(FILE *output, const FlowComponentABI *abi, co
     if (!strcasecmp(target_lang, "rust") || !strcasecmp(target_lang, "rs")) return flow_abi_emit_rust_adapter(output, abi);
     if (!strcasecmp(target_lang, "python") || !strcasecmp(target_lang, "py")) return flow_abi_emit_python_adapter(output, abi);
     char pascal[64], id[64]; sanitize_ident(abi->component_id, id, sizeof(id)); to_pascal_case(abi->component_id, pascal, sizeof(pascal));
+    const FlowLeanFunction *migrate_struct_fn = NULL;
+    if (abi->ir && abi->ir->migrate_fn[0]) {
+        for (size_t fi = 0; fi < abi->ir->lean_function_count; ++fi) {
+            const FlowLeanFunction *mfn = &abi->ir->lean_functions[fi];
+            if (strcmp(mfn->name, abi->ir->migrate_fn) == 0 && mfn->is_struct_transform && mfn->param_count == 1) {
+                migrate_struct_fn = mfn;
+                break;
+            }
+        }
+    }
+    int has_patchbay = (abi->ir && abi->ir->patchbay_stage_count > 0 &&
+                        abi->ir->patchbay_stages[0].in_struct[0] &&
+                        abi->ir->patchbay_stages[abi->ir->patchbay_stage_count - 1].out_struct[0]);
     if (!strcasecmp(target_lang, "js") || !strcasecmp(target_lang, "ts")) {
-        fprintf(output, "// FLOW Zero-Copy JS/Bun/WASM Adapter (%s)\nimport { dlopen, FFIType, ptr } from 'bun:ffi';\nexport class %s {\n  static STATE_FIELDS = [", abi->component_id, pascal);
+        fprintf(output,
+            "// FLOW Zero-Copy JS/Bun/WASM Adapter (%s)\n"
+            "import { dlopen, FFIType, ptr } from 'bun:ffi';\n"
+            "export const FLOW_OK = 0;\n"
+            "export const FLOW_ERR_INVALID_ARG = -1;\n"
+            "export const FLOW_ERR_QUOTA_OR_STRIDE = -2;\n"
+            "export const FLOW_ERR_KERNEL_UNBOUND = -3;\n"
+            "export const FLOW_ERR_WATCHDOG_ESTOP = -4;\n",
+            abi->component_id);
+        if (abi->ir) {
+            for (size_t ei = 0; ei < abi->ir->lean_enum_count; ++ei) {
+                const FlowLeanEnum *en = &abi->ir->lean_enums[ei];
+                fprintf(output, "export const %s = Object.freeze({ ", en->name);
+                for (size_t vi = 0; vi < en->variant_count; ++vi)
+                    fprintf(output, "%s%s: %zu", vi ? ", " : "", en->variants[vi], vi);
+                fprintf(output, " });\n");
+            }
+        }
+        fprintf(output, "export class %s {\n  static STATE_FIELDS = [", pascal);
         if (abi->ir) for (size_t i = 0; i < abi->ir->state_field_count; ++i)
             fprintf(output, "%s{ name: '%s', size_bytes: %zu, offset: %zu }", i ? ", " : "", abi->ir->state_fields[i].name, abi->ir->state_fields[i].size_bytes, i * 8);
+        fprintf(output, "];\n  static LEAN_STRUCTS = [");
+        if (abi->ir) for (size_t i = 0; i < abi->ir->lean_struct_count; ++i)
+            fprintf(output, "%s{ name: '%s', byte_size: %zu }", i ? ", " : "", abi->ir->lean_structs[i].name, abi->ir->lean_structs[i].byte_size);
         fprintf(output, "];\n  static LEAN_FUNCTIONS = [");
         if (abi->ir) for (size_t i = 0; i < abi->ir->lean_function_count; ++i)
             fprintf(output, "%s'%s'", i ? ", " : "", abi->ir->lean_functions[i].name);
@@ -770,26 +1210,120 @@ int flow_abi_emit_polyglot_adapter(FILE *output, const FlowComponentABI *abi, co
                 "      flow_%s_create: { args: [], returns: FFIType.ptr }, flow_%s_acquire_epoch: { args: [FFIType.ptr], returns: FFIType.u64 },\n"
                 "      flow_%s_release_epoch: { args: [FFIType.ptr, FFIType.u64], returns: FFIType.void },\n"
                 "      flow_%s_process_descriptor: { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },\n"
-                "      flow_%s_destroy: { args: [FFIType.ptr], returns: FFIType.void }", id, id, id, id, id);
+                "      flow_%s_trip_watchdog_for_test: { args: [FFIType.ptr, FFIType.u64], returns: FFIType.i32 },\n"
+                "      flow_%s_reset_watchdog: { args: [FFIType.ptr], returns: FFIType.i32 },\n"
+                "      flow_%s_watchdog_breach_count: { args: [FFIType.ptr], returns: FFIType.u64 },\n"
+                "      flow_%s_destroy: { args: [FFIType.ptr], returns: FFIType.void },\n"
+                "      flow_ab_shadow_record: { args: [FFIType.u32, FFIType.f64, FFIType.f64, FFIType.f64], returns: FFIType.void },\n"
+                "      flow_ab_shadow_get_calls: { args: [], returns: FFIType.u64 },\n"
+                "      flow_ab_shadow_get_mismatches: { args: [], returns: FFIType.u64 },\n"
+                "      flow_ab_shadow_get_fn_calls: { args: [FFIType.u32], returns: FFIType.u64 },\n"
+                "      flow_ab_shadow_reset: { args: [], returns: FFIType.void }",
+                id, id, id, id, id, id, id, id);
+        if (migrate_struct_fn) {
+            fprintf(output, ",\n      flow_%s_migrate_buffer: { args: [FFIType.ptr, FFIType.u64, FFIType.ptr, FFIType.u64], returns: FFIType.i32 }", id);
+        }
+        if (has_patchbay) {
+            fprintf(output, ",\n      flow_%s_run_patchbay: { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 }", id);
+        }
         if (abi->ir) {
             for (size_t i = 0; i < abi->ir->lean_function_count; ++i) {
                 const FlowLeanFunction *fn = &abi->ir->lean_functions[i];
+                if (abi_fn_has_fx_variant(abi->ir, fn)) {
+                    fprintf(output, ",\n      %s_fx: { args: [", fn->name);
+                    for (size_t p = 0; p < fn->param_count; ++p)
+                        fprintf(output, "%sFFIType.%s", p ? ", " : "", abi_lean_fx_js_ffi_type_ir(abi->ir, fn->param_types[p]));
+                    if (fn->is_tuple_return && fn->tuple_arity >= 2) {
+                        for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                            fprintf(output, "%sFFIType.ptr", (fn->param_count > 0 || ti > 0) ? ", " : "");
+                    }
+                    fprintf(output, "], returns: FFIType.%s }", abi_lean_fx_js_ffi_type_ir(abi->ir, fn->return_type));
+                }
                 fprintf(output, ",\n      %s: { args: [", fn->name);
-                for (size_t p = 0; p < fn->param_count; ++p) fprintf(output, "%sFFIType.%s", p ? ", " : "", !strcmp(fn->param_types[p], "Bool") ? "u8" : (!strcmp(fn->param_types[p], "UInt32") ? "u32" : (!strcmp(fn->param_types[p], "Float") ? "f64" : "u64")));
-                fprintf(output, "], returns: FFIType.%s }", !strcmp(fn->return_type, "Bool") ? "u8" : (!strcmp(fn->return_type, "UInt32") ? "u32" : (!strcmp(fn->return_type, "Float") ? "f64" : "u64")));
+                for (size_t p = 0; p < fn->param_count; ++p)
+                    fprintf(output, "%sFFIType.%s", p ? ", " : "", abi_lean_js_ffi_type_ir(abi->ir, fn->param_types[p]));
+                if (fn->is_tuple_return && fn->tuple_arity >= 2) {
+                    for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                        fprintf(output, "%sFFIType.ptr", (fn->param_count > 0 || ti > 0) ? ", " : "");
+                }
+                fprintf(output, "], returns: FFIType.%s }", abi_lean_js_ffi_type_ir(abi->ir, fn->return_type));
             }
         }
         fprintf(output, "\n    }).symbols;\n    this.h = this.lib.flow_%s_create();\n  }\n"
                 "  acquireEpoch() { return this.lib.flow_%s_acquire_epoch(this.h); }\n  releaseEpoch(ep) { this.lib.flow_%s_release_epoch(this.h, ep); }\n"
-                "  stepExtent(inBuf64, outBuf64 = new BigUint64Array(8)) { if (this.lib.flow_%s_process_descriptor(this.h, ptr(inBuf64), ptr(outBuf64)) !== 0) throw new Error('FLOW extent failed'); return outBuf64; }\n", id, id, id, id);
+                "  stepExtent(inBuf64, outBuf64 = new BigUint64Array(8)) { if (this.lib.flow_%s_process_descriptor(this.h, ptr(inBuf64), ptr(outBuf64)) !== 0) throw new Error('FLOW extent failed'); return outBuf64; }\n"
+                "  tripWatchdog(elapsedNs) { return this.lib.flow_%s_trip_watchdog_for_test(this.h, elapsedNs); }\n"
+                "  resetWatchdog() { return this.lib.flow_%s_reset_watchdog(this.h); }\n"
+                "  watchdogBreachCount() { return this.lib.flow_%s_watchdog_breach_count(this.h); }\n"
+                "  abShadowRecord(fnId, f64Val, fxAsF64, tol = 1e-6) { this.lib.flow_ab_shadow_record(fnId, f64Val, fxAsF64, tol); }\n"
+                "  abShadowGetCalls() { return this.lib.flow_ab_shadow_get_calls(); }\n"
+                "  abShadowGetMismatches() { return this.lib.flow_ab_shadow_get_mismatches(); }\n"
+                "  abShadowGetFnCalls(fnId) { return this.lib.flow_ab_shadow_get_fn_calls(fnId); }\n"
+                "  abShadowReset() { this.lib.flow_ab_shadow_reset(); }\n",
+                id, id, id, id, id, id, id);
         if (abi->ir) {
             for (size_t i = 0; i < abi->ir->lean_function_count; ++i) {
                 const FlowLeanFunction *fn = &abi->ir->lean_functions[i];
-                fprintf(output, "  %s(", fn->name);
-                for (size_t p = 0; p < fn->param_count; ++p) fprintf(output, "%s%s", p ? ", " : "", fn->param_names[p]);
-                fprintf(output, ") { return %sthis.lib.%s(", !strcmp(fn->return_type, "Bool") ? "Boolean(" : "", fn->name);
-                for (size_t p = 0; p < fn->param_count; ++p) fprintf(output, "%s%s", p ? ", " : "", fn->param_names[p]);
-                fprintf(output, ")%s; }\n", !strcmp(fn->return_type, "Bool") ? ")" : "");
+                char fn_ident[96];
+                abi_escape_js_ident(fn->name, fn_ident, sizeof(fn_ident));
+                if (abi_fn_has_fx_variant(abi->ir, fn)) {
+                    fprintf(output, "  %s_fx(", fn->name);
+                    for (size_t p = 0; p < fn->param_count; ++p) {
+                        char p_ident[96];
+                        fprintf(output, "%s%s", p ? ", " : "", abi_escape_js_ident(fn->param_names[p], p_ident, sizeof(p_ident)));
+                    }
+                    if (fn->is_tuple_return && fn->tuple_arity >= 2) {
+                        fprintf(output, ") { ");
+                        for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                            fprintf(output, "const _out_%zu = new %s(1); ", ti, abi_lean_js_typed_array(abi->ir, fn->tuple_types[ti], 1));
+                        fprintf(output, "this.lib.%s_fx(", fn->name);
+                        for (size_t p = 0; p < fn->param_count; ++p) {
+                            char p_ident[96];
+                            fprintf(output, "%s%s", p ? ", " : "", abi_escape_js_ident(fn->param_names[p], p_ident, sizeof(p_ident)));
+                        }
+                        for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                            fprintf(output, "%sptr(_out_%zu)", (fn->param_count > 0 || ti > 0) ? ", " : "", ti);
+                        fprintf(output, "); return [");
+                        for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                            fprintf(output, "%s_out_%zu[0]", ti ? ", " : "", ti);
+                        fprintf(output, "]; }\n");
+                    } else {
+                        fprintf(output, ") { return this.lib.%s_fx(", fn->name);
+                        for (size_t p = 0; p < fn->param_count; ++p) {
+                            char p_ident[96];
+                            fprintf(output, "%s%s", p ? ", " : "", abi_escape_js_ident(fn->param_names[p], p_ident, sizeof(p_ident)));
+                        }
+                        fprintf(output, "); }\n");
+                    }
+                }
+                fprintf(output, "  %s(", fn_ident);
+                for (size_t p = 0; p < fn->param_count; ++p) {
+                    char p_ident[96];
+                    fprintf(output, "%s%s", p ? ", " : "", abi_escape_js_ident(fn->param_names[p], p_ident, sizeof(p_ident)));
+                }
+                if (fn->is_tuple_return && fn->tuple_arity >= 2) {
+                    fprintf(output, ") { ");
+                    for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                        fprintf(output, "const _out_%zu = new %s(1); ", ti, abi_lean_js_typed_array(abi->ir, fn->tuple_types[ti], 0));
+                    fprintf(output, "this.lib.%s(", fn->name);
+                    for (size_t p = 0; p < fn->param_count; ++p) {
+                        char p_ident[96];
+                        fprintf(output, "%s%s", p ? ", " : "", abi_escape_js_ident(fn->param_names[p], p_ident, sizeof(p_ident)));
+                    }
+                    for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                        fprintf(output, "%sptr(_out_%zu)", (fn->param_count > 0 || ti > 0) ? ", " : "", ti);
+                    fprintf(output, "); return [");
+                    for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                        fprintf(output, "%s_out_%zu[0]", ti ? ", " : "", ti);
+                    fprintf(output, "]; }\n");
+                } else {
+                    fprintf(output, ") { return %sthis.lib.%s(", !strcmp(fn->return_type, "Bool") ? "Boolean(" : "", fn->name);
+                    for (size_t p = 0; p < fn->param_count; ++p) {
+                        char p_ident[96];
+                        fprintf(output, "%s%s", p ? ", " : "", abi_escape_js_ident(fn->param_names[p], p_ident, sizeof(p_ident)));
+                    }
+                    fprintf(output, ")%s; }\n", !strcmp(fn->return_type, "Bool") ? ")" : "");
+                }
             }
         }
         fprintf(output, "  close() { if (this.h) { this.lib.flow_%s_destroy(this.h); this.h = null; } }\n}\n", id);
@@ -815,6 +1349,9 @@ int flow_abi_emit_polyglot_adapter(FILE *output, const FlowComponentABI *abi, co
             fprintf(output, "    STATE_FIELDS = {");
             for (size_t i = 0; i < abi->ir->state_field_count; ++i)
                 fprintf(output, "%s'%s'", i ? ", " : "", abi->ir->state_fields[i].name);
+            fprintf(output, "};\n    LEAN_STRUCTS = {");
+            for (size_t i = 0; i < abi->ir->lean_struct_count; ++i)
+                fprintf(output, "%s'%s'", i ? ", " : "", abi->ir->lean_structs[i].name);
             fprintf(output, "};\n    LEAN_FUNCTIONS = {");
             for (size_t i = 0; i < abi->ir->lean_function_count; ++i)
                 fprintf(output, "%s'%s'", i ? ", " : "", abi->ir->lean_functions[i].name);
@@ -842,15 +1379,18 @@ int flow_abi_emit_polyglot_adapter(FILE *output, const FlowComponentABI *abi, co
             "    function rc = tripWatchdog(obj, elapsedNs), rc = calllib(obj.Lib, 'flow_%s_trip_watchdog_for_test', obj.Handle, uint64(elapsedNs)); end\n"
             "    function rc = resetWatchdog(obj), rc = calllib(obj.Lib, 'flow_%s_reset_watchdog', obj.Handle); end\n"
             "    function cnt = breachCount(obj), cnt = calllib(obj.Lib, 'flow_%s_watchdog_breach_count', obj.Handle); end\n"
+            "    function abShadowRecord(obj, fnId, f64Val, fxAsF64, tol), calllib(obj.Lib, 'flow_ab_shadow_record', uint32(fnId), double(f64Val), double(fxAsF64), double(tol)); end\n"
+            "    function cnt = abShadowGetCalls(obj), cnt = calllib(obj.Lib, 'flow_ab_shadow_get_calls'); end\n"
+            "    function cnt = abShadowGetMismatches(obj), cnt = calllib(obj.Lib, 'flow_ab_shadow_get_mismatches'); end\n"
+            "    function cnt = abShadowGetFnCalls(obj, fnId), cnt = calllib(obj.Lib, 'flow_ab_shadow_get_fn_calls', uint32(fnId)); end\n"
+            "    function abShadowReset(obj), calllib(obj.Lib, 'flow_ab_shadow_reset'); end\n"
             "    function outDesc = stepExtent(obj, inDesc)\n"
             "      outDesc = libstruct('FlowExtentDescriptor');\n"
             "      rc = calllib(obj.Lib, 'flow_%s_process_descriptor', obj.Handle, inDesc, outDesc);\n"
             "      assert(rc == 0, 'FLOW extent failed with status %%d', rc);\n"
             "    end\n",
             id, id, id, id, id, id, id, id, id);
-        if (abi->ir && abi->ir->patchbay_stage_count > 0 &&
-            abi->ir->patchbay_stages[0].in_struct[0] &&
-            abi->ir->patchbay_stages[abi->ir->patchbay_stage_count - 1].out_struct[0]) {
+        if (has_patchbay) {
             const char *pb_out = abi->ir->patchbay_stages[abi->ir->patchbay_stage_count - 1].out_struct;
             fprintf(output,
                 "    function outFrame = runPatchbay(obj, inFrame)\n"
@@ -860,29 +1400,92 @@ int flow_abi_emit_polyglot_adapter(FILE *output, const FlowComponentABI *abi, co
                 "    end\n",
                 pb_out, id);
         }
-        if (abi->ir && abi->ir->migrate_fn[0]) {
-            for (size_t fi = 0; fi < abi->ir->lean_function_count; ++fi) {
-                const FlowLeanFunction *mfn = &abi->ir->lean_functions[fi];
-                if (strcmp(mfn->name, abi->ir->migrate_fn) == 0 && mfn->is_struct_transform && mfn->param_count == 1) {
-                    fprintf(output,
-                        "    function newState = migrateState(obj, oldState)\n"
-                        "      newState = calllib(obj.Lib, '%s', oldState);\n"
-                        "    end\n",
-                        mfn->name);
-                    break;
-                }
-            }
+        if (migrate_struct_fn) {
+            fprintf(output,
+                "    function newState = migrateState(obj, oldState)\n"
+                "      newState = calllib(obj.Lib, '%s', oldState);\n"
+                "    end\n",
+                migrate_struct_fn->name);
         }
         if (abi->ir && abi->ir->lean_function_count > 0) {
             for (size_t fi = 0; fi < abi->ir->lean_function_count; ++fi) {
                 const FlowLeanFunction *fn = &abi->ir->lean_functions[fi];
-                fprintf(output, "    function res = %s(obj", fn->name);
-                for (size_t pi = 0; pi < fn->param_count; ++pi)
-                    fprintf(output, ", %s", fn->param_names[pi]);
-                fprintf(output, ")\n      res = calllib(obj.Lib, '%s'", fn->name);
-                for (size_t pi = 0; pi < fn->param_count; ++pi)
-                    fprintf(output, ", %s", fn->param_names[pi]);
-                fprintf(output, ");\n    end\n");
+                char fn_ident[96];
+                abi_escape_matlab_ident(fn->name, fn_ident, sizeof(fn_ident));
+                if (abi_fn_has_fx_variant(abi->ir, fn)) {
+                    if (fn->is_tuple_return && fn->tuple_arity >= 2) {
+                        fprintf(output, "    function [");
+                        for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                            fprintf(output, "%sout_%zu", ti ? ", " : "", ti);
+                        fprintf(output, "] = %s_fx(obj", fn->name);
+                        for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                            char p_ident[96];
+                            fprintf(output, ", %s", abi_escape_matlab_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                        }
+                        fprintf(output, ")\n");
+                        for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                            fprintf(output, "      p_out_%zu = libpointer('%s', 0);\n", ti, abi_lean_matlab_ptr_type_ir(abi->ir, fn->tuple_types[ti], 1));
+                        fprintf(output, "      calllib(obj.Lib, '%s_fx'", fn->name);
+                        for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                            char p_ident[96];
+                            fprintf(output, ", int64(%s)", abi_escape_matlab_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                        }
+                        for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                            fprintf(output, ", p_out_%zu", ti);
+                        fprintf(output, ");\n");
+                        for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                            fprintf(output, "      out_%zu = p_out_%zu.Value;\n", ti, ti);
+                        fprintf(output, "    end\n");
+                    } else {
+                        fprintf(output, "    function res = %s_fx(obj", fn->name);
+                        for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                            char p_ident[96];
+                            fprintf(output, ", %s", abi_escape_matlab_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                        }
+                        fprintf(output, ")\n      res = calllib(obj.Lib, '%s_fx'", fn->name);
+                        for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                            char p_ident[96];
+                            fprintf(output, ", int64(%s)", abi_escape_matlab_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                        }
+                        fprintf(output, ");\n    end\n");
+                    }
+                }
+                if (fn->is_tuple_return && fn->tuple_arity >= 2) {
+                    fprintf(output, "    function [");
+                    for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                        fprintf(output, "%sout_%zu", ti ? ", " : "", ti);
+                    fprintf(output, "] = %s(obj", fn_ident);
+                    for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                        char p_ident[96];
+                        fprintf(output, ", %s", abi_escape_matlab_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                    }
+                    fprintf(output, ")\n");
+                    for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                        fprintf(output, "      p_out_%zu = libpointer('%s', 0);\n", ti, abi_lean_matlab_ptr_type_ir(abi->ir, fn->tuple_types[ti], 0));
+                    fprintf(output, "      calllib(obj.Lib, '%s'", fn->name);
+                    for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                        char p_ident[96];
+                        fprintf(output, ", %s", abi_escape_matlab_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                    }
+                    for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                        fprintf(output, ", p_out_%zu", ti);
+                    fprintf(output, ");\n");
+                    for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                        fprintf(output, "      out_%zu = p_out_%zu.Value;\n", ti, ti);
+                    fprintf(output, "    end\n");
+                } else {
+                    fprintf(output, "    function res = %s(obj", fn_ident);
+                    for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                        char p_ident[96];
+                        fprintf(output, ", %s", abi_escape_matlab_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                    }
+                    fprintf(output, ")\n      res = calllib(obj.Lib, '%s'", fn->name);
+                    for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                        char p_ident[96];
+                        fprintf(output, ", %s", abi_escape_matlab_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                    }
+                    fprintf(output, ");\n    end\n");
+                }
             }
         }
         fprintf(output,
@@ -891,27 +1494,251 @@ int flow_abi_emit_polyglot_adapter(FILE *output, const FlowComponentABI *abi, co
             "end\n", id);
         return ferror(output) == 0;
     }
-    static const struct { const char *lang; const char *tpl; } TABLE[] = {
-        {"cuda", "/* FLOW Zero-Copy CUDA Stream & QSBR Extent Bridge (%s | %s) */\n#pragma once\n#include <stdint.h>\n#include <cuda_runtime.h>\n"
-                 "typedef struct { uint64_t base_offset, byte_length, qsbr_epoch; uint32_t stride_bytes, align_bytes, schema_version, flags; uint64_t reserved[3]; } FlowExtentDescriptor;\n"
-                 "extern \"C\" { void *flow_%s_create(void); uint64_t flow_%s_acquire_epoch(void *h); void flow_%s_release_epoch(void *h, uint64_t ep);\n"
-                 "int32_t flow_%s_process_descriptor(void *h, const FlowExtentDescriptor *in_d, FlowExtentDescriptor *out_d); void flow_%s_destroy(void *h); }\n"
-                 "typedef struct { void *h; uint64_t ep; } FlowCudaEpochLease_%s;\n"
-                 "static void CUDART_CB flow_%s_cuda_release_cb(void *ud) { FlowCudaEpochLease_%s *l = (FlowCudaEpochLease_%s *)ud; flow_%s_release_epoch(l->h, l->ep); }\n"
-                 "static inline int32_t flow_%s_launch_cuda_extent(void *h, const FlowExtentDescriptor *in_d, FlowExtentDescriptor *out_d, FlowCudaEpochLease_%s *lease, cudaStream_t stream) {\n"
-                 "    lease->h = h; lease->ep = flow_%s_acquire_epoch(h); int32_t rc = flow_%s_process_descriptor(h, in_d, out_d);\n"
-                 "    if (rc == 0) cudaLaunchHostFunc(stream, flow_%s_cuda_release_cb, lease); else flow_%s_release_epoch(h, lease->ep); return rc;\n}\n"},
-        {"julia", "# FLOW Zero-Copy Julia Adapter (%s)\nmodule %s\nstruct FlowExtentDescriptor; base_offset::UInt64; byte_length::UInt64; qsbr_epoch::UInt64; stride_bytes::UInt32; align_bytes::UInt32; schema_version::UInt32; flags::UInt32; r0::UInt64; r1::UInt64; r2::UInt64; end\n"
-                  "create(lib) = ccall((:flow_%s_create, lib), Ptr{Cvoid}, ())\nacquire_epoch(lib, h) = ccall((:flow_%s_acquire_epoch, lib), UInt64, (Ptr{Cvoid},), h)\n"
-                  "release_epoch(lib, h, ep) = ccall((:flow_%s_release_epoch, lib), Cvoid, (Ptr{Cvoid}, UInt64), h, ep)\n"
-                  "step_extent(lib, h, in_r, out_r) = ccall((:flow_%s_process_descriptor, lib), Int32, (Ptr{Cvoid}, Ref{FlowExtentDescriptor}, Ref{FlowExtentDescriptor}), h, in_r, out_r)\n"
-                  "destroy(lib, h) = ccall((:flow_%s_destroy, lib), Cvoid, (Ptr{Cvoid},), h)\nend\n"}
-    };
-    for (size_t i = 0; i < sizeof(TABLE) / sizeof(TABLE[0]); ++i) {
-        if (!strcasecmp(target_lang, TABLE[i].lang)) {
-            fprintf(output, TABLE[i].tpl, abi->component_id, pascal, id, id, id, id, id, id, id, id, id, id, id, id, id, id, id, id);
-            return ferror(output) == 0;
+    if (!strcasecmp(target_lang, "cuda") || !strcasecmp(target_lang, "cuh")) {
+        fprintf(output,
+            "/* FLOW Zero-Copy CUDA Stream & QSBR Extent Bridge (%s | %s) */\n"
+            "#ifndef FLOW_ABI_CUDA_%s_CUH\n"
+            "#define FLOW_ABI_CUDA_%s_CUH\n"
+            "#include <stdint.h>\n"
+            "#include <stddef.h>\n"
+            "#include <stdbool.h>\n"
+            "#if defined(__CUDACC__) || (defined(__has_include) && __has_include(<cuda_runtime.h>))\n"
+            "#include <cuda_runtime.h>\n"
+            "#else\n"
+            "typedef void *cudaStream_t;\n"
+            "typedef void (*cudaHostFn_t)(void *);\n"
+            "#ifndef CUDART_CB\n"
+            "#define CUDART_CB\n"
+            "#endif\n"
+            "static inline int cudaLaunchHostFunc(cudaStream_t stream, cudaHostFn_t fn, void *userData) { (void)stream; if (fn) fn(userData); return 0; }\n"
+            "#endif\n"
+            "#ifndef FLOW_FX64_T_DEFINED\n"
+            "#define FLOW_FX64_T_DEFINED\n"
+            "typedef int64_t flow_fx64_t;\n"
+            "#endif\n"
+            "#ifndef FLOW_STATUS_CODE_DEFINED\n"
+            "#define FLOW_STATUS_CODE_DEFINED\n"
+            "typedef enum { FLOW_OK = 0, FLOW_ERR_INVALID_ARG = -1, FLOW_ERR_QUOTA_OR_STRIDE = -2, FLOW_ERR_KERNEL_UNBOUND = -3, FLOW_ERR_WATCHDOG_ESTOP = -4 } FlowStatusCode;\n"
+            "#endif\n"
+            "#ifndef FLOW_EXTENT_DESCRIPTOR_DEFINED\n"
+            "#define FLOW_EXTENT_DESCRIPTOR_DEFINED\n"
+            "typedef struct { uint64_t base_offset, byte_length, qsbr_epoch; uint32_t stride_bytes, align_bytes, schema_version, flags; uint64_t reserved[3]; } FlowExtentDescriptor;\n"
+            "#endif\n"
+            "#ifdef __cplusplus\n"
+            "extern \"C\" {\n"
+            "#endif\n",
+            abi->component_id, pascal, id, id);
+        if (abi->ir) {
+            for (size_t ei = 0; ei < abi->ir->lean_enum_count; ++ei) {
+                const FlowLeanEnum *en = &abi->ir->lean_enums[ei];
+                fprintf(output, "#ifndef FLOW_LEAN_ENUM_%s_DEFINED\n#define FLOW_LEAN_ENUM_%s_DEFINED\ntypedef enum {\n", en->name, en->name);
+                for (size_t vi = 0; vi < en->variant_count; ++vi)
+                    fprintf(output, "    %s = %zu%s\n", en->variants[vi], vi, vi + 1 < en->variant_count ? "," : "");
+                fprintf(output, "} %s;\n#endif\n", en->name);
+            }
+            for (size_t si = 0; si < abi->ir->lean_struct_count; ++si) {
+                const FlowLeanStruct *st = &abi->ir->lean_structs[si];
+                fprintf(output, "#ifndef FLOW_LEAN_STRUCT_%s_DEFINED\n#define FLOW_LEAN_STRUCT_%s_DEFINED\ntypedef struct {\n", st->name, st->name);
+                for (size_t fi = 0; fi < st->field_count; ++fi) {
+                    char f_ident[96];
+                    fprintf(output, "    %s %s;\n", st->fields[fi].c_type, abi_escape_c_ident(st->fields[fi].name, f_ident, sizeof(f_ident)));
+                }
+                fprintf(output, "} %s;\n#endif\n", st->name);
+            }
         }
+        fprintf(output,
+            "void *flow_%s_create(void);\n"
+            "uint64_t flow_%s_acquire_epoch(void *h);\n"
+            "void flow_%s_release_epoch(void *h, uint64_t ep);\n"
+            "int32_t flow_%s_process_descriptor(void *h, const FlowExtentDescriptor *in_d, FlowExtentDescriptor *out_d);\n"
+            "int32_t flow_%s_trip_watchdog_for_test(void *h, uint64_t simulated_elapsed_ns);\n"
+            "int32_t flow_%s_reset_watchdog(void *h);\n"
+            "uint64_t flow_%s_watchdog_breach_count(void *h);\n"
+            "void flow_%s_destroy(void *h);\n"
+            "void flow_ab_shadow_record(uint32_t fn_id, double f64_val, double fx_as_f64, double tol);\n"
+            "uint64_t flow_ab_shadow_get_calls(void);\n"
+            "uint64_t flow_ab_shadow_get_mismatches(void);\n"
+            "uint64_t flow_ab_shadow_get_fn_calls(uint32_t fn_id);\n"
+            "void flow_ab_shadow_reset(void);\n",
+            id, id, id, id, id, id, id, id);
+        if (migrate_struct_fn) {
+            fprintf(output, "int32_t flow_%s_migrate_buffer(const void *old_buf, size_t old_len, void *new_buf, size_t new_len);\n", id);
+        }
+        if (has_patchbay) {
+            fprintf(output, "int32_t flow_%s_run_patchbay(void *h, const %s *in_frame, %s *out_frame);\n",
+                    id, abi->ir->patchbay_stages[0].in_struct, abi->ir->patchbay_stages[abi->ir->patchbay_stage_count - 1].out_struct);
+        }
+        if (abi->ir && abi->ir->lean_function_count > 0) {
+            for (size_t fi = 0; fi < abi->ir->lean_function_count; ++fi) {
+                const FlowLeanFunction *fn = &abi->ir->lean_functions[fi];
+                if (abi_fn_has_fx_variant(abi->ir, fn)) {
+                    fprintf(output, "%s %s_fx(", abi_lean_fx_c_type_ir(abi->ir, fn->return_type), fn->name);
+                    for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                        char p_ident[96];
+                        fprintf(output, "%s%s %s", pi > 0 ? ", " : "", abi_lean_fx_c_type_ir(abi->ir, fn->param_types[pi]), abi_escape_c_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                    }
+                    if (fn->is_tuple_return && fn->tuple_arity >= 2) {
+                        for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                            fprintf(output, "%s%s *out_%zu", (fn->param_count > 0 || ti > 0) ? ", " : "", abi_lean_fx_c_type_ir(abi->ir, fn->tuple_types[ti]), ti);
+                    }
+                    fprintf(output, ");\n");
+                }
+                fprintf(output, "%s %s(", abi_lean_c_type_ir(abi->ir, fn->return_type), fn->name);
+                for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                    char p_ident[96];
+                    fprintf(output, "%s%s %s", pi > 0 ? ", " : "", abi_lean_c_type_ir(abi->ir, fn->param_types[pi]), abi_escape_c_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                }
+                if (fn->is_tuple_return && fn->tuple_arity >= 2) {
+                    for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                        fprintf(output, "%s%s *out_%zu", (fn->param_count > 0 || ti > 0) ? ", " : "", abi_lean_c_type_ir(abi->ir, fn->tuple_types[ti]), ti);
+                }
+                fprintf(output, ");\n");
+            }
+        }
+        fprintf(output,
+            "#ifdef __cplusplus\n"
+            "}\n"
+            "#endif\n"
+            "typedef struct { void *h; uint64_t ep; } FlowCudaEpochLease_%s;\n"
+            "static inline void CUDART_CB flow_%s_cuda_release_cb(void *ud) { FlowCudaEpochLease_%s *l = (FlowCudaEpochLease_%s *)ud; flow_%s_release_epoch(l->h, l->ep); }\n"
+            "static inline int32_t flow_%s_launch_cuda_extent(void *h, const FlowExtentDescriptor *in_d, FlowExtentDescriptor *out_d, FlowCudaEpochLease_%s *lease, cudaStream_t stream) {\n"
+            "    lease->h = h; lease->ep = flow_%s_acquire_epoch(h); int32_t rc = flow_%s_process_descriptor(h, in_d, out_d);\n"
+            "    if (rc == 0) cudaLaunchHostFunc(stream, flow_%s_cuda_release_cb, lease); else flow_%s_release_epoch(h, lease->ep); return rc;\n}\n"
+            "#endif /* FLOW_ABI_CUDA_%s_CUH */\n",
+            id, id, id, id, id, id, id, id, id, id, id, id);
+        return ferror(output) == 0;
+    }
+    if (!strcasecmp(target_lang, "julia") || !strcasecmp(target_lang, "jl")) {
+        fprintf(output,
+            "# FLOW Zero-Copy Julia Adapter (%s)\n"
+            "module %s\n"
+            "const FLOW_OK = Int32(0)\n"
+            "const FLOW_ERR_INVALID_ARG = Int32(-1)\n"
+            "const FLOW_ERR_QUOTA_OR_STRIDE = Int32(-2)\n"
+            "const FLOW_ERR_KERNEL_UNBOUND = Int32(-3)\n"
+            "const FLOW_ERR_WATCHDOG_ESTOP = Int32(-4)\n"
+            "struct FlowExtentDescriptor; base_offset::UInt64; byte_length::UInt64; qsbr_epoch::UInt64; stride_bytes::UInt32; align_bytes::UInt32; schema_version::UInt32; flags::UInt32; r0::UInt64; r1::UInt64; r2::UInt64; end\n",
+            abi->component_id, pascal);
+        if (abi->ir) {
+            for (size_t ei = 0; ei < abi->ir->lean_enum_count; ++ei) {
+                const FlowLeanEnum *en = &abi->ir->lean_enums[ei];
+                fprintf(output, "@enum %s::UInt32", en->name);
+                for (size_t vi = 0; vi < en->variant_count; ++vi)
+                    fprintf(output, " %s=%zu", en->variants[vi], vi);
+                fprintf(output, "\n");
+            }
+            for (size_t si = 0; si < abi->ir->lean_struct_count; ++si) {
+                const FlowLeanStruct *st = &abi->ir->lean_structs[si];
+                fprintf(output, "struct %s\n", st->name);
+                for (size_t fi = 0; fi < st->field_count; ++fi) {
+                    char f_ident[96];
+                    const char *ft = st->fields[fi].lean_type[0]
+                        ? abi_lean_julia_type_ir(abi->ir, st->fields[fi].lean_type)
+                        : (abi_find_lean_struct(abi->ir, st->fields[fi].c_type) ? st->fields[fi].c_type
+                            : (abi_find_lean_enum(abi->ir, st->fields[fi].c_type) ? "UInt32" : abi_c_type_to_julia_type(st->fields[fi].c_type)));
+                    fprintf(output, "    %s::%s\n", abi_escape_julia_ident(st->fields[fi].name, f_ident, sizeof(f_ident)), ft);
+                }
+                fprintf(output, "end\n");
+            }
+        }
+        fprintf(output,
+            "create(lib) = ccall((:flow_%s_create, lib), Ptr{Cvoid}, ())\n"
+            "acquire_epoch(lib, h) = ccall((:flow_%s_acquire_epoch, lib), UInt64, (Ptr{Cvoid},), h)\n"
+            "release_epoch(lib, h, ep) = ccall((:flow_%s_release_epoch, lib), Cvoid, (Ptr{Cvoid}, UInt64), h, ep)\n"
+            "step_extent(lib, h, in_r, out_r) = ccall((:flow_%s_process_descriptor, lib), Int32, (Ptr{Cvoid}, Ref{FlowExtentDescriptor}, Ref{FlowExtentDescriptor}), h, in_r, out_r)\n"
+            "trip_watchdog_for_test(lib, h, elapsed_ns) = ccall((:flow_%s_trip_watchdog_for_test, lib), Int32, (Ptr{Cvoid}, UInt64), h, elapsed_ns)\n"
+            "reset_watchdog(lib, h) = ccall((:flow_%s_reset_watchdog, lib), Int32, (Ptr{Cvoid},), h)\n"
+            "watchdog_breach_count(lib, h) = ccall((:flow_%s_watchdog_breach_count, lib), UInt64, (Ptr{Cvoid},), h)\n"
+            "destroy(lib, h) = ccall((:flow_%s_destroy, lib), Cvoid, (Ptr{Cvoid},), h)\n"
+            "ab_shadow_record(lib, fn_id, f64_val, fx_as_f64, tol=1e-6) = ccall((:flow_ab_shadow_record, lib), Cvoid, (UInt32, Float64, Float64, Float64), fn_id, f64_val, fx_as_f64, tol)\n"
+            "ab_shadow_get_calls(lib) = ccall((:flow_ab_shadow_get_calls, lib), UInt64, ())\n"
+            "ab_shadow_get_mismatches(lib) = ccall((:flow_ab_shadow_get_mismatches, lib), UInt64, ())\n"
+            "ab_shadow_get_fn_calls(lib, fn_id) = ccall((:flow_ab_shadow_get_fn_calls, lib), UInt64, (UInt32,), fn_id)\n"
+            "ab_shadow_reset(lib) = ccall((:flow_ab_shadow_reset, lib), Cvoid, ())\n",
+            id, id, id, id, id, id, id, id);
+        if (abi->ir && abi->ir->lean_function_count > 0) {
+            for (size_t fi = 0; fi < abi->ir->lean_function_count; ++fi) {
+                const FlowLeanFunction *fn = &abi->ir->lean_functions[fi];
+                char fn_ident[96];
+                abi_escape_julia_ident(fn->name, fn_ident, sizeof(fn_ident));
+                if (abi_fn_has_fx_variant(abi->ir, fn)) {
+                    fprintf(output, "function %s_fx(lib", fn->name);
+                    for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                        char p_ident[96];
+                        fprintf(output, ", %s", abi_escape_julia_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                    }
+                    fprintf(output, ")\n");
+                    if (fn->is_tuple_return && fn->tuple_arity >= 2) {
+                        for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                            fprintf(output, "    _out_%zu = Ref{%s}(0)\n", ti, abi_lean_fx_julia_type_ir(abi->ir, fn->tuple_types[ti]));
+                        fprintf(output, "    ccall((:%s_fx, lib), %s, (", fn->name, abi_lean_fx_julia_type_ir(abi->ir, fn->return_type));
+                        for (size_t pi = 0; pi < fn->param_count; ++pi)
+                            fprintf(output, "%s%s%s", pi ? ", " : "", abi_lean_fx_julia_type_ir(abi->ir, fn->param_types[pi]), (fn->param_count == 1 && !(fn->is_tuple_return && fn->tuple_arity >= 2)) ? "," : "");
+                        for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                            fprintf(output, "%sRef{%s}", (fn->param_count > 0 || ti > 0) ? ", " : "", abi_lean_fx_julia_type_ir(abi->ir, fn->tuple_types[ti]));
+                        fprintf(output, ")");
+                        for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                            char p_ident[96];
+                            fprintf(output, ", %s", abi_escape_julia_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                        }
+                        for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                            fprintf(output, ", _out_%zu", ti);
+                        fprintf(output, ")\n    return (");
+                        for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                            fprintf(output, "%s_out_%zu[]", ti ? ", " : "", ti);
+                        fprintf(output, ")\nend\n");
+                    } else {
+                        fprintf(output, "    return ccall((:%s_fx, lib), %s, (", fn->name, abi_lean_fx_julia_type_ir(abi->ir, fn->return_type));
+                        for (size_t pi = 0; pi < fn->param_count; ++pi)
+                            fprintf(output, "%s%s%s", pi ? ", " : "", abi_lean_fx_julia_type_ir(abi->ir, fn->param_types[pi]), (fn->param_count == 1) ? "," : "");
+                        fprintf(output, ")");
+                        for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                            char p_ident[96];
+                            fprintf(output, ", %s", abi_escape_julia_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                        }
+                        fprintf(output, ")\nend\n");
+                    }
+                }
+                fprintf(output, "function %s(lib", fn_ident);
+                for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                    char p_ident[96];
+                    fprintf(output, ", %s", abi_escape_julia_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                }
+                fprintf(output, ")\n");
+                if (fn->is_tuple_return && fn->tuple_arity >= 2) {
+                    for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                        fprintf(output, "    _out_%zu = Ref{%s}(0)\n", ti, abi_lean_julia_type_ir(abi->ir, fn->tuple_types[ti]));
+                    fprintf(output, "    ccall((:%s, lib), %s, (", fn->name, abi_lean_julia_type_ir(abi->ir, fn->return_type));
+                    for (size_t pi = 0; pi < fn->param_count; ++pi)
+                        fprintf(output, "%s%s", pi ? ", " : "", abi_lean_julia_type_ir(abi->ir, fn->param_types[pi]));
+                    for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                        fprintf(output, "%sRef{%s}", (fn->param_count > 0 || ti > 0) ? ", " : "", abi_lean_julia_type_ir(abi->ir, fn->tuple_types[ti]));
+                    fprintf(output, ")");
+                    for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                        char p_ident[96];
+                        fprintf(output, ", %s", abi_escape_julia_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                    }
+                    for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                        fprintf(output, ", _out_%zu", ti);
+                    fprintf(output, ")\n    return (");
+                    for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                        fprintf(output, "%s_out_%zu[]", ti ? ", " : "", ti);
+                    fprintf(output, ")\nend\n");
+                } else {
+                    fprintf(output, "    return ccall((:%s, lib), %s, (", fn->name, abi_lean_julia_type_ir(abi->ir, fn->return_type));
+                    for (size_t pi = 0; pi < fn->param_count; ++pi)
+                        fprintf(output, "%s%s%s", pi ? ", " : "", abi_lean_julia_type_ir(abi->ir, fn->param_types[pi]), (fn->param_count == 1) ? "," : "");
+                    fprintf(output, ")");
+                    for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                        char p_ident[96];
+                        fprintf(output, ", %s", abi_escape_julia_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                    }
+                    fprintf(output, ")\nend\n");
+                }
+            }
+        }
+        fprintf(output, "end\n");
+        return ferror(output) == 0;
     }
     return 0;
 }

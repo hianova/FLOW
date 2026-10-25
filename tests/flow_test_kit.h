@@ -14,6 +14,10 @@
 extern "C" {
 #endif
 
+#ifndef FLOW_BUILD_DIR
+#define FLOW_BUILD_DIR "./build"
+#endif
+
 /*
  * ============================================================================
  * FLOW Unified Test Kit & SMT Theorem Assertions (flow_test_kit.h)

@@ -1,9 +1,7 @@
 #include "flowy.h"
 #include "topology.h"
-#include "token_ring.h"
 #include "cubical_hott.h"
 #include "flow_jet.h"
-#include "flowy_fvec.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -58,6 +56,20 @@ int flowy_explain_bottleneck(const FlowTopologyGraph *graph, char *buf_out, size
     return 1;
 }
 
+static int node_matches_consolidated_alias(const char *node_name, const char *q) {
+    if (!node_name || !q) return 0;
+    if (!strcmp(node_name, "bitspace") && (strcasestr(q, "token_ring") || strcasestr(q, "fvec") || strcasestr(q, "montgomery") || strcasestr(q, "fx64") || strcasestr(q, "u256") || strcasestr(q, "exact_numerics"))) return 1;
+    if (!strcmp(node_name, "reload") && (strcasestr(q, "jit") || strcasestr(q, "qsbr") || strcasestr(q, "hot_swap") || strcasestr(q, "rcu"))) return 1;
+    if (!strcmp(node_name, "smt") && (strcasestr(q, "security") || strcasestr(q, "capability") || strcasestr(q, "qf_lia") || strcasestr(q, "sandbox"))) return 1;
+    if (!strcmp(node_name, "flow_jet") && (strcasestr(q, "hardware_telemetry") || strcasestr(q, "telemetry") || strcasestr(q, "numa") || strcasestr(q, "fjet") || strcasestr(q, "koopman"))) return 1;
+    if (!strcmp(node_name, "embodied") && (strcasestr(q, "driver_can") || strcasestr(q, "driver_imu") || strcasestr(q, "mori_zwanzig") || strcasestr(q, "socketcan") || strcasestr(q, "imu") || strcasestr(q, "zmp"))) return 1;
+    if (!strcmp(node_name, "registry") && strcasestr(q, "builtin_plugin")) return 1;
+    if (!strcmp(node_name, "cubical_hott") && (strcasestr(q, "univalence") || strcasestr(q, "hott") || strcasestr(q, "topos") || strcasestr(q, "kan") || strcasestr(q, "demorgan") || strcasestr(q, "universe"))) return 1;
+    if (!strcmp(node_name, "topology") && (strcasestr(q, "probe") || strcasestr(q, "radar") || strcasestr(q, "orchestrator") || strcasestr(q, "autopilot") || strcasestr(q, "self_bootstrap") || strcasestr(q, "makefile"))) return 1;
+    if (!strcmp(node_name, "flow_plugin_sdk") && (strcasestr(q, "cargo") || strcasestr(q, "rust_sdk") || strcasestr(q, "repr(c)"))) return 1;
+    return 0;
+}
+
 int flowy_query_codebase(const FlowTopologyGraph *graph, const char *query_text, FlowyIntrospectiveAnswer *ans) {
     if (!query_text || !ans) return 0;
     memset(ans, 0, sizeof(*ans));
@@ -79,8 +91,10 @@ int flowy_query_codebase(const FlowTopologyGraph *graph, const char *query_text,
     uint32_t best_score = 0;
     for (size_t i = 0; i < g->node_count; ++i) {
         const FlowTopologyNode *n = &g->nodes[i];
-        int match = (n->name[0] && (strcasestr(query_text, n->name) != NULL || strcasestr(n->name, query_text) != NULL));
-        uint32_t s = (match ? 150 : 0) + (uint32_t)__builtin_popcountll(q_mask & n->capability_mask) * 30;
+        int match = (n->name[0] && (strcasestr(query_text, n->name) != NULL || strcasestr(n->name, query_text) != NULL)) ||
+                    node_matches_consolidated_alias(n->name, query_text);
+        int scope_match = (n->scope_name[0] && strcasestr(query_text, n->scope_name) != NULL);
+        uint32_t s = (match ? 600 : (scope_match ? 120 : 0)) + (uint32_t)__builtin_popcountll(q_mask & n->capability_mask) * 30;
         if (s > best_score) { best_score = s; best_node = n; }
     }
     ans->primary_node = *best_node;
@@ -91,10 +105,11 @@ int flowy_query_codebase(const FlowTopologyGraph *graph, const char *query_text,
     flow_token_ring_converge_default(&ring, NULL, best_node->name);
     snprintf(ans->explanation, sizeof(ans->explanation),
              "[FLOW Canonical Agent: Live AST Topology + Token Ring + Lean 4]\n"
-             "Node: %s (Layer %u, Role=%s, LOC=%u, FanIn=%u, FanOut=%u, Sieve=0x%016llx)\n"
+             "Node: %s (Layer %u, Scope=%s, Role=%s, LOC=%u, FanIn=%u, FanOut=%u, Sieve=0x%016llx)\n"
              "Subspace: %s | Proof Obligation: %s\n"
              "Token Ring Convergence: Component=%s, Genome=0x%016llx, Energy=%.2f, SMT=%s\n",
-             best_node->name, best_node->layer, best_node->role, best_node->loc, best_node->fan_in, best_node->fan_out,
+             best_node->name, best_node->layer, best_node->scope_name[0] ? best_node->scope_name : "core",
+             best_node->role, best_node->loc, best_node->fan_in, best_node->fan_out,
              (unsigned long long)best_node->capability_mask, ax->subspace_name, ax->policy_contract,
              ring.best_search.component ? ring.best_search.component->id : "sharded_hash",
              (unsigned long long)ring.active_genome, ring.lyapunov_energy, ring.smt_proof.proof_summary);
@@ -127,6 +142,24 @@ void flowy_print_autopilot_incident(const FlowAutopilotIncident *inc, FILE *out)
 int flowy_interactive_loop(FlowOrchestrator *orch, FILE *in, FILE *out) { if (!in || !out) return 0; FlowTopologyGraph graph; flow_topology_build_codebase_graph(&graph);
     char line[512]; while (fprintf(out, "FLOW-Agent > "), fflush(out), fgets(line, sizeof(line), in)) {
         line[strcspn(line, "\r\n")] = '\0'; if (!line[0]) continue; if (!strcmp(line, "exit") || !strcmp(line, "quit")) break;
+        if (!strcmp(line, "help") || !strcmp(line, "?")) {
+            fprintf(out, "Commands: audit | scope [name] | topos | why | bottleneck | timeline | what-if | remediate | <query> | exit\n");
+            continue;
+        }
+        if (!strcmp(line, "audit")) {
+            FlowTopologyAuditReport r; flow_topology_audit(&graph, &r);
+            int pop_sc = 0; for (int s = 0; s < (int)FLOW_SCOPE_COUNT; ++s) if (r.scope_node_counts[s] > 0) pop_sc++;
+            fprintf(out, "[FLOW Topology Audit] Nodes: %zu | LOC: %zu | Leaks: %zu | Modularity: %.2f | Scopes: %d/%d | Makefile: %s | Rust-SDK: %s | HoTT-U0: %s(%zu)\n",
+                    r.total_nodes, r.total_loc, r.cross_layer_leaks, r.modularity_score, pop_sc, (int)FLOW_SCOPE_COUNT,
+                    r.makefile_bijective ? "BIJECTIVE" : "DRIFT", r.rust_sdk_parity ? "PARITY_OK" : "DRIFT",
+                    r.hott_univalence_sound ? "UNIVALENT" : "BROKEN", r.hott_type_count);
+            continue;
+        }
+        if (!strncmp(line, "scope", 5)) {
+            const char *arg = line + 5; while (*arg == ' ') ++arg;
+            flowy_print_scope_report(&graph, *arg ? arg : "all", out); continue;
+        }
+        if (!strcmp(line, "topos") || !strcmp(line, "hott") || !strcmp(line, "cubical")) { flowy_print_cubical_topos_report(out); continue; }
         if (!strcmp(line, "why")) { flowy_print_decision_explanation(flow_decision_logger_latest(NULL), out); continue; }
         if (!strcmp(line, "bottleneck")) { flowy_print_bottleneck_explanation(&graph, out); continue; }
         if (!strcmp(line, "timeline")) { flowy_print_decision_timeline(NULL, out); continue; }
@@ -152,7 +185,22 @@ int flowy_jet_learn_demo(struct FlowJet *jet, int samples, FILE *out) { if (!jet
         flow_jet_edmd_update(&edmd, x0, x1, 0.01); memcpy(x0, x1, sizeof(double) * kdim); }
     fprintf(out, "[Koopman EDMD] Observed %d samples | Applied=%s\n", n, flow_jet_apply_learned_koopman(jet, &edmd) ? "YES" : "NO"); return 1; }
 void flowy_print_cubical_topos_report(FILE *out) { if (!out) return; FlowCubicalTransitionReport rep = {0}; flow_cubical_decode_transition(0x10ULL, 0x14ULL, 2, &rep);
-    fprintf(out, "[Cubical HoTT & Topos Sieve] I^64 | chi=0x%02x | Bit#%u: %s\n", (unsigned)flow_topos_classify_subobject(0x14ULL, 0xFFULL), rep.flipped_axis, rep.is_kan_homotopic ? "KAN_FILLED" : "OBSTRUCTED"); }
+    FlowTopologyGraph g; flow_topology_build_codebase_graph(&g); FlowTopologyAuditReport ar; flow_topology_audit(&g, &ar);
+    FlowHoTTUniverse *u0 = flow_hott_universe_global();
+    fprintf(out, "[Cubical HoTT & Topos Sieve] I^64 | chi=0x%02x | Bit#%u: %s | Universe-U0: %zu types (%zu entries, Univalence=%s)\n",
+            (unsigned)flow_topos_classify_subobject(0x14ULL, 0xFFULL), rep.flipped_axis, rep.is_kan_homotopic ? "KAN_FILLED" : "OBSTRUCTED",
+            u0->distinct_type_count, u0->count, ar.hott_univalence_sound ? "UNIVALENT" : "BROKEN");
+    for (size_t i = 0; i < u0->count; ++i) {
+        int seen = 0;
+        for (size_t j = 0; j < i; ++j) if (!strcmp(u0->entries[i].name, u0->entries[j].name)) { seen = 1; break; }
+        if (seen) continue;
+        uint64_t path_hash = 0ULL;
+        FlowKanStatus st = flow_hott_verify_univalence(u0, u0->entries[i].name, &path_hash);
+        fprintf(out, "  * [U_0] %-22s | fields=%-2zu size=%-3zuB align=%zuB fx=%u | Path=0x%016llx (%s)\n",
+                u0->entries[i].name, u0->entries[i].field_count, u0->entries[i].byte_size, u0->entries[i].align_bytes,
+                u0->entries[i].fx_scale_bits, (unsigned long long)path_hash, st == FLOW_KAN_FILLED_HOMOTOPIC ? "A ~= B => A = B" : "OBSTRUCTED");
+    }
+}
 
 void cmd_fvec_print_usage(FILE *out) { fprintf(out, "Usage: flowy fvec <seed|list|inspect|query|rag|remediate|gc> [options...]\n"); }
 static void ensure_seeded_store(FlowVecStore *store) { flow_fvec_store_init(store, FLOW_FVEC_DEFAULT_DIR);
@@ -199,7 +247,33 @@ int cmd_jet_run(int argc, char **argv) { if (argc < 1 || !strcmp(argv[0], "-h") 
         flowy_jet_learn_demo(&jet, samples, stdout); return EXIT_SUCCESS; }
     cmd_jet_print_usage(stderr); return EXIT_FAILURE; }
 
-void cmd_topo_print_usage(FILE *out) { fprintf(out, "Usage: flowy topo <absorb|anneal|landscape|refactor|morph|what-if|remediate|autopilot|daemon> [options...]\n"); }
+void flowy_print_scope_report(const FlowTopologyGraph *graph, const char *scope_filter, FILE *out) {
+    if (!out) return;
+    FlowTopologyGraph local;
+    const FlowTopologyGraph *g = (graph && graph->node_count) ? graph : (flow_topology_build_codebase_graph(&local), &local);
+    FlowTopologyAuditReport rep;
+    flow_topology_audit(g, &rep);
+    FlowComponentScope target_sc = FLOW_SCOPE_FRONTEND;
+    int has_filter = (scope_filter && scope_filter[0] && strcmp(scope_filter, "all") != 0 && flow_topology_parse_scope(scope_filter, &target_sc));
+    fprintf(out, "[FLOW Full-Codebase Component Scope Matrix | %zu Nodes | %zu LOC | %zu Leaks]\n",
+            rep.total_nodes, rep.total_loc, rep.cross_layer_leaks);
+    for (int s = 0; s < (int)FLOW_SCOPE_COUNT; ++s) {
+        FlowComponentScope sc = (FlowComponentScope)s;
+        if (has_filter && sc != target_sc) continue;
+        fprintf(out, "  [%d] Scope %-16s | Nodes=%-2zu | LOC=%-6zu | Contract: %s\n      Members: ",
+                s, flow_topology_scope_name(sc), rep.scope_node_counts[s], rep.scope_loc[s], flow_topology_scope_contract(sc));
+        int first = 1;
+        for (size_t i = 0; i < g->node_count; ++i) {
+            if (g->nodes[i].scope == sc) {
+                fprintf(out, "%s%s(L%u,%uLOC)", first ? "" : ", ", g->nodes[i].name, g->nodes[i].layer, g->nodes[i].loc);
+                first = 0;
+            }
+        }
+        fprintf(out, "\n");
+    }
+}
+
+void cmd_topo_print_usage(FILE *out) { fprintf(out, "Usage: flowy topo <absorb|anneal|landscape|refactor|morph|what-if|remediate|autopilot|daemon|scope> [options...]\n"); }
 static void absorb_args_or_default(FlowOrchestrator *orch, int argc, char **argv, char *diag, size_t dsz) {
     for (int i = 2; i < argc; ++i) if (argv[i][0] != '-') flow_orchestrator_absorb(orch, argv[i], diag, dsz);
 }
@@ -208,6 +282,8 @@ static int run_orchestrator_cmd(int argc, char **argv) { if (argc < 2) return EX
     FlowOrchestrator *orch = flow_orchestrator_create("."); char diag[256] = {0}; int res = EXIT_SUCCESS;
     if (!strcmp(cmd, "shell")) {
         res = flowy_interactive_loop(orch, stdin, stdout) ? EXIT_SUCCESS : EXIT_FAILURE;
+    } else if (!strcmp(cmd, "scope") || !strcmp(cmd, "scopes")) {
+        flowy_print_scope_report(&orch->topology_graph, argc >= 3 ? argv[2] : "all", stdout);
     } else if (!strcmp(cmd, "absorb")) { if (argc < 3) res = EXIT_FAILURE; else {
         FlowAbsorbStatus st = flow_orchestrator_absorb(orch, argv[2], diag, sizeof(diag)); printf("flow-orchestrator: [%s] %s\n", flow_absorb_status_name(st), diag);
         res = (st == FLOW_ABSORB_OK || st == FLOW_ABSORB_ALREADY_ABSORBED) ? EXIT_SUCCESS : EXIT_FAILURE; }
@@ -244,7 +320,7 @@ int cmd_topo_run(int argc, char **argv) { if (argc < 2) { cmd_topo_print_usage(s
     const char *sub = (argv[1][0] == '-' && argv[1][1] == '-') ? argv[1] + 2 : argv[1];
     return (!strcmp(sub, "-h") || !strcmp(sub, "help")) ? (cmd_topo_print_usage(stdout), EXIT_SUCCESS) : run_orchestrator_cmd(argc, argv); }
 
-void cmd_inspect_print_usage(FILE *out) { fprintf(out, "Usage: flowy inspect <ask|why|timeline|bottleneck|audit|topos|doc> [options...]\n"); }
+void cmd_inspect_print_usage(FILE *out) { fprintf(out, "Usage: flowy inspect <ask|why|timeline|bottleneck|audit|scope|topos|doc> [options...]\n"); }
 int cmd_inspect_run(int argc, char **argv) {
     if (argc < 1) { cmd_inspect_print_usage(stderr); return EXIT_FAILURE; }
     const char *sub = (argv[0][0] == '-' && argv[0][1] == '-') ? argv[0] + 2 : argv[0];
@@ -258,10 +334,26 @@ int cmd_inspect_run(int argc, char **argv) {
     if (!strcmp(sub, "why")) { flowy_print_decision_explanation(flow_decision_logger_latest(NULL), stdout); return EXIT_SUCCESS; }
     if (!strcmp(sub, "timeline") || !strcmp(sub, "explain-decisions")) { flowy_print_decision_timeline(NULL, stdout); return EXIT_SUCCESS; }
     if (!strcmp(sub, "bottleneck")) { FlowTopologyGraph g; flow_topology_build_codebase_graph(&g); flowy_print_bottleneck_explanation(&g, stdout); return EXIT_SUCCESS; }
+    if (!strcmp(sub, "scope") || !strcmp(sub, "scopes")) {
+        FlowTopologyGraph g; flow_topology_build_codebase_graph(&g);
+        flowy_print_scope_report(&g, argc >= 2 ? argv[1] : "all", stdout);
+        return EXIT_SUCCESS;
+    }
     if (!strcmp(sub, "audit")) {
         FlowTopologyGraph g; flow_topology_build_codebase_graph(&g); FlowTopologyAuditReport r; flow_topology_audit(&g, &r);
-        printf("[FLOW Topology Audit] Nodes: %zu (Core:%zu, Plugins:%zu, Intents:%zu) | LOC:%zu | Leaks:%zu | Modularity:%.2f | SMT: QF_LIA SOUND\n",
-               r.total_nodes, r.core_nodes, r.plugin_nodes, r.intent_nodes, r.total_loc, r.cross_layer_leaks, r.modularity_score);
+        int pop_sc = 0; for (int s = 0; s < (int)FLOW_SCOPE_COUNT; ++s) if (r.scope_node_counts[s] > 0) pop_sc++;
+        printf("[FLOW Topology Audit] Nodes: %zu (Core:%zu, Plugins:%zu, Intents:%zu, Rust:%zu) | LOC:%zu | Leaks:%zu | Modularity:%.2f | SMT: QF_LIA SOUND\n"
+               "  [Self-Bootstrap Gates] Scopes:%d/%d | Makefile:%s | Rust-SDK:%s | 7-Lang-ABI:%s | HoTT-U0:%s(%zu) | Probes:%s | Exact-Numerics:%s\n",
+               r.total_nodes, r.core_nodes, r.plugin_nodes, r.intent_nodes, r.rust_nodes, r.total_loc, r.cross_layer_leaks, r.modularity_score,
+               pop_sc, (int)FLOW_SCOPE_COUNT,
+               r.makefile_bijective ? "BIJECTIVE" : "DRIFT",
+               r.rust_sdk_parity ? "PARITY_OK" : "DRIFT",
+               r.polyglot_homomorphic ? "HOMOMORPHIC" : "DRIFT",
+               r.hott_univalence_sound ? "UNIVALENT" : "BROKEN",
+               r.hott_type_count,
+               r.probe_weaving_sound ? "WOVEN" : "MISSING",
+               r.exact_numerics_sound ? "SOUND" : "DRIFT");
+        if (r.cross_layer_leaks > 0 && r.leak_details[0]) printf("  [Audit Violations] %s\n", r.leak_details);
         return r.cross_layer_leaks == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
     }
     if (!strcmp(sub, "topos") || !strcmp(sub, "hott") || !strcmp(sub, "cubical")) { flowy_print_cubical_topos_report(stdout); return EXIT_SUCCESS; }
@@ -270,9 +362,9 @@ int cmd_inspect_run(int argc, char **argv) {
         FlowTopologyGraph g; flow_topology_build_codebase_graph(&g);
         for (size_t i = 0; i < g.node_count; ++i) {
             const FlowTopologyNode *n = &g.nodes[i];
-            if (!strcmp(mod, "all") || !strcmp(mod, n->name))
-                printf("* [%s] (L%u, %s) LOC=%u FanIn=%u FanOut=%u Sieve=0x%016llx\n",
-                       n->name, n->layer, n->role, n->loc, n->fan_in, n->fan_out, (unsigned long long)n->capability_mask);
+            if (!strcmp(mod, "all") || !strcmp(mod, n->name) || !strcasecmp(mod, n->scope_name))
+                printf("* [%s] (L%u, %s, scope=%s) LOC=%u FanIn=%u FanOut=%u Sieve=0x%016llx\n",
+                       n->name, n->layer, n->role, n->scope_name, n->loc, n->fan_in, n->fan_out, (unsigned long long)n->capability_mask);
         }
         return EXIT_SUCCESS;
     }

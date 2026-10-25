@@ -1,7 +1,6 @@
 #include "flowy.h"
 #include "topology.h"
 #include "registry.h"
-#include "flowy_fvec.h"
 #include "flow_jet.h"
 #include "backend.h"
 #include <errno.h>
@@ -41,15 +40,19 @@ static int flowy_build_cmd(int argc, char **argv, int and_run) {
         out_bin = auto_bin;
     }
     (void)mkdir("build", 0755);
-    snprintf(temp_c, sizeof(temp_c), "/tmp/flow_%d_%lu.c", (int)getpid(), (unsigned long)time(NULL));
+    snprintf(temp_c, sizeof(temp_c), "/tmp/flow_XXXXXX.c");
+    int tmp_fd = mkstemps(temp_c, 2);
+    if (tmp_fd >= 0) close(tmp_fd);
+    else snprintf(temp_c, sizeof(temp_c), "/tmp/flow_%d_%lu.c", (int)getpid(), (unsigned long)time(NULL));
     char sibling_flowc[512] = {0};
     const char *flowc_bin = flowy_resolve_flowc_bin(argc > 0 ? argv[0] : NULL, sibling_flowc, sizeof(sibling_flowc));
-    char h_path[256] = {0}, py_path[256] = {0}, m_path[256] = {0};
+    char h_path[256] = {0}, py_path[256] = {0}, rs_path[256] = {0}, m_path[256] = {0};
     if (is_shared) {
         snprintf(h_path, sizeof(h_path), "build/%s.h", stem);
         snprintf(py_path, sizeof(py_path), "build/%s_abi.py", stem);
+        snprintf(rs_path, sizeof(rs_path), "build/%s_abi.rs", stem);
         snprintf(m_path, sizeof(m_path), "build/flow_%s.m", stem);
-        char *fc_sh_argv[] = {(char *)flowc_bin, (char *)spec_file, "-o", temp_c, "--target-c-header", h_path, "--target-python", py_path, "--target-matlab", m_path, NULL};
+        char *fc_sh_argv[] = {(char *)flowc_bin, (char *)spec_file, "-o", temp_c, "--target-c-header", h_path, "--target-python", py_path, "--target-rust", rs_path, "--target-matlab", m_path, NULL};
         if (run_argv_sync(fc_sh_argv) != 0) { fprintf(stderr, "flowy build --shared: failed to compile %s\n", spec_file); remove(temp_c); return EXIT_FAILURE; }
     } else {
         char *fc_argv[] = {(char *)flowc_bin, (char *)spec_file, "-o", temp_c, NULL};
@@ -66,7 +69,7 @@ static int flowy_build_cmd(int argc, char **argv, int and_run) {
         }
         remove(temp_c);
         if (ret != 0) { fprintf(stderr, "flowy build --shared: failed to generate %s\n", out_bin); return EXIT_FAILURE; }
-        printf("  ✓ [FLOW SDK Bundle] Built %s + %s + %s + %s\n", out_bin, h_path, py_path, m_path);
+        printf("  ✓ [FLOW SDK Bundle] Built %s + %s + %s + %s + %s\n", out_bin, h_path, py_path, rs_path, m_path);
         return EXIT_SUCCESS;
     }
     char *cc_argv1[] = {(char *)cc, "-O3", temp_c, "-o", (char *)out_bin, "-lpthread", "-lm", NULL};
@@ -105,10 +108,10 @@ static int flowy_run_jit_direct(const char *spec_file) {
     printf("[Dual-Track: JIT Direct Track] Executing %s (in-memory, 0 disk I/O, SMT UNSAT verified)...\n", ir.flow_name[0] ? ir.flow_name : spec_file);
     int ok = flow_backend_run_in_memory(&ir, component, NULL, &verification, stdout); flow_ir_cleanup(&ir); return ok ? EXIT_SUCCESS : -1; }
 static int flowy_run_cmd(int argc, char **argv) {
-    if (argc < 3 || is_help_flag(argv[2])) { printf("Usage: flowy run [--aot] <spec.flow> [args...]\n"); return (argc < 3) ? EXIT_FAILURE : EXIT_SUCCESS; }
+    if (argc < 3 || is_help_flag(argv[2])) { printf("Usage: flowy run [--aot] <spec.lean|spec.flow> [args...]\n"); return (argc < 3) ? EXIT_FAILURE : EXIT_SUCCESS; }
     int use_aot = 0; const char *spec_file = NULL;
     for (int i = 2; i < argc; ++i) if (!strcmp(argv[i], "--aot")) use_aot = 1; else if (argv[i][0] != '-' && !spec_file) spec_file = argv[i];
-    if (!spec_file) { fprintf(stderr, "flowy run: missing .flow specification\n"); return EXIT_FAILURE; } if (use_aot) { char *aot_argv[128]; int aot_argc = 0;
+    if (!spec_file) { fprintf(stderr, "flowy run: missing .lean or .flow specification\n"); return EXIT_FAILURE; } if (use_aot) { char *aot_argv[128]; int aot_argc = 0;
         aot_argv[aot_argc++] = argv[0]; aot_argv[aot_argc++] = argv[1];
         for (int i = 2; i < argc && aot_argc < 127; ++i) if (strcmp(argv[i], "--aot") != 0) aot_argv[aot_argc++] = argv[i]; aot_argv[aot_argc] = NULL;
         return flowy_build_cmd(aot_argc, aot_argv, 1); } int ret = flowy_run_jit_direct(spec_file);
@@ -212,31 +215,46 @@ static int flowy_ui_cmd(int argc, char **argv) {
 }
 static void flowy_print_usage(FILE *out) { fprintf(out, "FLOW 2.0 Living System & Declarative Toolchain (flowy) v2.5.0\nUsage: flowy <command> [options...]\n\n"
                  "Primary Commands:\n"
-                 "  run [--aot] <spec.flow> [args...] Run instantly via In-Memory JIT Direct Track (or --aot)\n"
-                 "  build <spec.flow> [-o <bin>]   Build standalone AOT native binary\n"
-                 "  ui <spec.lean> [--port <N>]    Synthesize & serve schema-driven C17 Control Plane & SoD Ledger UI\n"
-                 "  why                            Explain real-time scheduling / hardware decision\n"
-                 "  audit                          Run formal invariant & layer separation audit\n"
-                 "  shell                          Start the autonomic interactive REPL\n"
-                 "  inspect <subcommand>           Introspection: ask, why, timeline, bottleneck, audit, doc, topos\n"
-                 "  jet <subcommand>               Phase Space Jet Bundles (.fjet) & Symplectic physics\n"
-                 "  fvec <subcommand>              Gene vectors & immune antibody promotion (.fvec)\n"
-                 "  topo <subcommand>              Topology graph and continuous living orchestrator\n"
-                 "  test [suite]                   Run domain test suites (brain, body, concurrency, fvec-swarm, system, refactored-core, geometric-axiom, cubical-hott, all)\n"); } static int run_test_cmd(int argc, char **argv) {
+                 "  run [--aot] <spec.lean|spec.flow> [args...] Run instantly via In-Memory JIT Direct Track (or --aot)\n"
+                 "  build [--shared] <spec.lean|spec.flow>      Build standalone AOT binary or 5-artifact SDK bundle (--shared)\n"
+                 "  ui <spec.lean|spec.flow> [--port <N>]       Synthesize & serve schema-driven C17 Control Plane & SoD Ledger UI\n"
+                 "  audit                                       Run self-bootstrapping 7-scope codebase & HoTT U_0 univalence audit\n"
+                 "  scope [name]                                Inspect the 7 architectural Component Scopes across C17, Lean & Rust\n"
+                 "  topos / hott                                Inspect 64-Bit Cubical HoTT Sieve & Intensional Type Universe U_0\n"
+                 "  ask <query>                                 Query any module, scope, or .lean intent via Live AST + Token Ring\n"
+                 "  why                                         Explain real-time scheduling / hardware decision\n"
+                 "  shell                                       Start the autonomic interactive REPL\n"
+                 "  inspect <subcommand>                        Introspection: ask, why, timeline, bottleneck, audit, scope, doc, topos\n"
+                 "  jet <subcommand>                            Phase Space Jet Bundles (.fjet) & Symplectic physics\n"
+                 "  fvec <subcommand>                           Gene vectors & immune antibody promotion (.fvec)\n"
+                 "  topo <subcommand>                           Topology graph and continuous living orchestrator\n"
+                 "  test [suite]                                Run domain test suites (brain, body, concurrency, fvec-swarm, system, refactored-core, geometric-axiom, cubical-hott, all)\n"); } static int run_test_cmd(int argc, char **argv) {
     const char *suite = (argc >= 3) ? argv[2] : "all";
     if (is_help_flag(suite)) { printf("Usage: flowy test <brain|body|concurrency|fvec-swarm|system|refactored-core|geometric-axiom|cubical-hott|all>\n"); return EXIT_SUCCESS; }
     static const char *const suites[] = {"brain", "body", "concurrency", "fvec-swarm", "system", "refactored-core", "geometric-axiom", "cubical-hott"};
-    static const char *const bins[] = {"./build/test-brain", "./build/test-body", "./build/test-concurrency", "./build/test-fvec-swarm", "./build/test-system", "./build/test-refactored-core", "./build/test-geometric-axiom", "./build/test-cubical-hott"};
-    if (!strcmp(suite, "all")) { for (int i = 0; i < 8; ++i) { printf("▶ Running Suite [%s] (%s)...\n", suites[i], bins[i]); char *t_argv[] = {(char *)bins[i], NULL}; int ret = run_argv_sync(t_argv);
-            if (ret != 0) { fprintf(stderr, "❌ Suite [%s] failed with exit code %d\n", suites[i], ret); return EXIT_FAILURE; } }
-        printf("  ✅ ALL 8 DOMAIN TEST SUITES PASSED\n"); return EXIT_SUCCESS; }
+    const char *build_dir = getenv("FLOW_BUILD_DIR");
+    if (!build_dir || !build_dir[0]) build_dir = "./build";
+    if (!strcmp(suite, "all")) {
+        for (int i = 0; i < 8; ++i) {
+            char bin_path[512];
+            snprintf(bin_path, sizeof(bin_path), "%s/test-%s", build_dir, suites[i]);
+            printf("▶ Running Suite [%s] (%s)...\n", suites[i], bin_path);
+            char *t_argv[] = {bin_path, NULL};
+            int ret = run_argv_sync(t_argv);
+            if (ret != 0) { fprintf(stderr, "❌ Suite [%s] failed with exit code %d\n", suites[i], ret); return EXIT_FAILURE; }
+        }
+        printf("  ✅ ALL 8 DOMAIN TEST SUITES PASSED\n");
+        return EXIT_SUCCESS;
+    }
     for (int i = 0; i < 8; ++i) {
         if (!strcmp(suite, suites[i]) || (!strcmp(suite, "fvec") && !strcmp(suites[i], "fvec-swarm")) ||
             (!strcmp(suite, "core") && !strcmp(suites[i], "refactored-core")) ||
             (!strcmp(suite, "axiom") && !strcmp(suites[i], "geometric-axiom")) ||
             (!strcmp(suite, "hott") && !strcmp(suites[i], "cubical-hott"))) {
-            printf("▶ Running Suite [%s] (%s)...\n", suites[i], bins[i]);
-            char *t_argv[] = {(char *)bins[i], NULL};
+            char bin_path[512];
+            snprintf(bin_path, sizeof(bin_path), "%s/test-%s", build_dir, suites[i]);
+            printf("▶ Running Suite [%s] (%s)...\n", suites[i], bin_path);
+            char *t_argv[] = {bin_path, NULL};
             return (run_argv_sync(t_argv) == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
         }
     }
@@ -261,7 +279,7 @@ int main(int argc, char **argv) { if (argc < 2 || is_help_flag(argv[1])) { flowy
     if (!strcmp(argv[1], "inspect")) {
         if (argc < 3 || is_help_flag(argv[2])) { cmd_inspect_print_usage(stdout); return EXIT_SUCCESS; } return cmd_inspect_run(argc - 2, argv + 2); }
     static const char *const inspect_aliases[] = { "ask","--ask","why","--why","timeline","--timeline",
-        "explain-decisions","bottleneck","--bottleneck","audit","--audit","doc","--doc","topos","--topos",NULL };
+        "explain-decisions","bottleneck","--bottleneck","audit","--audit","scope","--scope","scopes","doc","--doc","topos","--topos","hott","--hott","cubical","--cubical",NULL };
     if (match_any(argv[1], inspect_aliases)) return cmd_inspect_run(argc - 1, argv + 1); if (!strcmp(argv[1], "lang") || !strcmp(argv[1], "language")) {
         if (argc >= 3) { FlowLanguage nl = flowy_parse_language(argv[2]); flowy_set_language(nl); printf("FLOW language switched to: %s\n", flowy_language_name(nl)); }
         else printf("Active FLOW language: %s\n", flowy_language_name(flowy_get_language())); return EXIT_SUCCESS; }

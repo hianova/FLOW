@@ -95,13 +95,15 @@ bind "plugins/embodied.lean"
 
 ### 鐵律 1：遵守 `Lean-RT` 零 GC 實時子集、巢狀 `structure` 展平與硬體編解碼內建函數
 - **禁止外部套件與動態配置（`Lean-RT` Zero-GC Gate）**：不要寫 `import Mathlib`，且嚴格禁止 `List`、`Array`、`ByteArray`、`String`、高階閉包（`fun x =>`）、自遞迴函數或遞迴 `inductive` 型別。這確保所有算子皆為 O(1) 堆疊記憶體與零 GC 暫停。
-- **C17 型別直接映射與巢狀 `structure` / 有限 `inductive` 支援**：
+- **C17 與七語言型別直接映射、巢狀 `structure` / 有限 `inductive` / Tuple 回傳與關鍵字轉義**：
   - `UInt64` / `Nat` $\longrightarrow$ `uint64_t` (8 bytes)
+  - `USize` $\longrightarrow$ `size_t` / Rust `usize` / Python `ctypes.c_size_t` / Julia `Csize_t`
   - `UInt32` $\longrightarrow$ `uint32_t` (4 bytes)
   - `Bool` $\longrightarrow$ `bool`
-  - `Float` $\longrightarrow$ `double` (8 bytes)
+  - `Float` $\longrightarrow$ `double` (8 bytes，底層映射至無損確定性 $Q32.32$ 定點數 `flow_fx64_t`)
   - 有限列舉 `inductive Mode | Idle | Torque` $\longrightarrow$ `uint32_t` (`0, 1, ...`)
-  - 巢狀 `structure`（如 `GaitFrame` 內含 `ImuSample`）與鏈式欄位存取（`f.imu.ax`）會自動展平為自然對齊之 C ABI 結構（`f.imu_ax`），並自動產生對應的 Python `ctypes.Structure` 與 Rust `#[repr(C)] pub struct`。
+  - 多回傳值 Tuple `(Float * Float)` $\longrightarrow$ C/CUDA `double *out_0, double *out_1` 指標輸出，並於 Rust、Python、JS、MATLAB 與 Julia 自動解構為原生 Tuple / 多回傳值
+  - 巢狀 `structure`（如 `GaitFrame` 內含 `ImuSample`）與鏈式欄位存取（`f.imu.ax`）會自動展平為自然對齊之 C ABI 結構（`f.imu_ax`），且各目標語言保留字（如 `in`、`type`、`from`、`var`）會自動安全轉義（Rust `r#in` / Python/JS/Julia `in_`）。
 - **硬體量化與反量化內建函數**：直接呼叫 `flow_quantize val scale offset min_q max_q`（`Float -> UInt64`）與 `flow_dequantize q scale offset`（`UInt64 -> Float`），`flowc` 會自動降階為無分支飽和 C17 硬體轉換指令。
 - **最佳實踐**：將主狀態 `structure` 設計為 **8 個 `UInt64`/`Float` 欄位（共 64 bytes）**，剛好對齊單一 CPU Cache Line（`stride = 64, align = 8`）。
 

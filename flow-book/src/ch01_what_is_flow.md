@@ -13,32 +13,32 @@
 
 ---
 
-## 1.2 FLOW 的三層數學-AST 融合架構
+## 1.2 FLOW 的三層數學-AST 融合架構與七大元件作用域
 
-FLOW 建立了以 **「Pure `.lean` / `.flow` 意圖與證明」、「Cubical HoTT 同倫篩與領域插件函子」、「QSBR 零拷貝執行基底」** 為核心的三位一體架構：
+FLOW 將核心引擎收斂為 **7 大正交元件作用域（`frontend`、`formal_sieve`、`exact_manifold`、`runtime_jet`、`polyglot_abi`、`introspection_ui`、`rust_sdk`）**，建立以 **「Pure `.lean` / `.flow` 意圖與證明」、「Cubical HoTT 單價宇宙 $\mathcal{U}_0$ × 精確流形」、「QSBR 零拷貝執行基底與七語同態投影」** 為核心的三位一體架構：
 
 ```text
-FLOW 三層無縫融合:
+FLOW 三層無縫融合 (7 Component Scopes | Leaks = 0 | Modularity = 1.00):
                  ┌───────────────────────────────────────────┐
                  │  1. Pure .lean / .flow 單一真實來源       │
                  │  • 原生 structure -> 自動推導 Stride/ABI  │
                  │  • 定理錨定算子   -> 零 @[export] 綁定 def│
                  └─────────────────────┬─────────────────────┘
                                        │
-                     領域插件函子降階 (lower_domain_semantics)
+                     領域插件函子降階 (plugins/embodied.c)
                                        ▼
     ┌──────────────────────────────────────────────────────────────────────┐
-    │          2. 64-Bit Cubical HoTT 同倫篩 + 5-Stage Token Ring          │
-    │   • 6 大正交代數子空間 (Memory / Concurrency / Microarch / ...)      │
-    │   • Presburger 多面體排程 + 接觸噴流束 (.fjet) + 架構記憶庫 (.fvec)  │
+    │   2. 64-Bit Cubical HoTT 單價宇宙 U_0 + 精確流形 (`bitspace.c`)       │
+    │   • 內源性 HoTT U_0 單價海關 (Lean4 ~= C17 ~= Rust) + 外源性 topo 雷達│
+    │   • Q32.32 定點數 + 256-Bit Montgomery + 5-Stage Token Ring + .fvec   │
     └──────────────────┬────────────────────────────────┬──────────────────┘
                        │                                │
            (SMT QF_LIA 四大定理守門)          (64B 快取行對齊原子切換)
                        ▼                                ▼
          ┌───────────────────────────┐    ┌───────────────────────────┐
-         │ 3a. 零 sorry + 四大定理   │    │ 3b. QSBR 世代鎖 + 多語言  │
+         │ 3a. 零 sorry + 四大定理   │    │ 3b. QSBR 世代鎖 + 七語言  │
          │ buffer / memory / shard / │    │ 64B FlowExtentDescriptor  │
-         │ determinism UNSAT 證明    │    │ (C/Rust/Py/JS/CUDA/MATLAB)│
+         │ determinism UNSAT 證明    │    │ (C/Rust/Py/JS/CUDA/M/Jl)  │
          └───────────────────────────┘    └───────────────────────────┘
 ```
 

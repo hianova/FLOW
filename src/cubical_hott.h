@@ -95,6 +95,49 @@ int flow_cubical_match_types(FlowCubicalTypeSieve intent, FlowCubicalTypeSieve c
     char explanation[512], pre_topology[64], post_topology[64]; } FlowCubicalTransitionReport; const FlowCubicalAxisInfo *flow_cubical_get_axis_info(uint32_t axis_idx);
 int flow_cubical_decode_transition(uint64_t v_pre, uint64_t v_post, uint32_t explicit_axis, FlowCubicalTransitionReport *report_out);
 uint64_t flow_cubical_project_text_intent(const char *text); uint64_t flow_cubical_get_module_mask(const char *module_id);
+
+/*
+ * ============================================================================
+ * Intensional Global Type Universe U_0 & Univalence Customs (A ~= B => A = B)
+ * ============================================================================
+ */
+#define FLOW_HOTT_UNIVERSE_MAX_TYPES 128
+
+typedef enum {
+    FLOW_HOTT_LANG_LEAN     = 0,
+    FLOW_HOTT_LANG_C17      = 1,
+    FLOW_HOTT_LANG_RUST     = 2,
+    FLOW_HOTT_LANG_POLYGLOT = 3
+} FlowHoTTLangOrigin;
+
+typedef struct {
+    char name[64];
+    FlowHoTTLangOrigin origin;
+    size_t field_count;
+    size_t byte_size;
+    size_t align_bytes;
+    uint32_t fx_scale_bits;
+    uint64_t sieve_fingerprint;
+} FlowHoTTTypeEntry;
+
+typedef struct {
+    FlowHoTTTypeEntry entries[FLOW_HOTT_UNIVERSE_MAX_TYPES];
+    size_t count;
+    size_t distinct_type_count;
+    size_t univalence_passed_count;
+    size_t homotopy_broken_count;
+    char broken_diagnostic[256];
+} FlowHoTTUniverse;
+
+const char *flow_hott_lang_origin_name(FlowHoTTLangOrigin origin);
+FlowHoTTUniverse *flow_hott_universe_global(void);
+void flow_hott_universe_reset(FlowHoTTUniverse *u);
+int flow_hott_register_type(FlowHoTTUniverse *u, const char *name, FlowHoTTLangOrigin origin,
+                            size_t field_count, size_t byte_size, size_t align_bytes,
+                            uint32_t fx_scale_bits, uint64_t sieve_fingerprint);
+FlowKanStatus flow_hott_verify_univalence(FlowHoTTUniverse *u, const char *type_name, uint64_t *path_hash_out);
+int flow_hott_verify_universe_all(FlowHoTTUniverse *u);
+
 #ifdef __cplusplus
 }
 #endif

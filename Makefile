@@ -27,7 +27,7 @@ INCLUDEDIR ?= $(PREFIX)/include/flow
 
 PLUGINS_SO := $(BUILD_DIR)/libflow_embodied.so
 
-.PHONY: all clean test security-test install uninstall fuzz test-build test-run test-asan test-tsan plugins flowy libflow test-cubical-hott
+.PHONY: all clean test test-cli security-test install uninstall fuzz test-build test-run test-asan test-tsan plugins flowy libflow
 
 all: $(LIBFLOW_A) $(FLOWC) $(FLOWY) plugins
 
@@ -38,7 +38,7 @@ install: $(FLOWC) $(FLOWY) $(LIBFLOW_A)
 	mkdir -p $(DESTDIR)$(PREFIX)/lib
 	install -m 644 $(LIBFLOW_A) $(DESTDIR)$(PREFIX)/lib/libflow.a
 	mkdir -p $(DESTDIR)$(INCLUDEDIR)
-	install -m 644 src/*.h $(DESTDIR)$(INCLUDEDIR)
+	install -m 644 src/*.h plugins/*.h $(DESTDIR)$(INCLUDEDIR)
 
 uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/flowc $(DESTDIR)$(BINDIR)/flowy $(DESTDIR)$(PREFIX)/lib/libflow.a
@@ -73,8 +73,9 @@ flowy: $(FLOWY)
 
 plugins: $(PLUGINS_SO)
 
-$(BUILD_DIR)/libflow_embodied.so: plugins/embodied.c plugins/flow_embodied_mz.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -shared -fPIC -DFLOW_PLUGIN_DSO -undefined dynamic_lookup $(THREAD_FLAGS) -Isrc -Iplugins plugins/embodied.c plugins/flow_embodied_mz.c -o $@ $(LDLIBS)
+$(BUILD_DIR)/libflow_embodied.so: plugins/embodied.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -shared -fPIC -DFLOW_PLUGIN_DSO -undefined dynamic_lookup $(THREAD_FLAGS) -Isrc -Iplugins plugins/embodied.c -o $@ $(LDLIBS)
+	@if [ ! -f target/debug/libflow_plugin_example.dylib ] && [ ! -f target/debug/libflow_plugin_example.so ] && command -v cargo >/dev/null 2>&1; then cargo build --workspace --locked --quiet; fi
 
 # ==============================================================================
 # Two-Stage Native Makefile Test Pipeline (Native Hermetic Barrier)
@@ -85,7 +86,7 @@ $(BUILD_DIR)/libflow_embodied.so: plugins/embodied.c plugins/flow_embodied_mz.c 
 TEST_DEFS := -DFLOW_BUILD_DIR=\"$(BUILD_DIR)\"
 TEST_DEPS := tests/flow_test_kit.h $(FLOWC) $(FLOWY) $(PLUGINS_SO) $(LIBFLOW_A)
 
-# 5 Consolidated Domain Test Suites (Brain, Body, Concurrency, Fvec-Swarm, System)
+# 8 Consolidated Domain Test Suites + Fuzz Harness
 TEST_BINARIES := \
 	$(BUILD_DIR)/test-brain \
 	$(BUILD_DIR)/test-body \
@@ -177,11 +178,38 @@ test-run: $(TEST_BINARIES)
 	@$(BUILD_DIR)/fuzz-test || echo fuzz-test >> $(BUILD_DIR)/.failed-suites
 	@if [ -s $(BUILD_DIR)/.failed-suites ]; then echo "❌ FAILED SUITES:"; cat $(BUILD_DIR)/.failed-suites; exit 1; fi
 
+test-cli: $(FLOWC) $(FLOWY)
+	@echo "=== [CLI] Testing flowc and flowy CLI Interfaces ==="
+	@$(FLOWC) -h >/dev/null
+	@$(FLOWC) --help >/dev/null
+	@$(FLOWC) --version >/dev/null
+	@! $(FLOWC) >/dev/null 2>&1
+	@! $(FLOWC) /nonexistent/file.lean >/dev/null 2>&1
+	@$(FLOWY) -h >/dev/null
+	@$(FLOWY) --version >/dev/null
+	@$(FLOWY) audit >/dev/null
+	@$(FLOWY) topos >/dev/null
+	@$(FLOWY) inspect scope formal_sieve >/dev/null
+	@$(FLOWY) inspect scope rust_sdk >/dev/null
+	@if command -v cargo >/dev/null 2>&1; then cargo test --workspace --locked --quiet && echo "  ✓ Rust Plugin SDK workspace unit tests passed (0 external crates)."; fi
+	@echo "  ✓ flowc & flowy CLI smoke tests passed."
+
 test: test-build
 	@$(MAKE) --no-print-directory test-run
+	@$(MAKE) --no-print-directory test-cli
 	@echo "================================================================================"
-	@echo "            ALL 8 DOMAIN TEST SUITES 100% SOUND & PASSED!                       "
+	@echo "      ALL 8 DOMAIN TEST SUITES + CLI SMOKE TESTS 100% SOUND & PASSED!           "
 	@echo "================================================================================"
 
+help:
+	@echo "FLOW Native C17 & Rust Build Pipeline (Makefile)"
+	@echo "  make -j4 all        Build libflow.a, flowc, flowy, and libflow_embodied.so"
+	@echo "  make -j4 test       Run all 8 domain test suites, fuzz harness, and CLI smoke tests"
+	@echo "  make test-asan      Run all suites under AddressSanitizer + UBSan"
+	@echo "  make test-tsan      Run all suites under ThreadSanitizer"
+	@echo "  make fuzz           Run LLVM libFuzzer (FUZZ_SECONDS=60)"
+	@echo "  make install        Install flowc, flowy, libflow.a, and headers to PREFIX=$(PREFIX)"
+	@echo "  make clean          Remove build artifacts"
+
 clean:
-	rm -rf $(BUILD_DIR) build/asan build/tsan
+	rm -rf $(BUILD_DIR) build/asan build/tsan /tmp/flow_* /tmp/libflow_*

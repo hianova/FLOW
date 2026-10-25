@@ -4,7 +4,6 @@
 #include "registry.h"
 #include "bitspace.h"
 #include "smt.h"
-#include "token_ring.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -12,15 +11,25 @@
 #define FLOW_TOPOLOGY_MAX_NODES 256
 #define FLOW_TOPOLOGY_MAX_EDGES 1024
 typedef enum { FLOW_NODE_CORE_MODULE = 0, FLOW_NODE_PLUGIN = 1, FLOW_NODE_COMPONENT = 2, FLOW_NODE_INTENT_OP = 3, FLOW_NODE_DIMENSION = 4, FLOW_NODE_SHARD_GROUP = 5,
-    FLOW_NODE_FVEC_EXPERIENCE = 6 } FlowNodeType;
+    FLOW_NODE_FVEC_EXPERIENCE = 6, FLOW_NODE_RUST_CRATE = 7 } FlowNodeType;
+typedef enum { FLOW_SCOPE_FRONTEND = 0, FLOW_SCOPE_FORMAL_SIEVE = 1, FLOW_SCOPE_EXACT_MANIFOLD = 2, FLOW_SCOPE_RUNTIME_JET = 3,
+    FLOW_SCOPE_POLYGLOT_ABI = 4, FLOW_SCOPE_INTROSPECTION_UI = 5, FLOW_SCOPE_RUST_SDK = 6, FLOW_SCOPE_COUNT = 7 } FlowComponentScope;
 typedef enum { FLOW_EDGE_CALLS = 0, FLOW_EDGE_USES = 1, FLOW_EDGE_IMPLEMENTS = 2, FLOW_EDGE_BINDS_DIMENSION = 3, FLOW_EDGE_DATA_FLOW = 4,
     FLOW_EDGE_SHARD_AFFINITY = 5, FLOW_EDGE_MEMORIALIZES = 6 } FlowEdgeType;
-typedef struct { uint32_t id; FlowNodeType type; char name[64], module[64], role[128]; int is_core; uint32_t layer, loc, fan_in, fan_out;
+typedef struct { uint32_t id; FlowNodeType type; FlowComponentScope scope; char scope_name[32]; char name[64], module[64], role[128]; int is_core; uint32_t layer, loc, fan_in, fan_out;
     uint64_t capability_mask; double hotspot_score; char hotspot_metric[64]; double hotspot_raw_val, hotspot_threshold_val; char hotspot_unit[16], dynamic_symptom[128]; } FlowTopologyNode;
 typedef struct { uint32_t from_id, to_id; FlowEdgeType type; double weight; char label[64]; } FlowTopologyEdge;
 typedef struct { FlowTopologyNode nodes[FLOW_TOPOLOGY_MAX_NODES]; size_t node_count; FlowTopologyEdge edges[FLOW_TOPOLOGY_MAX_EDGES]; size_t edge_count; } FlowTopologyGraph;
-typedef struct { size_t total_nodes, total_edges, core_nodes, plugin_nodes, intent_nodes, cross_layer_leaks, total_loc; char leak_details[512];
-    double average_coupling, modularity_score; } FlowTopologyAuditReport;
+typedef struct { size_t total_nodes, total_edges, core_nodes, plugin_nodes, intent_nodes, rust_nodes, cross_layer_leaks, total_loc;
+    size_t scope_node_counts[FLOW_SCOPE_COUNT], scope_loc[FLOW_SCOPE_COUNT];
+    union { int makefile_bijective; int build_rs_bijective; };
+    int rust_sdk_parity, polyglot_homomorphic, exact_numerics_sound;
+    int hott_univalence_sound, probe_weaving_sound;
+    size_t hott_type_count, hott_broken_count;
+    char leak_details[512]; double average_coupling, modularity_score; } FlowTopologyAuditReport;
+const char *flow_topology_scope_name(FlowComponentScope scope);
+const char *flow_topology_scope_contract(FlowComponentScope scope);
+int flow_topology_parse_scope(const char *name, FlowComponentScope *out);
 void flow_topology_init(FlowTopologyGraph *graph);
 uint32_t flow_topology_add_node(FlowTopologyGraph *graph, FlowNodeType type, const char *name, const char *module, int is_core, uint32_t layer);
 int flow_topology_add_edge(FlowTopologyGraph *graph, uint32_t from_id, uint32_t to_id, FlowEdgeType type, double weight, const char *label);

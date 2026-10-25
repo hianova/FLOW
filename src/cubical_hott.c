@@ -113,7 +113,7 @@ static const struct { FlowCubicalSubspaceType sub; const char *name, *contract, 
     {FLOW_CUBICAL_SUBSPACE_MEMORY,      "memory_subspace_axis",      "Theorem2 Memory Quota",        "bitspace",   "Memory & Capacity",        "Polytope capacity & quota projection in I^[0..7]."},
     {FLOW_CUBICAL_SUBSPACE_CONCURRENCY, "concurrency_subspace_axis", "Theorem8 QSBR Epoch Lease",    "reload",     "Concurrency & Scheduling", "QSBR lock-free epoch & shard non-aliasing in I^[8..15]."},
     {FLOW_CUBICAL_SUBSPACE_MICROARCH,   "microarch_subspace_axis",   "Presburger Dependency Sound",  "polyhedral", "Microarchitecture & SIMD", "Polyhedral affine schedule & SIMD lane width in I^[16..23]."},
-    {FLOW_CUBICAL_SUBSPACE_LAYOUT,      "layout_subspace_axis",      "Theorem9 Stride & Alignment",  "jit",        "Layout & Representation",  "Zero-copy extent stride & layout transposition in I^[24..31]."},
+    {FLOW_CUBICAL_SUBSPACE_LAYOUT,      "layout_subspace_axis",      "Theorem9 Stride & Alignment",  "reload",     "Layout & Representation",  "Zero-copy extent stride & layout transposition in I^[24..31]."},
     {FLOW_CUBICAL_SUBSPACE_PHYSICAL,    "physical_subspace_axis",    "Symplectic Hamiltonian Bound", "flow_jet",   "Physical & Phase-Space",   "Symplectic phase-space & ZMP safety envelope in I^[32..47]."},
     {FLOW_CUBICAL_SUBSPACE_SECURITY,    "security_subspace_axis",    "Theorem5 Kan Open-Box Filler", "smt",        "System Invariants & SMT",  "QF_LIA & Lean 4 formal invariant gate in I^[48..63]."}
 };
@@ -255,3 +255,114 @@ FlowSMTResult flow_axiom_verify_smt(const FlowUnifiedSection *sec, FlowSMTProofA
         FLOW_SMT_RULE("axiom_bmf_confinement", !bmf_ok, 0, 0, FLOW_BOX_THEOREM_DETERMINISM, "64B confinement violated") };
     return FLOW_SMT_VERIFY_RULES("geometric_axiom", proof_out, rules, "AXIOM ZERO-DEFECT UNSAT: margin=%.3f, T*=%u, V*=%u, BMF_64B=YES",
         sec->transversality_margin, sec->optimal_tile_size, sec->optimal_simd_width); }
+
+const char *flow_hott_lang_origin_name(FlowHoTTLangOrigin origin) {
+    switch (origin) {
+        case FLOW_HOTT_LANG_LEAN:     return "Lean4";
+        case FLOW_HOTT_LANG_C17:      return "C17";
+        case FLOW_HOTT_LANG_RUST:     return "Rust";
+        case FLOW_HOTT_LANG_POLYGLOT: return "Polyglot";
+        default:                      return "Unknown";
+    }
+}
+
+FlowHoTTUniverse *flow_hott_universe_global(void) {
+    static FlowHoTTUniverse g_universe_u0;
+    return &g_universe_u0;
+}
+
+void flow_hott_universe_reset(FlowHoTTUniverse *u) {
+    if (!u) return;
+    memset(u, 0, sizeof(*u));
+}
+
+int flow_hott_register_type(FlowHoTTUniverse *u, const char *name, FlowHoTTLangOrigin origin,
+                            size_t field_count, size_t byte_size, size_t align_bytes,
+                            uint32_t fx_scale_bits, uint64_t sieve_fingerprint) {
+    if (!u || !name || !name[0]) return 0;
+    int name_seen = 0;
+    for (size_t i = 0; i < u->count; ++i) {
+        if (strcmp(u->entries[i].name, name) == 0) {
+            name_seen = 1;
+            if (u->entries[i].origin == origin) {
+                u->entries[i].field_count = field_count;
+                u->entries[i].byte_size = byte_size;
+                u->entries[i].align_bytes = align_bytes;
+                u->entries[i].fx_scale_bits = fx_scale_bits;
+                u->entries[i].sieve_fingerprint = sieve_fingerprint;
+                return 1;
+            }
+        }
+    }
+    if (u->count >= FLOW_HOTT_UNIVERSE_MAX_TYPES) return 0;
+    FlowHoTTTypeEntry *e = &u->entries[u->count++];
+    memset(e, 0, sizeof(*e));
+    snprintf(e->name, sizeof(e->name), "%s", name);
+    e->origin = origin;
+    e->field_count = field_count;
+    e->byte_size = byte_size;
+    e->align_bytes = align_bytes;
+    e->fx_scale_bits = fx_scale_bits;
+    e->sieve_fingerprint = sieve_fingerprint;
+    if (!name_seen) u->distinct_type_count++;
+    return 1;
+}
+
+FlowKanStatus flow_hott_verify_univalence(FlowHoTTUniverse *u, const char *type_name, uint64_t *path_hash_out) {
+    if (path_hash_out) *path_hash_out = 0ULL;
+    if (!u || !type_name || !type_name[0]) return FLOW_KAN_OBSTRUCTED_SINGULARITY;
+    const FlowHoTTTypeEntry *ref = NULL;
+    for (size_t i = 0; i < u->count; ++i) {
+        if (strcmp(u->entries[i].name, type_name) != 0) continue;
+        if (!ref) {
+            ref = &u->entries[i];
+        } else {
+            const FlowHoTTTypeEntry *cur = &u->entries[i];
+            if (cur->field_count != ref->field_count ||
+                cur->byte_size != ref->byte_size ||
+                cur->align_bytes != ref->align_bytes ||
+                cur->fx_scale_bits != ref->fx_scale_bits ||
+                cur->sieve_fingerprint != ref->sieve_fingerprint) {
+                snprintf(u->broken_diagnostic, sizeof(u->broken_diagnostic),
+                         "Homotopy Path Broken on '%s': %s(fields=%zu,size=%zu,align=%zu,fx=%u,sieve=0x%llx) != %s(fields=%zu,size=%zu,align=%zu,fx=%u,sieve=0x%llx)",
+                         type_name,
+                         flow_hott_lang_origin_name(ref->origin), ref->field_count, ref->byte_size, ref->align_bytes, ref->fx_scale_bits, (unsigned long long)ref->sieve_fingerprint,
+                         flow_hott_lang_origin_name(cur->origin), cur->field_count, cur->byte_size, cur->align_bytes, cur->fx_scale_bits, (unsigned long long)cur->sieve_fingerprint);
+                return FLOW_KAN_OBSTRUCTED_SINGULARITY;
+            }
+        }
+    }
+    if (!ref) return FLOW_KAN_OBSTRUCTED_SINGULARITY;
+    uint64_t h = 14695981039346656037ULL;
+    for (const char *p = ref->name; *p; ++p) h = (h ^ (uint64_t)(unsigned char)*p) * 1099511628211ULL;
+    h = (h ^ (uint64_t)ref->field_count) * 1099511628211ULL;
+    h = (h ^ (uint64_t)ref->byte_size) * 1099511628211ULL;
+    h = (h ^ (uint64_t)ref->align_bytes) * 1099511628211ULL;
+    h = (h ^ (uint64_t)ref->fx_scale_bits) * 1099511628211ULL;
+    h = (h ^ ref->sieve_fingerprint) * 1099511628211ULL;
+    if (path_hash_out) *path_hash_out = h;
+    return FLOW_KAN_FILLED_HOMOTOPIC;
+}
+
+int flow_hott_verify_universe_all(FlowHoTTUniverse *u) {
+    if (!u || u->count == 0) return 0;
+    u->univalence_passed_count = 0;
+    u->homotopy_broken_count = 0;
+    u->broken_diagnostic[0] = '\0';
+    for (size_t i = 0; i < u->count; ++i) {
+        int already_checked = 0;
+        for (size_t j = 0; j < i; ++j) {
+            if (strcmp(u->entries[i].name, u->entries[j].name) == 0) {
+                already_checked = 1;
+                break;
+            }
+        }
+        if (already_checked) continue;
+        if (flow_hott_verify_univalence(u, u->entries[i].name, NULL) == FLOW_KAN_FILLED_HOMOTOPIC) {
+            u->univalence_passed_count++;
+        } else {
+            u->homotopy_broken_count++;
+        }
+    }
+    return (u->homotopy_broken_count == 0 && u->univalence_passed_count == u->distinct_type_count && u->distinct_type_count > 0) ? 1 : 0;
+}

@@ -52,7 +52,7 @@ install -m 755 "$TMPDIR/build/flowc" "$BINDIR/flowc"
 install -m 755 "$TMPDIR/build/flowy" "$BINDIR/flowy"
 
 mkdir -p "$INCLUDEDIR"
-install -m 644 "$SRCDIR"/src/*.h "$INCLUDEDIR/"
+install -m 644 "$SRCDIR"/src/*.h "$SRCDIR"/plugins/*.h "$INCLUDEDIR/"
 
 echo ""
 echo "=========================================================="

@@ -3,17 +3,12 @@
 #include "registry.h"
 #include "smt.h"
 #include "flowy.h"
-#include "jit.h"
 #include "abi.h"
 #include "backend.h"
 #include "reload.h"
-#include "security.h"
 #include "flow_jet.h"
 #include "topology.h"
 #include "cubical_hott.h"
-#include "hardware_telemetry.h"
-#include "token_ring.h"
-#include "flowy_fvec.h"
 
 #include <dlfcn.h>
 #include <math.h>
@@ -1098,7 +1093,9 @@ int main(void) {
         fclose(spy_fp);
 
         FLOW_ASSERT_EQ(system("python3 /tmp/flow_test_scalar.py"), 0);
-        FLOW_ASSERT_EQ(system("./build/flowy ui /tmp/flow_test_scalar.lean --selftest >/dev/null"), 0);
+        char ui_cmd12[512];
+        snprintf(ui_cmd12, sizeof(ui_cmd12), "%s/flowy ui /tmp/flow_test_scalar.lean --selftest >/dev/null", FLOW_BUILD_DIR);
+        FLOW_ASSERT_EQ(system(ui_cmd12), 0);
 
         /* Verify Lean theorem evaluator rejects false theorems and comment-evaded certificates (V5, L1-L3) */
         const char *false_lean =
@@ -1118,7 +1115,9 @@ int main(void) {
         memset(&f_spec, 0, sizeof(f_spec));
         FLOW_ASSERT_FALSE(parse_spec(fl_fp, &f_spec));
         fclose(fl_fp);
-        FLOW_ASSERT_NE(system("./build/flowc /tmp/flow_false_thm.lean >/dev/null 2>&1"), 0);
+        char fc_cmd12[512];
+        snprintf(fc_cmd12, sizeof(fc_cmd12), "%s/flowc /tmp/flow_false_thm.lean >/dev/null 2>&1", FLOW_BUILD_DIR);
+        FLOW_ASSERT_NE(system(fc_cmd12), 0);
         remove("/tmp/flow_false_thm.lean");
 
         /* Verify parameterized false decide and omega theorems are rejected (L1) */
@@ -1220,7 +1219,9 @@ int main(void) {
         FLOW_ASSERT_EQ(ef_spec.lean_function_count, 7u);
         FLOW_ASSERT_EQ(ef_spec.lean_theorem_count, 2u);
         FLOW_ASSERT_STR_EQ(ef_spec.extern_kernel, "embodiedStepKernel");
-        FLOW_ASSERT_EQ(system("./build/flowc plugins/embodied.flow -o /tmp/flow_cli_embodied_out.c >/dev/null"), 0);
+        char fc_emb_cmd[512];
+        snprintf(fc_emb_cmd, sizeof(fc_emb_cmd), "%s/flowc plugins/embodied.flow -o /tmp/flow_cli_embodied_out.c >/dev/null", FLOW_BUILD_DIR);
+        FLOW_ASSERT_EQ(system(fc_emb_cmd), 0);
         remove("/tmp/flow_cli_embodied_out.c");
 
         /* Edge cases: reject invalid bind path and malformed @quota/@embodied/@reload units & keys */
@@ -2344,6 +2345,7 @@ int main(void) {
             remove("build/libflow_stage17_sdk.so");
             remove("build/flow_stage17_sdk.h");
             remove("build/flow_stage17_sdk_abi.py");
+            remove("build/flow_stage17_sdk_abi.rs");
             remove("build/flow_flow_stage17_sdk.m");
         }
         remove(s17_lean);
@@ -2621,6 +2623,398 @@ int main(void) {
         FLOW_ASSERT_TRUE(loss_after < loss_before);
 
         printf("  ✓ Stage 19 Passed: FlowExactNumerics (Q16.16/Q32.32 fixed-point, 256-bit Montgomery/Miller-Rabin BigInt, Xoshiro256** & fixed-point linalg) verified.\n\n");
+    }
+
+    /* =========================================================================
+     * STAGE 20: Self-Bootstrapping Codebase Auditor, 7 Component Scopes,
+     *           Rust Plugin DSO Lifecycle, 256-Bit secp256k1 & 7-Language Polyglot Gate
+     * ========================================================================= */
+    FLOW_STAGE_BEGIN(20, "Self-Bootstrapping Codebase Auditor, 7 Component Scopes, Rust Plugin DSO & 7-Language Polyglot Gate");
+    {
+        /* 1. Full-Codebase Topology Graph, 7 Component Scopes & Self-Bootstrapping Audit */
+        FlowTopologyGraph full_graph;
+        flow_topology_build_codebase_graph(&full_graph);
+        FlowTopologyAuditReport full_rep;
+        flow_topology_audit(&full_graph, &full_rep);
+
+        FLOW_ASSERT_EQ(full_rep.cross_layer_leaks, 0u);
+        FLOW_ASSERT_EQ(full_rep.makefile_bijective, 1);
+        FLOW_ASSERT_EQ(full_rep.build_rs_bijective, 1);
+        FLOW_ASSERT_EQ(full_rep.rust_sdk_parity, 1);
+        FLOW_ASSERT_EQ(full_rep.polyglot_homomorphic, 1);
+        FLOW_ASSERT_EQ(full_rep.exact_numerics_sound, 1);
+        FLOW_ASSERT_EQ(full_rep.hott_univalence_sound, 1);
+        FLOW_ASSERT_EQ(full_rep.probe_weaving_sound, 1);
+        FLOW_ASSERT_TRUE(full_rep.hott_type_count >= 7u);
+        FLOW_ASSERT_EQ(full_rep.hott_broken_count, 0u);
+        FLOW_ASSERT_EQ(full_rep.rust_nodes, 2u);
+
+        /* Verify all redundant C & Rust wrapper files have been folded into core pillars and deleted */
+        FLOW_ASSERT_TRUE(access("build.rs", F_OK) != 0);
+        FLOW_ASSERT_TRUE(access("src/main.rs", F_OK) != 0);
+        FLOW_ASSERT_TRUE(access("src/builtin_plugin.c", F_OK) != 0);
+        FLOW_ASSERT_TRUE(access("src/flowy_fvec.h", F_OK) != 0);
+        FLOW_ASSERT_TRUE(access("src/flowy_fvec.c", F_OK) != 0);
+        FLOW_ASSERT_TRUE(access("src/security.h", F_OK) != 0);
+        FLOW_ASSERT_TRUE(access("src/security.c", F_OK) != 0);
+        FLOW_ASSERT_TRUE(access("src/hardware_telemetry.h", F_OK) != 0);
+        FLOW_ASSERT_TRUE(access("src/hardware_telemetry.c", F_OK) != 0);
+        FLOW_ASSERT_TRUE(access("src/jit.h", F_OK) != 0);
+        FLOW_ASSERT_TRUE(access("src/jit.c", F_OK) != 0);
+        FLOW_ASSERT_TRUE(access("src/token_ring.h", F_OK) != 0);
+        FLOW_ASSERT_TRUE(access("src/token_ring.c", F_OK) != 0);
+        FLOW_ASSERT_TRUE(access("plugins/flow_embodied_mz.h", F_OK) != 0);
+        FLOW_ASSERT_TRUE(access("plugins/flow_embodied_mz.c", F_OK) != 0);
+        FLOW_ASSERT_TRUE(access("plugins/driver_imu.h", F_OK) != 0);
+        FLOW_ASSERT_TRUE(access("plugins/driver_imu.c", F_OK) != 0);
+        FLOW_ASSERT_TRUE(access("plugins/driver_can.h", F_OK) != 0);
+        FLOW_ASSERT_TRUE(access("plugins/driver_can.c", F_OK) != 0);
+
+        /* Verify Global HoTT Universe U_0 populated by flow_topology_audit has exact C17 == Rust field counts (10, 30, 13, 16) */
+        FlowHoTTUniverse *g_u0 = flow_hott_universe_global();
+        FLOW_ASSERT_TRUE(g_u0 != NULL && g_u0->count >= 8u);
+        FLOW_ASSERT_EQ(g_u0->entries[0].field_count, 10u); /* FlowPluginDescriptor C17 */
+        FLOW_ASSERT_EQ(g_u0->entries[1].field_count, 10u); /* FlowPluginDescriptor Rust */
+        FLOW_ASSERT_EQ(g_u0->entries[2].field_count, 30u); /* FlowPlugin C17 */
+        FLOW_ASSERT_EQ(g_u0->entries[3].field_count, 30u); /* FlowPlugin Rust */
+        FLOW_ASSERT_EQ(g_u0->entries[4].field_count, 13u); /* FlowUnit C17 */
+        FLOW_ASSERT_EQ(g_u0->entries[5].field_count, 13u); /* FlowUnit Rust */
+        FLOW_ASSERT_EQ(g_u0->entries[6].field_count, 16u); /* FlowComponent C17 */
+        FLOW_ASSERT_EQ(g_u0->entries[7].field_count, 16u); /* FlowComponent Rust */
+
+        /* HoTT Intensional Type Universe U_0: Univalence positive & negative homotopy path break tests */
+        FlowHoTTUniverse local_u0;
+        flow_hott_universe_reset(&local_u0);
+        FLOW_ASSERT_EQ(flow_hott_register_type(&local_u0, "OrderBookFrame", FLOW_HOTT_LANG_LEAN, 4, 32, 8, 32, 0xABCD1234ULL), 1);
+        FLOW_ASSERT_EQ(flow_hott_register_type(&local_u0, "OrderBookFrame", FLOW_HOTT_LANG_C17,  4, 32, 8, 32, 0xABCD1234ULL), 1);
+        FLOW_ASSERT_EQ(flow_hott_register_type(&local_u0, "OrderBookFrame", FLOW_HOTT_LANG_RUST, 4, 32, 8, 32, 0xABCD1234ULL), 1);
+        uint64_t path_hash = 0ULL;
+        FLOW_ASSERT_EQ(flow_hott_verify_univalence(&local_u0, "OrderBookFrame", &path_hash), FLOW_KAN_FILLED_HOMOTOPIC);
+        FLOW_ASSERT_TRUE(path_hash != 0ULL);
+        FLOW_ASSERT_EQ(flow_hott_verify_universe_all(&local_u0), 1);
+        FLOW_ASSERT_EQ(local_u0.distinct_type_count, 1u);
+        FLOW_ASSERT_EQ(local_u0.univalence_passed_count, 1u);
+        FLOW_ASSERT_EQ(local_u0.homotopy_broken_count, 0u);
+
+        /* Negative test: Rust struct missing a field triggers Homotopy Path Broken */
+        FLOW_ASSERT_EQ(flow_hott_register_type(&local_u0, "OrderBookFrame", FLOW_HOTT_LANG_RUST, 3, 24, 8, 32, 0xABCD1234ULL), 1);
+        FLOW_ASSERT_EQ(flow_hott_verify_univalence(&local_u0, "OrderBookFrame", &path_hash), FLOW_KAN_OBSTRUCTED_SINGULARITY);
+        FLOW_ASSERT_EQ(path_hash, 0ULL);
+        FLOW_ASSERT_EQ(flow_hott_verify_universe_all(&local_u0), 0);
+        FLOW_ASSERT_EQ(local_u0.homotopy_broken_count, 1u);
+        FLOW_ASSERT_TRUE(strstr(local_u0.broken_diagnostic, "Homotopy Path Broken on 'OrderBookFrame'") != NULL);
+
+        for (int s = 0; s < (int)FLOW_SCOPE_COUNT; ++s) {
+            FLOW_ASSERT_TRUE(full_rep.scope_node_counts[s] > 0u);
+            FLOW_ASSERT_TRUE(full_rep.scope_loc[s] > 0u);
+            FlowComponentScope parsed_sc = FLOW_SCOPE_FRONTEND;
+            FLOW_ASSERT_TRUE(flow_topology_parse_scope(flow_topology_scope_name((FlowComponentScope)s), &parsed_sc));
+            FLOW_ASSERT_EQ((int)parsed_sc, s);
+        }
+
+        /* Negative test 1: injecting a forbidden Layer 0 -> Layer 2 dependency edge and an orphan C module node is caught by flow_topology_audit */
+        FlowTopologyGraph mutated_graph = full_graph;
+        int core_idx = -1, plg_idx = -1;
+        for (size_t i = 0; i < mutated_graph.node_count; ++i) {
+            if (mutated_graph.nodes[i].layer == 0 && core_idx < 0) core_idx = (int)i;
+            if (mutated_graph.nodes[i].layer == 2 && plg_idx < 0) plg_idx = (int)i;
+        }
+        FLOW_ASSERT_TRUE(core_idx >= 0 && plg_idx >= 0);
+        FLOW_ASSERT_TRUE(flow_topology_add_edge(&mutated_graph, (uint32_t)core_idx, (uint32_t)plg_idx, FLOW_EDGE_USES, 1.0, "synthetic_violation"));
+        (void)flow_topology_add_node(&mutated_graph, FLOW_NODE_CORE_MODULE, "nonexistent_ghost_module", "core", 1, 0);
+        FlowTopologyAuditReport bad_rep;
+        flow_topology_audit(&mutated_graph, &bad_rep);
+        FLOW_ASSERT_TRUE(bad_rep.cross_layer_leaks >= 2u);
+        FLOW_ASSERT_EQ(bad_rep.makefile_bijective, 0);
+        FLOW_ASSERT_TRUE(strstr(bad_rep.leak_details, "[LEAK]") != NULL);
+        FLOW_ASSERT_TRUE(strstr(bad_rep.leak_details, "[MAKEFILE_ORPHAN_NODE]") != NULL);
+
+        /* Negative test 2: hermetic corrupted workspace via FLOW_WORKSPACE_ROOT catches stale build.rs/main.rs, non-virtual Cargo.toml, external crate in Cargo.lock & Rust SDK field drift */
+        FLOW_ASSERT_EQ(system("rm -rf /tmp/flow_s20_bad_ws && mkdir -p /tmp/flow_s20_bad_ws/src /tmp/flow_s20_bad_ws/crates/flow-plugin/src"), 0);
+        FILE *f_brs = fopen("/tmp/flow_s20_bad_ws/build.rs", "w");
+        if (f_brs) { fputs("fn main() {}\n", f_brs); fclose(f_brs); }
+        FILE *f_mrs = fopen("/tmp/flow_s20_bad_ws/src/main.rs", "w");
+        if (f_mrs) { fputs("fn main() {}\n", f_mrs); fclose(f_mrs); }
+        FILE *f_ct = fopen("/tmp/flow_s20_bad_ws/Cargo.toml", "w");
+        if (f_ct) { fputs("[workspace]\nresolver = \"2\"\nmembers = [\"crates/flow-plugin\", \"crates/flow-plugin-example\"]\n[package]\nname = \"bad\"\n[build-dependencies]\ncc = \"1.0\"\n", f_ct); fclose(f_ct); }
+        FILE *f_cl = fopen("/tmp/flow_s20_bad_ws/Cargo.lock", "w");
+        if (f_cl) { fputs("[[package]]\nname = \"flow-plugin\"\n[[package]]\nname = \"flow-plugin-example\"\n[[package]]\nname = \"cc\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\n", f_cl); fclose(f_cl); }
+        FILE *f_sdk = fopen("/tmp/flow_s20_bad_ws/crates/flow-plugin/src/lib.rs", "w");
+        if (f_sdk) { fputs("pub const FLOW_PLUGIN_ABI_MAJOR: u32 = 1;\npub struct FlowPluginDescriptor { pub a: u32 }\npub struct FlowPlugin { pub a: u32 }\npub struct FlowUnit { pub a: u32 }\npub struct FlowComponent { pub a: u32 }\n", f_sdk); fclose(f_sdk); }
+        setenv("FLOW_WORKSPACE_ROOT", "/tmp/flow_s20_bad_ws", 1);
+        FlowTopologyAuditReport corrupt_rep;
+        flow_topology_audit(&full_graph, &corrupt_rep);
+        unsetenv("FLOW_WORKSPACE_ROOT");
+        FLOW_ASSERT_EQ(corrupt_rep.makefile_bijective, 0);
+        FLOW_ASSERT_EQ(corrupt_rep.rust_sdk_parity, 0);
+        FLOW_ASSERT_EQ(corrupt_rep.hott_univalence_sound, 0);
+        FLOW_ASSERT_TRUE(strstr(corrupt_rep.leak_details, "[STALE_BUILD_RS]") != NULL);
+        FLOW_ASSERT_TRUE(strstr(corrupt_rep.leak_details, "[STALE_RUST_MAIN]") != NULL);
+        FLOW_ASSERT_TRUE(strstr(corrupt_rep.leak_details, "[RUST_NON_VIRTUAL_WORKSPACE]") != NULL);
+        FLOW_ASSERT_TRUE(strstr(corrupt_rep.leak_details, "[RUST_EXTERNAL_CRATE_LEAK]") != NULL);
+        FLOW_ASSERT_TRUE(strstr(corrupt_rep.leak_details, "[RUST_SDK_DRIFT]") != NULL);
+        FLOW_ASSERT_TRUE(strstr(corrupt_rep.leak_details, "[HOTT_UNIVALENCE_BROKEN]") != NULL);
+        (void)system("rm -rf /tmp/flow_s20_bad_ws");
+        /* Restore global HoTT universe U_0 to clean workspace state */
+        flow_topology_audit(&full_graph, &full_rep);
+        FLOW_ASSERT_EQ(full_rep.hott_univalence_sound, 1);
+
+        /* Verify flowy CLI scope & audit commands succeed from both repo root and subdirectory */
+        char audit_cmd[512], scope_cmd[512], subdir_audit_cmd[512];
+        snprintf(audit_cmd, sizeof(audit_cmd), "%s/flowy audit > /dev/null", FLOW_BUILD_DIR);
+        snprintf(scope_cmd, sizeof(scope_cmd), "%s/flowy inspect scope rust_sdk > /dev/null", FLOW_BUILD_DIR);
+        snprintf(subdir_audit_cmd, sizeof(subdir_audit_cmd), "(cd %s && ./flowy audit | grep -q 'Nodes: 30')", FLOW_BUILD_DIR);
+        FLOW_ASSERT_EQ(system(audit_cmd), 0);
+        FLOW_ASSERT_EQ(system(scope_cmd), 0);
+        FLOW_ASSERT_EQ(system(subdir_audit_cmd), 0);
+
+        /* 2. 256-Bit secp256k1 Prime, Even-Modulus mod_pow, Multi-Output MSE, Q32.32 Overflow & QSBR Overflow Guard */
+        FlowU256 p_secp;
+        static const uint64_t secp_bases[] = { 2ULL, 3ULL, 5ULL, 7ULL };
+        FLOW_ASSERT_TRUE(flow_u256_from_hex_str("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F", &p_secp));
+        FLOW_ASSERT_EQ(flow_u256_is_probably_prime(&p_secp, secp_bases, 4), 1);
+
+        /* Even-modulus 256-bit mod_pow with high bit set in base: (2^255 + 5)^2 mod 1000 == (968 + 5)^2 mod 1000 == 973^2 mod 1000 == 729 */
+        FlowU256 big_base, exp2, even_mod;
+        FLOW_ASSERT_TRUE(flow_u256_from_hex_str("0x8000000000000000000000000000000000000000000000000000000000000005", &big_base));
+        exp2 = flow_u256_from_u64(2ULL);
+        even_mod = flow_u256_from_u64(1000ULL);
+        FlowU256 even_res = flow_u256_mod_pow(big_base, exp2, even_mod);
+        FLOW_ASSERT_EQ(even_res.w[0], 729ULL);
+
+        /* Multi-output flow_fx_mse_loss (N=2, OUT=2) and OUT=0 guard */
+        flow_fx64_t m_pred[4] = { 2LL * FLOW_FX_ONE, 4LL * FLOW_FX_ONE, 6LL * FLOW_FX_ONE, 8LL * FLOW_FX_ONE };
+        flow_fx64_t m_tgt[4]  = { 1LL * FLOW_FX_ONE, 2LL * FLOW_FX_ONE, 3LL * FLOW_FX_ONE, 4LL * FLOW_FX_ONE };
+        flow_fx64_t m_loss = flow_fx_mse_loss(2, 2, m_pred, m_tgt);
+        FLOW_ASSERT_TRUE(fabs(flow_fx64_to_double(m_loss) - 7.5) < 1e-6);
+        FLOW_ASSERT_EQ(flow_fx_mse_loss(2, 0, m_pred, m_tgt), 0LL);
+
+        /* Extreme Q32.32 signed overflow guards */
+        FLOW_ASSERT_EQ(flow_fx64_ceil(FLOW_FX64_MAX), FLOW_FX64_NONE);
+        FLOW_ASSERT_EQ(flow_fx64_round(FLOW_FX64_MAX), FLOW_FX64_NONE);
+        FLOW_ASSERT_EQ(flow_fx64_round(FLOW_FX64_MIN), FLOW_FX64_NONE);
+        FLOW_ASSERT_EQ(flow_fx64_cos(FLOW_FX64_NONE), FLOW_FX64_NONE);
+        FLOW_ASSERT_TRUE(flow_fx64_cos(FLOW_FX64_MAX) != FLOW_FX64_NONE);
+        FLOW_ASSERT_EQ(flow_fx64_atan2(FLOW_FX64_NONE, FLOW_FX_ONE), 0LL);
+        FLOW_ASSERT_TRUE(flow_fx64_atan2(-FLOW_FX64_MAX, FLOW_FX_ONE) < 0LL);
+        FLOW_ASSERT_EQ(flow_quantize_fx(FLOW_FX64_MAX, FLOW_FX64_MIN, FLOW_FX64_MAX, 100), 0ULL);
+
+        /* QSBR bump allocator SIZE_MAX overflow guard */
+        uint8_t qsbr_backing[4096] = {0};
+        FlowBumpQsbrArena qsbr_arena;
+        FLOW_ASSERT_TRUE(flow_bump_qsbr_init(&qsbr_arena, qsbr_backing, sizeof(qsbr_backing)));
+        FLOW_ASSERT_TRUE(flow_bump_qsbr_alloc(&qsbr_arena, 128) != NULL);
+        FLOW_ASSERT_TRUE(flow_bump_qsbr_alloc(&qsbr_arena, SIZE_MAX - 4) == NULL);
+
+        /* Parser bind metadata preservation */
+        const char *bind_spec_text =
+            "project bound_pipeline\n"
+            "import rust_simd_plugin\n"
+            "contract zmp_torque_safe\n"
+            "fallback golden_fallback\n"
+            "input raw_stream {\n"
+            "  max_count 2048\n"
+            "}\n"
+            "require {\n"
+            "  memory_mb <= 64\n"
+            "}\n"
+            "bind \"plugins/embodied.lean\"\n";
+        FILE *bfp = tmpfile();
+        FLOW_ASSERT_TRUE(bfp != NULL);
+        fputs(bind_spec_text, bfp);
+        rewind(bfp);
+        FlowSpec *bspec = (FlowSpec *)calloc(1, sizeof(FlowSpec));
+        FLOW_ASSERT_TRUE(bspec != NULL);
+        FLOW_ASSERT_TRUE(parse_spec(bfp, bspec));
+        fclose(bfp);
+        FLOW_ASSERT_STR_EQ(bspec->project_name, "bound_pipeline");
+        FLOW_ASSERT_STR_EQ(bspec->plugin_name, "rust_simd_plugin");
+        FLOW_ASSERT_STR_EQ(bspec->contract_name, "zmp_torque_safe");
+        FLOW_ASSERT_STR_EQ(bspec->fallback_policy, "golden_fallback");
+        FLOW_ASSERT_EQ(bspec->input_max_count, 2048);
+        FLOW_ASSERT_EQ(bspec->memory_limit_mb, 64);
+        FLOW_ASSERT_TRUE(bspec->lean_function_count > 0u);
+        free(bspec);
+
+        /* 3. Rust Plugin DSO (flow_plugin_example / rust_simd_plugin / plugin-example) Full Lifecycle Verification */
+        FLOW_ASSERT_TRUE(flow_registry_resolve_plugin("plugin-example"));
+        FLOW_ASSERT_TRUE(flow_registry_resolve_plugin("rust_simd_plugin"));
+        const FlowPlugin *rplg = flow_registry_lookup("rust_simd_plugin");
+        FLOW_ASSERT_TRUE(rplg != NULL && rplg->component_count > 0 && rplg->components != NULL);
+        FLOW_ASSERT_EQ(flow_registry_lookup("flow_plugin_example"), rplg);
+        FLOW_ASSERT_EQ(flow_registry_lookup("plugin-example"), rplg);
+        const Component *rcomp = &rplg->components[0];
+
+        SemanticIR rir = {0};
+        strncpy(rir.flow_name, "rust_dso_test", sizeof(rir.flow_name) - 1);
+        rir.input_max_count = 1024;
+        rir.fact_deterministic = 1;
+
+        /* Short-buffer null-termination in verify */
+        char short_msg[5] = { 'X', 'X', 'X', 'X', 'X' };
+        FLOW_ASSERT_EQ(rplg->verify(&rir, rcomp, 1024, 1, short_msg, sizeof(short_msg)), 1);
+        FLOW_ASSERT_EQ(short_msg[4], '\0');
+
+        /* Zero-valued plan division-by-zero protection in evaluate_plan & verify_plan */
+        FlowPlanAssignment zero_plan = {0};
+        FlowPlanMetrics rmetrics = {0};
+        FLOW_ASSERT_EQ(rplg->evaluate_plan(&rir, rcomp, &zero_plan, &rmetrics), 1);
+        FLOW_ASSERT_TRUE(isfinite(rmetrics.latency_score) && rmetrics.latency_score > 0.0);
+        VerificationReport rvrep = {0};
+        FLOW_ASSERT_EQ(rplg->verify_plan(&rir, rcomp, &zero_plan, &rvrep), 1);
+        FLOW_ASSERT_EQ((int)rvrep.status, (int)VERIFIER_PROVEN);
+        FLOW_ASSERT_TRUE(rvrep.capacity >= 64u && rvrep.estimated_bytes > 0u);
+
+        /* Fallback C emission when plugin emit == NULL */
+        FILE *remit_fp = tmpfile();
+        FLOW_ASSERT_TRUE(remit_fp != NULL);
+        FLOW_ASSERT_EQ(flow_component_emit(remit_fp, &rir, rcomp, NULL, &rvrep, 0), 1);
+        FLOW_ASSERT_TRUE(ftell(remit_fp) > 64);
+        fclose(remit_fp);
+
+        /* FlowUnit creation and aliased (input == output) execution */
+        FlowUnit runit = {0};
+        FLOW_ASSERT_EQ(flow_component_create_unit(NULL, &rir, rcomp, &runit), 1);
+        FLOW_ASSERT_TRUE(runit.init != NULL && runit.run != NULL && runit.drop != NULL);
+        void *ustate = NULL;
+        FLOW_ASSERT_EQ(runit.init(NULL, &ustate), 0);
+        uint32_t rbuf[1024] = {0};
+        rbuf[0] = 11U;
+        rbuf[1] = 22U;
+        rbuf[2] = 33U;
+        rbuf[3] = 44U;
+        FLOW_ASSERT_EQ(runit.run(NULL, ustate, rbuf, rbuf), 0);
+        FLOW_ASSERT_EQ(rbuf[0], 11U);
+        FLOW_ASSERT_EQ(rbuf[3], 44U);
+        uint32_t rdst[1024] = {0};
+        FLOW_ASSERT_EQ(runit.run(NULL, ustate, rbuf, rdst), 0);
+        FLOW_ASSERT_EQ(rdst[0], 11U);
+        FLOW_ASSERT_EQ(rdst[1], 22U);
+        runit.drop(NULL, ustate);
+
+        /* 4. 7-Language Polyglot Emission, C++17 Header/CUDA Syntax Check, Live Rustc & Live Python Execution */
+        const char *s20_lean = "/tmp/flow_stage20_polyglot.lean";
+        FILE *p20 = fopen(s20_lean, "w");
+        FLOW_ASSERT_TRUE(p20 != NULL);
+        fprintf(p20,
+                "namespace Quant.Stage20\n"
+                "inductive RegimeMode where\n"
+                "  | Idle\n"
+                "  | Active\n"
+                "  | Fault\n"
+                "  deriving Repr\n"
+                "structure Vec2 where\n"
+                "  x : Float\n"
+                "  y : Float\n"
+                "structure AuditFrame where\n"
+                "  pos  : Vec2\n"
+                "  mode : RegimeMode\n"
+                "  seq  : USize\n"
+                "def bilateral_spread (mid : Float) (vol : Float) (tick : Float) : (Float * Float) :=\n"
+                "  let half := Float.max (Float.sqrt (Float.abs vol) * 0.5) tick in\n"
+                "  (mid - half, mid + half)\n"
+                "def eval_keyword_gate (in : UInt64) (type : UInt32) (from : Float) (var : Float) : Float :=\n"
+                "  if type == 0 && in > 0 then from + var else from - var\n"
+                "def step_frame (f : AuditFrame) : AuditFrame :=\n"
+                "  { pos := { x := f.pos.x + 1.0, y := f.pos.y - 0.5 }, mode := f.mode, seq := f.seq + 1 }\n"
+                "theorem spread_ok : (bilateral_spread 100.0 4.0 0.25).1 <= (bilateral_spread 100.0 4.0 0.25).2 := by decide\n"
+                "end Quant.Stage20\n");
+        fclose(p20);
+
+        char emit_all_cmd[2048];
+        snprintf(emit_all_cmd, sizeof(emit_all_cmd),
+                 "%s/flowc %s -o /tmp/flow_s20.c "
+                 "--target-c-header /tmp/flow_s20.h "
+                 "--target-rust /tmp/flow_s20_abi.rs "
+                 "--target-python /tmp/flow_s20_abi.py "
+                 "--target-js /tmp/flow_s20_abi.mjs "
+                 "--target-cuda /tmp/flow_s20.cuh "
+                 "--target-matlab /tmp/flow_s20.m "
+                 "--target-julia /tmp/flow_s20.jl",
+                 FLOW_BUILD_DIR, s20_lean);
+        FLOW_ASSERT_EQ(system(emit_all_cmd), 0);
+
+        /* Compile shared library */
+#ifdef __APPLE__
+        FLOW_ASSERT_EQ(system("cc -std=c17 -O2 -shared -fPIC -DFLOW_SHARED_LIB /tmp/flow_s20.c -o /tmp/libflow_s20.dylib -lm"), 0);
+#else
+        FLOW_ASSERT_EQ(system("cc -std=c17 -O2 -shared -fPIC -DFLOW_SHARED_LIB /tmp/flow_s20.c -o /tmp/libflow_s20.so -lm"), 0);
+#endif
+        /* Verify C header and CUDA header parse cleanly under C++17 */
+        FLOW_ASSERT_EQ(system("c++ -x c++ -std=c++17 -fsyntax-only /tmp/flow_s20.h"), 0);
+        FLOW_ASSERT_EQ(system("c++ -x c++ -std=c++17 -fsyntax-only /tmp/flow_s20.cuh"), 0);
+
+        /* Live Python adapter execution (enums, structs, USize, tuple returns, _fx, escaped keywords, watchdog, A/B shadow) */
+        const char *py_s20_cmd =
+            "python3 -c \""
+            "import sys; sys.path.insert(0, '/tmp'); "
+            "import flow_s20_abi as m; "
+            "cls = next(v for v in vars(m).values() if isinstance(v, type) and hasattr(v, 'LEAN_FUNCTIONS')); "
+            "eng = cls('/tmp/libflow_s20.dylib' if sys.platform == 'darwin' else '/tmp/libflow_s20.so'); "
+            "assert m.RegimeMode.Active == 1; "
+            "bid, ask = eng.bilateral_spread(100.0, 4.0, 0.25); "
+            "assert abs(bid - 99.0) < 1e-9 and abs(ask - 101.0) < 1e-9; "
+            "bid_fx, ask_fx = eng.bilateral_spread_fx(100 << 32, 4 << 32, 1 << 30); "
+            "assert (bid_fx >> 32) == 99 and (ask_fx >> 32) == 101; "
+            "kw = eng.eval_keyword_gate(1, 0, 10.0, 2.5); "
+            "assert abs(kw - 12.5) < 1e-9; "
+            "kw_fx = eng.eval_keyword_gate_fx(1, 0, 10 << 32, 2 << 32); "
+            "assert (kw_fx >> 32) == 12; "
+            "f0 = m.AuditFrame(1.0, 2.0, m.RegimeMode.Active, 7); "
+            "f1 = eng.step_frame(f0); "
+            "assert abs(f1.pos_x - 2.0) < 1e-9 and abs(f1.pos_y - 1.5) < 1e-9 and f1.seq == 8; "
+            "eng.ab_shadow_reset(); eng.ab_shadow_record(0, 1.0, 2.0, 0.1); "
+            "assert eng.ab_shadow_get_calls() == 1 and eng.ab_shadow_get_mismatches() == 1; "
+            "assert eng.reset_watchdog() == 0; "
+            "eng.close()\"";
+        FLOW_ASSERT_EQ(system(py_s20_cmd), 0);
+
+        /* Live Rust adapter compilation & execution via rustc */
+        const char *rs_runner = "/tmp/flow_s20_runner.rs";
+        FILE *rfp = fopen(rs_runner, "w");
+        FLOW_ASSERT_TRUE(rfp != NULL);
+        fprintf(rfp,
+                "#[allow(dead_code, non_camel_case_types, non_snake_case)]\n"
+                "#[path = \"/tmp/flow_s20_abi.rs\"]\n"
+                "mod abi;\n"
+                "use abi::*;\n"
+                "fn main() {\n"
+                "    let eng = FlowComponentAdapter::new().unwrap();\n"
+                "    let (bid, ask) = eng.bilateral_spread(100.0, 4.0, 0.25);\n"
+                "    assert!((bid - 99.0).abs() < 1e-9 && (ask - 101.0).abs() < 1e-9);\n"
+                "    let (bid_fx, ask_fx) = eng.bilateral_spread_fx(100i64 << 32, 4i64 << 32, 1i64 << 30);\n"
+                "    assert_eq!(bid_fx >> 32, 99);\n"
+                "    assert_eq!(ask_fx >> 32, 101);\n"
+                "    let kw = eng.eval_keyword_gate(1, 0, 10.0, 2.5);\n"
+                "    assert!((kw - 12.5).abs() < 1e-9);\n"
+                "    let f0 = AuditFrame { pos_x: 1.0, pos_y: 2.0, mode: RegimeMode::Active as u32, seq: 7 };\n"
+                "    let f1 = eng.step_frame(f0);\n"
+                "    assert!((f1.pos_x - 2.0).abs() < 1e-9 && (f1.pos_y - 1.5).abs() < 1e-9 && f1.seq == 8);\n"
+                "    FlowComponentAdapter::ab_shadow_reset();\n"
+                "    FlowComponentAdapter::ab_shadow_record(0, 1.0, 2.0, 0.1);\n"
+                "    assert_eq!(FlowComponentAdapter::ab_shadow_get_calls(), 1);\n"
+                "    assert_eq!(eng.reset_watchdog(), 0);\n"
+                "    let out = eng.process(&[1u8, 2, 3, 4, 5, 6, 7, 8]).unwrap();\n"
+                "    assert!(!out.is_empty());\n"
+                "}\n");
+        fclose(rfp);
+        FLOW_ASSERT_EQ(system("rustc --edition 2021 /tmp/flow_s20_runner.rs -L /tmp -l flow_s20 -C link-arg=-Wl,-rpath,/tmp -o /tmp/flow_s20_runner && /tmp/flow_s20_runner"), 0);
+
+        remove(s20_lean);
+        remove("/tmp/flow_s20.c");
+        remove("/tmp/flow_s20.h");
+        remove("/tmp/flow_s20_abi.rs");
+        remove("/tmp/flow_s20_abi.py");
+        remove("/tmp/flow_s20_abi.mjs");
+        remove("/tmp/flow_s20.cuh");
+        remove("/tmp/flow_s20.m");
+        remove("/tmp/flow_s20.jl");
+        remove("/tmp/libflow_s20.dylib");
+        remove("/tmp/libflow_s20.so");
+        remove(rs_runner);
+        remove("/tmp/flow_s20_runner");
+
+        printf("  ✓ Stage 20 Passed: Self-bootstrapping codebase auditor, 7 Component Scopes, Rust plugin DSO lifecycle, 256-bit secp256k1 & 7-language polyglot live gate verified.\n\n");
     }
 
     FLOW_TEST_SUITE_END();

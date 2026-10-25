@@ -1,10 +1,7 @@
 #include "flow_test_kit.h"
-#include "flowy_fvec.h"
-#include "hardware_telemetry.h"
 #include "flow_jet.h"
-#include "flow_embodied_mz.h"
+#include "embodied.h"
 #include "bitspace.h"
-#include "token_ring.h"
 
 #include <stdio.h>
 #include <stdlib.h>

@@ -6,7 +6,6 @@
 #include "polyhedral.h"
 #include "flow_jet.h"
 #include "reload.h"
-#include "token_ring.h"
 
 #include <stdio.h>
 #include <stdlib.h>

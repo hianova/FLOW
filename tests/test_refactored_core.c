@@ -2,8 +2,6 @@
 #include "flow_jet.h"
 #include "polyhedral.h"
 #include "bitspace.h"
-#include "token_ring.h"
-#include "hardware_telemetry.h"
 
 #include <stdio.h>
 #include <stdlib.h>

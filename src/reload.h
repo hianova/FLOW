@@ -66,4 +66,28 @@ FlowAdaptiveStatus flow_adaptive_handle_pressure_event(FlowAdaptiveController *c
 typedef struct { double drop_threshold, recovery_threshold; uint64_t dwell_time_required_ns, stable_since_ns; int current_state; } FlowSchmittTrigger;
 void flow_schmitt_trigger_init(FlowSchmittTrigger *st, double base_min, uint64_t dwell_ns);
 int flow_schmitt_trigger_update(FlowSchmittTrigger *st, double current_val, uint64_t current_time_ns, int *state_changed_out);
+
+/* ============================================================================
+ * In-Memory Dual-Mapped W^X JIT Engine (folded into reload.h)
+ * ============================================================================ */
+#define FLOW_JIT_DEFAULT_HEAP_BYTES (1024U * 1024U)
+#define FLOW_JIT_CODE_PAGE_BYTES    4096U
+#define FLOW_JIT_BASE_OVERHEAD_MB   64
+#define FLOW_JIT_DEFAULT_IR_NODES   11
+#define FLOW_JIT_MB_PER_IR_NODE     3
+#define FLOW_JIT_SAFETY_MARGIN_MB   3
+
+typedef struct FlowJITEngine FlowJITEngine;
+typedef struct FlowJITCodeBlock { uintptr_t start_ip, end_ip; size_t code_bytes; FlowLayoutKind layout; uint64_t compile_time_ns; } FlowJITCodeBlock;
+typedef struct { int enable_lto, opt_level; size_t initial_code_heap_bytes; } FlowJITConfig;
+typedef struct { int is_dual_mapped; uintptr_t write_base, exec_base; size_t pool_size, pool_used; uint64_t tlb_shootdowns_avoided; } FlowJITPoolStats;
+FlowJITEngine *flow_jit_create(const FlowJITConfig *config);
+void flow_jit_destroy(FlowJITEngine *engine);
+int flow_jit_get_pool_stats(const FlowJITEngine *engine, FlowJITPoolStats *stats_out);
+int flow_jit_verify_wx_invariants(const FlowJITEngine *engine, char *message, size_t message_size);
+int flow_jit_compile_llvm_ir(FlowJITEngine *engine, const char *llvm_ir_code, const char *unit_name, FlowLayoutKind layout, FlowUnit *unit_out, FlowJITCodeBlock *code_block_out);
+int flow_jit_calculate_min_memory_mb(const SemanticIR *ir);
+typedef struct FlowLayoutMigrationSpec { FlowLayoutKind from_layout, to_layout; size_t item_count, field_count, field_sizes[8]; int field_changed[8]; } FlowLayoutMigrationSpec;
+
+#include "bitspace.h"
 #endif

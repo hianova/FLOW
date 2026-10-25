@@ -27,6 +27,7 @@ uint64_t flow_component_preference_mask(const SemanticIR *ir, const Component *c
 uint64_t flow_component_contract_mask(const SemanticIR *ir, const Component *component, const FlowPlanDimensionSet *dims);
 uint64_t flow_component_resource_mask(const SemanticIR *ir, const Component *component, const FlowPlanDimensionSet *dims, size_t memory_limit_bytes);
 int flow_component_emit(FILE *output, const SemanticIR *ir, const Component *component, const struct FlowSearchResult *search, const struct FlowVerificationReport *verification, int reload_adapter);
+int flow_component_create_unit(const struct FlowPlanArtifact *art, const SemanticIR *ir, const Component *component, struct FlowUnit *unit_out);
 const Component *select_component(const SemanticIR *ir);
 int component_compatible(const SemanticIR *ir, const Component *component);
 size_t compatible_component_count(const SemanticIR *ir);

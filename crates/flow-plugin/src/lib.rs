@@ -254,3 +254,29 @@ macro_rules! declare_flow_unit_plugin {
         }
     };
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::mem::{align_of, size_of};
+
+    #[test]
+    fn test_repr_c_abi_layouts_and_versions() {
+        assert_eq!(FLOW_PLUGIN_ABI_MAJOR, 1);
+        assert_eq!(FLOW_PLUGIN_ABI_MINOR, 0);
+        assert_eq!(FLOW_RELOAD_ABI_VERSION, 3);
+        assert_eq!(size_of::<FlowPluginDescriptor>(), 72);
+        assert_eq!(align_of::<FlowPluginDescriptor>(), 8);
+        assert_eq!(size_of::<FlowPlugin>(), 240);
+        assert_eq!(align_of::<FlowPlugin>(), 8);
+        assert_eq!(size_of::<FlowUnit>(), 96);
+        assert_eq!(align_of::<FlowUnit>(), 8);
+        assert_eq!(size_of::<FlowComponent>(), 104);
+        assert_eq!(align_of::<FlowComponent>(), 8);
+        assert_eq!(size_of::<FlowPlanDimension>(), 80);
+        assert_eq!(size_of::<FlowPlanMetrics>(), 56);
+        assert_eq!(size_of::<VerificationReport>(), 160);
+    }
+}
+
+

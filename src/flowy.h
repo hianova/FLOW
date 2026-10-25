@@ -30,6 +30,7 @@ void flowy_print_autopilot_incident(const FlowAutopilotIncident *incident, FILE 
 void flowy_render_phase_portrait(const struct FlowJet *jet, uint32_t dim_x, uint32_t dim_y, int steps, double dt, FILE *out);
 int flowy_jet_simulate_run(const struct FlowJet *jet, int steps, double dt, FILE *out); int flowy_jet_learn_demo(struct FlowJet *jet, int sample_count, FILE *out);
 int flowy_interactive_loop(FlowOrchestrator *orch, FILE *in, FILE *out); void flowy_print_cubical_topos_report(FILE *out);
+void flowy_print_scope_report(const FlowTopologyGraph *graph, const char *scope_filter, FILE *out);
 
 int cmd_topo_run(int argc, char **argv); int cmd_inspect_run(int argc, char **argv); int cmd_fvec_run(int argc, char **argv); int cmd_jet_run(int argc, char **argv);
 void cmd_topo_print_usage(FILE *out); void cmd_inspect_print_usage(FILE *out); void cmd_fvec_print_usage(FILE *out); void cmd_jet_print_usage(FILE *out);

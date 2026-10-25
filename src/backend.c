@@ -566,6 +566,8 @@ static void emit_lean_nat_and_float_ops(FILE *output) {
         "#define FLOW_FX_HALF (INT64_C(1) << 31)\n"
         "#define FLOW_FX_FRAC_MASK ((INT64_C(1) << 32) - 1)\n"
         "#define FLOW_FX64_NONE INT64_MIN\n"
+        "#define FLOW_FX64_MAX INT64_MAX\n"
+        "#define FLOW_FX64_MIN (-INT64_MAX)\n"
         "#define FLOW_FX16_SHIFT 16\n"
         "#define FLOW_FX16_ONE (1 << 16)\n",
         output);
@@ -946,10 +948,10 @@ void flow_emit_abi_exports(FILE *output, const SemanticIR *ir, const Component *
         "_Static_assert(sizeof(FlowExtentDescriptor) == 64, \"FlowExtentDescriptor must be 64 bytes\");\n"
         "#endif\n"
         "#ifndef FLOW_AB_SHADOW_TELEMETRY_DEFINED\n#define FLOW_AB_SHADOW_TELEMETRY_DEFINED\n"
-        "static _Atomic uint64_t _flow_ab_shadow_calls = 0ULL;\n"
-        "static _Atomic uint64_t _flow_ab_shadow_mismatches = 0ULL;\n"
-        "static _Atomic uint64_t _flow_ab_fn_calls[64] = {0};\n"
-        "static _Atomic uint64_t _flow_ab_record_fn_calls[64] = {0};\n"
+        "__attribute__((weak)) _Atomic uint64_t _flow_ab_shadow_calls = 0ULL;\n"
+        "__attribute__((weak)) _Atomic uint64_t _flow_ab_shadow_mismatches = 0ULL;\n"
+        "__attribute__((weak)) _Atomic uint64_t _flow_ab_fn_calls[64] = {0};\n"
+        "__attribute__((weak)) _Atomic uint64_t _flow_ab_record_fn_calls[64] = {0};\n"
         "__attribute__((weak)) void flow_ab_shadow_record(uint32_t kernel_id, double primary_val, double shadow_val, double tol) {\n"
         "    atomic_fetch_add_explicit(&_flow_ab_shadow_calls, 1ULL, memory_order_relaxed);\n"
         "    if (kernel_id < 64U) atomic_fetch_add_explicit(&_flow_ab_record_fn_calls[kernel_id], 1ULL, memory_order_relaxed);\n"
@@ -1130,14 +1132,14 @@ void flow_emit_abi_exports(FILE *output, const SemanticIR *ir, const Component *
             fprintf(output,
                 "    {\n"
                 "        uint32_t krc = %s(0ULL, (uint64_t)input_len, (uint64_t)ctx->stride, ep);\n"
-                "        if (krc != 0) { atomic_store_explicit(&ctx->active_epoch, 0, memory_order_release); return -(int32_t)krc; }\n"
+                "        if (krc != 0) { atomic_store_explicit(&ctx->active_epoch, 0, memory_order_release); return (krc > (uint32_t)INT32_MAX) ? -1 : -(int32_t)krc; }\n"
                 "    }\n", step_kern_fn);
         } else {
             fprintf(output,
                 "    {\n"
                 "        if (!%s) { atomic_store_explicit(&ctx->active_epoch, 0, memory_order_release); return -3; }\n"
                 "        uint32_t krc = %s(0ULL, (uint64_t)input_len, (uint64_t)ctx->stride, ep);\n"
-                "        if (krc != 0) { atomic_store_explicit(&ctx->active_epoch, 0, memory_order_release); return -(int32_t)krc; }\n"
+                "        if (krc != 0) { atomic_store_explicit(&ctx->active_epoch, 0, memory_order_release); return (krc > (uint32_t)INT32_MAX) ? -1 : -(int32_t)krc; }\n"
                 "    }\n", step_kern_fn, step_kern_fn);
         }
     }
@@ -1173,14 +1175,14 @@ void flow_emit_abi_exports(FILE *output, const SemanticIR *ir, const Component *
             fprintf(output,
                 "    {\n"
                 "        uint32_t krc = %s(in_desc->base_offset, in_desc->byte_length, out_desc->stride_bytes, ep);\n"
-                "        if (krc != 0) { atomic_store_explicit(&ctx->active_epoch, 0, memory_order_release); return -(int32_t)krc; }\n"
+                "        if (krc != 0) { atomic_store_explicit(&ctx->active_epoch, 0, memory_order_release); return (krc > (uint32_t)INT32_MAX) ? -1 : -(int32_t)krc; }\n"
                 "    }\n", step_kern_fn);
         } else {
             fprintf(output,
                 "    {\n"
                 "        if (!%s) { atomic_store_explicit(&ctx->active_epoch, 0, memory_order_release); return -3; }\n"
                 "        uint32_t krc = %s(in_desc->base_offset, in_desc->byte_length, out_desc->stride_bytes, ep);\n"
-                "        if (krc != 0) { atomic_store_explicit(&ctx->active_epoch, 0, memory_order_release); return -(int32_t)krc; }\n"
+                "        if (krc != 0) { atomic_store_explicit(&ctx->active_epoch, 0, memory_order_release); return (krc > (uint32_t)INT32_MAX) ? -1 : -(int32_t)krc; }\n"
                 "    }\n", step_kern_fn, step_kern_fn);
         }
     }

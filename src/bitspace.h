@@ -255,6 +255,8 @@ typedef int64_t flow_fx64_t;
 #define FLOW_FX_HALF         (INT64_C(1) << (FLOW_FX_SHIFT - 1))
 #define FLOW_FX_FRAC_MASK    (FLOW_FX_ONE - 1)
 #define FLOW_FX64_NONE       INT64_MIN
+#define FLOW_FX64_MAX        INT64_MAX
+#define FLOW_FX64_MIN        (-INT64_MAX)
 #define FLOW_FX_PI           INT64_C(13493037705)
 #define FLOW_FX_TWO_PI       INT64_C(26986075409)
 #define FLOW_FX_HALF_PI      INT64_C(6746518852)
@@ -362,72 +364,61 @@ static inline __attribute__((unused)) double flow_fx64_to_double(flow_fx64_t x) 
 
 #define FLOW_EXACT_ALU_C17 \
 static inline __attribute__((unused)) flow_fx64_t flow_fx64_add(flow_fx64_t a, flow_fx64_t b) { \
-    if (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE) { return FLOW_FX64_NONE; } \
+    if (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE) return FLOW_FX64_NONE; \
     flow_i128_t s = (flow_i128_t)a + (flow_i128_t)b; \
-    if (s > (flow_i128_t)INT64_MAX || s < -(flow_i128_t)INT64_MAX) { return FLOW_FX64_NONE; } \
-    return (flow_fx64_t)s; \
+    return (s > (flow_i128_t)INT64_MAX || s < -(flow_i128_t)INT64_MAX) ? FLOW_FX64_NONE : (flow_fx64_t)s; \
 } \
 static inline __attribute__((unused)) flow_fx64_t flow_fx64_sub(flow_fx64_t a, flow_fx64_t b) { \
-    if (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE) { return FLOW_FX64_NONE; } \
+    if (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE) return FLOW_FX64_NONE; \
     flow_i128_t d = (flow_i128_t)a - (flow_i128_t)b; \
-    if (d > (flow_i128_t)INT64_MAX || d < -(flow_i128_t)INT64_MAX) { return FLOW_FX64_NONE; } \
-    return (flow_fx64_t)d; \
+    return (d > (flow_i128_t)INT64_MAX || d < -(flow_i128_t)INT64_MAX) ? FLOW_FX64_NONE : (flow_fx64_t)d; \
 } \
 static inline __attribute__((unused)) flow_fx64_t flow_fx64_neg(flow_fx64_t x) { \
     return (x == FLOW_FX64_NONE) ? FLOW_FX64_NONE : -x; \
 } \
 static inline __attribute__((unused)) flow_fx64_t flow_fx64_abs(flow_fx64_t x) { \
-    if (x == FLOW_FX64_NONE) { return FLOW_FX64_NONE; } \
-    return x < 0 ? -x : x; \
+    return (x == FLOW_FX64_NONE) ? FLOW_FX64_NONE : (x < 0 ? -x : x); \
 } \
 static inline __attribute__((unused)) flow_fx64_t flow_fx64_mul(flow_fx64_t a, flow_fx64_t b) { \
-    if (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE) { return FLOW_FX64_NONE; } \
-    flow_i128_t prod = (flow_i128_t)a * (flow_i128_t)b; \
-    flow_i128_t half = (flow_i128_t)FLOW_FX_HALF; \
+    if (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE) return FLOW_FX64_NONE; \
+    flow_i128_t prod = (flow_i128_t)a * (flow_i128_t)b, half = (flow_i128_t)FLOW_FX_HALF; \
     flow_i128_t res = (prod >= 0) ? ((prod + half) >> FLOW_FX_SHIFT) : -(((-prod) + half) >> FLOW_FX_SHIFT); \
-    if (res > (flow_i128_t)INT64_MAX || res < -(flow_i128_t)INT64_MAX) { return FLOW_FX64_NONE; } \
-    return (flow_fx64_t)res; \
+    return (res > (flow_i128_t)INT64_MAX || res < -(flow_i128_t)INT64_MAX) ? FLOW_FX64_NONE : (flow_fx64_t)res; \
 } \
 static inline __attribute__((unused)) flow_fx64_t flow_fx64_div(flow_fx64_t a, flow_fx64_t b) { \
-    if (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE || b == 0) { return 0; } \
+    if (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE || b == 0) return 0; \
     int neg = (a < 0) ^ (b < 0); \
     flow_u128_t ua = (flow_u128_t)(a < 0 ? (0ULL - (uint64_t)a) : (uint64_t)a); \
     flow_u128_t ub = (flow_u128_t)(b < 0 ? (0ULL - (uint64_t)b) : (uint64_t)b); \
     flow_u128_t q = ((ua << FLOW_FX_SHIFT) + (ub >> 1U)) / ub; \
-    if (q > (flow_u128_t)INT64_MAX) { return FLOW_FX64_NONE; } \
-    return neg ? -(flow_fx64_t)q : (flow_fx64_t)q; \
+    return (q > (flow_u128_t)INT64_MAX) ? FLOW_FX64_NONE : (neg ? -(flow_fx64_t)q : (flow_fx64_t)q); \
 } \
 static inline __attribute__((unused)) flow_fx64_t flow_fx64_mod(flow_fx64_t a, flow_fx64_t b) { \
-    if (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE || b == 0) { return 0; } \
-    return a % b; \
+    return (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE || b == 0) ? 0 : (a % b); \
 } \
 static inline __attribute__((unused)) flow_fx64_t flow_fx64_floor(flow_fx64_t x) { \
-    if (x == FLOW_FX64_NONE) { return FLOW_FX64_NONE; } \
-    return (flow_fx64_t)((uint64_t)x & ~(uint64_t)FLOW_FX_FRAC_MASK); \
+    return (x == FLOW_FX64_NONE) ? FLOW_FX64_NONE : (flow_fx64_t)((uint64_t)x & ~(uint64_t)FLOW_FX_FRAC_MASK); \
 } \
 static inline __attribute__((unused)) flow_fx64_t flow_fx64_ceil(flow_fx64_t x) { \
-    if (x == FLOW_FX64_NONE) { return FLOW_FX64_NONE; } \
-    return -flow_fx64_floor(-x); \
+    if (x == FLOW_FX64_NONE || ((uint64_t)x & (uint64_t)FLOW_FX_FRAC_MASK) == 0ULL) return x; \
+    return flow_fx64_add(flow_fx64_floor(x), FLOW_FX_ONE); \
 } \
 static inline __attribute__((unused)) flow_fx64_t flow_fx64_round(flow_fx64_t x) { \
-    if (x == FLOW_FX64_NONE) { return FLOW_FX64_NONE; } \
-    return (x >= 0) ? flow_fx64_floor(x + FLOW_FX_HALF) : -flow_fx64_floor((-x) + FLOW_FX_HALF); \
+    if (x == FLOW_FX64_NONE) return FLOW_FX64_NONE; \
+    flow_fx64_t s = flow_fx64_add(x >= 0 ? x : -x, FLOW_FX_HALF); \
+    return (s == FLOW_FX64_NONE) ? FLOW_FX64_NONE : (x >= 0 ? flow_fx64_floor(s) : -flow_fx64_floor(s)); \
 } \
 static inline __attribute__((unused)) flow_fx64_t flow_fx64_max(flow_fx64_t a, flow_fx64_t b) { \
-    if (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE) { return FLOW_FX64_NONE; } \
-    return a > b ? a : b; \
+    return (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE) ? FLOW_FX64_NONE : (a > b ? a : b); \
 } \
 static inline __attribute__((unused)) flow_fx64_t flow_fx64_min(flow_fx64_t a, flow_fx64_t b) { \
-    if (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE) { return FLOW_FX64_NONE; } \
-    return a < b ? a : b; \
+    return (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE) ? FLOW_FX64_NONE : (a < b ? a : b); \
 } \
 static inline __attribute__((unused)) flow_fx64_t flow_fx64_of_nat(uint64_t x) { \
-    if (x > (uint64_t)INT32_MAX) { return FLOW_FX64_NONE; } \
-    return (flow_fx64_t)(x << FLOW_FX_SHIFT); \
+    return (x > (uint64_t)INT32_MAX) ? FLOW_FX64_NONE : (flow_fx64_t)(x << FLOW_FX_SHIFT); \
 } \
 static inline __attribute__((unused)) flow_fx64_t flow_fx64_of_int(int64_t x) { \
-    if (x > (int64_t)INT32_MAX || x < -(int64_t)INT32_MAX) { return FLOW_FX64_NONE; } \
-    return (flow_fx64_t)((uint64_t)x << FLOW_FX_SHIFT); \
+    return (x > (int64_t)INT32_MAX || x < -(int64_t)INT32_MAX) ? FLOW_FX64_NONE : (flow_fx64_t)((uint64_t)x << FLOW_FX_SHIFT); \
 }
 
 #define FLOW_EXACT_EXP_LOG_C17 \
@@ -517,40 +508,50 @@ static inline __attribute__((unused)) flow_fx64_t flow_fx64_sin(flow_fx64_t x) {
 static inline __attribute__((unused)) flow_fx64_t flow_fx64_cos(flow_fx64_t x) { \
     if (x == FLOW_FX64_NONE) { return FLOW_FX64_NONE; } \
     if (x == 0) { return FLOW_FX_ONE; } \
-    return flow_fx64_sin(x + FLOW_FX_HALF_PI); \
+    flow_fx64_t r = x % FLOW_FX_TWO_PI; \
+    return flow_fx64_sin(r + FLOW_FX_HALF_PI); \
 } \
 static inline __attribute__((unused)) flow_fx64_t flow_fx64_atan2(flow_fx64_t y, flow_fx64_t x) { \
     if (y == FLOW_FX64_NONE || x == FLOW_FX64_NONE || (y == 0 && x == 0)) { return 0; } \
-    flow_fx64_t abs_y = flow_fx64_abs(y) + 1; \
+    if (x == 0) { return y < 0 ? -FLOW_FX_HALF_PI : FLOW_FX_HALF_PI; } \
+    if (y == 0) { return x < 0 ? FLOW_FX_PI : 0; } \
+    flow_fx64_t sx = x, sy = y; \
+    if (flow_fx64_abs(sx) > (INT64_MAX >> 2) || flow_fx64_abs(sy) > (INT64_MAX >> 2)) { \
+        sx >>= 2; \
+        sy >>= 2; \
+    } \
+    flow_fx64_t abs_y = flow_fx64_abs(sy) + 1; \
     flow_fx64_t angle = 0; \
-    if (x >= 0) { \
-        flow_fx64_t r = flow_fx64_div(x - abs_y, x + abs_y); \
+    if (sx >= 0) { \
+        flow_fx64_t r = flow_fx64_div(sx - abs_y, sx + abs_y); \
         flow_fx64_t r2 = flow_fx64_mul(r, r); \
         angle = FLOW_FX_QTR_PI + flow_fx64_mul(flow_fx64_mul(FLOW_FX_ATAN_C1, r2) - FLOW_FX_ATAN_C0, r); \
     } else { \
-        flow_fx64_t r = flow_fx64_div(x + abs_y, abs_y - x); \
+        flow_fx64_t r = flow_fx64_div(sx + abs_y, abs_y - sx); \
         flow_fx64_t r2 = flow_fx64_mul(r, r); \
         angle = (3 * FLOW_FX_QTR_PI) + flow_fx64_mul(flow_fx64_mul(FLOW_FX_ATAN_C1, r2) - FLOW_FX_ATAN_C0, r); \
     } \
-    if (x == 0) { angle = FLOW_FX_HALF_PI; } \
-    else if (y == 0) { return x < 0 ? FLOW_FX_PI : 0; } \
     return y < 0 ? -angle : angle; \
 } \
 static inline __attribute__((unused)) uint64_t flow_quantize_fx(flow_fx64_t val, flow_fx64_t min_v, flow_fx64_t max_v, uint32_t bits) { \
     if (val == FLOW_FX64_NONE || min_v == FLOW_FX64_NONE || max_v == FLOW_FX64_NONE || max_v <= min_v || bits == 0 || bits > (uint32_t)FLOW_FX_SHIFT) { return 0ULL; } \
     flow_fx64_t c = val < min_v ? min_v : (val > max_v ? max_v : val); \
     uint64_t max_q = (1ULL << bits) - 1ULL; \
-    flow_u128_t num = (flow_u128_t)(uint64_t)(c - min_v) * (flow_u128_t)max_q; \
-    flow_u128_t den = (flow_u128_t)(uint64_t)(max_v - min_v); \
+    flow_u128_t diff_c = (flow_u128_t)((flow_i128_t)c - (flow_i128_t)min_v); \
+    flow_u128_t den = (flow_u128_t)((flow_i128_t)max_v - (flow_i128_t)min_v); \
+    flow_u128_t num = diff_c * (flow_u128_t)max_q; \
     return (uint64_t)((num + (den >> 1)) / den); \
 } \
 static inline __attribute__((unused)) flow_fx64_t flow_dequantize_fx(uint64_t code, flow_fx64_t min_v, flow_fx64_t max_v, uint32_t bits) { \
     if (min_v == FLOW_FX64_NONE || max_v == FLOW_FX64_NONE || max_v <= min_v || bits == 0 || bits > (uint32_t)FLOW_FX_SHIFT) { return 0; } \
     uint64_t max_q = (1ULL << bits) - 1ULL; \
     uint64_t c = code > max_q ? max_q : code; \
-    flow_u128_t span = (flow_u128_t)(uint64_t)(max_v - min_v); \
-    flow_fx64_t delta = (flow_fx64_t)(((flow_u128_t)c * span + (max_q >> 1)) / max_q); \
-    return min_v + delta; \
+    flow_u128_t span = (flow_u128_t)((flow_i128_t)max_v - (flow_i128_t)min_v); \
+    flow_i128_t delta = (flow_i128_t)(((flow_u128_t)c * span + (max_q >> 1)) / max_q); \
+    flow_i128_t res = (flow_i128_t)min_v + delta; \
+    if (res > (flow_i128_t)INT64_MAX) { return INT64_MAX; } \
+    if (res < -(flow_i128_t)INT64_MAX) { return -INT64_MAX; } \
+    return (flow_fx64_t)res; \
 }
 
 #define FLOW_LEAN_NAT_OPS_C17 \
@@ -644,4 +645,152 @@ void flow_fx_gradient_descent_step(size_t N, size_t IN, size_t OUT,
                                    const flow_fx64_t *predictions, const flow_fx64_t *targets,
                                    flow_fx64_t learning_rate);
 #endif /* FLOW_EXACT_NUMERICS_DEFINED */
+
+/* ============================================================================
+ * Architectural Experience Memory (.fvec) (folded into bitspace.h)
+ * ============================================================================ */
+#define FLOW_VAULT_DIM 16
+#define FLOW_FVEC_MAGIC "FVEC_V1"
+#define FLOW_FVEC_HEADER_SIZE 1024
+#define FLOW_FVEC_MAX_ENTRIES 128
+#define FLOW_FVEC_DEFAULT_DIR ".flow/vecs"
+#define FLOW_FVEC_RAM_CRITICAL_PCT (90.0)
+#define FLOW_FVEC_CACHE_MISS_CRITICAL (0.15)
+#define FLOW_FVEC_MAX_SWAP_NS (500ULL)
+typedef struct { char magic[16], id[64], name[128], origin_hardware[128], trigger_intent[64], category[32], component_id[32], description[256], smt_signature[64];
+    double energy_score; uint64_t created_at_unix; uint32_t vector_dim, payload_size, confidence_score; uint64_t last_reinforced_unix; uint8_t is_auto_promoted;
+    char content_hash[32], filepath[256]; } FlowVecHeader;
+typedef struct { double features[FLOW_VAULT_DIM]; uint64_t pure_genome, hard_composite_mask, soft_composite_bias; FlowSMTProofAttestation proof; uint32_t crc32; } FlowVecPayload;
+typedef struct { FlowVecHeader header; FlowVecPayload payload; } FlowVecRecord;
+typedef struct { FlowVecRecord records[FLOW_FVEC_MAX_ENTRIES]; size_t count; char root_dir[256]; uint64_t total_lookups; } FlowVecStore;
+uint32_t flow_fvec_crc32(const void *data, size_t length);
+int flow_fvec_header_serialize(const FlowVecHeader *hdr, char *out_buf, size_t buf_size);
+int flow_fvec_header_deserialize(const char *in_buf, size_t buf_size, FlowVecHeader *hdr_out);
+int flow_fvec_write_file(const char *filepath, const FlowVecHeader *hdr, const FlowVecPayload *payload);
+int flow_fvec_read_file(const char *filepath, FlowVecHeader *hdr_out, FlowVecPayload *payload_out);
+void flow_fvec_embed_prompt(const char *prompt, double *out_features);
+double flow_fvec_cosine_similarity(const double *a, const double *b, size_t dim);
+void flow_fvec_store_init(FlowVecStore *store, const char *dir_path);
+int flow_fvec_store_scan(FlowVecStore *store);
+const FlowVecRecord *flow_fvec_store_lookup_by_id(const FlowVecStore *store, const char *id);
+int flow_fvec_store_query(const FlowVecStore *store, const char *natural_query, size_t *best_idx_out, double *best_sim_out);
+int flow_fvec_remediate_check(const FlowVecStore *store, double ram_pressure_pct, double cache_miss_rate, const FlowVecRecord **recommended_record_out, double *confidence_out, char *diagnosis_out, size_t max_diag_len);
+void flow_fvec_inspect(const FlowVecHeader *hdr, const FlowVecPayload *payload, FILE *out);
+void flow_fvec_store_print_summary(const FlowVecStore *store, FILE *out);
+int flow_fvec_seed_canonical_files(const char *target_dir);
+int flow_fvec_verify_hardware_affinity(const FlowVecHeader *hdr, const FlowEnvironmentState *host_env, char *diag_msg, size_t max_len);
+uint64_t flow_fvec_compute_content_hash(uint64_t genome, uint64_t hard_mask, uint64_t soft_bias, const FlowSMTProofAttestation *proof);
+int flow_fvec_promote_or_strengthen(const char *target_dir, const FlowVecHeader *base_hdr, const FlowVecPayload *payload, uint64_t content_hash, char *out_filepath, size_t max_path_len, uint32_t *new_confidence_out);
+size_t flow_fvec_store_evict_senescent(FlowVecStore *store, uint64_t now_unix, uint64_t max_idle_seconds, char (*evicted_files_out)[256], size_t max_evictions);
+#define FLOW_FVEC_MAX_PRESTAGED 8
+typedef struct { char trigger_condition[64], fvec_path[256]; FlowVecHeader header; FlowVecPayload payload; FlowBmf1BitCanvas staged_canvas; int is_staged_sound; } FlowFvecPreStagingSlot;
+typedef struct { FlowFvecPreStagingSlot slots[FLOW_FVEC_MAX_PRESTAGED]; size_t slot_count; uint64_t total_speculative_swaps; double last_swap_latency_ns; } FlowFvecPreStagingVault;
+int flow_fvec_prestaging_init(FlowFvecPreStagingVault *vault);
+int flow_fvec_prestaging_register(FlowFvecPreStagingVault *vault, const char *fvec_file_path, const char *trigger_condition);
+int flow_fvec_prestaging_swap_atomic(FlowFvecPreStagingVault *vault, const char *trigger_condition, FlowBmf1BitCanvas *active_canvas_out, double *swap_latency_ns_out);
+FlowSMTResult flow_fvec_verify_prestaging_soundness_smt(const FlowFvecPreStagingVault *vault, const char *trigger_condition, double swap_latency_ns, FlowSMTProofAttestation *proof_out);
+
+/* ============================================================================
+ * 5-Stage Token Ring, Wavefront Semilattice & Swarm Mesh (folded into bitspace.h)
+ * ============================================================================ */
+#define FLOW_WIRE_FRAME9_SIZE 9
+#define FLOW_WIRE_OP_HASH_SYNC    0xAA
+#define FLOW_WIRE_OP_ANTIBODY     0xAA
+#define FLOW_WIRE_OP_HETERO_MESH  0xBB
+#define FLOW_WIRE_OP_FLEET_SYNC   0xCC
+#pragma pack(push, 1)
+typedef struct { uint8_t opcode; union { struct { uint8_t hash_bytes[8]; } antibody;
+    struct { uint8_t role, node_id, bp_hi, bp_lo, lat_hi, lat_lo, crc_hi, crc_lo; } hetero_mesh;
+    struct { uint8_t agent_id, role, x_hi, x_lo, y_hi, y_lo, crc_hi, crc_lo; } fleet; uint8_t raw[8]; } payload; } FlowWireFrame9;
+#pragma pack(pop)
+static inline uint16_t flow_wire_crc16(const uint8_t *data, size_t len) { uint16_t crc = 0xFFFF; if (!data) return 0; for (size_t i = 0; i < len; ++i) {
+    crc ^= (uint16_t)data[i] << 8; for (int b = 0; b < 8; ++b) crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) : (crc << 1); } return crc; }
+static inline int flow_wire_frame9_pack(const FlowWireFrame9 *frame, uint8_t out[FLOW_WIRE_FRAME9_SIZE]) {
+    return (frame && out) ? (memcpy(out, frame, FLOW_WIRE_FRAME9_SIZE), 1) : 0; }
+static inline int flow_wire_frame9_unpack(const uint8_t in[FLOW_WIRE_FRAME9_SIZE], FlowWireFrame9 *frame_out) {
+    return (in && frame_out) ? (memcpy(frame_out, in, FLOW_WIRE_FRAME9_SIZE), 1) : 0; }
+static inline int flow_wire_hash_encode(uint64_t content_hash, uint8_t out_packet[FLOW_WIRE_FRAME9_SIZE]) { if (!out_packet) return 0;
+    FlowWireFrame9 f = { .opcode = FLOW_WIRE_OP_HASH_SYNC }; for (int i = 0; i < 8; ++i) f.payload.antibody.hash_bytes[i] = (uint8_t)((content_hash >> (56 - i * 8)) & 0xFF);
+    return flow_wire_frame9_pack(&f, out_packet); }
+static inline int flow_wire_hash_decode(const uint8_t in_packet[FLOW_WIRE_FRAME9_SIZE], uint64_t *out_content_hash) { if (!in_packet || !out_content_hash) return 0;
+    FlowWireFrame9 f; if (!flow_wire_frame9_unpack(in_packet, &f) || f.opcode != FLOW_WIRE_OP_HASH_SYNC) return 0; uint64_t h = 0;
+    for (int i = 0; i < 8; ++i) h = (h << 8) | f.payload.antibody.hash_bytes[i]; *out_content_hash = h; return 1; }
+#define FLOW_SWARM_MSG_ANTIBODY       FLOW_WIRE_OP_HASH_SYNC
+#define FLOW_SWARM_LYMPH_PKT_SIZE     FLOW_WIRE_FRAME9_SIZE
+#define flow_swarm_lymphatic_encode   flow_wire_hash_encode
+#define flow_swarm_lymphatic_decode   flow_wire_hash_decode
+#define FLOW_TOKEN_RING_MAX_TOKENS 16
+#define FLOW_TOKEN_RING_DEFAULT_MAX_CYCLES 32
+typedef enum { FLOW_TOKEN_STAGE_INGEST = 0, FLOW_TOKEN_STAGE_POLYTOPE = 1, FLOW_TOKEN_STAGE_ANNEAL = 2,
+    FLOW_TOKEN_STAGE_SMT_PROOF = 3, FLOW_TOKEN_STAGE_SYNTHESIS = 4, FLOW_TOKEN_STAGE_ATTRACTOR = 5, FLOW_TOKEN_STAGE_CUSTOM = 6 } FlowTokenStage;
+typedef enum { FLOW_RING_INIT = 0, FLOW_RING_CIRCULATING = 1, FLOW_RING_ATTRACTOR_REACHED = 2, FLOW_RING_UNSAT = 3, FLOW_RING_EXHAUSTED = 4 } FlowTokenRingState;
+struct FlowTokenRing; typedef struct FlowToken FlowToken;
+typedef int (*FlowTokenTransitionFn)(struct FlowTokenRing *ring, FlowToken *token, FlowMaskCanvas *canvas);
+struct FlowToken { uint32_t token_id; FlowTokenStage stage; char stage_name[32]; uint64_t attention_mask, dynamic_bias, execution_count;
+    double energy; FlowTokenTransitionFn transition_fn; void *user_data; };
+typedef struct FlowTokenRing { FlowToken tokens[FLOW_TOKEN_RING_MAX_TOKENS]; size_t token_count, current_token_idx, step_count, anneal_iterations;
+    FlowMaskCanvas active_canvas; FlowBmf1BitCanvas bmf_1bit_canvas; uint64_t active_genome, cycle_count, rng_state, wavefront_epoch, quiescent_generation;
+    double lyapunov_energy, prev_energy, lyapunov_delta_e; FlowTokenRingState state; int attractor_converged; SemanticIR *active_ir; FlowBitSpace active_space;
+    SearchResult best_search; FlowSMTProofAttestation smt_proof; FlowPlanEnsemble ensemble; uint32_t rng_seed; FlowBumpQsbrArena *bound_arena; char status_message[128]; } FlowTokenRing;
+int flow_token_ring_init(FlowTokenRing *ring, SemanticIR *ir);
+int flow_token_ring_setup_canonical(FlowTokenRing *ring, SemanticIR *ir, size_t anneal_iters, uint32_t seed);
+int flow_token_ring_add_token(FlowTokenRing *ring, FlowTokenStage stage, const char *name, FlowTokenTransitionFn fn, void *user_data);
+uint64_t flow_token_ring_attention_project(FlowMaskCanvas *canvas, uint64_t attention_mask, uint64_t dynamic_bias, uint64_t current_genome);
+uint64_t flow_token_ring_bmf_attention_project(FlowBmf1BitCanvas *canvas, uint64_t attention_mask, uint64_t dynamic_bias);
+int flow_token_ring_step(FlowTokenRing *ring);
+FlowTokenRingState flow_token_ring_run_to_attractor(FlowTokenRing *ring, size_t max_cycles);
+int flow_token_ring_converge_default(FlowTokenRing *ring, const SemanticIR *opt_ir, const char *flow_name);
+
+#define FLOW_SUBSPACE_MASK_CAPACITY     0x000000000000FFFFULL
+#define FLOW_SUBSPACE_MASK_CONCURRENCY  0x0000000000FF0000ULL
+#define FLOW_SUBSPACE_MASK_SHARDING     0x00000000FF000000ULL
+#define FLOW_SUBSPACE_MASK_BUFFER       0x0000FFFF00000000ULL
+#define FLOW_SUBSPACE_MASK_GROWTH       0xFFFF000000000000ULL
+#define FLOW_LYAPUNOV_CONVERGE_EPS      1e-5
+#define FLOW_LAGRANGIAN_DEFAULT_ETA     0.05
+#define FLOW_MESH_SATURATION_LIMIT_PERMILLE 949U
+
+#define FLOW_MAX_SUBSPACES 8
+#define FLOW_WAVEFRONT_MAX_SLOTS 8
+#define FLOW_WAVEFRONT_MAX_WORKERS 8
+typedef enum { FLOW_SUBSPACE_CAPACITY = 0, FLOW_SUBSPACE_CONCURRENCY = 1, FLOW_SUBSPACE_SHARDING = 2,
+    FLOW_SUBSPACE_BUFFER = 3, FLOW_SUBSPACE_GROWTH = 4, FLOW_SUBSPACE_CUSTOM = 5 } FlowSubspaceId;
+typedef struct { FlowSubspaceId id; char name[32]; uint64_t mask; uint8_t bit_offset, bit_width; uint64_t min_value, max_value;
+    double shadow_price_lambda, learning_rate_eta, current_demand, capacity_limit; uint64_t current_val, optimal_val; } FlowSubspace;
+typedef struct { FlowSubspace subspaces[FLOW_MAX_SUBSPACES]; size_t subspace_count; uint64_t composite_coverage_mask; bool is_strictly_orthogonal; } FlowSubspaceDecomposition;
+typedef struct __attribute__((aligned(64))) { uint32_t slot_id; FlowTokenStage current_stage; uint64_t slot_genome; FlowBmf1BitCanvas bmf_canvas; FlowMaskCanvas slot_canvas;
+    double energy; bool in_flight; } FlowWavefrontSlot;
+typedef struct FlowWavefrontRing { FlowSubspaceDecomposition decomp; FlowWavefrontSlot slots[FLOW_WAVEFRONT_MAX_SLOTS]; size_t slot_count, worker_count;
+    uint64_t global_lattice_genome, wave_cycle_count, total_cycles, wavefront_epoch, quiescent_generation; FlowMaskCanvas global_canvas;
+    double global_lyapunov_energy, prev_lyapunov_energy, lyapunov_delta_e, total_energy_uj; bool attractor_converged; FlowTokenRingState state; SemanticIR *active_ir;
+    FlowBitSpace active_space; SearchResult best_search; FlowSMTProofAttestation smt_proof; FlowPhysicalProbe last_probe; FlowBumpQsbrArena *bound_arena; char status_message[128]; } FlowWavefrontRing;
+int flow_subspace_decompose_canonical(FlowSubspaceDecomposition *decomp, const SemanticIR *ir);
+int flow_subspace_lagrangian_tune(FlowSubspace *sub, double current_demand, double capacity_limit);
+uint64_t flow_subspace_polyhedral_project(const FlowSubspace *sub, uint64_t raw_val);
+uint64_t flow_wavefront_semilattice_join(uint64_t base_genome, const uint64_t *thread_slices, const uint64_t *subspace_masks, size_t count);
+int flow_wavefront_ring_init(FlowWavefrontRing *ring, SemanticIR *ir, size_t num_slots, size_t num_workers);
+int flow_wavefront_ring_step_parallel(FlowWavefrontRing *ring);
+void flow_wavefront_ring_destroy(FlowWavefrontRing *ring);
+int flow_wavefront_ring_bind_arena(FlowWavefrontRing *ring, FlowBumpQsbrArena *arena);
+FlowSMTResult flow_wavefront_verify_temporal_safety_smt(const FlowWavefrontRing *ring, FlowSMTProofAttestation *proof_out);
+#define FLOW_SWARM_MSG_HETERO_PHEROMONE 0xBB
+#define FLOW_SWARM_HETERO_PKT_SIZE 9
+#define FLOW_HETERO_MESH_MAX_NODES 64
+typedef enum { FLOW_SWARM_ROLE_GENERIC = 0, FLOW_SWARM_ROLE_INGRESS_GATEWAY = 1, FLOW_SWARM_ROLE_COMPUTE_ROUTER = 2, FLOW_SWARM_ROLE_STORAGE_INDEX = 3,
+    FLOW_SWARM_ROLE_EMBODIED_ACTUATOR = 4 } FlowSwarmRole;
+typedef struct { uint8_t node_id; FlowSwarmRole role; char name[32]; uint64_t contract_hash; uint32_t capacity; uint16_t current_backpressure, current_latency_us;
+    uint64_t total_routed_requests; int is_active; } FlowHeteroMeshNode;
+typedef struct { size_t node_count; FlowHeteroMeshNode nodes[FLOW_HETERO_MESH_MAX_NODES]; uint64_t total_mesh_telemetry_packets, total_mesh_routed; } FlowHeteroMesh;
+void flow_hetero_mesh_init(FlowHeteroMesh *mesh);
+int flow_hetero_mesh_register_node(FlowHeteroMesh *mesh, uint8_t node_id, FlowSwarmRole role, const char *name, uint64_t contract_hash, uint32_t capacity);
+int flow_hetero_mesh_route_target(const FlowHeteroMesh *mesh, FlowSwarmRole target_role, uint8_t *selected_node_id_out);
+FlowSMTResult flow_hetero_mesh_verify_smt(const FlowHeteroMesh *mesh, uint32_t ingress_max_qps, FlowSMTProofAttestation *proof_out);
+#define FLOW_HETERO_RING_MAX_NODES 64
+typedef struct __attribute__((aligned(64))) { _Atomic uint64_t seq; uint8_t node_id, role; uint16_t backpressure_permille, latency_p99_us, contract_crc16;
+    uint32_t capacity_qps; uint64_t timestamp_ns; double q_snapshot[16]; uint8_t reserved[36]; } FlowSwarmRingSlot;
+typedef struct { FlowSwarmRingSlot slots[FLOW_HETERO_RING_MAX_NODES]; size_t active_node_count; uint64_t total_ring_updates, total_ring_samples; } FlowSwarmRingMesh;
+int flow_swarm_ring_mesh_init(FlowSwarmRingMesh *mesh);
+int flow_swarm_ring_publish(FlowSwarmRingMesh *mesh, uint8_t node_id, FlowSwarmRole role, uint16_t backpressure, uint16_t latency_p99_us, uint16_t contract_crc16, uint32_t capacity_qps, const double q[16]);
+int flow_swarm_ring_sample(const FlowSwarmRingMesh *mesh, uint8_t node_id, FlowSwarmRingSlot *slot_out);
+int flow_swarm_ring_route_lowest_energy(const FlowSwarmRingMesh *mesh, FlowSwarmRole target_role, uint8_t *selected_node_out);
 #endif

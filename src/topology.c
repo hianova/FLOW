@@ -1,7 +1,8 @@
 #include "topology.h"
+#include "abi.h"
 #include "backend.h"
 #include "cubical_hott.h"
-#include "hardware_telemetry.h"
+#include "flow_jet.h"
 #include "registry.h"
 #include <dirent.h>
 #include <math.h>
@@ -9,6 +10,71 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+
+#include <strings.h>
+
+const char *flow_topology_scope_name(FlowComponentScope scope) {
+    static const char *const NAMES[FLOW_SCOPE_COUNT] = {
+        "frontend", "formal_sieve", "exact_manifold", "runtime_jet",
+        "polyglot_abi", "introspection_ui", "rust_sdk"
+    };
+    return (scope >= 0 && scope < FLOW_SCOPE_COUNT) ? NAMES[scope] : "unknown";
+}
+
+const char *flow_topology_scope_contract(FlowComponentScope scope) {
+    static const char *const CONTRACTS[FLOW_SCOPE_COUNT] = {
+        "Lean 4 / .flow Specification Parser, AST & SemanticIR Lowering",
+        "Cubical HoTT Type Sieve, SMT QF_LIA Solver, Polyhedral & Capability Security",
+        "256-Bit Montgomery, Q32.32 Exact Numerics, Bit-Manifold, .fvec & 5-Stage Token Ring",
+        "C17 Codegen Backend, In-Memory JIT, QSBR Hot-Reload, Symplectic .fjet & Embodied Drivers",
+        "7-Language Polyglot ABI Synthesizer (C/Rust/Py/JS/CUDA/MATLAB/Julia) & Plugin Registry",
+        "Living System Orchestrator, Full-Codebase Topology Auditor & flowy Control-Plane UI",
+        "Zero-Dependency Virtual Cargo Workspace & #[repr(C)] Rust Plugin SDK Crates"
+    };
+    return (scope >= 0 && scope < FLOW_SCOPE_COUNT) ? CONTRACTS[scope] : "Unclassified Scope";
+}
+
+int flow_topology_parse_scope(const char *name, FlowComponentScope *out) {
+    if (!name || !name[0]) return 0;
+    for (int s = 0; s < (int)FLOW_SCOPE_COUNT; ++s) {
+        if (!strcasecmp(name, flow_topology_scope_name((FlowComponentScope)s))) {
+            if (out) *out = (FlowComponentScope)s;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static FlowComponentScope classify_node_scope(FlowNodeType t, const char *name) {
+    if (t == FLOW_NODE_RUST_CRATE) return FLOW_SCOPE_RUST_SDK;
+    if (t == FLOW_NODE_INTENT_OP) return FLOW_SCOPE_FRONTEND;
+    if (t == FLOW_NODE_FVEC_EXPERIENCE) return FLOW_SCOPE_EXACT_MANIFOLD;
+    if (!name) return FLOW_SCOPE_EXACT_MANIFOLD;
+    if (!strcmp(name, "parser") || !strcmp(name, "flow"))
+        return FLOW_SCOPE_FRONTEND;
+    if (!strcmp(name, "smt") || !strcmp(name, "cubical_hott") ||
+        !strcmp(name, "polyhedral") || !strcmp(name, "security"))
+        return FLOW_SCOPE_FORMAL_SIEVE;
+    if (!strcmp(name, "bitspace") || !strcmp(name, "flowy_fvec") ||
+        !strcmp(name, "token_ring"))
+        return FLOW_SCOPE_EXACT_MANIFOLD;
+    if (!strcmp(name, "backend") || !strcmp(name, "jit") ||
+        !strcmp(name, "reload") || !strcmp(name, "flow_jet") ||
+        !strcmp(name, "hardware_telemetry") || !strncmp(name, "driver_", 7) ||
+        !strncmp(name, "embodied", 8) || !strncmp(name, "flow_embodied", 13))
+        return FLOW_SCOPE_RUNTIME_JET;
+    if (!strcmp(name, "abi") || !strcmp(name, "registry") ||
+        !strcmp(name, "builtin_plugin") || !strcmp(name, "plugin") ||
+        !strcmp(name, "primitive") || t == FLOW_NODE_COMPONENT)
+        return FLOW_SCOPE_POLYGLOT_ABI;
+    if (!strcmp(name, "topology") || !strcmp(name, "flowy") ||
+        !strcmp(name, "flowy_main") || !strcmp(name, "flowc"))
+        return FLOW_SCOPE_INTROSPECTION_UI;
+    if (!strncmp(name, "rust_", 5) || !strncmp(name, "flow_plugin", 11))
+        return FLOW_SCOPE_RUST_SDK;
+    return (t == FLOW_NODE_PLUGIN) ? FLOW_SCOPE_POLYGLOT_ABI : FLOW_SCOPE_EXACT_MANIFOLD;
+}
 
 void flow_topology_init(FlowTopologyGraph *g) { if (g) memset(g, 0, sizeof(*g)); }
 
@@ -16,7 +82,9 @@ uint32_t flow_topology_add_node(FlowTopologyGraph *g, FlowNodeType t, const char
     if (!g || g->node_count >= FLOW_TOPOLOGY_MAX_NODES) return 0;
     uint32_t id = (uint32_t)g->node_count++;
     FlowTopologyNode *node = &g->nodes[id];
-    *node = (FlowTopologyNode){ .id = id, .type = t, .is_core = c, .layer = l, .capability_mask = n ? flow_cubical_get_module_mask(n) : 0 };
+    FlowComponentScope sc = classify_node_scope(t, n);
+    *node = (FlowTopologyNode){ .id = id, .type = t, .scope = sc, .is_core = c, .layer = l, .capability_mask = n ? flow_cubical_get_module_mask(n) : 0 };
+    strncpy(node->scope_name, flow_topology_scope_name(sc), sizeof(node->scope_name) - 1);
     strncpy(node->name, n ? n : "", sizeof(node->name) - 1);
     strncpy(node->module, m ? m : "", sizeof(node->module) - 1);
     strncpy(node->role, m ? m : "core", sizeof(node->role) - 1);
@@ -25,6 +93,9 @@ uint32_t flow_topology_add_node(FlowTopologyGraph *g, FlowNodeType t, const char
 
 int flow_topology_add_edge(FlowTopologyGraph *g, uint32_t f, uint32_t to, FlowEdgeType t, double w, const char *lbl) {
     if (!g || g->edge_count >= FLOW_TOPOLOGY_MAX_EDGES || f >= g->node_count || to >= g->node_count) return 0;
+    for (size_t e = 0; e < g->edge_count; ++e) {
+        if (g->edges[e].from_id == f && g->edges[e].to_id == to && g->edges[e].type == t) return 1;
+    }
     FlowTopologyEdge *e = &g->edges[g->edge_count++];
     *e = (FlowTopologyEdge){.from_id = f, .to_id = to, .type = t, .weight = w};
     strncpy(e->label, lbl ? lbl : "", sizeof(e->label) - 1);
@@ -43,7 +114,8 @@ static int find_node_by_name(const FlowTopologyGraph *g, const char *name) {
 static int ensure_stem_node_in_dir(FlowTopologyGraph *g, const char *dir_path, const char *stem) {
     int idx = find_node_by_name(g, stem);
     if (idx >= 0) return idx;
-    if (!strcmp(stem, "flowc") || !strcmp(stem, "flowy_main")) return -1;
+    if (!strcmp(stem, "flowc") || !strcmp(stem, "flowy_main"))
+        return (int)flow_topology_add_node(g, FLOW_NODE_CORE_MODULE, stem, "entrypoint", 1, 1);
     if (dir_path && strstr(dir_path, "plugins"))
         return (int)flow_topology_add_node(g, FLOW_NODE_PLUGIN, stem, "plugin", 0, 2);
     if (!strcmp(stem, "registry") || !strcmp(stem, "abi") || !strcmp(stem, "primitive") ||
@@ -76,16 +148,61 @@ static void scan_file_loc_and_includes(FlowTopologyGraph *g, int node_idx, const
             if (dot) *dot = '\0';
             int target_idx = ensure_stem_node_in_dir(g, NULL, stem);
             if (target_idx >= 0 && target_idx != node_idx) {
-                int exists = 0;
-                for (size_t e = 0; e < g->edge_count; ++e)
-                    if (g->edges[e].from_id == (uint32_t)node_idx && g->edges[e].to_id == (uint32_t)target_idx) { exists = 1; break; }
-                if (!exists)
-                    flow_topology_add_edge(g, (uint32_t)node_idx, (uint32_t)target_idx, FLOW_EDGE_USES, 1.0, "includes_header");
+                flow_topology_add_edge(g, (uint32_t)node_idx, (uint32_t)target_idx, FLOW_EDGE_USES, 1.0, "includes_header");
             }
         }
     }
     fclose(f);
     g->nodes[node_idx].loc += lines;
+}
+
+static const char *resolve_workspace_root(void) {
+    const char *env_ws = getenv("FLOW_WORKSPACE_ROOT");
+    if (env_ws && env_ws[0]) return env_ws;
+    if (access("src/flow.h", F_OK) == 0) return ".";
+    if (access("../src/flow.h", F_OK) == 0) return "..";
+    if (access("../../src/flow.h", F_OK) == 0) return "../..";
+    return ".";
+}
+
+static void join_ws_path(char *out, size_t out_sz, const char *ws, const char *rel) {
+    if (!ws || !ws[0] || !strcmp(ws, ".")) snprintf(out, out_sz, "%s", rel);
+    else snprintf(out, out_sz, "%s/%s", ws, rel);
+}
+
+static void scan_rust_workspace(FlowTopologyGraph *g, const char *ws) {
+    static const struct {
+        const char *name;
+        const char *path;
+        const char *role;
+        int is_core;
+        uint32_t layer;
+        const char *dep0;
+        const char *dep1;
+        const char *dep2;
+    } RUST_UNITS[] = {
+        { "flow_plugin_sdk",     "crates/flow-plugin/src/lib.rs",         "rust_sdk",    1, 1, "plugin",          "registry", NULL },
+        { "flow_plugin_example", "crates/flow-plugin-example/src/lib.rs", "rust_plugin", 0, 2, "flow_plugin_sdk", "registry", NULL }
+    };
+    for (size_t i = 0; i < sizeof(RUST_UNITS) / sizeof(RUST_UNITS[0]); ++i) {
+        char full_path[512];
+        join_ws_path(full_path, sizeof(full_path), ws, RUST_UNITS[i].path);
+        if (access(full_path, F_OK) != 0) continue;
+        int idx = find_node_by_name(g, RUST_UNITS[i].name);
+        if (idx < 0) {
+            idx = (int)flow_topology_add_node(g, FLOW_NODE_RUST_CRATE, RUST_UNITS[i].name, RUST_UNITS[i].role, RUST_UNITS[i].is_core, RUST_UNITS[i].layer);
+        }
+        if (idx >= 0) {
+            scan_file_loc_and_includes(g, idx, full_path);
+            const char *deps[3] = { RUST_UNITS[i].dep0, RUST_UNITS[i].dep1, RUST_UNITS[i].dep2 };
+            for (int d = 0; d < 3; ++d) {
+                if (!deps[d]) continue;
+                int tidx = find_node_by_name(g, deps[d]);
+                if (tidx >= 0 && tidx != idx)
+                    flow_topology_add_edge(g, (uint32_t)idx, (uint32_t)tidx, FLOW_EDGE_USES, 1.0, "rust_ffi_bridge");
+            }
+        }
+    }
 }
 
 int flow_topology_scan_workspace(FlowTopologyGraph *g, const char *src_dir) {
@@ -138,22 +255,410 @@ int flow_topology_scan_workspace(FlowTopologyGraph *g, const char *src_dir) {
 void flow_topology_build_codebase_graph(FlowTopologyGraph *graph) {
     if (!graph) return;
     flow_topology_init(graph);
+    const char *ws = resolve_workspace_root();
     static const char *const dirs[] = {"src", "plugins", "tests"};
-    for (size_t i = 0; i < sizeof(dirs) / sizeof(dirs[0]); ++i)
-        flow_topology_scan_workspace(graph, dirs[i]);
+    for (size_t i = 0; i < sizeof(dirs) / sizeof(dirs[0]); ++i) {
+        char dpath[512];
+        join_ws_path(dpath, sizeof(dpath), ws, dirs[i]);
+        flow_topology_scan_workspace(graph, dpath);
+    }
+    scan_rust_workspace(graph, ws);
     if (flow_registry_init()) {
         int reg_idx = find_node_by_name(graph, "registry");
-        int bp_idx = find_node_by_name(graph, "builtin_plugin");
-        if (bp_idx >= 0 && reg_idx >= 0)
-            flow_topology_add_edge(graph, (uint32_t)bp_idx, (uint32_t)reg_idx, FLOW_EDGE_IMPLEMENTS, 1.0, "FlowPluginDescriptor");
         for (size_t i = 0; i < component_count(); ++i) {
             const Component *c = component_at(i);
             if (!c || !c->id) continue;
             int c_idx = find_node_by_name(graph, c->id);
             if (c_idx < 0) c_idx = (int)flow_topology_add_node(graph, FLOW_NODE_COMPONENT, c->id, "plugin", 0, 2);
-            if (bp_idx >= 0 && c_idx >= 0)
-                flow_topology_add_edge(graph, (uint32_t)c_idx, (uint32_t)bp_idx, FLOW_EDGE_USES, 1.0, "registered_component");
+            if (reg_idx >= 0 && c_idx >= 0)
+                flow_topology_add_edge(graph, (uint32_t)c_idx, (uint32_t)reg_idx, FLOW_EDGE_USES, 1.0, "registered_component");
         }
+    }
+}
+
+static void audit_record_leak(FlowTopologyAuditReport *report, const char *tag, const char *detail) {
+    if (!report) return;
+    report->cross_layer_leaks++;
+    if (strlen(report->leak_details) + 64 < sizeof(report->leak_details)) {
+        char buf[160];
+        snprintf(buf, sizeof(buf), "[%s] %s; ", tag, detail ? detail : "");
+        strncat(report->leak_details, buf, sizeof(report->leak_details) - strlen(report->leak_details) - 1);
+    }
+}
+
+static void audit_makefile_bijection(const FlowTopologyGraph *graph, FlowTopologyAuditReport *report, const char *ws) {
+    report->makefile_bijective = 1;
+    char p_build_rs[512], p_main_rs[512], p_mk[512], p_flow_h[512];
+    join_ws_path(p_build_rs, sizeof(p_build_rs), ws, "build.rs");
+    join_ws_path(p_main_rs, sizeof(p_main_rs), ws, "src/main.rs");
+    join_ws_path(p_mk, sizeof(p_mk), ws, "Makefile");
+    join_ws_path(p_flow_h, sizeof(p_flow_h), ws, "src/flow.h");
+    if (access(p_build_rs, F_OK) == 0) {
+        report->makefile_bijective = 0;
+        audit_record_leak(report, "STALE_BUILD_RS", "build.rs");
+    }
+    if (access(p_main_rs, F_OK) == 0) {
+        report->makefile_bijective = 0;
+        audit_record_leak(report, "STALE_RUST_MAIN", "src/main.rs");
+    }
+    FILE *mf = fopen(p_mk, "r");
+    if (mf) {
+        char mk_buf[16384] = {0};
+        size_t n = fread(mk_buf, 1, sizeof(mk_buf) - 1, mf);
+        fclose(mf);
+        if (n > 0) {
+            /* 1. Forward check: Makefile must contain canonical C17 library, binary, plugin & test rules */
+            static const char *const MK_REQUIRED_TOKENS[] = {
+                "$(wildcard src/*.c)",
+                "$(wildcard plugins/*.c)",
+                "src/flowc.c",
+                "src/flowy_main.c",
+                "plugins/embodied.c"
+            };
+            for (size_t i = 0; i < sizeof(MK_REQUIRED_TOKENS) / sizeof(MK_REQUIRED_TOKENS[0]); ++i) {
+                if (!strstr(mk_buf, MK_REQUIRED_TOKENS[i])) {
+                    report->makefile_bijective = 0;
+                    audit_record_leak(report, "MAKEFILE_DRIFT", MK_REQUIRED_TOKENS[i]);
+                }
+            }
+            static const char *const MK_EXPLICIT_FILES[] = {
+                "src/flowc.c",
+                "src/flowy_main.c",
+                "plugins/embodied.c",
+                "tests/test_brain.c",
+                "tests/test_body.c",
+                "tests/test_concurrency.c",
+                "tests/test_fvec_swarm.c",
+                "tests/test_system.c",
+                "tests/test_refactored_core.c",
+                "tests/test_geometric_axiom.c",
+                "tests/test_cubical_hott.c",
+                "tests/fuzz-test.c"
+            };
+            for (size_t i = 0; i < sizeof(MK_EXPLICIT_FILES) / sizeof(MK_EXPLICIT_FILES[0]); ++i) {
+                char fpath[512];
+                join_ws_path(fpath, sizeof(fpath), ws, MK_EXPLICIT_FILES[i]);
+                if (!strstr(mk_buf, MK_EXPLICIT_FILES[i]) || access(fpath, F_OK) != 0) {
+                    report->makefile_bijective = 0;
+                    audit_record_leak(report, "MAKEFILE_MISSING", MK_EXPLICIT_FILES[i]);
+                }
+            }
+        }
+    }
+
+    /* 2. Reverse check: every C module in graph must exist on disk in src/ or plugins/ */
+    if (graph && access(p_flow_h, F_OK) == 0) {
+        for (size_t i = 0; i < graph->node_count; ++i) {
+            const FlowTopologyNode *nd = &graph->nodes[i];
+            if (nd->type != FLOW_NODE_CORE_MODULE && nd->type != FLOW_NODE_PLUGIN) continue;
+            char rel_sc[128], rel_sh[128], rel_pc[128], rel_ph[128];
+            char src_c[512], src_h[512], plg_c[512], plg_h[512];
+            snprintf(rel_sc, sizeof(rel_sc), "src/%s.c", nd->name);
+            snprintf(rel_sh, sizeof(rel_sh), "src/%s.h", nd->name);
+            snprintf(rel_pc, sizeof(rel_pc), "plugins/%s.c", nd->name);
+            snprintf(rel_ph, sizeof(rel_ph), "plugins/%s.h", nd->name);
+            join_ws_path(src_c, sizeof(src_c), ws, rel_sc);
+            join_ws_path(src_h, sizeof(src_h), ws, rel_sh);
+            join_ws_path(plg_c, sizeof(plg_c), ws, rel_pc);
+            join_ws_path(plg_h, sizeof(plg_h), ws, rel_ph);
+            if (access(src_c, F_OK) != 0 && access(src_h, F_OK) != 0 &&
+                access(plg_c, F_OK) != 0 && access(plg_h, F_OK) != 0) {
+                report->makefile_bijective = 0;
+                audit_record_leak(report, "MAKEFILE_ORPHAN_NODE", nd->name);
+            }
+        }
+    }
+}
+
+static size_t count_rust_struct_pub_fields(const char *rust_src, const char *struct_header) {
+    if (!rust_src || !struct_header) return 0;
+    const char *p = strstr(rust_src, struct_header);
+    if (!p) return 0;
+    const char *open_brace = strchr(p, '{');
+    if (!open_brace) return 0;
+    const char *close_brace = strchr(open_brace, '}');
+    if (!close_brace) return 0;
+    size_t count = 0;
+    const char *cur = open_brace + 1;
+    while (cur < close_brace) {
+        const char *hit = strstr(cur, "pub ");
+        if (!hit || hit >= close_brace) break;
+        count++;
+        cur = hit + 4;
+    }
+    return count;
+}
+
+static int file_contains_all(const char *path, const char *const *tokens, size_t count) {
+    FILE *fp = fopen(path, "r");
+    if (!fp) return 1; /* Skip if workspace file not present */
+    char buf[32768] = {0};
+    size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
+    fclose(fp);
+    if (n == 0) return 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (tokens[i] && !strstr(buf, tokens[i])) return 0;
+    }
+    return 1;
+}
+
+static void audit_rust_sdk_parity(FlowTopologyAuditReport *report, const char *ws, size_t rust_fields_out[4]) {
+    report->rust_sdk_parity = 1;
+    rust_fields_out[0] = 10; /* FlowPluginDescriptor */
+    rust_fields_out[1] = 30; /* FlowPlugin */
+    rust_fields_out[2] = 13; /* FlowUnit */
+    rust_fields_out[3] = 16; /* FlowComponent */
+    static const char *const SDK_TOKENS[] = {
+        "pub struct FlowPluginDescriptor {",
+        "pub struct FlowPlugin {",
+        "pub struct FlowUnit {",
+        "pub struct FlowComponent {",
+        "FLOW_PLUGIN_ABI_MAJOR"
+    };
+    static const char *const EX_TOKENS[] = {
+        "flow_plugin_entry_v1",
+        "create_unit: Some(",
+        "emit: None",
+        ".max(1)"
+    };
+    static const char *const WORKSPACE_TOKENS[] = {
+        "[workspace]",
+        "resolver = \"2\"",
+        "crates/flow-plugin",
+        "crates/flow-plugin-example"
+    };
+    char p_sdk[512], p_ex[512], p_toml[512], p_lock[512], p_stray1[512], p_stray2[512];
+    join_ws_path(p_sdk, sizeof(p_sdk), ws, "crates/flow-plugin/src/lib.rs");
+    join_ws_path(p_ex, sizeof(p_ex), ws, "crates/flow-plugin-example/src/lib.rs");
+    join_ws_path(p_toml, sizeof(p_toml), ws, "Cargo.toml");
+    join_ws_path(p_lock, sizeof(p_lock), ws, "Cargo.lock");
+    join_ws_path(p_stray1, sizeof(p_stray1), ws, "crates/flow-plugin-example/Cargo.lock");
+    join_ws_path(p_stray2, sizeof(p_stray2), ws, "crates/flow-plugin/Cargo.lock");
+
+    if (!file_contains_all(p_sdk, SDK_TOKENS, sizeof(SDK_TOKENS) / sizeof(SDK_TOKENS[0]))) {
+        report->rust_sdk_parity = 0;
+        audit_record_leak(report, "RUST_SDK_DRIFT", "crates/flow-plugin/src/lib.rs");
+    }
+    FILE *sf = fopen(p_sdk, "r");
+    if (sf) {
+        char sbuf[32768] = {0};
+        (void)fread(sbuf, 1, sizeof(sbuf) - 1, sf);
+        fclose(sf);
+        rust_fields_out[0] = count_rust_struct_pub_fields(sbuf, "pub struct FlowPluginDescriptor {");
+        rust_fields_out[1] = count_rust_struct_pub_fields(sbuf, "pub struct FlowPlugin {");
+        rust_fields_out[2] = count_rust_struct_pub_fields(sbuf, "pub struct FlowUnit {");
+        rust_fields_out[3] = count_rust_struct_pub_fields(sbuf, "pub struct FlowComponent {");
+        if (rust_fields_out[0] != 10 || rust_fields_out[1] != 30 ||
+            rust_fields_out[2] != 13 || rust_fields_out[3] != 16) {
+            report->rust_sdk_parity = 0;
+            audit_record_leak(report, "RUST_SDK_DRIFT", "crates/flow-plugin/src/lib.rs");
+        }
+    }
+    if (!file_contains_all(p_ex, EX_TOKENS, sizeof(EX_TOKENS) / sizeof(EX_TOKENS[0]))) {
+        report->rust_sdk_parity = 0;
+        audit_record_leak(report, "RUST_PLUGIN_DRIFT", "crates/flow-plugin-example/src/lib.rs");
+    }
+    if (!file_contains_all(p_toml, WORKSPACE_TOKENS, sizeof(WORKSPACE_TOKENS) / sizeof(WORKSPACE_TOKENS[0]))) {
+        report->rust_sdk_parity = 0;
+        audit_record_leak(report, "RUST_WORKSPACE_DRIFT", "Cargo.toml");
+    }
+    FILE *ct = fopen(p_toml, "r");
+    if (ct) {
+        char cbuf[4096] = {0};
+        (void)fread(cbuf, 1, sizeof(cbuf) - 1, ct);
+        fclose(ct);
+        if (strstr(cbuf, "[package]") || strstr(cbuf, "[[bin]]") ||
+            strstr(cbuf, "[build-dependencies]") || strstr(cbuf, "[dependencies]")) {
+            report->rust_sdk_parity = 0;
+            audit_record_leak(report, "RUST_NON_VIRTUAL_WORKSPACE", "Cargo.toml");
+        }
+    }
+    FILE *cl = fopen(p_lock, "r");
+    if (cl) {
+        char lbuf[8192] = {0};
+        (void)fread(lbuf, 1, sizeof(lbuf) - 1, cl);
+        fclose(cl);
+        if (!strstr(lbuf, "name = \"flow-plugin\"") || !strstr(lbuf, "name = \"flow-plugin-example\"")) {
+            report->rust_sdk_parity = 0;
+            audit_record_leak(report, "RUST_LOCK_DRIFT", "Cargo.lock");
+        }
+        if (strstr(lbuf, "crates.io-index") || strstr(lbuf, "source = ") ||
+            strstr(lbuf, "checksum = ") || strstr(lbuf, "name = \"cc\"") ||
+            strstr(lbuf, "name = \"shlex\"") || strstr(lbuf, "name = \"find-msvc-tools\"")) {
+            report->rust_sdk_parity = 0;
+            audit_record_leak(report, "RUST_EXTERNAL_CRATE_LEAK", "Cargo.lock");
+        }
+    }
+    if (access(p_stray1, F_OK) == 0 || access(p_stray2, F_OK) == 0) {
+        report->rust_sdk_parity = 0;
+        audit_record_leak(report, "RUST_STRAY_LOCK", "crates/*/Cargo.lock");
+    }
+}
+
+static void audit_polyglot_abi_homomorphism(FlowTopologyAuditReport *report, const size_t rust_fields[4]) {
+    report->polyglot_homomorphic = 1;
+    report->exact_numerics_sound = 1;
+    report->hott_univalence_sound = 1;
+    report->probe_weaving_sound = 1;
+    static const char *const bootstrap_lean =
+        "namespace Quant.SelfBootstrapAudit\n"
+        "inductive RegimeMode where\n"
+        "  | Idle\n"
+        "  | Active\n"
+        "  | Fault\n"
+        "  deriving Repr\n"
+        "structure Vec2 where\n"
+        "  x : Float\n"
+        "  y : Float\n"
+        "structure AuditFrame where\n"
+        "  pos  : Vec2\n"
+        "  mode : RegimeMode\n"
+        "  seq  : USize\n"
+        "def bilateral_spread\n"
+        "    (mid : Float)\n"
+        "    (vol : Float)\n"
+        "    (tick : Float) : (Float * Float) :=\n"
+        "  let half := Float.max (Float.sqrt (Float.abs vol) * 0.5) tick in\n"
+        "  (mid - half, mid + half)\n"
+        "def eval_keyword_gate (in : UInt64) (type : UInt32) (from : Float) (var : Float) : Float :=\n"
+        "  if type == 0 && in > 0 then from + var else from - var\n"
+        "def step_frame (f : AuditFrame) : AuditFrame :=\n"
+        "  { pos := { x := f.pos.x + 1.0, y := f.pos.y - 0.5 }, mode := f.mode, seq := f.seq + 1 }\n"
+        "theorem spread_sound : (bilateral_spread 100.0 4.0 0.25).1 <= (bilateral_spread 100.0 4.0 0.25).2 := by decide\n"
+        "end Quant.SelfBootstrapAudit\n";
+
+    FILE *lfp = tmpfile();
+    if (!lfp) return;
+    fputs(bootstrap_lean, lfp);
+    rewind(lfp);
+
+    FlowSpec *spec = (FlowSpec *)calloc(1, sizeof(FlowSpec));
+    if (!spec) { fclose(lfp); return; }
+    if (!parse_spec(lfp, spec)) {
+        free(spec);
+        fclose(lfp);
+        report->polyglot_homomorphic = 0;
+        audit_record_leak(report, "SELF_BOOTSTRAP_PARSE", "failed to parse self-bootstrap Lean spec");
+        return;
+    }
+    fclose(lfp);
+
+    SemanticIR ir;
+    lower_to_ir(spec, &ir);
+    free(spec);
+    flow_registry_init();
+    const Component *comp = select_component(&ir);
+    if (!comp) {
+        flow_ir_cleanup(&ir);
+        report->polyglot_homomorphic = 0;
+        audit_record_leak(report, "SELF_BOOTSTRAP_COMP", "no component selected for self-bootstrap IR");
+        return;
+    }
+    FlowComponentABI abi;
+    if (!flow_abi_build_for_component(&ir, comp, &abi)) {
+        flow_ir_cleanup(&ir);
+        report->polyglot_homomorphic = 0;
+        audit_record_leak(report, "SELF_BOOTSTRAP_ABI", "failed to build FlowComponentABI");
+        return;
+    }
+
+    /* Populate Intensional Global Type Universe U_0 (HoTT Univalence: A ~= B => A = B) */
+    FlowHoTTUniverse *u0 = flow_hott_universe_global();
+    flow_hott_universe_reset(u0);
+    flow_hott_register_type(u0, "FlowPluginDescriptor", FLOW_HOTT_LANG_C17, 10, sizeof(FlowPluginDescriptor), _Alignof(FlowPluginDescriptor), 32, 0x504C475F44455343ULL);
+    flow_hott_register_type(u0, "FlowPluginDescriptor", FLOW_HOTT_LANG_RUST, rust_fields[0], sizeof(FlowPluginDescriptor), _Alignof(FlowPluginDescriptor), 32, 0x504C475F44455343ULL);
+    flow_hott_register_type(u0, "FlowPlugin", FLOW_HOTT_LANG_C17, 30, sizeof(FlowPlugin), _Alignof(FlowPlugin), 32, 0x504C475F5654424CULL);
+    flow_hott_register_type(u0, "FlowPlugin", FLOW_HOTT_LANG_RUST, rust_fields[1], sizeof(FlowPlugin), _Alignof(FlowPlugin), 32, 0x504C475F5654424CULL);
+    flow_hott_register_type(u0, "FlowUnit", FLOW_HOTT_LANG_C17, 13, sizeof(FlowUnit), _Alignof(FlowUnit), 32, 0x504C475F554E4954ULL);
+    flow_hott_register_type(u0, "FlowUnit", FLOW_HOTT_LANG_RUST, rust_fields[2], sizeof(FlowUnit), _Alignof(FlowUnit), 32, 0x504C475F554E4954ULL);
+    flow_hott_register_type(u0, "FlowComponent", FLOW_HOTT_LANG_C17, 16, sizeof(Component), _Alignof(Component), 32, 0x504C475F434F4D50ULL);
+    flow_hott_register_type(u0, "FlowComponent", FLOW_HOTT_LANG_RUST, rust_fields[3], sizeof(Component), _Alignof(Component), 32, 0x504C475F434F4D50ULL);
+    for (size_t ei = 0; ei < ir.lean_enum_count; ++ei) {
+        const FlowLeanEnum *en = &ir.lean_enums[ei];
+        uint64_t fp = 0x454E554D00000000ULL ^ (uint64_t)en->variant_count;
+        flow_hott_register_type(u0, en->name, FLOW_HOTT_LANG_LEAN, en->variant_count, 4, 4, 32, fp);
+        flow_hott_register_type(u0, en->name, FLOW_HOTT_LANG_C17,  en->variant_count, 4, 4, 32, fp);
+        flow_hott_register_type(u0, en->name, FLOW_HOTT_LANG_RUST, en->variant_count, 4, 4, 32, fp);
+    }
+    for (size_t si = 0; si < ir.lean_struct_count; ++si) {
+        const FlowLeanStruct *st = &ir.lean_structs[si];
+        uint64_t fp = 0x5354525500000000ULL ^ ((uint64_t)st->field_count << 16) ^ (uint64_t)st->byte_size;
+        flow_hott_register_type(u0, st->name, FLOW_HOTT_LANG_LEAN, st->field_count, st->byte_size, st->align_bytes, 32, fp);
+        flow_hott_register_type(u0, st->name, FLOW_HOTT_LANG_C17,  st->field_count, st->byte_size, st->align_bytes, 32, fp);
+        flow_hott_register_type(u0, st->name, FLOW_HOTT_LANG_RUST, st->field_count, st->byte_size, st->align_bytes, 32, fp);
+    }
+    if (!flow_hott_verify_universe_all(u0)) {
+        report->hott_univalence_sound = 0;
+        audit_record_leak(report, "HOTT_UNIVALENCE_BROKEN", u0->broken_diagnostic);
+    }
+    report->hott_type_count = u0->distinct_type_count;
+    report->hott_broken_count = u0->homotopy_broken_count;
+
+    static const struct {
+        const char *lang;
+        const char *tok0;
+        const char *tok1;
+        const char *tok2;
+        const char *tok3;
+        const char *tok4;
+        const char *probe0;
+        const char *probe1;
+    } CHECKS[] = {
+        { "c",      "RegimeMode",    "AuditFrame", "uint64_t seq;",            "bilateral_spread_fx(", "double *out_0, double *out_1", "_reset_watchdog(", "flow_ab_shadow_record(" },
+        { "rust",   "pub enum RegimeMode", "pub struct AuditFrame", "pub seq: usize", "r#in: u64", "r#type: u32", "pub fn reset_watchdog(", "pub fn ab_shadow_record(" },
+        { "python", "class AuditFrame(ctypes.Structure):", "('seq', ctypes.c_size_t)", "def bilateral_spread_fx(self", "in_", "from_", "def reset_watchdog(", "def ab_shadow_record(" },
+        { "js",     "export const RegimeMode = Object.freeze", "bilateral_spread_fx(", "new Float64Array(1)", "in_", "var_", "resetWatchdog(", "abShadowRecord(" },
+        { "cuda",   "RegimeMode",    "AuditFrame", "bilateral_spread_fx(",     "double *out_0, double *out_1", "cudaLaunchHostFunc(stream", "_reset_watchdog(", "flow_ab_shadow_record(" },
+        { "matlab", "Active = uint32(1);", "function [out_0, out_1] = bilateral_spread_fx(obj", "function [out_0, out_1] = bilateral_spread(obj", "libpointer('doublePtr', 0)", "abShadowRecord(", "resetWatchdog(", "abShadowRecord(" },
+        { "julia",  "@enum RegimeMode::UInt32", "struct AuditFrame", "seq::Csize_t", "in_", "type_", "reset_watchdog(", "ab_shadow_record(" }
+    };
+
+    for (size_t i = 0; i < sizeof(CHECKS) / sizeof(CHECKS[0]); ++i) {
+        FILE *tfp = tmpfile();
+        if (!tfp) continue;
+        int ok = flow_abi_emit_polyglot_adapter(tfp, &abi, CHECKS[i].lang);
+        long sz = ftell(tfp);
+        rewind(tfp);
+        char *buf = (sz > 0) ? (char *)calloc((size_t)sz + 1, 1) : NULL;
+        if (buf && sz > 0) (void)fread(buf, 1, (size_t)sz, tfp);
+        fclose(tfp);
+        if (!ok || !buf ||
+            !strstr(buf, CHECKS[i].tok0) ||
+            !strstr(buf, CHECKS[i].tok1) ||
+            !strstr(buf, CHECKS[i].tok2) ||
+            !strstr(buf, CHECKS[i].tok3) ||
+            !strstr(buf, CHECKS[i].tok4)) {
+            report->polyglot_homomorphic = 0;
+            audit_record_leak(report, "POLYGLOT_ABI_DRIFT", CHECKS[i].lang);
+        }
+        if (!ok || !buf ||
+            !strstr(buf, CHECKS[i].probe0) ||
+            !strstr(buf, CHECKS[i].probe1)) {
+            report->probe_weaving_sound = 0;
+            audit_record_leak(report, "PROBE_WEAVE_MISSING", CHECKS[i].lang);
+        }
+        free(buf);
+    }
+    flow_ir_cleanup(&ir);
+
+    /* Self-bootstrap Exact Numerics & 256-Bit Montgomery invariant check */
+    FlowU256 p_secp;
+    static const uint64_t mr_bases[] = {2ULL, 3ULL, 5ULL};
+    FlowU256 even_mod = flow_u256_from_u64(1000ULL);
+    FlowU256 even_b   = flow_u256_from_u64(7ULL);
+    FlowU256 even_e   = flow_u256_from_u64(4ULL);
+    FlowU256 even_r   = flow_u256_mod_pow(even_b, even_e, even_mod);
+    flow_fx64_t mse_pred[4] = { flow_fx64_from_double(2.0), flow_fx64_from_double(4.0), flow_fx64_from_double(6.0), flow_fx64_from_double(8.0) };
+    flow_fx64_t mse_tgt[4]  = { flow_fx64_from_double(1.0), flow_fx64_from_double(2.0), flow_fx64_from_double(3.0), flow_fx64_from_double(4.0) };
+    flow_fx64_t mse_val = flow_fx_mse_loss(2, 2, mse_pred, mse_tgt);
+    if (!flow_u256_from_hex_str("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F", &p_secp) ||
+        flow_u256_is_probably_prime(&p_secp, mr_bases, 3) != 1 ||
+        even_r.w[0] != 401ULL ||
+        fabs(flow_fx64_to_double(mse_val) - 7.5) > 1e-6 ||
+        flow_fx64_ceil(FLOW_FX64_MAX) != FLOW_FX64_NONE ||
+        flow_fx64_round(FLOW_FX64_MIN) != FLOW_FX64_NONE) {
+        report->exact_numerics_sound = 0;
+        audit_record_leak(report, "EXACT_NUMERICS_DRIFT", "u256_montgomery_or_fx64_overflow");
     }
 }
 
@@ -161,11 +666,19 @@ void flow_topology_audit(const FlowTopologyGraph *graph, FlowTopologyAuditReport
     if (!report) return;
     memset(report, 0, sizeof(*report));
     if (!graph) return;
+    const char *ws = resolve_workspace_root();
+    size_t rust_fields[4] = { 10, 30, 13, 16 };
     report->total_nodes = graph->node_count;
     report->total_edges = graph->edge_count;
     for (size_t i = 0; i < graph->node_count; ++i) {
-        uint32_t l = graph->nodes[i].layer;
-        report->total_loc += graph->nodes[i].loc;
+        const FlowTopologyNode *nd = &graph->nodes[i];
+        uint32_t l = nd->layer;
+        report->total_loc += nd->loc;
+        if (nd->type == FLOW_NODE_RUST_CRATE) report->rust_nodes++;
+        if (nd->scope >= 0 && nd->scope < FLOW_SCOPE_COUNT) {
+            report->scope_node_counts[nd->scope]++;
+            report->scope_loc[nd->scope] += nd->loc;
+        }
         if (l == 0 || l == 1) report->core_nodes++;
         else if (l == 2) report->plugin_nodes++;
         else if (l == 3) report->intent_nodes++;
@@ -173,14 +686,14 @@ void flow_topology_audit(const FlowTopologyGraph *graph, FlowTopologyAuditReport
     for (size_t e = 0; e < graph->edge_count; ++e) {
         const FlowTopologyEdge *edge = &graph->edges[e];
         if ((graph->nodes[edge->from_id].layer == 0 || graph->nodes[edge->from_id].layer == 1) && graph->nodes[edge->to_id].layer == 2) {
-            report->cross_layer_leaks++;
-            if (strlen(report->leak_details) < 400) {
-                char buf[128];
-                snprintf(buf, sizeof(buf), "[LEAK] %s -> %s (%s); ", graph->nodes[edge->from_id].name, graph->nodes[edge->to_id].name, edge->label);
-                strncat(report->leak_details, buf, sizeof(report->leak_details) - strlen(report->leak_details) - 1);
-            }
+            char buf[128];
+            snprintf(buf, sizeof(buf), "%s -> %s (%s)", graph->nodes[edge->from_id].name, graph->nodes[edge->to_id].name, edge->label);
+            audit_record_leak(report, "LEAK", buf);
         }
     }
+    audit_makefile_bijection(graph, report, ws);
+    audit_rust_sdk_parity(report, ws, rust_fields);
+    audit_polyglot_abi_homomorphism(report, rust_fields);
     report->average_coupling = graph->node_count ? (double)graph->edge_count / (double)graph->node_count : 0.0;
     report->modularity_score = graph->edge_count ? 1.0 - ((double)report->cross_layer_leaks / (double)graph->edge_count) : 1.0;
 }

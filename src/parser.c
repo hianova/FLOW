@@ -1939,48 +1939,82 @@ int parse_spec(FILE *input, FlowSpec *spec) {
             strncpy(bpath, trim(line + 5), sizeof(bpath) - 1);
             strip_quotes(bpath);
             FILE *lfp = open_bound_lean_file(input, bpath);
-            FlowSpec lspec; memset(&lspec, 0, sizeof(lspec));
-            if (!lfp || !parse_lean_spec(lfp, &lspec)) {
+            FlowSpec *lspec = calloc(1, sizeof(FlowSpec));
+            if (!lfp || !lspec || !parse_lean_spec(lfp, lspec)) {
                 if (lfp) fclose(lfp);
+                free(lspec);
                 fprintf(stderr, "flowc: failed to bind Lean kernel '%s' at line %d\n", bpath, line_number);
                 parse_error = 1; continue;
             }
             fclose(lfp);
-            FlowSpec prev = *spec;
-            *spec = lspec;
+            FlowSpec *prev = calloc(1, sizeof(FlowSpec));
+            if (!prev) { free(lspec); parse_error = 1; continue; }
+            *prev = *spec;
+            *spec = *lspec;
+            free(lspec);
             strncpy(spec->kernel_source_lean, bpath, FLOW_LINE - 1);
-            if (prev.project_name[0]) strncpy(spec->project_name, prev.project_name, FLOW_NAME - 1);
-            if (prev.flow_name[0]) strncpy(spec->flow_name, prev.flow_name, FLOW_NAME - 1);
-            if (prev.domain_name[0]) strncpy(spec->domain_name, prev.domain_name, FLOW_NAME - 1);
-            if (prev.plugin_name[0]) strncpy(spec->plugin_name, prev.plugin_name, FLOW_NAME - 1);
-            if (prev.resource_name[0]) strncpy(spec->resource_name, prev.resource_name, FLOW_NAME - 1);
-            if (prev.capability_name[0]) strncpy(spec->capability_name, prev.capability_name, FLOW_NAME - 1);
-            if (prev.contract_name[0]) strncpy(spec->contract_name, prev.contract_name, FLOW_NAME - 1);
-            if (prev.fallback_policy[0]) strncpy(spec->fallback_policy, prev.fallback_policy, FLOW_NAME - 1);
-            if (prev.sla_latency_ns > 0) spec->sla_latency_ns = prev.sla_latency_ns;
-            if (prev.arena_limit_bytes > 0) spec->arena_limit_bytes = prev.arena_limit_bytes;
-            if (prev.memory_mb > 0) spec->memory_mb = prev.memory_mb;
-            if (prev.qsbr_timeout_ns > 0) spec->qsbr_timeout_ns = prev.qsbr_timeout_ns;
-            if (prev.migrate_fn[0]) strncpy(spec->migrate_fn, prev.migrate_fn, FLOW_NAME - 1);
-            if (prev.reload_from_schema[0]) strncpy(spec->reload_from_schema, prev.reload_from_schema, FLOW_NAME - 1);
-            if (prev.reload_to_schema[0]) strncpy(spec->reload_to_schema, prev.reload_to_schema, FLOW_NAME - 1);
-            if (prev.ingress_driver[0]) strncpy(spec->ingress_driver, prev.ingress_driver, FLOW_NAME - 1);
-            if (prev.egress_driver[0]) strncpy(spec->egress_driver, prev.egress_driver, FLOW_NAME - 1);
-            if (prev.state_schema_version > 1) spec->state_schema_version = prev.state_schema_version;
-            if (prev.jet.enabled) spec->jet = prev.jet;
-            if (prev.jet_coord_count > 0) { spec->jet_coord_count = prev.jet_coord_count; memcpy(spec->jet_coord_names, prev.jet_coord_names, sizeof(spec->jet_coord_names)); }
-            if (prev.thermal.enabled) spec->thermal = prev.thermal;
-            if (prev.constraint_count > 0) { spec->constraint_count = prev.constraint_count; spec->declared_constraint_count = prev.declared_constraint_count; memcpy(spec->constraints, prev.constraints, sizeof(spec->constraints)); }
-            if (prev.patchbay_stage_count > 0) { spec->patchbay_stage_count = prev.patchbay_stage_count; memcpy(spec->patchbay_stages, prev.patchbay_stages, sizeof(spec->patchbay_stages)); }
-            merge_bound_lean_into_spec(spec, &prev);
-            if (prev.flow_node_count > 0) {
-                strncpy(spec->flow_expression, prev.flow_expression, FLOW_LINE - 1);
-                spec->flow_node_count = prev.flow_node_count;
-                memcpy(spec->flow_nodes, prev.flow_nodes, sizeof(spec->flow_nodes));
+            if (prev->project_name[0]) strncpy(spec->project_name, prev->project_name, FLOW_NAME - 1);
+            if (prev->flow_name[0]) strncpy(spec->flow_name, prev->flow_name, FLOW_NAME - 1);
+            if (prev->domain_name[0]) strncpy(spec->domain_name, prev->domain_name, FLOW_NAME - 1);
+            if (prev->plugin_name[0]) strncpy(spec->plugin_name, prev->plugin_name, FLOW_NAME - 1);
+            if (prev->resource_name[0]) strncpy(spec->resource_name, prev->resource_name, FLOW_NAME - 1);
+            if (prev->capability_name[0]) strncpy(spec->capability_name, prev->capability_name, FLOW_NAME - 1);
+            if (prev->contract_name[0]) strncpy(spec->contract_name, prev->contract_name, FLOW_NAME - 1);
+            if (prev->fallback_policy[0]) strncpy(spec->fallback_policy, prev->fallback_policy, FLOW_NAME - 1);
+            if (prev->extern_kernel[0]) strncpy(spec->extern_kernel, prev->extern_kernel, FLOW_NAME - 1);
+            if (prev->input_name[0] && strcmp(prev->input_name, "lean_stream") != 0) strncpy(spec->input_name, prev->input_name, FLOW_NAME - 1);
+            if (prev->max_count > 0 && prev->max_count != 1024) spec->max_count = prev->max_count;
+            if (prev->input_stride_bytes > 0) spec->input_stride_bytes = prev->input_stride_bytes;
+            if (prev->input_align_bytes > 0) spec->input_align_bytes = prev->input_align_bytes;
+            if (prev->sample_count > 0) { spec->sample_count = prev->sample_count; memcpy(spec->samples, prev->samples, sizeof(spec->samples)); }
+            if (prev->output_name[0]) strncpy(spec->output_name, prev->output_name, FLOW_NAME - 1);
+            if (prev->output_type[0]) strncpy(spec->output_type, prev->output_type, FLOW_NAME - 1);
+            if (prev->top_n > 0) spec->top_n = prev->top_n;
+            if (prev->state_name[0]) strncpy(spec->state_name, prev->state_name, FLOW_NAME - 1);
+            if (prev->shared) spec->shared = 1;
+            if (prev->read_heavy) spec->read_heavy = 1;
+            if (prev->bounded) spec->bounded = 1;
+            if (prev->deterministic) spec->deterministic = 1;
+            if (prev->lean_certified) spec->lean_certified = 1;
+            if (prev->prefer_latency) spec->prefer_latency = 1;
+            if (prev->ensure_count > 0) spec->ensure_count += prev->ensure_count;
+            for (size_t sfi = 0; sfi < prev->state_field_count && spec->state_field_count < FLOW_FIELD_MAX; ++sfi) {
+                int dup_sf = 0;
+                for (size_t di = 0; di < spec->state_field_count; ++di)
+                    if (!strcmp(spec->state_fields[di].name, prev->state_fields[sfi].name)) { dup_sf = 1; break; }
+                if (!dup_sf) spec->state_fields[spec->state_field_count++] = prev->state_fields[sfi];
+            }
+            for (size_t im = 0; im < prev->imported_module_count && spec->imported_module_count < 8; ++im) {
+                int dup_im = 0;
+                for (size_t dm = 0; dm < spec->imported_module_count; ++dm)
+                    if (!strcmp(spec->imported_modules[dm], prev->imported_modules[im])) { dup_im = 1; break; }
+                if (!dup_im) strncpy(spec->imported_modules[spec->imported_module_count++], prev->imported_modules[im], FLOW_NAME - 1);
+            }
+            if (prev->sla_latency_ns > 0) spec->sla_latency_ns = prev->sla_latency_ns;
+            if (prev->arena_limit_bytes > 0) spec->arena_limit_bytes = prev->arena_limit_bytes;
+            if (prev->memory_mb > 0) spec->memory_mb = prev->memory_mb;
+            if (prev->qsbr_timeout_ns > 0) spec->qsbr_timeout_ns = prev->qsbr_timeout_ns;
+            if (prev->migrate_fn[0]) strncpy(spec->migrate_fn, prev->migrate_fn, FLOW_NAME - 1);
+            if (prev->reload_from_schema[0]) strncpy(spec->reload_from_schema, prev->reload_from_schema, FLOW_NAME - 1);
+            if (prev->reload_to_schema[0]) strncpy(spec->reload_to_schema, prev->reload_to_schema, FLOW_NAME - 1);
+            if (prev->ingress_driver[0]) strncpy(spec->ingress_driver, prev->ingress_driver, FLOW_NAME - 1);
+            if (prev->egress_driver[0]) strncpy(spec->egress_driver, prev->egress_driver, FLOW_NAME - 1);
+            if (prev->state_schema_version > 1) spec->state_schema_version = prev->state_schema_version;
+            if (prev->jet.enabled) spec->jet = prev->jet;
+            if (prev->jet_coord_count > 0) { spec->jet_coord_count = prev->jet_coord_count; memcpy(spec->jet_coord_names, prev->jet_coord_names, sizeof(spec->jet_coord_names)); }
+            if (prev->thermal.enabled) spec->thermal = prev->thermal;
+            if (prev->constraint_count > 0) { spec->constraint_count = prev->constraint_count; spec->declared_constraint_count = prev->declared_constraint_count; memcpy(spec->constraints, prev->constraints, sizeof(spec->constraints)); }
+            if (prev->patchbay_stage_count > 0) { spec->patchbay_stage_count = prev->patchbay_stage_count; memcpy(spec->patchbay_stages, prev->patchbay_stages, sizeof(spec->patchbay_stages)); }
+            merge_bound_lean_into_spec(spec, prev);
+            if (prev->flow_node_count > 0) {
+                strncpy(spec->flow_expression, prev->flow_expression, FLOW_LINE - 1);
+                spec->flow_node_count = prev->flow_node_count;
+                memcpy(spec->flow_nodes, prev->flow_nodes, sizeof(spec->flow_nodes));
                 flow_nodes_from_bind = 0;
             } else {
                 flow_nodes_from_bind = 1;
             }
+            free(prev);
             continue;
         }
         if (!strcmp(line, "require {") || !strcmp(line, "@quota {") || !strcmp(line, "quota {") || starts_with(line, "@quota ") || starts_with(line, "quota ")) { section = SECTION_REQUIRE; continue; }
@@ -2178,24 +2212,30 @@ int parse_spec(FILE *input, FlowSpec *spec) {
                     }
                     if (parse_error || !bpath[0]) { parse_error = 1; break; }
                     FILE *lfp = open_bound_lean_file(input, bpath);
-                    FlowSpec st_spec; memset(&st_spec, 0, sizeof(st_spec));
-                    if (!lfp || !parse_lean_spec(lfp, &st_spec)) {
+                    FlowSpec *st_spec = calloc(1, sizeof(FlowSpec));
+                    if (!lfp || !st_spec || !parse_lean_spec(lfp, st_spec)) {
                         if (lfp) fclose(lfp);
+                        free(st_spec);
                         fprintf(stderr, "flowc: failed to bind patchbay stage '%s' Lean kernel '%s' at line %d\n", sname, bpath, line_number);
                         parse_error = 1; break;
                     }
                     fclose(lfp);
-                    merge_bound_lean_into_spec(spec, &st_spec);
-                    const FlowLeanFunction *picked_fn = NULL;
+                    merge_bound_lean_into_spec(spec, st_spec);
+                    FlowLeanFunction picked_fn_val = {0};
+                    int has_picked_fn = 0;
                     if (fn_nm[0]) {
-                        for (size_t fi = 0; fi < st_spec.lean_function_count; ++fi)
-                            if (!strcmp(st_spec.lean_functions[fi].name, fn_nm)) { picked_fn = &st_spec.lean_functions[fi]; break; }
+                        for (size_t fi = 0; fi < st_spec->lean_function_count; ++fi)
+                            if (!strcmp(st_spec->lean_functions[fi].name, fn_nm)) { picked_fn_val = st_spec->lean_functions[fi]; has_picked_fn = 1; break; }
                     } else {
-                        for (size_t fi = st_spec.lean_function_count; fi > 0; --fi)
-                            if (st_spec.lean_functions[fi - 1].is_struct_transform) { picked_fn = &st_spec.lean_functions[fi - 1]; break; }
-                        if (!picked_fn && st_spec.lean_function_count > 0)
-                            picked_fn = &st_spec.lean_functions[st_spec.lean_function_count - 1];
+                        for (size_t fi = st_spec->lean_function_count; fi > 0; --fi)
+                            if (st_spec->lean_functions[fi - 1].is_struct_transform) { picked_fn_val = st_spec->lean_functions[fi - 1]; has_picked_fn = 1; break; }
+                        if (!has_picked_fn && st_spec->lean_function_count > 0) {
+                            picked_fn_val = st_spec->lean_functions[st_spec->lean_function_count - 1];
+                            has_picked_fn = 1;
+                        }
                     }
+                    free(st_spec);
+                    const FlowLeanFunction *picked_fn = has_picked_fn ? &picked_fn_val : NULL;
                     if (!picked_fn) { parse_error = 1; break; }
                     FlowPatchbayStage *stg = &spec->patchbay_stages[spec->patchbay_stage_count++];
                     memset(stg, 0, sizeof(*stg));

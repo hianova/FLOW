@@ -2,7 +2,6 @@
 #define FLOW_JET_H
 #include "flow.h"
 #include "bitspace.h"
-#include "flowy_fvec.h"
 #include "smt.h"
 #include "cubical_hott.h"
 #include <stddef.h>
