@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-# FLOW One-Line Installer (Zero-dependency pure C build)
+# FLOW One-Line Installer
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/hianova/FLOW/main/tools/install.sh | sh
 # Or locally:
@@ -9,15 +9,19 @@ set -eu
 
 PREFIX="${PREFIX:-$HOME/.local}"
 BINDIR="$PREFIX/bin"
+LIBDIR="$PREFIX/lib"
 INCLUDEDIR="$PREFIX/include/flow"
 
 CC="${CC:-clang}"
 if ! command -v "$CC" >/dev/null 2>&1; then
     CC="gcc"
 fi
+if ! command -v "$CC" >/dev/null 2>&1; then
+    CC="cc"
+fi
 
 if ! command -v "$CC" >/dev/null 2>&1; then
-    echo "Error: C compiler (clang or gcc) is required to build FLOW." >&2
+    echo "Error: C compiler (clang, gcc, or cc) is required to build FLOW." >&2
     exit 1
 fi
 
@@ -36,30 +40,72 @@ else
     SRCDIR="$TMPDIR/flow"
 fi
 
-echo "Building FLOW compiler (flowc) using $CC..."
-mkdir -p "$TMPDIR/build"
-CORE_SRCS=$(find "$SRCDIR/src" "$SRCDIR/plugins" -name "*.c" ! -name "flowc.c" ! -name "flowy_main.c")
-"$CC" -std=c17 -Wall -Wextra -Wpedantic -O3 -pthread -I"$SRCDIR/src" -I"$SRCDIR/plugins" \
-    $CORE_SRCS "$SRCDIR/src/flowc.c" -o "$TMPDIR/build/flowc" -lm
+echo "=========================================================="
+echo "  Installing FLOW to $PREFIX"
+echo "  Compiler: $CC ($(command -v "$CC"))"
+echo "=========================================================="
 
-echo "Building FLOW introspective assistant (flowy) using $CC..."
-"$CC" -std=c17 -Wall -Wextra -Wpedantic -O3 -pthread -I"$SRCDIR/src" -I"$SRCDIR/plugins" \
-    $CORE_SRCS "$SRCDIR/src/flowy_main.c" -o "$TMPDIR/build/flowy" -lm
+if [ "${FLOW_NO_MAKE:-0}" != "1" ] && command -v make >/dev/null 2>&1 && [ -f "$SRCDIR/Makefile" ]; then
+    echo "Building and installing via Makefile..."
+    make -C "$SRCDIR" CC="$CC" PREFIX="$PREFIX" install
+else
+    echo "Building FLOW core libraries and binaries using $CC..."
+    mkdir -p "$TMPDIR/build/obj"
+    mkdir -p "$BINDIR" "$LIBDIR" "$INCLUDEDIR"
 
-echo "Installing flowc and flowy to $BINDIR..."
-mkdir -p "$BINDIR"
-install -m 755 "$TMPDIR/build/flowc" "$BINDIR/flowc"
-install -m 755 "$TMPDIR/build/flowy" "$BINDIR/flowy"
+    # Core library sources (exclude entrypoints flowc, flowy_main, and flowy)
+    CORE_SRCS="src/abi.c src/backend.c src/bitspace.c src/cubical_hott.c src/flow_jet.c src/parser.c src/registry.c src/reload.c"
+    
+    for src in $CORE_SRCS; do
+        obj="$TMPDIR/build/obj/$(basename "$src" .c).o"
+        "$CC" -std=c17 -Wall -Wextra -Wpedantic -O2 -pthread -I"$SRCDIR/src" -I"$SRCDIR/plugins" -c "$SRCDIR/$src" -o "$obj"
+    done
 
-mkdir -p "$INCLUDEDIR"
-install -m 644 "$SRCDIR"/src/*.h "$SRCDIR"/plugins/*.h "$INCLUDEDIR/"
+    # Archive libflow.a
+    AR="${AR:-ar}"
+    RANLIB="${RANLIB:-ranlib}"
+    "$AR" rcs "$LIBDIR/libflow.a" $TMPDIR/build/obj/*.o
+    "$RANLIB" "$LIBDIR/libflow.a"
+
+    # Archive libflow_rt.a (flow_jet, reload, cubical_hott)
+    "$AR" rcs "$LIBDIR/libflow_rt.a" \
+        "$TMPDIR/build/obj/flow_jet.o" \
+        "$TMPDIR/build/obj/reload.o" \
+        "$TMPDIR/build/obj/cubical_hott.o"
+    "$RANLIB" "$LIBDIR/libflow_rt.a"
+
+    # Build flowc
+    "$CC" -std=c17 -Wall -Wextra -Wpedantic -O2 -pthread -I"$SRCDIR/src" -I"$SRCDIR/plugins" \
+        "$SRCDIR/src/flowc.c" "$LIBDIR/libflow.a" -o "$BINDIR/flowc" -lm
+
+    # Build flowy
+    "$CC" -std=c17 -Wall -Wextra -Wpedantic -O2 -pthread -I"$SRCDIR/src" -I"$SRCDIR/plugins" \
+        "$SRCDIR/src/flowy_main.c" "$SRCDIR/src/flowy.c" "$LIBDIR/libflow.a" -o "$BINDIR/flowy" -lm
+
+    # Headers
+    install -m 644 "$SRCDIR"/src/*.h "$SRCDIR"/plugins/*.h "$INCLUDEDIR/"
+fi
 
 echo ""
 echo "=========================================================="
-echo "  FLOW Toolchain (flowc + flowy) successfully installed!"
-echo "  Binaries: $BINDIR/flowc, $BINDIR/flowy"
+echo "  FLOW Toolchain successfully installed!"
+echo "  Binaries: $BINDIR/flowc"
+echo "            $BINDIR/flowy"
+echo "  Libraries: $LIBDIR/libflow.a"
+echo "             $LIBDIR/libflow_rt.a"
 echo "  Headers:  $INCLUDEDIR"
 echo "=========================================================="
+echo ""
+
+# Verify installed binaries
+if [ -x "$BINDIR/flowc" ]; then
+    echo "Verifying flowc binary:"
+    "$BINDIR/flowc" --version || true
+fi
+if [ -x "$BINDIR/flowy" ]; then
+    echo "Verifying flowy binary:"
+    "$BINDIR/flowy" --version || true
+fi
 echo ""
 
 # Check if BINDIR is in PATH

@@ -31,18 +31,21 @@ INCLUDEDIR ?= $(PREFIX)/include/flow
 
 all: $(LIBFLOW_A) $(LIBFLOW_RT_A) $(FLOWC) $(FLOWY) plugins
 
-install: $(FLOWC) $(FLOWY) $(LIBFLOW_A) $(LIBFLOW_RT_A)
+install: $(FLOWC) $(FLOWY) $(LIBFLOW_A) $(LIBFLOW_RT_A) plugins
 	mkdir -p $(DESTDIR)$(BINDIR)
 	install -m 755 $(FLOWC) $(DESTDIR)$(BINDIR)/flowc
 	install -m 755 $(FLOWY) $(DESTDIR)$(BINDIR)/flowy
 	mkdir -p $(DESTDIR)$(PREFIX)/lib
 	install -m 644 $(LIBFLOW_A) $(DESTDIR)$(PREFIX)/lib/libflow.a
 	install -m 644 $(LIBFLOW_RT_A) $(DESTDIR)$(PREFIX)/lib/libflow_rt.a
+	mkdir -p $(DESTDIR)$(PREFIX)/lib/flow
+	install -m 755 $(PLUGINS_SO) $(DESTDIR)$(PREFIX)/lib/flow/
 	mkdir -p $(DESTDIR)$(INCLUDEDIR)
 	install -m 644 src/*.h plugins/*.h $(DESTDIR)$(INCLUDEDIR)
 
 uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/flowc $(DESTDIR)$(BINDIR)/flowy $(DESTDIR)$(PREFIX)/lib/libflow.a $(DESTDIR)$(PREFIX)/lib/libflow_rt.a
+	rm -rf $(DESTDIR)$(PREFIX)/lib/flow
 	rm -rf $(DESTDIR)$(INCLUDEDIR)
 
 $(BUILD_DIR):

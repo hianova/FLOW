@@ -21,8 +21,8 @@ static inline unsigned flow_dimension_bits(const FlowPlanDimension *dim) {
     unsigned b = 1; while (((uint64_t)1 << b) <= span && b < 64) ++b;
     return b;
 }
-typedef struct { size_t count; uint64_t values[FLOW_DIMENSION_MAX]; } FlowPlanAssignment;
-typedef struct { size_t capacity, threads, shards, memory_bytes; double latency_score, throughput_score, energy; } FlowPlanMetrics;
+typedef struct FlowPlanAssignment { size_t count; uint64_t values[FLOW_DIMENSION_MAX]; } FlowPlanAssignment;
+typedef struct FlowPlanMetrics { size_t capacity, threads, shards, memory_bytes; double latency_score, throughput_score, energy; } FlowPlanMetrics;
 typedef enum { VERIFIER_PROVEN, VERIFIER_RUNTIME_CHECK, VERIFIER_COMPILE_ERROR } VerificationStatus;
 typedef struct FlowVerificationReport { VerificationStatus status; size_t capacity, estimated_bytes; int max_count_proven, runtime_input_guard; char message[128]; } VerificationReport;
 static inline const char *verification_status_name(VerificationStatus s) {
