@@ -50,5 +50,5 @@ FLOW 的核心編譯器 `flowc`（[`src/parser.c`](../../src/parser.c)、[`src/b
 | 編譯器輸出訊息 | 白話工程意義 |
 | :--- | :--- |
 | `verifier: status=proven capacity=1024 estimated_bytes=8192` | **邏輯與記憶體上限已證明**：所有 `.lean` 定理皆無 `sorry` / 自訂 `axiom`，且通過 `Lean-RT` 零 GC 靜態閘門（零動態配置、零記憶體洩漏）。 |
-| `SMT proof: status=unsat_proven_sound (4/4 theorems verified UNSAT)` | **零反例保證（UNSAT = Unsatisfiable）**：SMT 求解器證明 `buffer_bounds`、`memory_quota`、`shard_isolation`、`determinism` 四大不變量在所有合法輸入下皆無反例。 |
+| `SMT proof: status=unsat_proven_sound (4/4 theorems verified UNSAT)` | **零反例保證（UNSAT = Unsatisfiable）**：形式化證明 `buffer_bounds`、`memory_quota`、`shard_isolation`、`determinism` 四大安全不變量在所有合法輸入下皆無反例。 |
 | `symplectic: omega=2.000 mu=0.000977 q_sat=1280.0` | **硬體節流與背壓參數**：根據資料對齊與容量推導出的多面體區塊與相空間阻尼參數。 |

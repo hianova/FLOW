@@ -1,6 +1,6 @@
-# 第五章：顯式 C17 執行期 (`libflow_rt.a`)：無鎖 SPSC、接觸噴流束 (.fjet)、架構記憶 (.fvec) 與 QSBR 熱替換
+# 第五章：極致低延遲執行期 (`libflow_rt.a`)：無鎖 SPSC、2-Jet 自動微分與 QSBR 熱重載 (Minimal RT Runtime)
 
-> **給開發者的白話翻譯**：`libflow_rt.a` 只提供乾淨、透明、零黑盒的 C17 硬實時原語（[`flow_spsc.h`](../../src/flow_spsc.h)、[`flow_jet.h`](../../src/flow_jet.h)、[`reload.h`](../../src/reload.h)、[`cubical_hott.h`](../../src/cubical_hott.h)、[`polyhedral.h`](../../src/polyhedral.h)），讓應用層的 C17 程式碼直接顯式初始化與呼叫。
+> **給開發者的白話翻譯**：`libflow_rt.a` 只提供乾淨、透明、零黑盒的 C17 硬實時原語（[`flow_spsc.h`](../../src/flow_spsc.h)、[`flow_jet.h`](../../src/flow_jet.h)、[`reload.h`](../../src/reload.h)、[`cubical_hott.h`](../../src/cubical_hott.h)），讓應用層的 C17 程式碼直接顯式初始化與呼叫。
 
 ---
 
@@ -38,11 +38,9 @@ void control_loop_example(void) {
 
 ---
 
-## 5.3 熱力學接觸噴流束 `.fjet`、具名座標視圖與 `.fvec` 架構記憶庫 (`src/flow_jet.h`, `src/bitspace.h`)
+## 5.3 2-Jet 自動微分算子與具名相空間視圖 (`src/flow_jet.h`)
 
-- **具名相空間視圖（`FLOW_JET_DEFINE_NAMED_VIEW`）**：
-  在 C17 中透過 `FLOW_JET_DEFINE_NAMED_VIEW(ViewType, CoordsStruct)` 即可將 64 維辛幾何噴流束 `FlowJet` 直接映射為零偏移的具名欄位指標（如 `view.q->hipPitch`、`view.p->hipPitch`），並透過 `flow_jet_sanitize_finite(&jet)` 一鍵清除任何 NaN/Inf 異常值。
-- **熱力學接觸流形與硬體週期探針（[`src/flow_jet.c`](../../src/flow_jet.c), [`src/flow.h`](../../src/flow.h)）**：
-  結合跨平台硬體週期計數器（AArch64 `cntvct_el0` / x86_64 `rdtsc`）與 NUMA 拓撲探針，在相空間 $(q, p, \ddot{q})$ 上追蹤熱耗散作用量 $s$ 與 Koopman EDMD 算子學習。
-- **`.fvec` 架構記憶庫與 9-Byte 群體免疫抗體（[`src/bitspace.c`](../../src/bitspace.c)）**：
-  將通過 SMT 驗證的 64-bit 架構基因持久化為帶 CRC32 校驗的 `.fvec` 檔案，並支援 9-byte 抗體封包微秒級跨節點同步。
+- **具名相空間座標視圖（`FLOW_JET_DEFINE_NAMED_VIEW`）**：
+  在 C17 中透過 `FLOW_JET_DEFINE_NAMED_VIEW(ViewType, CoordsStruct)` 即可將 64 維相空間 `FlowJet` 直接映射為零偏移的具名欄位指標（如 `view.q->hipPitch`、`view.p->hipPitch`），並透過 `flow_jet_sanitize_finite(&jet)` 一鍵清除任何 NaN/Inf 異常值。
+- **2-Jet 對偶數二階前向自動微分（`FlowJetScalar2`）**：
+  在純 C17 核心中以對偶數一次性求得零截斷誤差之 $(f(x), f'(x), f''(x))$，供實時最優控制與高頻定價即時使用。

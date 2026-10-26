@@ -460,3 +460,55 @@ static const FlowPlugin BUILTIN_PLUGIN = { .name = "builtin", .version = "1", .c
     .doc_algorithmic_guarantee = "Formal QF_LIA verified sound bounds", .doc_memory_concurrency_model = "Pthread lock-free / QSBR shared memory",
     .doc_key_apis = "flow_component_evaluate, flow_component_verify_plan" };
 const FlowPlugin *flow_builtin_plugin(void) { return &BUILTIN_PLUGIN; }
+
+int verify_candidate(const SemanticIR *ir, const Component *c, const SearchResult *s, VerificationReport *r) {
+    if (!r) return 0;
+    size_t cap = s ? (size_t)s->capacity : (size_t)ir->input_max_count, shd = (s && s->shards > 0) ? (size_t)s->shards : 1, est = 0;
+    *r = (VerificationReport){.capacity = cap};
+    if (ir && ir->fact_lean_certified && ir->hole_count > 0) {
+        r->status = VERIFIER_COMPILE_ERROR;
+        snprintf(r->message, sizeof(r->message), "lean proof gate rejected: %zu unresolved hole(s)", ir->hole_count);
+        return 0;
+    }
+    if (s && s->assignment.count > 0) {
+        if (!flow_component_verify_plan(ir, c, &s->assignment, r)) {
+            r->status = VERIFIER_COMPILE_ERROR;
+            if (!r->message[0]) snprintf(r->message, sizeof(r->message), "plugin verification failed");
+            return 0;
+        }
+        est = r->estimated_bytes;
+        cap = r->capacity;
+    } else {
+        if (!flow_component_memory(ir, c, cap, shd, &est)) {
+            r->status = VERIFIER_COMPILE_ERROR;
+            snprintf(r->message, sizeof(r->message), "plugin memory model failed");
+            return 0;
+        }
+        r->estimated_bytes = est;
+        if (!flow_component_verify(ir, c, cap, shd, r->message, sizeof(r->message))) {
+            r->status = VERIFIER_COMPILE_ERROR;
+            if (!r->message[0]) snprintf(r->message, sizeof(r->message), "plugin verification failed");
+            return 0;
+        }
+    }
+    if (cap == 0 || (size_t)ir->top_n > cap) {
+        r->status = VERIFIER_COMPILE_ERROR;
+        snprintf(r->message, sizeof(r->message), "top_n exceeds selected capacity");
+        return 0;
+    }
+    if (ir->memory_limit_mb > 0 && est > (size_t)ir->memory_limit_mb * 1024u * 1024u) {
+        r->status = VERIFIER_COMPILE_ERROR;
+        snprintf(r->message, sizeof(r->message), "estimated collection memory exceeds memory constraint");
+        return 0;
+    }
+    r->max_count_proven = (size_t)ir->input_max_count <= cap;
+    if (ir->fact_lean_certified && !r->max_count_proven) {
+        r->status = VERIFIER_COMPILE_ERROR;
+        snprintf(r->message, sizeof(r->message), "lean_certified requires compile-time proven input bound (capacity %zu < input_max_count %d)", cap, ir->input_max_count);
+        return 0;
+    }
+    r->runtime_input_guard = !r->max_count_proven;
+    r->status = r->max_count_proven ? VERIFIER_PROVEN : VERIFIER_RUNTIME_CHECK;
+    snprintf(r->message, sizeof(r->message), r->max_count_proven ? (ir->fact_lean_certified ? "lean_certified & input bound proven" : "input bound proven") : "input bound requires runtime guard");
+    return 1;
+}

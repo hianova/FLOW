@@ -3,7 +3,7 @@
 #include "flow.h"
 #include "plugin.h"
 #include "reload.h"
-#include "polyhedral.h"
+#include "cubical_hott.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -68,8 +68,12 @@ static inline uint64_t flow_manifold_transition(uint64_t genome, uint64_t mask, 
 #define FLOW_BMF_SW_PREPLAY_CONE_SAFE  (1ULL << 22)
 #define FLOW_BMF_SW_SWARM_IMMUNITY     (1ULL << 23)
 #define FLOW_BMF_SW_TELEMETRY_BIAS_MASK (0xFFFFFFFF00000000ULL)
+#ifndef FLOW_BMF_1BIT_CANVAS_DEFINED
+#define FLOW_BMF_1BIT_CANVAS_DEFINED
 typedef struct __attribute__((aligned(64))) { uint32_t subspace_id; int32_t is_adjudicated_sound; uint64_t switchboard_bits, invariant_mask, malleable_mask, dynamic_bias;
-    double energy; uint8_t _cacheline_pad[16]; } FlowBmf1BitCanvas; typedef FlowBmf1BitCanvas FlowBmfCanvas;
+    double energy; uint8_t _cacheline_pad[16]; } FlowBmf1BitCanvas;
+#endif
+typedef FlowBmf1BitCanvas FlowBmfCanvas;
 #define FLOW_ATOMIC_STAGE_SWAP(dst, src) do { if ((dst) && (src)) { \
     __atomic_store_n(&((dst)->subspace_id), __atomic_load_n(&((src)->subspace_id), __ATOMIC_RELAXED), __ATOMIC_RELAXED); \
     __atomic_store_n(&((dst)->invariant_mask), __atomic_load_n(&((src)->invariant_mask), __ATOMIC_RELAXED), __ATOMIC_RELAXED); \

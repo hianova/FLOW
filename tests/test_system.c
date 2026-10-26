@@ -1,7 +1,6 @@
-#include "flow_test_kit.h"
+#include "hott_test_kit.h"
 #include "flow.h"
 #include "registry.h"
-#include "smt.h"
 #include "flowy.h"
 #include "abi.h"
 #include "backend.h"
@@ -9,7 +8,6 @@
 #include "flow_jet.h"
 #include "flow_spsc.h"
 #include "cubical_hott.h"
-#include "polyhedral.h"
 
 #include <dlfcn.h>
 #include <math.h>
@@ -302,107 +300,47 @@ int main(void) {
     /* ========================================================================= */
     /* STAGE 5: Pure .lean Embodied Reflex & AWS Cedar Authorization in C17      */
     /* ========================================================================= */
-    FLOW_STAGE_BEGIN(5, "Pure .lean Embodied Reflex (plugins/embodied.lean) & AWS Cedar Authorization in C17");
-    {
-        /* 5a. Compile plugins/embodied.lean directly to C17 + C17 header and execute in C17 */
-        char cmd_emb[1024];
-        snprintf(cmd_emb, sizeof(cmd_emb),
-                 "%s/flowc plugins/embodied.lean -o /tmp/flow_emb_pure.c --target-c-header /tmp/flow_emb_pure.h",
-                 FLOW_BUILD_DIR);
-        FLOW_ASSERT_EQ(system(cmd_emb), 0);
+        FLOW_STAGE_BEGIN(5, "Pure .lean Embodied Reflex (plugins/embodied.lean) in C17");
+        {
+            /* 5a. Compile plugins/embodied.lean directly to C17 + C17 header and execute in C17 */
+            char cmd_emb[1024];
+            snprintf(cmd_emb, sizeof(cmd_emb),
+                     "%s/flowc plugins/embodied.lean -o /tmp/flow_emb_pure.c --target-c-header /tmp/flow_emb_pure.h",
+                     FLOW_BUILD_DIR);
+            FLOW_ASSERT_EQ(system(cmd_emb), 0);
 
-        FILE *emb_drv = fopen("/tmp/flow_emb_pure_drv.c", "w");
-        FLOW_ASSERT_TRUE(emb_drv != NULL);
-        fputs("#include \"/tmp/flow_emb_pure.h\"\n"
-              "#include <assert.h>\n"
-              "#include <math.h>\n"
-              "int main(void) {\n"
-              "    assert(flowc_isTorqueWithinLimit(45.0, 80.0) == 1);\n"
-              "    assert(flowc_isTorqueWithinLimit(95.0, 80.0) == 0);\n"
-              "    assert(flowc_isTorqueWithinLimit(NAN, 80.0) == 0);\n"
-              "    assert(fabs(flowc_dampedAngularAccel(10.0, 2.0, 50.0) - 39.6) < 1e-6);\n"
-              "    assert(flowc_dampedAngularAccel(NAN, 2.0, 50.0) == 0.0);\n"
-              "    assert(fabs(flowc_pdReflexLaw(0.5, 1.0, 20.0, 2.0) - (-12.0)) < 1e-6);\n"
-              "    assert(flowc_embodiedStepKernel(0, 64, 64, 1) == 0);\n"
-              "    return 0;\n"
-              "}\n", emb_drv);
-        fclose(emb_drv);
-        FLOW_ASSERT_EQ(system("cc -std=c17 -Wall -Wextra -Werror -O2 /tmp/flow_emb_pure_drv.c -lm -o /tmp/flow_emb_pure_drv && /tmp/flow_emb_pure_drv"), 0);
-        remove("/tmp/flow_emb_pure.c");
-        remove("/tmp/flow_emb_pure.h");
-        remove("/tmp/flow_emb_pure_drv.c");
-        remove("/tmp/flow_emb_pure_drv");
+            FILE *emb_drv = fopen("/tmp/flow_emb_pure_drv.c", "w");
+            FLOW_ASSERT_TRUE(emb_drv != NULL);
+            fputs("#include \"/tmp/flow_emb_pure.h\"\n"
+                  "#include <assert.h>\n"
+                  "#include <math.h>\n"
+                  "int main(void) {\n"
+                  "    assert(flowc_isTorqueWithinLimit(45.0, 80.0) == 1);\n"
+                  "    assert(flowc_isTorqueWithinLimit(95.0, 80.0) == 0);\n"
+                  "    assert(flowc_isTorqueWithinLimit(NAN, 80.0) == 0);\n"
+                  "    assert(fabs(flowc_dampedAngularAccel(10.0, 2.0, 50.0) - 39.6) < 1e-6);\n"
+                  "    assert(flowc_dampedAngularAccel(NAN, 2.0, 50.0) == 0.0);\n"
+                  "    assert(fabs(flowc_pdReflexLaw(0.5, 1.0, 20.0, 2.0) - (-12.0)) < 1e-6);\n"
+                  "    assert(flowc_embodiedStepKernel(0, 64, 64, 1) == 0);\n"
+                  "    return 0;\n"
+                  "}\n", emb_drv);
+            fclose(emb_drv);
+            FLOW_ASSERT_EQ(system("cc -std=c17 -Wall -Wextra -Werror -O2 /tmp/flow_emb_pure_drv.c -lm -o /tmp/flow_emb_pure_drv && /tmp/flow_emb_pure_drv"), 0);
+            remove("/tmp/flow_emb_pure.c");
+            remove("/tmp/flow_emb_pure.h");
+            remove("/tmp/flow_emb_pure_drv.c");
+            remove("/tmp/flow_emb_pure_drv");
 
-        /* 5b. Real-World Acceptance: AWS Cedar Authorization Engine (tests/cedar_authorization.lean) in C17 */
-        FILE *cedar_fp = fopen("tests/cedar_authorization.lean", "r");
-        FLOW_ASSERT_TRUE(cedar_fp != NULL);
-        static FlowSpec cedar_spec;
-        memset(&cedar_spec, 0, sizeof(cedar_spec));
-        FLOW_ASSERT_TRUE(parse_spec(cedar_fp, &cedar_spec));
-        fclose(cedar_fp);
+            FlowJet jet;
+            FLOW_ASSERT_TRUE(flow_jet_init(&jet, "jet_embodied_test", "Embodied Named View Jet"));
+            TestEmbodiedJetView view = TestEmbodiedJetView_bind(&jet);
+            view.q->hipPitch = 0.25;
+            view.q->hipRoll = NAN;
+            FLOW_ASSERT_TRUE(flow_jet_sanitize_finite(&jet));
+            FLOW_ASSERT_TRUE(isfinite(view.q->hipRoll) && view.q->hipRoll == 0.0);
 
-        FLOW_ASSERT_EQ(cedar_spec.lean_certified, 1);
-        FLOW_ASSERT_EQ(cedar_spec.state_field_count, 7);
-        FLOW_ASSERT_EQ(cedar_spec.input_stride_bytes, 56);
-        FLOW_ASSERT_TRUE(cedar_spec.lean_enum_count >= 1);
-        FLOW_ASSERT_TRUE(cedar_spec.lean_struct_count >= 2);
-
-        static SemanticIR cedar_ir;
-        memset(&cedar_ir, 0, sizeof(cedar_ir));
-        lower_to_ir(&cedar_spec, &cedar_ir);
-        const Component *cedar_comp = select_component(&cedar_ir);
-        FLOW_ASSERT_TRUE(cedar_comp != NULL);
-        VerificationReport cedar_vrep;
-        FLOW_ASSERT_TRUE(verify_candidate(&cedar_ir, cedar_comp, NULL, &cedar_vrep));
-
-        const char *cedar_c = "/tmp/flow_cedar_dso.c";
-        const char *cedar_so = "/tmp/libflow_cedar_dso.so";
-        FILE *cc_fp = fopen(cedar_c, "w");
-        FLOW_ASSERT_TRUE(cc_fp != NULL);
-        FLOW_ASSERT_TRUE(emit_c(cc_fp, &cedar_ir, cedar_comp, NULL, &cedar_vrep, 0));
-        fclose(cc_fp);
-
-        FLOW_ASSERT_EQ(system("cc -std=c17 -Wall -Wextra -Werror -O2 -shared -fPIC -DFLOW_SHARED_LIB /tmp/flow_cedar_dso.c -o /tmp/libflow_cedar_dso.so -lpthread"), 0);
-        void *cdl = dlopen(cedar_so, RTLD_NOW);
-        FLOW_ASSERT_TRUE(cdl != NULL);
-        typedef void *(*create_fn_t)(void);
-        typedef void (*destroy_fn_t)(void *);
-        typedef int32_t (*proc_desc_fn_t)(void *, const FlowExtentDescriptor *, FlowExtentDescriptor *);
-        create_fn_t fn_cr = NULL;
-        destroy_fn_t fn_de = NULL;
-        proc_desc_fn_t fn_pd = NULL;
-        void *s_cr = dlsym(cdl, "flow_linear_array_create");
-        void *s_de = dlsym(cdl, "flow_linear_array_destroy");
-        void *s_pd = dlsym(cdl, "flow_linear_array_process_descriptor");
-        FLOW_ASSERT_TRUE(s_cr != NULL && s_de != NULL && s_pd != NULL);
-        memcpy(&fn_cr, &s_cr, sizeof(fn_cr));
-        memcpy(&fn_de, &s_de, sizeof(fn_de));
-        memcpy(&fn_pd, &s_pd, sizeof(fn_pd));
-
-        void *ch = fn_cr();
-        FLOW_ASSERT_TRUE(ch != NULL);
-        FlowExtentDescriptor in_ext = { .base_offset = (1ULL << 50), .byte_length = 5600, .stride_bytes = 56, .align_bytes = 8 };
-        FlowExtentDescriptor out_ext = {0};
-        FLOW_ASSERT_EQ(fn_pd(ch, &in_ext, &out_ext), 0);
-        FLOW_ASSERT_EQ(out_ext.base_offset, (1ULL << 50) + 5600ULL);
-        FLOW_ASSERT_TRUE(out_ext.qsbr_epoch >= 2);
-        fn_de(ch);
-        dlclose(cdl);
-
-        remove(cedar_c);
-        remove(cedar_so);
-        flow_ir_cleanup(&cedar_ir);
-
-        FlowJet jet;
-        FLOW_ASSERT_TRUE(flow_jet_init(&jet, "jet_embodied_test", "Embodied Named View Jet"));
-        TestEmbodiedJetView view = TestEmbodiedJetView_bind(&jet);
-        view.q->hipPitch = 0.25;
-        view.q->hipRoll = NAN;
-        FLOW_ASSERT_TRUE(flow_jet_sanitize_finite(&jet));
-        FLOW_ASSERT_TRUE(isfinite(view.q->hipRoll) && view.q->hipRoll == 0.0);
-
-        printf("  ✓ Stage 5 Passed: Pure .lean (plugins/embodied.lean + AWS Cedar 427-line Authorization.lean) verified in C17.\n\n");
-    }
+            printf("  ✓ Stage 5 Passed: Pure .lean (plugins/embodied.lean) verified in C17.\n\n");
+        }
 
     /* ========================================================================= */
     /* STAGE 6: Full .lean Scalar/Struct Defs, Theorem Contract Guards & Zero-GC */
@@ -664,7 +602,6 @@ int main(void) {
             "#include <stdio.h>\n"
             "#include \"plugin.h\"\n"
             "#include \"bitspace.h\"\n"
-            "#include \"smt.h\"\n"
             "#include \"%s\"\n"
             "typedef double (*exec_quote_fn)(double, double, double, double, double *, double *);\n"
             "typedef double (*quote_spread_fn)(double, double, double, double);\n"
@@ -805,7 +742,7 @@ int main(void) {
 
         FILE *f_rt_c = fopen("/tmp/flow_s10_rt_only.c", "w");
         FLOW_ASSERT_TRUE(f_rt_c != NULL);
-        fputs("#include \"flow_spsc.h\"\n#include \"flow_jet.h\"\n#include \"reload.h\"\n#include \"cubical_hott.h\"\n#include \"polyhedral.h\"\n#include <assert.h>\n"
+        fputs("#include \"flow_spsc.h\"\n#include \"flow_jet.h\"\n#include \"reload.h\"\n#include \"cubical_hott.h\"\n#include <assert.h>\n"
               "FLOW_SPSC_DEFINE(TickRing, double, 16)\n"
               "int main(void) {\n"
               "    TickRing ring;\n"

@@ -1,31 +1,18 @@
 #ifndef FLOW_CUBICAL_HOTT_H
 #define FLOW_CUBICAL_HOTT_H
+
+#include "flow.h"
+#include "plugin.h"
 #include "bitspace.h"
-#include "smt.h"
-#include "polyhedral.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdatomic.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-typedef struct FlowJet FlowJet;
-typedef struct FlowThermalState {
-    double temp_c, temp_ambient_c, dtemp_dt, r_thermal, c_thermal, temp_throttle_c, temp_target_c, active_power_w; uint64_t throttle_events; uint8_t is_throttled, reserved[7];
-} FlowThermalState;
-#define FLOW_AXIOM_DIM 64
-#define FLOW_AXIOM_LATTICE_DIM 4
-typedef struct FlowUnifiedSection FlowUnifiedSection;
-struct __attribute__((aligned(64))) FlowUnifiedSection { double q[FLOW_AXIOM_DIM], p[FLOW_AXIOM_DIM], a[FLOW_AXIOM_DIM];
-    double s, transversality_margin; int64_t lattice_idx[FLOW_AXIOM_LATTICE_DIM]; uint32_t optimal_tile_size, optimal_simd_width;
-    uint64_t total_lattice_points, bmf_subspace_mask; FlowBmf1BitCanvas bmf_canvas; double curvature_spectrum[FLOW_AXIOM_DIM]; FlowThermalState thermal;
-    FlowSMTProofAttestation proof; uint64_t cubical_sieve; uint8_t kan_homotopy_status, omega_classifier_bit; uint32_t crc32; uint8_t is_transversal, is_compact, reserved[16]; };
-FlowUnifiedSection *flow_axiom_create(const char *intent); void flow_axiom_destroy(FlowUnifiedSection *sec);
-int flow_axiom_init(FlowUnifiedSection *sec, const char *intent); int flow_axiom_eval_transversality(FlowUnifiedSection *sec, const FlowPolyhedron *poly);
-int flow_axiom_project_bmf(FlowUnifiedSection *sec); int flow_axiom_step(FlowUnifiedSection *sec, double dt, double p_active_watts);
-int flow_axiom_from_jet(FlowUnifiedSection *sec, const FlowJet *jet); int flow_axiom_to_jet(const FlowUnifiedSection *sec, FlowJet *jet_out);
-int flow_axiom_eval_cubical_homotopy(FlowUnifiedSection *sec, uint64_t target_path, uint64_t boundary_filter);
-FlowSMTResult flow_axiom_verify_smt(const FlowUnifiedSection *sec, FlowSMTProofAttestation *proof_out);
+
 /*
  * ============================================================================
  * FLOW Discrete Cubical Homotopy Type Theory (HoTT) & Grothendieck Topos Engine
@@ -35,29 +22,199 @@ FlowSMTResult flow_axiom_verify_smt(const FlowUnifiedSection *sec, FlowSMTProofA
  * 2. 64-Bit Boundary Basis Sieve: 64 morphisms/dimensions in a single CPU register.
  * 3. Kan Condition & Open-Box Filling: Mismatch = (Mask_p ^ Mask_q) & BoundaryFilter == 0.
  * 4. Subobject Classifier Omega = 2 = {0, 1}: Hom(X, Omega) ~= Sub(X).
- * 5. Unified Homotopy Type Matching for SemanticIR, Component & Codebase Topology.
+ * 5. Intensional Global Type Universe U_0 & Univalence (A ~= B => A = U_0 B).
  * ============================================================================
  */
+
+#ifndef FLOW_BMF_1BIT_CANVAS_DEFINED
+#define FLOW_BMF_1BIT_CANVAS_DEFINED
+typedef struct __attribute__((aligned(64))) {
+    uint32_t subspace_id;
+    int32_t is_adjudicated_sound;
+    uint64_t switchboard_bits, invariant_mask, malleable_mask, dynamic_bias;
+    double energy;
+    uint8_t _cacheline_pad[16];
+} FlowBmf1BitCanvas;
+_Static_assert(sizeof(FlowBmf1BitCanvas) == 64, "FlowBmf1BitCanvas must be 64 bytes");
+#endif
+
+/* De Morgan Abstract Interval I = {0, 1} */
 typedef uint8_t FlowDeMorganInterval;
 #define FLOW_DEMORGAN_ZERO 0
 #define FLOW_DEMORGAN_ONE  1
 #define FLOW_CUBICAL_MAX_DIM 64
 
+static inline FlowDeMorganInterval flow_demorgan_not(FlowDeMorganInterval i) { return (FlowDeMorganInterval)(1 - (i & 1)); }
+static inline FlowDeMorganInterval flow_demorgan_and(FlowDeMorganInterval a, FlowDeMorganInterval b) { return (FlowDeMorganInterval)((a & 1) & (b & 1)); }
+static inline FlowDeMorganInterval flow_demorgan_or(FlowDeMorganInterval a, FlowDeMorganInterval b) { return (FlowDeMorganInterval)((a & 1) | (b & 1)); }
+
+static inline uint64_t flow_demorgan_word_not(uint64_t w) { return ~w; }
+static inline uint64_t flow_demorgan_word_and(uint64_t w1, uint64_t w2) { return w1 & w2; }
+static inline uint64_t flow_demorgan_word_or(uint64_t w1, uint64_t w2) { return w1 | w2; }
+
+/* Cubical Sieve & Covering */
+typedef struct {
+    uint64_t arrows;
+    uint32_t dimension;
+    uint8_t is_closed, reserved[3];
+} FlowCubicalSieve;
+
+uint64_t flow_cubical_face_proj(uint64_t sieve, uint32_t dim_k, uint8_t endpoint);
+uint64_t flow_cubical_degeneracy(uint64_t sieve, uint32_t dim_k);
+static inline bool flow_cubical_sieve_is_covering(uint64_t sieve, uint64_t target_basis) {
+    return (sieve & target_basis) == target_basis;
+}
+
+/* Kan Open-Box Condition & Homotopy Equivalence */
 typedef enum {
-    FLOW_SIEVE_BIT_EXTENT_ALIGN    = 5,
-    FLOW_SIEVE_BIT_MEMORY_QUOTA    = 6,
-    FLOW_SIEVE_BIT_PARALLEL        = 8,
-    FLOW_SIEVE_BIT_SHARED_STATE    = 10,
-    FLOW_SIEVE_BIT_READ_HEAVY      = 12,
-    FLOW_SIEVE_BIT_UNORDERED       = 23,
-    FLOW_SIEVE_BIT_COLUMNAR_MORPH  = 31,
-    FLOW_SIEVE_BIT_ZERO_COPY_ABI   = 48,
-    FLOW_SIEVE_BIT_BOUNDED_RANGE   = 49,
-    FLOW_SIEVE_BIT_KAN_HOMOTOPY    = 50,
-    FLOW_SIEVE_BIT_TRANSVERSALITY  = 51,
-    FLOW_SIEVE_BIT_DETERMINISTIC   = 52,
+    FLOW_KAN_FILLED_HOMOTOPIC       = 0,
+    FLOW_KAN_OBSTRUCTED_SINGULARITY = 1
+} FlowKanStatus;
+
+typedef struct {
+    uint64_t mask_p, mask_q, boundary_filter, mismatch_mask;
+    FlowKanStatus status;
+} FlowKanBox;
+
+FlowKanStatus flow_kan_check_homotopy(uint64_t mask_p, uint64_t mask_q, uint64_t boundary_filter, uint64_t *mismatch_out);
+
+/* Grothendieck Topos Subobject Classifier Omega = {0, 1} */
+uint8_t flow_topos_classify_subobject(uint64_t subobject_mask, uint64_t ambient_sieve);
+
+/* Cubical Homotopy Type Sieve */
+typedef struct {
+    uint64_t mask;
+    uint64_t boundary_filter;
+} FlowCubicalTypeSieve;
+
+FlowCubicalTypeSieve flow_cubical_sieve_from_ir(const SemanticIR *ir);
+FlowCubicalTypeSieve flow_cubical_sieve_from_component(const Component *comp);
+int flow_cubical_match_types(FlowCubicalTypeSieve intent, FlowCubicalTypeSieve candidate, uint64_t *mismatch_out);
+
+/* Discrete Polytope Boundaries & Geometric Handover */
+#define FLOW_POLY_MAX_DIM 4
+#define FLOW_POLY_MAX_CONSTRAINTS 16
+
+typedef struct {
+    int64_t coeffs[FLOW_POLY_MAX_DIM];
+    int64_t constant;
+} FlowAffineConstraint;
+
+typedef struct {
+    double center[FLOW_POLY_MAX_DIM], hessian[FLOW_POLY_MAX_DIM][FLOW_POLY_MAX_DIM], gradient[FLOW_POLY_MAX_DIM], bound, semi_axes[FLOW_POLY_MAX_DIM];
+    bool is_active;
+} FlowQuadraticConstraint;
+
+typedef struct {
+    size_t dimension, constraint_count;
+    FlowAffineConstraint constraints[FLOW_POLY_MAX_CONSTRAINTS];
+    int64_t lower_bounds[FLOW_POLY_MAX_DIM], upper_bounds[FLOW_POLY_MAX_DIM];
+    size_t quad_constraint_count;
+    FlowQuadraticConstraint quad_constraints[FLOW_POLY_MAX_CONSTRAINTS];
+} FlowPolyhedron;
+
+typedef struct {
+    size_t optimal_tile_size, optimal_simd_width;
+    int64_t total_iterations;
+    bool is_parallelizable, is_bounded;
+    double quadratic_recovered_volume;
+    bool has_quadratic_curvature;
+} FlowPolyhedralSchedule;
+
+int flow_polyhedral_init(FlowPolyhedron *poly, size_t dimension);
+int flow_polyhedral_add_constraint(FlowPolyhedron *poly, const int64_t *coeffs, int64_t constant);
+int flow_polyhedral_add_quadratic_constraint(FlowPolyhedron *poly, const double center[], const double hessian[FLOW_POLY_MAX_DIM][FLOW_POLY_MAX_DIM], const double gradient[], double bound);
+int flow_polyhedral_set_box_bounds(FlowPolyhedron *poly, size_t dim_idx, int64_t lower, int64_t upper);
+int flow_polyhedral_solve_schedule(const FlowPolyhedron *poly, size_t cache_line_bytes, size_t vector_register_bytes, FlowPolyhedralSchedule *schedule_out);
+FlowSMTResult flow_polyhedral_verify_smt(const FlowPolyhedron *poly, const FlowPolyhedralSchedule *sched, FlowSMTProofAttestation *proof_out);
+int flow_cubical_handover_polytope(uint64_t mask_p, uint64_t mask_q, uint64_t boundary_filter, FlowPolyhedron *poly, int64_t offset_out[FLOW_POLY_MAX_DIM]);
+
+#define FLOW_POLYTOPE_MAX_CONSTRAINTS 32
+#define FLOW_POLYTOPE_MAX_DIMS 16
+
+typedef enum { FLOW_CONSTRAINT_LEQ = 0, FLOW_CONSTRAINT_GEQ = 1, FLOW_CONSTRAINT_EQ = 2, FLOW_CONSTRAINT_INTERVAL = 3 } FlowConstraintOp;
+typedef struct { double coefficients[FLOW_POLYTOPE_MAX_DIMS]; FlowConstraintOp op; double rhs_min, rhs_max; char symbolic_tag[64]; } FlowLinearConstraint;
+typedef struct {
+    FlowLinearConstraint constraints[FLOW_POLYTOPE_MAX_CONSTRAINTS];
+    size_t constraint_count, dimension_count;
+    double lower_bounds[FLOW_POLYTOPE_MAX_DIMS], upper_bounds[FLOW_POLYTOPE_MAX_DIMS];
+} FlowPolyhedronSystem;
+
+void flow_polyhedron_init(FlowPolyhedronSystem *poly, size_t dim_count);
+int flow_polyhedron_add_box_bounds(FlowPolyhedronSystem *poly, size_t dim_idx, double min_val, double max_val, const char *tag);
+int flow_polyhedron_add_inequality(FlowPolyhedronSystem *poly, const double *coeffs, FlowConstraintOp op, double bound, const char *tag);
+int flow_polyhedron_from_ir(const SemanticIR *ir, const Component *comp, const FlowPlanDimensionSet *dims, FlowPolyhedronSystem *poly);
+uint64_t flow_polyhedron_project_mask(const FlowPolyhedronSystem *poly, const FlowPlanDimensionSet *dims, uint32_t total_bits);
+int flow_polyhedron_from_affine(const FlowPolyhedron *affine_poly, FlowPolyhedronSystem *poly_out);
+
+#define FLOW_HARDWIRED_MAX_PLANES 64
+#define FLOW_HARDWIRED_MAX_DIM    8
+typedef struct __attribute__((aligned(64))) FlowHardwiredPolyhedralTemplate {
+    double coeffs[FLOW_HARDWIRED_MAX_PLANES][FLOW_HARDWIRED_MAX_DIM]; _Atomic double b_constants[FLOW_HARDWIRED_MAX_PLANES]; _Atomic uint64_t active_mask;
+    _Atomic double translation[FLOW_HARDWIRED_MAX_DIM]; _Atomic double scale[FLOW_HARDWIRED_MAX_DIM]; size_t dimension, total_planes; _Atomic uint64_t generation;
+    uint64_t total_evaluations, total_hot_updates, icache_flushes_avoided;
+} FlowHardwiredPolyhedralTemplate;
+
+typedef struct { bool is_inside; uint64_t violated_mask; double max_violation, projected_x[FLOW_HARDWIRED_MAX_DIM]; } FlowHardwiredEvalResult;
+int flow_hardwired_template_init(FlowHardwiredPolyhedralTemplate *tpl, size_t dimension);
+int flow_hardwired_template_from_polyhedron(FlowHardwiredPolyhedralTemplate *tpl, const FlowPolyhedron *poly);
+int flow_hardwired_eval(FlowHardwiredPolyhedralTemplate *tpl, const double x[FLOW_HARDWIRED_MAX_DIM], FlowHardwiredEvalResult *res_out);
+
+/* Verification Attestation */
+FlowSMTResult flow_cubical_verify_smt(const FlowCubicalSieve *sieve, uint64_t mask_p, uint64_t mask_q, uint64_t boundary_filter, FlowSMTProofAttestation *proof_out);
+
+/* Geometric Section & Fiber Bundle Connection */
+#define FLOW_AXIOM_DIM 64
+#define FLOW_AXIOM_LATTICE_DIM 4
+
+#ifndef FLOW_THERMAL_STATE_DEFINED
+#define FLOW_THERMAL_STATE_DEFINED
+typedef struct FlowThermalState {
+    double temp_c, temp_ambient_c, dtemp_dt, r_thermal, c_thermal, temp_throttle_c, temp_target_c, active_power_w;
+    uint64_t throttle_events;
+    uint8_t is_throttled, reserved[7];
+} FlowThermalState;
+#endif
+
+typedef struct FlowUnifiedSection FlowUnifiedSection;
+struct __attribute__((aligned(64))) FlowUnifiedSection {
+    double q[FLOW_AXIOM_DIM], p[FLOW_AXIOM_DIM], a[FLOW_AXIOM_DIM];
+    double s, transversality_margin;
+    int64_t lattice_idx[FLOW_AXIOM_LATTICE_DIM];
+    uint32_t optimal_tile_size, optimal_simd_width;
+    uint64_t total_lattice_points, bmf_subspace_mask;
+    FlowBmf1BitCanvas bmf_canvas;
+    double curvature_spectrum[FLOW_AXIOM_DIM];
+    FlowThermalState thermal;
+    FlowSMTProofAttestation proof;
+    uint64_t cubical_sieve;
+    uint8_t kan_homotopy_status, omega_classifier_bit;
+    uint32_t crc32;
+    uint8_t is_transversal, is_compact, reserved[16];
+};
+
+int flow_axiom_init(FlowUnifiedSection *sec, const char *intent);
+FlowUnifiedSection *flow_axiom_create(const char *intent);
+void flow_axiom_destroy(FlowUnifiedSection *sec);
+int flow_cubical_holonomy_twist(uint64_t loop_sieve, FlowUnifiedSection *sec);
+int flow_axiom_eval_cubical_homotopy(FlowUnifiedSection *sec, uint64_t target_path, uint64_t boundary_filter);
+
+/* 64-Bit Microarchitecture Axis Dictionary & Semantic Intent */
+typedef enum {
+    FLOW_SIEVE_BIT_EXTENT_ALIGN     = 5,
+    FLOW_SIEVE_BIT_MEMORY_QUOTA     = 6,
+    FLOW_SIEVE_BIT_PARALLEL         = 8,
+    FLOW_SIEVE_BIT_SHARED_STATE     = 10,
+    FLOW_SIEVE_BIT_READ_HEAVY       = 12,
+    FLOW_SIEVE_BIT_UNORDERED        = 23,
+    FLOW_SIEVE_BIT_COLUMNAR_MORPH   = 31,
+    FLOW_SIEVE_BIT_ZERO_COPY_ABI    = 48,
+    FLOW_SIEVE_BIT_BOUNDED_RANGE    = 49,
+    FLOW_SIEVE_BIT_KAN_HOMOTOPY     = 50,
+    FLOW_SIEVE_BIT_TRANSVERSALITY   = 51,
+    FLOW_SIEVE_BIT_DETERMINISTIC    = 52,
     FLOW_SIEVE_BIT_QSBR_EPOCH_LEASE = 61,
-    FLOW_SIEVE_BIT_LEAN_CERTIFIED  = 62
+    FLOW_SIEVE_BIT_LEAN_CERTIFIED   = 62
 } FlowCubicalAxisBit;
 
 #define FLOW_SIEVE_BASE_MASK 0x1FULL
@@ -68,37 +225,38 @@ typedef enum {
      (1ULL << FLOW_SIEVE_BIT_TRANSVERSALITY)| \
      (1ULL << FLOW_SIEVE_BIT_DETERMINISTIC))
 
-static inline FlowDeMorganInterval flow_demorgan_not(FlowDeMorganInterval i) { return (FlowDeMorganInterval)(1 - (i & 1)); }
-static inline FlowDeMorganInterval flow_demorgan_and(FlowDeMorganInterval a, FlowDeMorganInterval b) { return (FlowDeMorganInterval)((a & 1) & (b & 1)); }
-static inline FlowDeMorganInterval flow_demorgan_or(FlowDeMorganInterval a, FlowDeMorganInterval b) { return (FlowDeMorganInterval)((a & 1) | (b & 1)); }
-static inline uint64_t flow_demorgan_word_not(uint64_t w) { return ~w; } static inline uint64_t flow_demorgan_word_and(uint64_t w1, uint64_t w2) { return w1 & w2; }
-static inline uint64_t flow_demorgan_word_or(uint64_t w1, uint64_t w2) { return w1 | w2; } typedef struct { uint64_t arrows; uint32_t dimension;
-    uint8_t is_closed, reserved[3]; } FlowCubicalSieve; uint64_t flow_cubical_face_proj(uint64_t sieve, uint32_t dim_k, uint8_t endpoint);
-uint64_t flow_cubical_degeneracy(uint64_t sieve, uint32_t dim_k);
-static inline bool flow_cubical_sieve_is_covering(uint64_t sieve, uint64_t target_basis) { return (sieve & target_basis) == target_basis; } typedef enum {
-    FLOW_KAN_FILLED_HOMOTOPIC       = 0, FLOW_KAN_OBSTRUCTED_SINGULARITY = 1
-} FlowKanStatus; typedef struct { uint64_t mask_p, mask_q, boundary_filter, mismatch_mask; FlowKanStatus status; } FlowKanBox;
-FlowKanStatus flow_kan_check_homotopy(uint64_t mask_p, uint64_t mask_q, uint64_t boundary_filter, uint64_t *mismatch_out);
-uint8_t flow_topos_classify_subobject(uint64_t subobject_mask, uint64_t ambient_sieve);
-int flow_cubical_handover_polytope(uint64_t mask_p, uint64_t mask_q, uint64_t boundary_filter, FlowPolyhedron *poly, int64_t offset_out[FLOW_POLY_MAX_DIM]);
-int flow_cubical_holonomy_twist(uint64_t loop_sieve, FlowUnifiedSection *sec);
-FlowSMTResult flow_cubical_verify_smt(const FlowCubicalSieve *sieve, uint64_t mask_p, uint64_t mask_q, uint64_t boundary_filter, FlowSMTProofAttestation *proof_out);
-typedef struct { uint64_t mask;            /* 64-bit capability / intent face in I^64 */
-    uint64_t boundary_filter; /* Clamped invariant boundary dimensions */
-} FlowCubicalTypeSieve; FlowCubicalTypeSieve flow_cubical_sieve_from_ir(const SemanticIR *ir); FlowCubicalTypeSieve flow_cubical_sieve_from_component(const Component *comp);
-int flow_cubical_match_types(FlowCubicalTypeSieve intent, FlowCubicalTypeSieve candidate, uint64_t *mismatch_out); typedef enum { FLOW_CUBICAL_SUBSPACE_MEMORY      = 0,
-    FLOW_CUBICAL_SUBSPACE_CONCURRENCY = 1, FLOW_CUBICAL_SUBSPACE_MICROARCH   = 2, FLOW_CUBICAL_SUBSPACE_LAYOUT      = 3, FLOW_CUBICAL_SUBSPACE_PHYSICAL    = 4,
+typedef enum {
+    FLOW_CUBICAL_SUBSPACE_MEMORY      = 0,
+    FLOW_CUBICAL_SUBSPACE_CONCURRENCY = 1,
+    FLOW_CUBICAL_SUBSPACE_MICROARCH   = 2,
+    FLOW_CUBICAL_SUBSPACE_LAYOUT      = 3,
+    FLOW_CUBICAL_SUBSPACE_PHYSICAL    = 4,
     FLOW_CUBICAL_SUBSPACE_SECURITY    = 5
-} FlowCubicalSubspaceType; typedef struct { uint32_t axis_index; FlowCubicalSubspaceType subspace;
-    const char *axis_name, *policy_contract, *module_id, *subspace_name, *canonical_explanation; } FlowCubicalAxisInfo; typedef struct { uint32_t flipped_axis;
-    FlowCubicalSubspaceType subspace; const FlowCubicalAxisInfo *axis_info; uint64_t v_pre, v_post; int is_kan_homotopic;
-    char explanation[512], pre_topology[64], post_topology[64]; } FlowCubicalTransitionReport; const FlowCubicalAxisInfo *flow_cubical_get_axis_info(uint32_t axis_idx);
+} FlowCubicalSubspaceType;
+
+typedef struct {
+    uint32_t axis_index;
+    FlowCubicalSubspaceType subspace;
+    const char *axis_name, *policy_contract, *module_id, *subspace_name, *canonical_explanation;
+} FlowCubicalAxisInfo;
+
+typedef struct {
+    uint32_t flipped_axis;
+    FlowCubicalSubspaceType subspace;
+    const FlowCubicalAxisInfo *axis_info;
+    uint64_t v_pre, v_post;
+    int is_kan_homotopic;
+    char explanation[512], pre_topology[64], post_topology[64];
+} FlowCubicalTransitionReport;
+
+const FlowCubicalAxisInfo *flow_cubical_get_axis_info(uint32_t axis_idx);
 int flow_cubical_decode_transition(uint64_t v_pre, uint64_t v_post, uint32_t explicit_axis, FlowCubicalTransitionReport *report_out);
-uint64_t flow_cubical_project_text_intent(const char *text); uint64_t flow_cubical_get_module_mask(const char *module_id);
+uint64_t flow_cubical_project_text_intent(const char *text);
+uint64_t flow_cubical_get_module_mask(const char *module_id);
 
 /*
  * ============================================================================
- * Intensional Global Type Universe U_0 & Univalence Customs (A ~= B => A = B)
+ * Intensional Global Type Universe U_0 & Univalence Customs (A ~= B => A = U_0 B)
  * ============================================================================
  */
 #define FLOW_HOTT_UNIVERSE_MAX_TYPES 128
@@ -139,4 +297,5 @@ int flow_hott_verify_universe_all(FlowHoTTUniverse *u);
 #ifdef __cplusplus
 }
 #endif
+
 #endif /* FLOW_CUBICAL_HOTT_H */

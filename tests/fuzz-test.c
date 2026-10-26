@@ -3,7 +3,6 @@
 #include "abi.h"
 #include "flow.h"
 #include "registry.h"
-#include "smt.h"
 
 #include <stddef.h>
 #include <stdint.h>

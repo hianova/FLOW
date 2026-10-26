@@ -1,20 +1,20 @@
-# 第四章：形式化最高法院：定理合成硬體合約 `lean_<fn>`、SMT 四大定理與實戰藍圖
+# 第四章：定理湧現為硬體合約：從數學證明到 C17 執行期防護網 (Theorems to C17 Contracts)
 
-FLOW 將 `.lean` 的數學證明直接轉化為 C17 硬體級執行期防線與靜態 SMT 證明。
+FLOW 將 `.lean` 中的數學證明直接轉化為 C17 硬體級執行期防線與靜態不變量驗證。
 
 ---
 
-## 4.1 三層形式化驗證與硬體合約合成機制
+## 4.1 形式化驗證與硬體合約合成機制
 
 1. **結構型定義域前置斷言與定理實質蘊含合約（`structure` `Prop` & `theorem` $\to$ `lean_<fn>`，[`src/parser.c`](../../src/parser.c), [`src/backend.c`](../../src/backend.c)）**：
    - **結構型定義域假設（Structural / Domain Precondition）**：來自輸入 `structure` 內嵌的 `Prop` 欄位（如 `h_wv : w_v ≥ 0`、`h_wa : w_a > 0`）與 `def` 簽名中的依賴證明參數，直接編譯為執行前輸入邊界斷言 `FLOW_LEAN_PRE_GUARD(domain_ok, fallback)`。
    - **定理實質蘊含守衛（Material Implication Guard $P_k(x) \implies Q_k(x, \text{\_ret})$）**：凡是針對算子 `def f` 證明的 `theorem`，其前提 $P_k(x)$ 與結論 $Q_k(x, \text{\_ret})$ 直接編譯為實質蘊含斷言 `FLOW_LEAN_IMPLIES_GUARD(P_k(x), Q_k(x, _ret), fallback)`（即 `if ((P_k(x)) && !(Q_k(x, _ret))) return fallback;`）。
-   - 當多條局部 `theorem`（例如互斥的 `v > 0` 上漲定理與 `v < 0` 下跌定理，或 `inductive` 狀態機的 `no_zombie_order` 定理）針對同一個 `f` 時，所有定理守衛能無縫共存並織成嚴密的執行期防護網，合成出 `lean_f()`（DSO 匯出函數）與 `flowc_lean_f()`（`--target-c-header` 靜態內聯函數）。
-2. **SMT QF_LIA 四大定理與保守多面體看門狗（[`src/smt.c`](../../src/smt.c)）**：
+   - 當多條局部 `theorem`（例如互斥的 `v > 0` 上漲定理與 `v < 0` 下跌定理，或 `inductive` 狀態機的狀態轉移定理）針對同一個 `f` 時，所有定理守衛無縫疊加並織成嚴密的執行期防護網，合成出 `lean_f()`（DSO 匯出函數）與 `flowc_lean_f()`（`--target-c-header` 靜態內聯函數）。
+2. **靜態不變量與多胞形安全看門狗（[`src/flow.h`](../../src/flow.h)）**：
    - 強制檢驗緩衝區邊界（`buffer_bounds_safety`）、記憶體配額（`memory_quota_bound`）、分片無別名正交（`shard_non_aliasing`）與決定論不變量（`determinism_invariant`）。
-   - 支援微秒級預算之保守多面體區間包絡線快速驗證（`flow_smt_verify_with_budget`）與插件能力安全閘門（`flow_security_check_composition_gate`）。
+   - 支援微秒級預算之保守多胞形區間包絡線快速驗證（`flow_smt_verify_with_budget`）與安全閘門。
 3. **Lean 4 形式化證書自舉審計（[`src/abi.c`](../../src/abi.c)）**：
-   - `flowc --target-lean <cert.lean>` 自動輸出涵蓋 12 條系統安全定理（緩衝區邊界、記憶體配額、QSBR 世代單調性、Kan Open-Box 同倫、雙軌差分神諭等）的 Lean 4 證書，並透過 `flow_abi_verify_lean_certificate` 驗證零 `sorry` 與 `lean` 編譯器類型檢查。
+   - `flowc --target-lean <cert.lean>` 自動輸出涵蓋系統安全定理的 Lean 4 形式化證書，並透過 `flow_abi_verify_lean_certificate` 驗證零 `sorry` 完整性。
 
 ---
 
@@ -62,5 +62,4 @@ int main(void) {
 
 | 檔案與模組 | 應用領域與驗證規模 | Pure `.lean` 湧現機制 |
 | :--- | :--- | :--- |
-| **1. AWS Cedar 授權引擎**<br>[`tests/cedar_authorization.lean`](../../tests/cedar_authorization.lean) | **雲端 IAM 授權防呆**（427 行標準 Lean 4 規格，取自 AWS 官方 `cedar-policy/cedar-spec`） | 從 `Decision` 列舉與 `Request` / `Response` 結構自動湧現 56B Stride C17 佈局與 1PB `FlowExtentDescriptor` 零拷貝處理器。 |
-| **2. 具身雙足反射控制核心**<br>[`plugins/embodied.lean`](../../plugins/embodied.lean) | **1kHz 雙足機器人關節扭矩限制、PD 反射控制律與步態核函數** | 自動合成 `isTorqueWithinLimit`、`dampedAngularAccel`、`pdReflexLaw`、`embodiedStepKernel` 之 `double` / `flow_fx64_t` 雙軌算子與 `lean_*` 合約。 |
+| **具身雙足反射控制核心**<br>[`plugins/embodied.lean`](../../plugins/embodied.lean) | **1kHz 雙足機器人關節扭矩限制、PD 反射控制律與步態核函數** | 自動合成 `isTorqueWithinLimit`、`dampedAngularAccel`、`pdReflexLaw`、`embodiedStepKernel` 之 `double` / `flow_fx64_t` 雙軌算子與 `lean_*` 合約。 |

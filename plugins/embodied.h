@@ -3,7 +3,6 @@
 #include "flow.h"
 #include "plugin.h"
 #include "flow_jet.h"
-#include "smt.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>

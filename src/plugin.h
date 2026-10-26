@@ -25,6 +25,9 @@ typedef struct { size_t count; uint64_t values[FLOW_DIMENSION_MAX]; } FlowPlanAs
 typedef struct { size_t capacity, threads, shards, memory_bytes; double latency_score, throughput_score, energy; } FlowPlanMetrics;
 typedef enum { VERIFIER_PROVEN, VERIFIER_RUNTIME_CHECK, VERIFIER_COMPILE_ERROR } VerificationStatus;
 typedef struct FlowVerificationReport { VerificationStatus status; size_t capacity, estimated_bytes; int max_count_proven, runtime_input_guard; char message[128]; } VerificationReport;
+static inline const char *verification_status_name(VerificationStatus s) {
+    return s == VERIFIER_PROVEN ? "proven" : (s == VERIFIER_RUNTIME_CHECK ? "runtime_check" : "compile_error");
+}
 typedef int (*FlowPluginValidateContractFn)(const SemanticIR *ir, const FlowPlugin *plugin, char *message, size_t message_size);
 typedef void (*FlowPluginLowerSemanticsFn)(const FlowSpec *spec, SemanticIR *ir, const FlowPlugin *plugin);
 typedef int (*FlowPluginEnumerateDimensionsFn)(const SemanticIR *ir, const Component *component, FlowPlanDimensionSet *dims_out);

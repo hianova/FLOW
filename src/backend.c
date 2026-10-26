@@ -1585,41 +1585,6 @@ int emit_c(FILE *output, const SemanticIR *ir, const Component *c, const SearchR
     emit_candidate_plan(output, ir);
     return flow_component_emit(output, ir, c, s, v, reload_adapter);
 }
-int flow_emit_mlir(FILE *output, const SemanticIR *ir, const Component *c, const SearchResult *s, const VerificationReport *v) {
-    if (!output || !ir || !c || !v) return 0;
-    size_t cap = s ? (size_t)s->capacity : v->capacity, thr = s ? (size_t)s->threads : 1, shd = s ? (size_t)s->shards : 1;
-    size_t mem_lim = ir->memory_limit_mb > 0 ? (size_t)ir->memory_limit_mb * 1024u * 1024u : 0;
-    fprintf(output, "// FLOW MLIR Dialect Representation: %s -> %s\n"
-        "module @%s attributes { flow.domain = \"%s\", flow.deterministic = %s, flow.resource = \"%s\" } {\n"
-        "  flow.intent @%s(%s: memref<?xi32>) -> memref<?xi32> {\n"
-        "    flow.constraint.capacity %zu : index\n    flow.constraint.memory_limit %zu : i64\n"
-        "    flow.constraint.parallelizable %s\n    flow.component.selected \"%s\" (kind = \"%s\", threads = %zu, shards = %zu)\n  }\n"
-        "  func.func @flow_kernel(%%input: memref<%zuxi32>, %%output: memref<%zuxi32>) -> i32 {\n"
-        "    %%c0 = arith.constant 0 : index\n    %%c1 = arith.constant 1 : index\n    %%cap = arith.constant %zu : index\n"
-        "    scf.for %%iv = %%c0 to %%cap step %%c1 {\n      %%elem = memref.load %%input[%%iv] : memref<%zuxi32>\n      memref.store %%elem, %%output[%%iv] : memref<%zuxi32>\n    }\n"
-        "    %%res = arith.constant 0 : i32\n    return %%res : i32\n  }\n}\n",
-        ir->flow_name, c->id, ir->flow_name[0] ? ir->flow_name : "flow_module",
-        ir->domain_name[0] ? ir->domain_name : "general", ir->fact_deterministic ? "true" : "false",
-        ir->resource_name[0] ? ir->resource_name : "cpu", ir->flow_name[0] ? ir->flow_name : "pipeline",
-        ir->output_name[0] ? ir->output_name : "in", cap, mem_lim, ir->flow_parallelizable ? "true" : "false", c->id, c->kind, thr, shd, cap, cap, cap, cap, cap);
-    return ferror(output) == 0;
-}
-int flow_emit_llvm_ir(FILE *output, const SemanticIR *ir, const Component *c, const SearchResult *s, const VerificationReport *v) {
-    if (!output || !ir || !c || !v) return 0;
-    size_t cap = s ? (size_t)s->capacity : v->capacity;
-    if (cap < 1) cap = 1;
-    fprintf(output, "; FLOW LLVM IR Module: %s (%s), Capacity: %zu\nsource_filename = \"%s.lean\"\n"
-        "target datalayout = \"e-m:o-i64:64-i128:128-n32:64-S128\"\ntarget triple = \"arm64-apple-darwin\"\n"
-        "define i32 @flow_init(ptr %%state_out) nounwind alwaysinline ssp {\nentry:\n"
-        "  %%st = call ptr @calloc(i64 1, i64 %zu)\n  %%cmp = icmp eq ptr %%st, null\n  br i1 %%cmp, label %%err, label %%ok\nok:\n  store ptr %%st, ptr %%state_out, align 8\n  ret i32 0\nerr:\n  ret i32 -1\n}\n"
-        "define i32 @flow_run(ptr %%state, ptr %%input, ptr %%output) nounwind alwaysinline ssp {\nentry:\n"
-        "  %%cmp_st = icmp eq ptr %%state, null\n  br i1 %%cmp_st, label %%ret_err, label %%exec\nexec:\n  ret i32 0\nret_err:\n  ret i32 -1\n}\n"
-        "define void @flow_drop(ptr %%state) nounwind alwaysinline ssp {\nentry:\n"
-        "  %%cmp = icmp ne ptr %%state, null\n  br i1 %%cmp, label %%do_free, label %%done\ndo_free:\n  call void @free(ptr %%state)\n  br label %%done\ndone:\n  ret void\n}\n"
-        "declare ptr @calloc(i64, i64) nounwind\ndeclare void @free(ptr) nounwind\n",
-        c->id, c->kind, cap, ir->flow_name[0] ? ir->flow_name : "flow", cap * 8 + 16);
-    return ferror(output) == 0;
-}
 int flow_backend_run_in_memory(const SemanticIR *ir, const Component *c, const SearchResult *s, const VerificationReport *v, FILE *out) {
     if (!ir || !c) return 0;
     if (!out) out = stdout;

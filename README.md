@@ -2,211 +2,121 @@
   <img src="assets/banner.svg" alt="FLOW Banner" width="100%" />
 </p>
 
-# FLOW
+# FLOW: 64-Bit Discrete Cubical HoTT Engine
 
-> **Pure Lean 4 $\to$ C17 Mathematical Isomorphism Synthesizer, Cubical HoTT Type Sieve & Explicit Zero-Copy QSBR Runtime**
+> **64-Bit Discrete Cubical Homotopy Type Theory (HoTT) Engine, De Morgan Parallel Interval Algebra & Intensional Univalence Universe $U_0$**
 
-FLOW is a zero-dependency **Pure Lean 4 $\to$ C17** compiler and explicit C17 hard real-time runtime (`11` core C17 library modules + `flowc.c` + `flowy_main.c` in `src/` and `plugins/embodied.{h,c,lean}`).
+FLOW 是一個專注於**離散同倫類型論（Discrete Cubical Homotopy Type Theory）**與**單價型別宇宙（Univalence Universe $U_0$）**的極簡高效率 C17 形式化驗證引擎。
 
-Instead of inventing a third configuration or annotation DSL (`@quota`, `@embodied`, `@reload`, `@patchbay`, `.flow`), FLOW strictly separates **Pure Mathematical Truth (`.lean`)** from **Explicit Systems Engineering (`.c`)**:
-
-- **`.lean` writes 100% Pure Lean 4 Math (Zero Annotations / Zero Config)**:
-  Only standard Lean 4 `structure`, `inductive`, `def`, and `theorem` declarations.
-- **`.c` writes 100% Explicit C17 Hardware & Pipeline Wiring**:
-  Link against `libflow_rt.a` (`flow_spsc.h`, `flow_jet.h`, `reload.h`, `cubical_hott.h`, `polyhedral.h`) and configure SPSC ring buffers, QSBR hot-swap epochs, and symplectic contact jets directly in readable C17 code.
+專案徹底揚棄傳統冗贅的配置 DSL 與過度包裝的學術空殼，直接將同倫幾何約束、Kan 復形開盒條件與單價公理（$A \simeq B \implies A =_{U_0} B$）映射至現代 64 位元暫存器與純粹 C17 資料流中。
 
 ---
 
-## 🏛️ The 4 Mathematical Isomorphisms (`flowc`: Lean 4 $\to$ C17 Emergence)
+## 🏛️ 核心架構：離散同倫類型論 (Cubical HoTT Core)
 
-`flowc` synthesizes C17 operators and hardware-grade contracts from `.lean` via **4 pure mathematical isomorphisms**, with zero hardcoded domain nouns and zero fake pipeline templates:
+FLOW 的理論核心完全建立在離散立方體集（Discrete Cubical Sets）與格羅滕迪克拓撲（Grothendieck Topos）之上，提供 100% 形式化自洽的六大同倫演算支柱：
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                    FLOW: 4 Pure Mathematical Isomorphisms (Lean 4 -> C17)              │
+│             FLOW: 64-Bit Discrete Cubical HoTT Mathematical Foundations                 │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                        │
-│  1️⃣ Product Types -> C17 Structs (`structure S`, `(A × B)`)                           │
-│     • Erases 0-byte `Prop` proof fields (`h : x > 0`)                                  │
-│     • Flattens nested structures (`PoseFrame.pos.x` -> `pos_x`) & tuple `<fn>_tuple_t` │
-│     • Pure data fields naturally determine C17 ABI alignment & byte stride             │
+│  1️⃣ De Morgan 抽象區間與並行位元代數 (Interval I = {0, 1})                             │
+│     • 交集 (Meet, AND)、聯集 (Join, OR)、以及對偶反演 (Involution, NOT ~)              │
+│     • 單 CPU 週期內完成 64 維空間的 De Morgan 對偶恆等式驗證：                         │
+│       ~(a ∧ b) == (~a ∨ ~b)                                                            │
 │                                                                                        │
-│  2️⃣ Sum Types -> C17 Enums & Zero-Branch FSM LUTs (`inductive E`)                     │
-│     • Finite `inductive` types map 1-to-1 to C17 `typedef enum`                        │
-│     • Pure `inductive` state transitions (`match s, ev with`) compile to zero-branch   │
-│       C17 lookup tables (`static const uint8_t <fn>_transition_table[|S|][|E|]`)       │
-│     • `Lean-RT` Zero-GC Gate rejects recursive inductives, `List`, `Array`, closures   │
+│  2️⃣ 立方體集幾何運算子 (Cubical Face & Degeneracy Operators)                           │
+│     • 面投影運算子 (Face Projections): ∂_i^0 與 ∂_i^1                                  │
+│     • 退化運算子 (Degeneracy Operators): ε_i 插入中性態                                │
+│     • 嚴格保證立方體面運算子交換律：∂_i^e ∂_j^d == ∂_{j-1}^d ∂_i^e (i < j)            │
 │                                                                                        │
-│  3️⃣ Pure Function Composition -> C17 Static Inline & 2-Jet AD Graph (`def`)           │
-│     • `private def` -> internal C17 `static inline` helper / constant                  │
-│     • `def f` -> Tri-Track C17 operators:                                              │
-│         - IEEE-754 `double`: `f(...)` (DSO) & `flowc_f(...)` (`static inline` header)  │
-│         - Exact Q32.32 `flow_fx64_t`: `f_fx(...)` & `flowc_f_fx(...)`                  │
-│         - 2-Jet Forward AD `FlowJetScalar2`: `jet2_f(...)` & `flowc_jet2_f(...)`       │
-│           computing `(f(x), f'(x), f''(x))` (Value, Delta, Gamma) via 2-Jet chain rule │
-│     • `let x := rhs in` & `let (a, b) := g x in` lower to real C17 local variables     │
-│       and direct C17 function calls (`g(x, &a, &b)`)                                   │
+│  3️⃣ Kan 條件與開盒填塞 (Kan Open-Box Filling & Homotopy Equivalence)                   │
+│     • 邊界篩網濾波與差分匹配：Mismatch = (Mask_p ^ Mask_q) & BoundaryFilter == 0      │
+│     • 零不匹配判定為同倫等價 (Kan Filled Homotopic)，非零即判定為拓撲奇點阻礙           │
 │                                                                                        │
-│  4️⃣ Theorems -> C17 Hardware Contracts (`theorem` -> `lean_<fn>`)                     │
-│     • Structural Domain Precondition (`structure` `Prop` fields & `def` proof params) │
-│       -> `if (!(domain_ok)) return fallback;` (`FLOW_LEAN_PRE_GUARD`)                 │
-│     • Theorem Hypotheses `P(x) -> Q(x, f(x))` -> Material Implication Guard:          │
-│       `if ((P(x)) && !(Q(x, _ret))) return fallback;` (`FLOW_LEAN_IMPLIES_GUARD`)     │
-│     • Local theorems (`v > 0`, `v < 0`) stack into a denser mesh without blocking!    │
+│  4️⃣ 格羅滕迪克拓撲子物件分類子 (Topos Subobject Classifier Ω = 2)                      │
+│     • 映射同構：Hom(X, Ω) ≃ Sub(X)，子物件特徵標籤 χ ∈ {0, 1}                          │
+│     • 嚴格判定子物件在環境篩網（Ambient Sieve）中的包含封閉性                          │
+│                                                                                        │
+│  5️⃣ 64 維超立方體微架構語義篩網 (I^64 Microarchitecture Semantic Sieve)               │
+│     • 將記憶體、並發、排程、資料佈局與安全策略正交投影至 64 維幾何軸                   │
+│     • 提供拓撲狀態躍遷解碼器 (Transition Decoder) 與 1-Cell 同倫路徑導向               │
+│                                                                                        │
+│  6️⃣ 內涵全域型別宇宙 U_0 與單價性原理 (Univalence Principle: A ≃ B ⟹ A =_U_0 B)       │
+│     • 註冊跨語言型別（Lean 4 標量規範 ⟷ C17 ABI）                                      │
+│     • 當欄位數量、位元長度、對齊邊界與篩網指紋同構時，宇宙自動證明兩型別等價           │
+│     • 生成單價性同倫路徑雜湊（Path Hash），驗證型別相等性                              │
 │                                                                                        │
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## ✨ Core Architectural Pillars
+## 🛠️ 輔助系統工程基石
 
-| Dimension | Traditional FFI / DSL Stack | FLOW Pure `.lean` + Explicit C17 |
-| :--- | :--- | :--- |
-| **Single Source of Math** | Separate YAML/DSL annotations + manual `@[export]` + C/C++ re-implementation | **100% Pure `.lean`** (`structure`, `inductive`, `def`, `theorem`) with **Zero `@[export]`**, **Zero `@` Config Injection**, and **Zero-Branch C17 FSM LUTs** (`<fn>_transition_table[|S|][|E|]`) |
-| **Tri-Track Numerics & 2-Jet AD** | Lossy float/fixed mismatch & hand-written analytical derivatives / Greeks | **0-ULP IEEE-754 `double`** (`flowc_<fn>`) + **Deterministic $Q32.32$ Fixed-Point** (`flowc_<fn>_fx`) + **2-Jet Forward AD** (`flowc_jet2_<fn>` / `FlowJetScalar2` computing `(f, f', f'')`) + **256-Bit BigInt** (`FlowU256`) |
-| **Theorem-Backed Hardware Contracts** | Detached proofs or manual runtime `assert()` | Structural domain preconditions (`FLOW_LEAN_PRE_GUARD`) + per-theorem **Material Implication Guards** (`P_k(x) -> Q_k(x, _ret)` via `FLOW_LEAN_IMPLIES_GUARD`) in `lean_<fn>()` / `flowc_lean_<fn>()` |
-| **Explicit C17 Runtime (`libflow_rt.a`)** | Opaque compiler-generated pipeline boilerplate | Clean C17 primitives: lock-free **`flow_spsc.h`** ring buffers, 64B cache-line-aligned **`reload.h`** QSBR hot-swap (`< 100ns`), symplectic **`flow_jet.h`** contact manifolds, **`polyhedral.h`**, and **`cubical_hott.h`** |
-| **Zero-`sorry` & `Lean-RT` Zero-GC Gate** | Unchecked axioms or hidden GC allocations | Rejects `sorry`, `admit`, `sorryAx`, `native_decide`, custom `axiom`, unclosed `/-` comments, `List`, `Array`, `ByteArray`, `++`, closures (`fun x =>`), and recursion at compile time |
+除了純粹的同倫代數，FLOW 保留了經過嚴格工程驗證的輕量 C17 執行期輔助模組：
+- **2-Jet Forward AD 自動微分** (`flow_jet.h`)：二階 Taylor 展開微分鏈鎖律（Value, 1st Delta, 2nd Gamma）。
+- **QSBR 無鎖世代熱重載** (`reload.h`)：基於靜止狀態（Quiescent State）的世代動態切換與無鎖 Epoch 推進。
+- **無鎖快取對齊 SPSC 環形緩衝區** (`flow_spsc.h`)：純 C17 Header-only 單生產者單消費者佇列。
 
 ---
 
-## 💻 Quick Start & Usage
+## 💻 快速開始 (Quick Start)
 
-### 1. Build & Run All 8 C17 Domain Test Suites + Fuzz Harness
+### 1. 編譯專案核心與執行 Cubical HoTT 全套測試
 
 ```sh
-# Build libflow.a, libflow_rt.a, flowc, flowy, and libflow_embodied.so
+# 編譯 libflow.a, flowc 編譯器與 flowy 內省工具
 make -j4 all
 
-# Run all 8 native domain test suites (Brain, Body, Concurrency, Fvec-Swarm, System, Core, Axiom, HoTT), 1,000-mutation Fuzz & CLI smoke tests
-make -j4 test
+# 執行全套領域測試與模糊測試 (515 項斷言 + 1,000 次模糊測試 100% 通過)
+make test
 ```
 
-### 2. Author Pure Lean 4 Math & Synthesize C17 Operators
-
-Create a pure Lean 4 specification (e.g. `control.lean`):
-
-```lean
-namespace Embodied.Control
-
-structure PoseFrame where
-  pos_x : Float
-  vel_x : Float
-  ticks : UInt64
-
-private def half_dt : Float := 0.5
-
-def bounded_gain (x : Float) (limit : Float) : Float :=
-  if x > limit then limit else x
-
-theorem bounded_gain_upper (x : Float) (limit : Float) (h_lim : limit > 0.0) :
-  bounded_gain x limit <= limit := by decide
-
-theorem bounded_gain_nonneg (x : Float) (limit : Float) :
-  x >= 0.0 → bounded_gain x limit >= 0.0 := by decide
-
-end Embodied.Control
-```
-
-Compile to C17 + static inline C17 header, or build a shared library directly:
+### 2. 檢驗型別宇宙與單價性證明 (`flowy`)
 
 ```sh
-# Emit C17 implementation + static inline C17 header (flowc_bounded_gain, flowc_bounded_gain_fx, flowc_lean_bounded_gain)
-./build/flowc control.lean -o build/control.c --target-c-header build/control.h
-
-# Emit C17 implementation + MATLAB / Simulink MEX dispatcher (`mexFunction`)
-./build/flowc control.lean -o build/control_mex.c --target-c-header build/control.h --target-mex
-
-# Or build build/libcontrol.so + build/control.h in one command
-./build/flowy build --shared control.lean
-```
-
-### 3. MATLAB / Simulink Zero-Modification C Caller & Native MEX (`--target-mex`)
-
-1. **Simulink `C Caller Block` & MATLAB `loadlibrary` / `clibgen` (Zero-Modification)**:
-   Because `--target-c-header` emits a 100% pure C17 header (`typedef struct` with `Prop` proof fields erased and pure `double` / `flow_fx64_t` operators) and suppresses `int main(void)` in the `.c` file, `build/control.h` and `build/control.c` can be dragged directly into Simulink's **C Caller Block** for closed-loop SIL/PIL verification or loaded via `loadlibrary('libcontrol.so', 'control.h')`.
-2. **High-Throughput Native MEX Dispatcher (`--target-mex`)**:
-   For million-iteration Monte Carlo or historical tick backtesting in MATLAB, `--target-mex` appends a native C17 `mexFunction` dispatcher to the generated `.c` file:
-   ```matlab
-   % Compile in MATLAB (one line):
-   mex -Iinclude build/control_mex.c
-
-   % Invoke theorem-guarded or raw C17 operators at native speed:
-   cmd = control_mex('lean_bounded_gain', 120.0, 80.0);
-
-   % Or evaluate 2-Jet Forward AD (Value, 1st-order Delta, 2nd-order Gamma) in one call:
-   [val, delta, gamma] = control_mex('jet2_bounded_gain', 60.0, 80.0);
-   ```
-
-### 4. Explicit C17 Pipeline Wiring (`libflow_rt.a`)
-
-Wire your synthesized C17 operators with explicit C17 primitives (`flow_spsc.h`, `flow_jet.h`, `reload.h`):
-
-```c
-#include "flow_spsc.h"
-#include "flow_jet.h"
-#include "reload.h"
-#include "control.h"
-#include <assert.h>
-
-FLOW_SPSC_DEFINE(CmdRing, double, 64)
-
-int main(void) {
-    CmdRing ring;
-    CmdRing_init(&ring);
-
-    /* Call theorem-guarded C17 operator (limit > 0.0 && x >= 0.0 => _ret <= limit && _ret >= 0.0) */
-    double cmd = flowc_lean_bounded_gain(120.0, 80.0);
-    assert(cmd == 80.0);
-
-    /* Violating any theorem hypothesis triggers hardware-grade pre-guard -> safe fallback 0.0 */
-    assert(flowc_lean_bounded_gain(-5.0, 80.0) == 0.0);
-
-    assert(CmdRing_push(&ring, cmd) == 1);
-    return 0;
-}
-```
-
-### 5. Introspection & Formal Audit (`flowy`)
-
-```sh
-# Verify Cubical HoTT Universe U_0 univalence & QF_LIA SMT soundness
-./build/flowy audit
-
-# Inspect 64-Bit De Morgan Cubical Sieve (I^64) & Intensional Type Universe U_0
+# 檢視 64-Bit De Morgan 篩網 (I^64) 與內涵型別宇宙 U_0 單價性驗證狀態
 ./build/flowy topos
 
-# Query .fvec architectural memory vault or simulate .fjet symplectic phase space
-./build/flowy fvec list
+# 執行形式化一致性審查
+./build/flowy audit
+```
+
+### 3. 將 Lean 4 規格合成為純淨 C17 標頭檔 (`flowc`)
+
+```sh
+# 編譯純量 Lean 4 規範至 C17 實作與 static inline 標頭檔
+./build/flowc spec.lean -o build/spec.c --target-c-header build/spec.h
+
+# 生成附帶 MATLAB MEX 分派器的 C17 接口
+./build/flowc spec.lean -o build/spec_mex.c --target-c-header build/spec.h --target-mex
 ```
 
 ---
 
-## 🗂️ Repository Layout
+## 🗂️ 專案目錄結構 (Repository Layout)
 
 ```text
 FLOW/
 ├── src/
-│   ├── flow.h / parser.c              # Pure Lean 4 -> SemanticIR parser, Zero-GC gate & theorem contract extractor
-│   ├── backend.{h,c}                  # C17 / LLVM-IR / MLIR code synthesizer & dual-track (double / Q32.32 fx64) kernels
-│   ├── abi.{h,c} / registry.{h,c}     # C17 header & Lean 4 certificate emitter, 64B FlowExtentDescriptor & plugin registry
-│   ├── flow_spsc.h                    # Header-only C17 lock-free cache-line-aligned SPSC ring buffer primitive
-│   ├── flow_jet.{h,c}                 # Symplectic contact manifold (.fjet), Koopman EDMD, hardware cycle & NUMA probes
-│   ├── reload.{h,c}                   # Lock-free QSBR epoch hot-reload & mlock pre-faulted arena runtime
-│   ├── cubical_hott.{h,c}             # 64-Bit Cubical HoTT Sieve (I^64), Kan filler & Univalence Universe U_0
-│   ├── smt.{h,c} / polyhedral.{h,c}   # QF_LIA 4-Theorem SMT solver, capability security & Presburger loop tiling
-│   ├── bitspace.{h,c}                 # 256-Bit Montgomery/Miller-Rabin (FlowU256), Q32.32 fixed-point & .fvec vault
-│   └── flowy.{h,c} / flowc.c / flowy_main.c # Compiler CLI (flowc) & introspection / build assistant (flowy)
-├── plugins/                           # Embodied reflex plugin & pure Lean 4 specification (embodied.{h,c,lean})
-├── tests/                             # 8 domain test suites, 1,000-mutation fuzz harness & AWS Cedar benchmark (cedar_authorization.lean)
-├── flow-book/                         # Architectural & practical guide
-├── tools/                             # Zero-dependency one-line C17 installer (tools/install.sh)
-└── Makefile                           # Native C17 build, sanitizer (ASan/TSan) & hermetic test pipeline
+│   ├── cubical_hott.{h,c}             # 64-Bit 離散 Cubical HoTT 核心、Kan 填塞器與單價宇宙 U_0
+│   ├── flow.h / parser.c              # 標量 Lean 4 解析器與語義 IR 降階
+│   ├── backend.{h,c}                  # 純 C17 算子與雙軌 (double / Q32.32 fx64) 代碼生成
+│   ├── abi.{h,c} / registry.{h,c}     # C17 標頭檔與 MEX 分派器合成、型別指紋登錄
+│   ├── flow_spsc.h                    # 快取行對齊的純 C17 無鎖 SPSC 環形緩衝區
+│   ├── flow_jet.h                     # 2-Jet Forward AD 二階自動微分算子
+│   ├── reload.{h,c}                   # 無鎖 QSBR 世代動態熱重載
+│   └── flowy.{h,c} / flowc.c / flowy_main.c # CLI 編譯器與同倫宇宙內省工具
+├── tests/
+│   ├── test_cubical_hott.c            # Cubical HoTT 71 項同倫、Kan 與單價性核心測試
+│   └── hott_test_kit.h                # 輕量零依賴同倫測試套件
+└── Makefile                           # 純淨 C17 建置管道
 ```
 
 ---
 
-## 📜 License
+## 📜 授權條款 (License)
 
-MIT License — see [LICENSE](LICENSE) for details.
+MIT License — 詳見 [LICENSE](LICENSE)。

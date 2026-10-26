@@ -36,4 +36,5 @@ size_t component_count(void);
 const Component *component_at(size_t index);
 size_t component_index(const Component *component);
 const FlowPlugin *flow_builtin_plugin(void);
+int verify_candidate(const SemanticIR *ir, const Component *c, const struct FlowSearchResult *s, VerificationReport *r);
 #endif

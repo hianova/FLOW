@@ -2,7 +2,6 @@
 #define _GNU_SOURCE
 #endif
 #include "reload.h"
-#include "smt.h"
 #include "flow_jet.h"
 #include "cubical_hott.h"
 #include <math.h>

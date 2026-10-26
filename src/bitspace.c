@@ -1,7 +1,5 @@
 #include "bitspace.h"
-#include "polyhedral.h"
 #include "registry.h"
-#include "smt.h"
 #include "reload.h"
 #include "flow_jet.h"
 #include <ctype.h>

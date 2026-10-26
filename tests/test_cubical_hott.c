@@ -1,6 +1,5 @@
-#include "flow_test_kit.h"
+#include "hott_test_kit.h"
 #include "cubical_hott.h"
-#include "flow_jet.h"
 
 #include <stdio.h>
 #include <stdlib.h>
