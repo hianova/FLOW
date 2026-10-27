@@ -39,4 +39,7 @@ void flowy_print_cubical_topos_report(FILE *out);
 int cmd_inspect_run(int argc, char **argv);
 void cmd_inspect_print_usage(FILE *out);
 
+int cmd_induce_run(int argc, char **argv);
+void cmd_induce_print_usage(FILE *out);
+
 #endif /* FLOW_FLOWY_H */

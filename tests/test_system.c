@@ -8,6 +8,7 @@
 #include "flow_jet.h"
 #include "flow_spsc.h"
 #include "cubical_hott.h"
+#include "induce.h"
 
 #include <dlfcn.h>
 #include <math.h>
@@ -1091,6 +1092,297 @@ int main(void) {
         remove("/tmp/flow_mex_drv");
 
         printf("  ✓ Stage 10 Passed: Pure C17 runtime (libflow_rt.a), HoTT U_0, FlowFinance C17 & MATLAB --target-mex verified.\n\n");
+    }
+
+    /* ========================================================================= */
+    /* STAGE 11: Inductive Knowledge Synthesis Engine (Data -> Solver -> Lean)   */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(11, "Inductive Knowledge Synthesis: Rational Poly, Grid Reflection, SMM & PRNG Seed=42 Audit");
+    {
+        const size_t N_SAMPLES = 10000;
+        double *xs = (double *)malloc(N_SAMPLES * sizeof(double));
+        double *ys = (double *)malloc(N_SAMPLES * sizeof(double));
+        FLOW_ASSERT_TRUE(xs != NULL && ys != NULL);
+
+        /* 1. Fit 10,000 samples of exact rational polynomial:
+         *    f(x) = (3/8)*x^2 - (1/4)*x + (5/16) = 0.375*x^2 - 0.25*x + 0.3125
+         */
+        for (size_t i = 0; i < N_SAMPLES; ++i) {
+            double x = (double)i / (double)(N_SAMPLES - 1);
+            xs[i] = x;
+            ys[i] = 0.375 * x * x - 0.25 * x + 0.3125;
+        }
+
+        FlowInducedPolyModel poly = {0};
+        FLOW_ASSERT_TRUE(flow_induce_fit_rational_poly(xs, ys, N_SAMPLES, 2, 1024, &poly));
+        FLOW_ASSERT_EQ(poly.coeffs[0].num, 5);
+        FLOW_ASSERT_EQ(poly.coeffs[0].den, 16);
+        FLOW_ASSERT_EQ(poly.coeffs[1].num, -1);
+        FLOW_ASSERT_EQ(poly.coeffs[1].den, 4);
+        FLOW_ASSERT_EQ(poly.coeffs[2].num, 3);
+        FLOW_ASSERT_EQ(poly.coeffs[2].den, 8);
+        FLOW_ASSERT_TRUE(poly.r_squared > 0.9999);
+        FLOW_ASSERT_TRUE(poly.epsilon_bound.approx_val >= poly.max_empirical_residual);
+
+        /* 2. Build finite Grid Envelope for computational reflection (by decide) */
+        FlowGridEnvelope grid = {0};
+        FLOW_ASSERT_TRUE(flow_induce_build_grid_envelope(xs, ys, N_SAMPLES, 4, 100, &grid));
+        FLOW_ASSERT_EQ(grid.bucket_count, 4u);
+        FLOW_ASSERT_EQ(grid.total_samples, N_SAMPLES);
+        FLOW_ASSERT_TRUE(grid.certified_upper_bound > grid.global_y_max);
+        FLOW_ASSERT_TRUE(grid.certified_lower_bound < grid.global_y_min);
+
+        /* 3. SMM Inverse Discovery: Cox-Ingersoll-Ross (CIR) & Feller Condition 2ab >= sigma^2 */
+        double *cir_samples = (double *)malloc(N_SAMPLES * sizeof(double));
+        FLOW_ASSERT_TRUE(cir_samples != NULL);
+        /* True parameters: a = 1.8, b = 3.0, sigma = 0.9 => 2ab = 10.8 >= sigma^2 = 0.81 */
+        FLOW_ASSERT_TRUE(flow_induce_simulate_cir(1.8, 3.0, 0.9, 3.0, 0.02, 42ULL, cir_samples, N_SAMPLES));
+
+        FlowSMMResult smm_cir = {0};
+        FLOW_ASSERT_TRUE(flow_induce_solve_smm(cir_samples, N_SAMPLES, FLOW_SMM_CIR_REFLECTING, 0.02, 42ULL, &smm_cir));
+        FLOW_ASSERT_EQ(smm_cir.feller_condition_holds, 1);
+        FLOW_ASSERT_TRUE(smm_cir.feller_margin > 0.0);
+        FLOW_ASSERT_TRUE(fabs(smm_cir.param_b_or_sigma - 3.0) < 0.35);
+
+        /* 4. SMM Inverse Discovery: Merton Jump-Diffusion on non-Gaussian skewed/fat-tailed returns */
+        double *merton_returns = (double *)malloc(N_SAMPLES * sizeof(double));
+        FLOW_ASSERT_TRUE(merton_returns != NULL);
+        FLOW_ASSERT_TRUE(flow_induce_simulate_merton_jump(0.05, 0.20, 3.0, -0.04, 0.06, 0.01, 42ULL, merton_returns, N_SAMPLES));
+
+        FlowEmpiricalMoments merton_mom = {0};
+        FLOW_ASSERT_TRUE(flow_induce_compute_moments(merton_returns, N_SAMPLES, &merton_mom));
+        /* Verify non-Gaussian fat tails (excess kurtosis > 0) and negative skewness */
+        FLOW_ASSERT_TRUE(merton_mom.excess_kurtosis > 0.5);
+        FLOW_ASSERT_TRUE(merton_mom.skewness < -0.1);
+
+        FlowSMMResult smm_merton = {0};
+        FLOW_ASSERT_TRUE(flow_induce_solve_smm(merton_returns, N_SAMPLES, FLOW_SMM_MERTON_JUMP, 0.01, 42ULL, &smm_merton));
+        FLOW_ASSERT_TRUE(smm_merton.param_b_or_sigma > 0.0);
+
+        /* Verify Integral Probability Metrics (IPM) distances */
+        double w1_self = flow_induce_ipm_distance(merton_returns, 1000, merton_returns, 1000, FLOW_IPM_WASSERSTEIN_1);
+        double ks_self = flow_induce_ipm_distance(merton_returns, 1000, merton_returns, 1000, FLOW_IPM_KOLMOGOROV_SMIRNOV);
+        FLOW_ASSERT_TRUE(w1_self < 1e-12 && ks_self < 1e-12);
+
+        /* 5. Algebraic Cryptanalysis: PRNG Seed=42 Inversion & State Recovery */
+        uint64_t prng_words[32];
+        uint64_t rng_st = 42ULL;
+        /* Advance 7 steps first to test multi-step F_2 backtracking to seed=42! */
+        for (int pre = 0; pre < 7; ++pre) {
+            (void)flow_prng_next(&rng_st);
+        }
+        for (size_t i = 0; i < 32; ++i) {
+            prng_words[i] = flow_prng_next(&rng_st);
+        }
+        FlowPRNGAuditResult prng_audit = {0};
+        FLOW_ASSERT_TRUE(flow_induce_audit_prng_u64(prng_words, 32, 64, &prng_audit));
+        FLOW_ASSERT_EQ(prng_audit.detected, 1);
+        FLOW_ASSERT_EQ(prng_audit.family, FLOW_PRNG_XORSHIFT64);
+        FLOW_ASSERT_EQ(prng_audit.recovered_initial_seed, 42ULL);
+        FLOW_ASSERT_EQ(prng_audit.recovered_step_offset, 7ULL);
+
+        /* Reset to step 0 from seed=42 so theorem witness step1 matches seed=42 directly */
+        rng_st = 42ULL;
+        for (size_t i = 0; i < 16; ++i) {
+            prng_words[i] = flow_prng_next(&rng_st);
+        }
+        FLOW_ASSERT_TRUE(flow_induce_audit_prng_u64(prng_words, 16, 64, &prng_audit));
+        FLOW_ASSERT_EQ(prng_audit.recovered_initial_seed, 42ULL);
+        FLOW_ASSERT_EQ(prng_audit.recovered_step_offset, 0ULL);
+
+        /* 6. Synthesize composite Zero-GC Lean 4 specification and verify parse_spec + C17 codegen */
+        FILE *lean_mem = tmpfile();
+        FLOW_ASSERT_TRUE(lean_mem != NULL);
+        FLOW_ASSERT_TRUE(flow_induce_emit_lean_composite(lean_mem, "Flow.InducedKnowledge",
+                                                         &poly, &grid, &smm_cir, &prng_audit));
+        rewind(lean_mem);
+
+        static FlowSpec ind_spec;
+        static SemanticIR ind_ir;
+        memset(&ind_spec, 0, sizeof(ind_spec));
+        memset(&ind_ir, 0, sizeof(ind_ir));
+        FLOW_ASSERT_TRUE(parse_spec(lean_mem, &ind_spec));
+        fclose(lean_mem);
+
+        FLOW_ASSERT_STR_EQ(ind_spec.flow_name, "InducedKnowledge");
+        FLOW_ASSERT_TRUE(ind_spec.lean_function_count >= 6);
+        FLOW_ASSERT_TRUE(ind_spec.lean_theorem_count >= 6);
+
+        /* Verify fitted_poly extracted formal theorem guards from fitted_poly_upper_bound / lower_bound */
+        const FlowLeanFunction *fn_poly = NULL;
+        for (size_t i = 0; i < ind_spec.lean_function_count; ++i) {
+            if (!strcmp(ind_spec.lean_functions[i].name, "fitted_poly")) {
+                fn_poly = &ind_spec.lean_functions[i];
+                break;
+            }
+        }
+        FLOW_ASSERT_TRUE(fn_poly != NULL);
+        FLOW_ASSERT_TRUE(fn_poly->thm_guard_count >= 2);
+
+        /* Verify end-to-end CLI pipeline: flowc --induce <csv> -> C17 + Header */
+        const char *csv_tmp = "/tmp/flow_induce_test.csv";
+        FILE *cfp = fopen(csv_tmp, "w");
+        FLOW_ASSERT_TRUE(cfp != NULL);
+        for (size_t i = 0; i < 200; ++i) {
+            fprintf(cfp, "%.6f,%.6f\n", xs[i * 50], ys[i * 50]);
+        }
+        fclose(cfp);
+
+        FLOW_ASSERT_EQ(system("./build/flowc --induce /tmp/flow_induce_test.csv -o /tmp/flow_induce_out.c --target-c-header /tmp/flow_induce_out.h --emit-induced-lean /tmp/flow_induced.lean >/dev/null"), 0);
+        FLOW_ASSERT_EQ(system("cc -std=c17 -Wall -Wextra -Wpedantic -Werror -O2 -Isrc -c /tmp/flow_induce_out.c -o /tmp/flow_induce_out.o"), 0);
+
+        remove(csv_tmp);
+        remove("/tmp/flow_induce_out.c");
+        remove("/tmp/flow_induce_out.h");
+        remove("/tmp/flow_induce_out.o");
+        remove("/tmp/flow_induced.lean");
+
+        free(xs);
+        free(ys);
+        free(cir_samples);
+        free(merton_returns);
+        printf("  ✓ Stage 11 Passed: 10,000-sample Rational Poly (3/8 x^2 - 1/4 x + 5/16), Grid Reflection, SMM CIR/Merton & Seed=42 Audit verified.\n\n");
+    }
+
+    /* ========================================================================= */
+    /* STAGE 12: Cryptanalysis Plugin (MT19937 Seed=42, PCG32, QMC & PUF Cert)   */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(12, "Cryptanalysis Plugin: MT19937 Untwist Seed=42, PCG32 State Recovery, GF(2), QMC & PUF");
+    {
+        /* 12a. Resolve & dynamically load build/libflow_cryptanalysis.so in plugin registry */
+        FLOW_ASSERT_TRUE(flow_registry_resolve_plugin("flow.cryptanalysis"));
+        const FlowPlugin *crypto_plug = flow_registry_lookup("flow.cryptanalysis");
+        FLOW_ASSERT_TRUE(crypto_plug != NULL);
+        FLOW_ASSERT_STR_EQ(crypto_plug->name, "flow.cryptanalysis");
+        FLOW_ASSERT_EQ(crypto_plug->component_count, 1u);
+        FLOW_ASSERT_STR_EQ(crypto_plug->components[0].id, "cryptanalysis_engine");
+
+        /* 12b. Compile plugins/cryptanalysis.lean to pure Zero-GC C17 + static inline header */
+        char cmd_crypto_lean[1024];
+        snprintf(cmd_crypto_lean, sizeof(cmd_crypto_lean),
+                 "%s/flowc plugins/cryptanalysis.lean -o /tmp/flow_crypto_pure.c --target-c-header /tmp/flow_crypto_pure.h",
+                 FLOW_BUILD_DIR);
+        FLOW_ASSERT_EQ(system(cmd_crypto_lean), 0);
+
+        /* 12c. Build & run a full C17 verification driver testing both plugins/cryptanalysis.lean
+         *      and plugins/cryptanalysis.c (MT19937 624-word untwist -> seed=42, PCG32 64-bit state
+         *      reconstruction, 64x64 GF(2) ANF solver, QMC star-discrepancy, PUF Min-Entropy & Lean cert)
+         */
+        FILE *c_drv = fopen("/tmp/flow_crypto_drv.c", "w");
+        FLOW_ASSERT_TRUE(c_drv != NULL);
+        fputs(
+            "#include \"cryptanalysis.h\"\n"
+            "#include \"/tmp/flow_crypto_pure.h\"\n"
+            "#include <assert.h>\n"
+            "#include <math.h>\n"
+            "#include <stdio.h>\n"
+            "#include <string.h>\n"
+            "int main(void) {\n"
+            "    /* 1. Verify Lean-synthesized static inline MT19937 untemper & init step inversion */\n"
+            "    uint64_t t_val = flowc_mt19937_temper(0x12345678ULL);\n"
+            "    assert(flowc_mt19937_untemper(t_val) == 0x12345678ULL);\n"
+            "    uint64_t s1_from_42 = flowc_mt19937_init_step(42ULL, 1ULL);\n"
+            "    assert(flowc_mt19937_invert_init_step(s1_from_42, 1ULL) == 42ULL);\n"
+            "    assert(flowc_puf_min_entropy_gate(920ULL, 498ULL, 12ULL, 1100ULL) == 0U);\n"
+            "    assert(flowc_puf_min_entropy_gate(350ULL, 498ULL, 12ULL, 1100ULL) == 1U);\n"
+            "\n"
+            "    /* 2. Full 624-word MT19937 state cloning, untwisting & exact seed=42 recovery */\n"
+            "    FlowMT19937State mt_orig;\n"
+            "    flow_mt19937_seed(&mt_orig, 42U);\n"
+            "    uint32_t obs624[FLOW_MT19937_N];\n"
+            "    for (size_t i = 0; i < FLOW_MT19937_N; ++i) {\n"
+            "        obs624[i] = flow_mt19937_next(&mt_orig);\n"
+            "    }\n"
+            "    FlowMT19937State mt_cloned;\n"
+            "    assert(flow_mt19937_clone_state(obs624, &mt_cloned) == 1);\n"
+            "    for (size_t i = 0; i < 64; ++i) {\n"
+            "        assert(flow_mt19937_next(&mt_orig) == flow_mt19937_next(&mt_cloned));\n"
+            "    }\n"
+            "    FlowMT19937AuditReport mt_rep;\n"
+            "    assert(flow_mt19937_recover_seed(obs624, FLOW_MT19937_N, &mt_rep) == 1);\n"
+            "    assert(mt_rep.seed_recovered == 1 && mt_rep.recovered_seed == 42U);\n"
+            "\n"
+            "    /* Also test micro-sample MT19937 seed=42 recovery from just 8 outputs */\n"
+            "    FlowMT19937AuditReport mt_short;\n"
+            "    assert(flow_mt19937_recover_seed(obs624, 8, &mt_short) == 1);\n"
+            "    assert(mt_short.seed_recovered == 1 && mt_short.recovered_seed == 42U);\n"
+            "\n"
+            "    /* 3. PCG32 (PCG-XSH-RR) 64-bit hidden state recovery from 4 32-bit outputs */\n"
+            "    uint64_t pcg_true_state = 0xB5AD4ECEDA1CE2A9ULL & ~0x07FFFFFFULL;\n"
+            "    pcg_true_state |= 0x0000BEEFULL; /* 64-bit state with 16-bit low entropy */\n"
+            "    uint64_t pcg_sim = pcg_true_state;\n"
+            "    uint32_t pcg_obs[6];\n"
+            "    for (int i = 0; i < 6; ++i) {\n"
+            "        pcg_obs[i] = flow_pcg32_step(&pcg_sim, FLOW_PCG32_DEFAULT_INC);\n"
+            "    }\n"
+            "    uint64_t pcg_recovered = 0ULL;\n"
+            "    assert(flow_pcg32_recover_state(pcg_obs, 6, FLOW_PCG32_DEFAULT_INC, &pcg_recovered) == 1);\n"
+            "    assert(pcg_recovered == pcg_true_state);\n"
+            "\n"
+            "    /* 4. 64x64 GF(2) Gaussian Elimination Solver */\n"
+            "    uint64_t gf2_mat[64];\n"
+            "    uint64_t secret_vec = 0xCAFEBABE1337BEEFULL;\n"
+            "    uint64_t rhs = 0ULL;\n"
+            "    for (unsigned r = 0; r < 64; ++r) {\n"
+            "        gf2_mat[r] = (1ULL << r) ^ ((r + 1 < 64) ? (1ULL << (r + 1)) : 0ULL) ^ ((r + 7 < 64) ? (1ULL << (r + 7)) : 0ULL);\n"
+            "        uint64_t dot = (uint64_t)__builtin_parityll(gf2_mat[r] & secret_vec);\n"
+            "        rhs |= (dot << r);\n"
+            "    }\n"
+            "    uint64_t solved_vec = 0ULL;\n"
+            "    size_t rank = 0;\n"
+            "    assert(flow_gf2_solve_64x64(gf2_mat, rhs, &solved_vec, &rank) == 1);\n"
+            "    assert(rank == 64 && solved_vec == secret_vec);\n", c_drv);
+        fputs(
+            "    /* 5. Certified QMC Derandomization (Halton 2D Star-Discrepancy < PRNG Discrepancy) */\n"
+            "    double qmc_x[256], qmc_y[256];\n"
+            "    FlowQMCCertificate qmc_cert;\n"
+            "    assert(flow_qmc_generate_2d(256, qmc_x, qmc_y, &qmc_cert) == 1);\n"
+            "    assert(qmc_cert.bound_certified == 1);\n"
+            "    assert(qmc_cert.empirical_star_discrepancy < qmc_cert.pseudo_random_discrepancy);\n"
+            "    assert(qmc_cert.derandomization_gain_ratio > 1.2);\n"
+            "\n"
+            "    /* 6. Hardware PUF Min-Entropy & Lipschitz SMT Certification */\n"
+            "    FlowPUFDevice puf_a, puf_b;\n"
+            "    assert(flow_puf_device_init(&puf_a, 101U, 0x1122334455667788ULL, 0.05) == 1);\n"
+            "    assert(flow_puf_device_init(&puf_b, 102U, 0x8877665544332211ULL, 0.05) == 1);\n"
+            "    uint64_t challenges[512];\n"
+            "    uint64_t ch_rng = 0x9E3779B97F4A7C15ULL;\n"
+            "    for (size_t i = 0; i < 512; ++i) challenges[i] = flow_prng_next(&ch_rng);\n"
+            "    uint8_t puf_resp[512];\n"
+            "    FlowPUFCertificate puf_cert;\n"
+            "    assert(flow_puf_certify_device(&puf_a, &puf_b, challenges, 512, puf_resp, &puf_cert) == 1);\n"
+            "    assert(puf_cert.is_cryptographically_sound == 1);\n"
+            "    assert(puf_cert.min_entropy_bits >= 0.70);\n"
+            "    FlowSMTProofAttestation puf_smt;\n"
+            "    assert(flow_puf_verify_smt(&puf_cert, &puf_smt) == FLOW_SMT_PROVEN_UNSAT);\n"
+            "\n"
+            "    /* 7. Emit composite Lean 4 Cryptanalysis Certificate */\n"
+            "    FILE *lcert = fopen(\"/tmp/flow_crypto_cert.lean\", \"w\");\n"
+            "    assert(lcert != NULL);\n"
+            "    assert(flow_cryptanalysis_emit_lean_certificate(lcert, \"Flow.CryptoAuditCert\", &mt_rep, &qmc_cert, &puf_cert) == 1);\n"
+            "    fclose(lcert);\n"
+            "    return 0;\n"
+            "}\n", c_drv);
+        fclose(c_drv);
+
+        FLOW_ASSERT_EQ(system("cc -std=c17 -Wall -Wextra -Wpedantic -Werror -O2 -Isrc -Iplugins /tmp/flow_crypto_drv.c plugins/cryptanalysis.c build/libflow.a -lm -lpthread -o /tmp/flow_crypto_drv && /tmp/flow_crypto_drv"), 0);
+
+        /* Verify the synthesized /tmp/flow_crypto_cert.lean compiles cleanly through flowc! */
+        char cmd_cert_compile[1024];
+        snprintf(cmd_cert_compile, sizeof(cmd_cert_compile),
+                 "%s/flowc /tmp/flow_crypto_cert.lean -o /tmp/flow_crypto_cert.c --target-c-header /tmp/flow_crypto_cert.h >/dev/null",
+                 FLOW_BUILD_DIR);
+        FLOW_ASSERT_EQ(system(cmd_cert_compile), 0);
+
+        remove("/tmp/flow_crypto_pure.c");
+        remove("/tmp/flow_crypto_pure.h");
+        remove("/tmp/flow_crypto_drv.c");
+        remove("/tmp/flow_crypto_drv");
+        remove("/tmp/flow_crypto_cert.lean");
+        remove("/tmp/flow_crypto_cert.c");
+        remove("/tmp/flow_crypto_cert.h");
+
+        printf("  ✓ Stage 12 Passed: Cryptanalysis plugin (.so + .lean), MT19937 624-word Untwist -> seed=42, PCG32 64-bit recovery, GF(2), QMC & PUF verified.\n\n");
     }
 
     FLOW_TEST_SUITE_END();

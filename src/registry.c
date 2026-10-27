@@ -80,9 +80,9 @@ int flow_registry_load_dso(const char *so_path, char *err_msg, size_t err_size) 
         m32 == 0xcafebabeU || m32 == 0xbebafecaU);
     if (!magic_ok) DSO_ERR("invalid ELF/Mach-O binary header in dso");
     if (!(handle = dlopen(so_path, RTLD_NOW | RTLD_LOCAL))) DSO_ERR("dlopen failed: %s", dlerror());
-    static const char *const SYMS[] = {"flow_plugin_entry_v1", "flow_embodied_entry_v1", "flow_swarm_entry_v1"};
+    static const char *const SYMS[] = {"flow_plugin_entry_v1", "flow_embodied_entry_v1", "flow_cryptanalysis_entry_v1", "flow_swarm_entry_v1"};
     FlowPluginEntryFn entry_fn = NULL;
-    for (size_t i = 0; i < 3 && !entry_fn; ++i) entry_fn = (FlowPluginEntryFn)dlsym(handle, SYMS[i]);
+    for (size_t i = 0; i < sizeof(SYMS) / sizeof(SYMS[0]) && !entry_fn; ++i) entry_fn = (FlowPluginEntryFn)dlsym(handle, SYMS[i]);
     if (!entry_fn) {
         typedef const FlowUnit *(*FlowUnitEntryFn)(void);
         FlowUnitEntryFn unit_fn = (FlowUnitEntryFn)dlsym(handle, "flow_unit_entry_v1");

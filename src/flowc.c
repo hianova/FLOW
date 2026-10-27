@@ -2,6 +2,7 @@
 #include "flow.h"
 #include "registry.h"
 #include "abi.h"
+#include "induce.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -12,17 +13,20 @@
 static void flowc_print_usage(FILE *out) {
     fprintf(out,
         "FLOW Lean 4 -> C17 Formal Synthesizer (flowc) v2.5.0 | Lean-RT & Cubical HoTT\n"
-        "Usage: flowc <input.lean> [-o <output.c>] [options]\n"
+        "Usage: flowc <input.lean | --induce data.csv> [-o <output.c>] [options]\n"
         "Options:\n"
-        "  -o <output.c>              Target C17 source path (default: <input>.c)\n"
-        "  --target-c-header <file.h> Emit static inline double/fx64 C17 header & FlowStatusCode\n"
-        "  --target-mex               Append MATLAB MEX C17 mexFunction dispatcher to <output.c>\n"
-        "  --target-lean <file.lean>  Emit & verify Lean 4 formal soundness certificate\n"
-        "  --reload-adapter           Generate live reload QSBR wrapper adapter\n"
-        "  --ieee64                   Force IEEE 754 64-bit floating point ABI\n"
-        "  --fx64                     Force Q32.32 fixed point ABI\n"
-        "  -v, --version              Show version information\n"
-        "  -h, --help                 Show this help message\n");
+        "  -o <output.c>                 Target C17 source path (default: <input>.c)\n"
+        "  --induce <samples.csv>        Induce Lean 4 spec & formal certificate from data trajectory\n"
+        "  --induce-mode <mode>          Induction mode: composite (default), poly, grid, smm-cir, smm-merton, prng\n"
+        "  --emit-induced-lean <f.lean>  Write synthesized Lean 4 specification to <f.lean>\n"
+        "  --target-c-header <file.h>    Emit static inline double/fx64 C17 header & FlowStatusCode\n"
+        "  --target-mex                  Append MATLAB MEX C17 mexFunction dispatcher to <output.c>\n"
+        "  --target-lean <file.lean>     Emit & verify Lean 4 formal soundness certificate\n"
+        "  --reload-adapter              Generate live reload QSBR wrapper adapter\n"
+        "  --ieee64                      Force IEEE 754 64-bit floating point ABI\n"
+        "  --fx64                        Force Q32.32 fixed point ABI\n"
+        "  -v, --version                 Show version information\n"
+        "  -h, --help                    Show this help message\n");
 }
 
 static int validate_and_lower_module(const char *mod_name, const FlowSpec *spec, SemanticIR *ir) {
@@ -45,6 +49,9 @@ static int validate_and_lower_module(const char *mod_name, const FlowSpec *spec,
 
 int flowc_main(int argc, char **argv) {
     const char *input_path = NULL;
+    const char *induce_csv_path = NULL;
+    const char *induce_mode = "composite";
+    const char *emit_induced_lean = NULL;
     const char *output_path = NULL;
     const char *target_c_header = NULL;
     const char *target_lean = NULL;
@@ -85,11 +92,15 @@ int flowc_main(int argc, char **argv) {
         return EXIT_SUCCESS;
     }
 
-    input_path = argv[1];
-
-    for (int arg = 2; arg < argc; ++arg) {
+    for (int arg = 1; arg < argc; ++arg) {
         if (!strcmp(argv[arg], "-o") && arg + 1 < argc) {
             output_path = argv[++arg];
+        } else if (!strcmp(argv[arg], "--induce") && arg + 1 < argc) {
+            induce_csv_path = argv[++arg];
+        } else if (!strcmp(argv[arg], "--induce-mode") && arg + 1 < argc) {
+            induce_mode = argv[++arg];
+        } else if (!strcmp(argv[arg], "--emit-induced-lean") && arg + 1 < argc) {
+            emit_induced_lean = argv[++arg];
         } else if (!strcmp(argv[arg], "--reload-adapter")) {
             use_reload_adapter = 1;
         } else if (!strcmp(argv[arg], "--target-c-header") && arg + 1 < argc) {
@@ -105,28 +116,94 @@ int flowc_main(int argc, char **argv) {
         } else if (!strcmp(argv[arg], "-h") || !strcmp(argv[arg], "--help")) {
             flowc_print_usage(stdout);
             return EXIT_SUCCESS;
+        } else if (argv[arg][0] != '-' && !input_path) {
+            input_path = argv[arg];
         } else {
             fprintf(stderr, "flowc: unknown option: %s\n", argv[arg]);
             return EXIT_FAILURE;
         }
     }
 
-    const char *dot = strrchr(input_path, '.');
-    size_t base_len = (dot && !strcmp(dot, ".lean")) ? (size_t)(dot - input_path) : 0;
+    if (!input_path && !induce_csv_path) {
+        fprintf(stderr, "flowc: missing input .lean specification or --induce <samples.csv>\n");
+        return EXIT_FAILURE;
+    }
+
+    const char *primary_path = input_path ? input_path : induce_csv_path;
+    const char *dot = strrchr(primary_path, '.');
+    size_t base_len = (dot && (!strcmp(dot, ".lean") || !strcmp(dot, ".csv"))) ? (size_t)(dot - primary_path) : 0;
     if (!output_path) {
         if (base_len > 0 && base_len + 3 < sizeof(auto_output_buf)) {
-            memcpy(auto_output_buf, input_path, base_len);
+            memcpy(auto_output_buf, primary_path, base_len);
             strcpy(auto_output_buf + base_len, ".c");
         } else {
-            snprintf(auto_output_buf, sizeof(auto_output_buf), "%s.c", input_path);
+            snprintf(auto_output_buf, sizeof(auto_output_buf), "%s.c", primary_path);
         }
         output_path = auto_output_buf;
     }
 
-    FILE *input = fopen(input_path, "r");
-    if (!input) {
-        fprintf(stderr, "flowc: cannot open %s: %s\n", input_path, strerror(errno));
-        return EXIT_FAILURE;
+    FILE *input = NULL;
+    if (induce_csv_path) {
+        double *xs = NULL, *ys = NULL;
+        size_t sample_cnt = 0;
+        int is_biv = 0;
+        if (!flow_induce_load_csv_samples(induce_csv_path, &xs, &ys, &sample_cnt, &is_biv)) {
+            fprintf(stderr, "flowc: --induce cannot load samples from %s\n", induce_csv_path);
+            return EXIT_FAILURE;
+        }
+        FlowInducedPolyModel poly = {0};
+        FlowGridEnvelope grid = {0};
+        FlowSMMResult smm = {0};
+        FlowPRNGAuditResult prng = {0};
+
+        int want_poly = (!strcmp(induce_mode, "composite") || !strcmp(induce_mode, "poly"));
+        int want_grid = (!strcmp(induce_mode, "composite") || !strcmp(induce_mode, "grid"));
+        int want_cir  = (!strcmp(induce_mode, "composite") || !strcmp(induce_mode, "smm-cir"));
+        int want_mert = (!strcmp(induce_mode, "smm-merton"));
+        int want_prng = (!strcmp(induce_mode, "composite") || !strcmp(induce_mode, "prng"));
+
+        if (want_poly) flow_induce_fit_rational_poly(xs, ys, sample_cnt, 2, 1024, &poly);
+        if (want_grid) flow_induce_build_grid_envelope(xs, ys, sample_cnt, 4, 100, &grid);
+        if (want_cir)  flow_induce_solve_smm(ys, sample_cnt, FLOW_SMM_CIR_REFLECTING, 0.05, 42ULL, &smm);
+        if (want_mert) flow_induce_solve_smm(ys, sample_cnt, FLOW_SMM_MERTON_JUMP, 0.01, 42ULL, &smm);
+        if (want_prng) flow_induce_audit_prng_floats(ys, sample_cnt < 64 ? sample_cnt : 64, 5000, &prng);
+
+        free(xs);
+        free(ys);
+
+        input = tmpfile();
+        if (!input) {
+            fprintf(stderr, "flowc: failed to create temporary buffer for induced Lean 4 spec\n");
+            return EXIT_FAILURE;
+        }
+        flow_induce_emit_lean_composite(
+            input, "Flow.InducedKnowledge",
+            want_poly ? &poly : NULL,
+            want_grid ? &grid : NULL,
+            (want_cir || want_mert) ? &smm : NULL,
+            (want_prng && prng.detected) ? &prng : NULL);
+
+        if (emit_induced_lean) {
+            FILE *lout = fopen(emit_induced_lean, "w");
+            if (lout) {
+                flow_induce_emit_lean_composite(
+                    lout, "Flow.InducedKnowledge",
+                    want_poly ? &poly : NULL,
+                    want_grid ? &grid : NULL,
+                    (want_cir || want_mert) ? &smm : NULL,
+                    (want_prng && prng.detected) ? &prng : NULL);
+                fclose(lout);
+                printf("  induce: synthesized Lean 4 spec -> %s\n", emit_induced_lean);
+            }
+        }
+        rewind(input);
+        input_path = induce_csv_path;
+    } else {
+        input = fopen(input_path, "r");
+        if (!input) {
+            fprintf(stderr, "flowc: cannot open %s: %s\n", input_path, strerror(errno));
+            return EXIT_FAILURE;
+        }
     }
 
     if (!parse_spec(input, &spec)) {

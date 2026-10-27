@@ -10,7 +10,7 @@ FLOWC := $(BUILD_DIR)/flowc
 FLOWY := $(BUILD_DIR)/flowy
 LIBFLOW_A := $(BUILD_DIR)/libflow.a
 LIBFLOW_RT_A := $(BUILD_DIR)/libflow_rt.a
-PLUGINS_SO := $(BUILD_DIR)/libflow_embodied.so
+PLUGINS_SO := $(BUILD_DIR)/libflow_embodied.so $(BUILD_DIR)/libflow_cryptanalysis.so
 
 SRC_LIB_ROOT := $(filter-out src/flowc.c src/flowy_main.c src/flowy.c,$(wildcard src/*.c))
 LIB_OBJS := $(patsubst src/%.c, $(BUILD_DIR)/obj/%.o, $(SRC_LIB_ROOT))
@@ -79,6 +79,9 @@ plugins: $(PLUGINS_SO)
 $(BUILD_DIR)/libflow_embodied.so: plugins/embodied.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -shared -fPIC -DFLOW_PLUGIN_DSO -undefined dynamic_lookup $(THREAD_FLAGS) -Isrc -Iplugins $< -o $@ $(LDLIBS)
 
+$(BUILD_DIR)/libflow_cryptanalysis.so: plugins/cryptanalysis.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -shared -fPIC -DFLOW_PLUGIN_DSO -undefined dynamic_lookup $(THREAD_FLAGS) -Isrc -Iplugins $< -o $@ $(LDLIBS)
+
 # ==============================================================================
 # Domain Test Pipeline
 # ==============================================================================
@@ -114,6 +117,7 @@ test-cli: $(FLOWC) $(FLOWY)
 	@$(FLOWY) --version >/dev/null
 	@$(FLOWY) audit >/dev/null
 	@$(FLOWY) topos >/dev/null
+	@$(FLOWY) induce --benchmark >/dev/null
 	@echo "  ✓ flowc & flowy CLI smoke tests passed."
 
 test: $(TEST_BINARIES) test-cli

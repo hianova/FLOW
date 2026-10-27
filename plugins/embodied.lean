@@ -20,11 +20,11 @@ structure EmbodiedJointFrame where
   deriving Repr
 
 def isTorqueWithinLimit (torque : Float) (limit : Float) : Bool :=
-  let effLimit := if limit > 0.0 then limit else 80.0 in
+  let effLimit := if limit > 0.0 then limit else 80.0
   torque >= -effLimit && torque <= effLimit
 
 def dampedAngularAccel (torque : Float) (vel : Float) (maxAccel : Float) : Float :=
-  let raw := (torque - 0.05 * vel) / 0.25 in
+  let raw := (torque - 0.05 * vel) / 0.25
   if raw > maxAccel then maxAccel else if raw < -maxAccel then -maxAccel else raw
 
 def stepEulerVelocity (vel : Float) (accel : Float) (dt : Float) : Float :=

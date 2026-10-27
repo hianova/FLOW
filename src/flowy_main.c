@@ -255,6 +255,7 @@ static void flowy_print_usage(FILE *out) {
         "FLOW 2.0 Living System & C17 Toolchain (flowy) v2.5.0\n"
         "Usage: flowy <command> [options...]\n\n"
         "Primary Commands:\n"
+        "  induce / discover [--benchmark|<file.csv>]  Induce Lean 4 invariants, SMM params & PRNG seed audit\n"
         "  topos / hott                                Inspect 64-Bit Cubical HoTT Sieve & Type Universe U_0\n"
         "  audit                                       Run HoTT U_0 univalence & C17 ABI soundness audit\n"
         "  build [--shared] <spec.lean>                Build standalone AOT binary or C17 shared library (--shared)\n"
@@ -280,6 +281,10 @@ int main(int argc, char **argv) {
 
     if (!strcmp(argv[1], "run")) return flowy_run_cmd(argc, argv);
     if (!strcmp(argv[1], "build") || !strcmp(argv[1], "compile")) return flowy_build_cmd(argc, argv, 0);
+    if (!strcmp(argv[1], "induce") || !strcmp(argv[1], "--induce") ||
+        !strcmp(argv[1], "discover") || !strcmp(argv[1], "--discover")) {
+        return cmd_induce_run(argc - 2, argv + 2);
+    }
 
     flow_registry_init();
     flowy_set_language(flowy_detect_system_language());
