@@ -1385,6 +1385,295 @@ int main(void) {
         printf("  ✓ Stage 12 Passed: Cryptanalysis plugin (.so + .lean), MT19937 624-word Untwist -> seed=42, PCG32 64-bit recovery, GF(2), QMC & PUF verified.\n\n");
     }
 
+    /* ======================================================================
+     * STAGE 13: HoTT Witness Types, Univalence SIMD SOA & Phase Attention
+     * ====================================================================== */
+    {
+        printf("--- [Stage 13: HoTT Witness Types (Omega), Univalence SIMD SOA64 & Phase-Space Attention] ---\n");
+        const char *lean_hott_att =
+            "-- Pure Lean 4 Quant Strategy with Subobject Classifier Invariants & SOA Lifting\n"
+            "structure OrderSlot where\n"
+            "  order_id : UInt64\n"
+            "  price : Float\n"
+            "  qty : Float\n"
+            "  solvency_headroom : Float\n"
+            "  h_solvency : solvency_headroom >= 0.20\n"
+            "  h_qty : qty > 0.0\n"
+            "\n"
+            "structure JetState where\n"
+            "  strike : Float\n"
+            "  iv : Float\n"
+            "  tte : Float\n"
+            "  solvency : Float\n"
+            "\n"
+            "def build_order (oid : UInt64) (p : Float) (q : Float) (solv : Float) (h_solv : solv >= 0.20) (h_q : q > 0.0) : OrderSlot :=\n"
+            "  { order_id := oid, price := p, qty := q, solvency_headroom := solv }\n"
+            "\n"
+            "def vega_snipe (s : JetState) (vol_floor : Float) : Float :=\n"
+            "  let eff_iv := if s.iv > vol_floor then s.iv else vol_floor\n"
+            "  in s.strike * eff_iv * Float.sqrt s.tte\n"
+            "\n"
+            "theorem vega_snipe_nonneg (s : JetState) (vol_floor : Float) (h_s : s.strike >= 0.0) (h_v : vol_floor >= 0.0) (h_t : s.tte >= 0.0) :\n"
+            "  vega_snipe s vol_floor >= 0.0 := by\n"
+            "  trivial\n";
+
+        FILE *lf = fopen("/tmp/flow_hott_attention.lean", "w");
+        FLOW_ASSERT_TRUE(lf != NULL);
+        fputs(lean_hott_att, lf);
+        fclose(lf);
+
+        char cmd_compile[1024];
+        snprintf(cmd_compile, sizeof(cmd_compile),
+                 "%s/flowc /tmp/flow_hott_attention.lean -o /tmp/flow_hott_attention.c --target-c-header /tmp/flow_hott_attention.h >/dev/null",
+                 FLOW_BUILD_DIR);
+        FLOW_ASSERT_EQ(system(cmd_compile), 0);
+
+        /* Verify generated header contains Witness Types and SIMD SOA64 constructs */
+        FILE *hf = fopen("/tmp/flow_hott_attention.h", "r");
+        FLOW_ASSERT_TRUE(hf != NULL);
+        char hbuf[65536];
+        memset(hbuf, 0, sizeof(hbuf));
+        (void)fread(hbuf, 1, sizeof(hbuf) - 1, hf);
+        fclose(hf);
+
+        FLOW_ASSERT_TRUE(strstr(hbuf, "lean_certified_OrderSlot") != NULL);
+        FLOW_ASSERT_TRUE(strstr(hbuf, "flowc_certify_OrderSlot") != NULL);
+        FLOW_ASSERT_TRUE(strstr(hbuf, "lean_certified_build_order") != NULL);
+        FLOW_ASSERT_TRUE(strstr(hbuf, "JetState_SOA64") != NULL);
+        FLOW_ASSERT_TRUE(strstr(hbuf, "flowc_ua_lift_to_soa_JetState") != NULL);
+        FLOW_ASSERT_TRUE(strstr(hbuf, "flowc_soa_vega_snipe") != NULL);
+        FLOW_ASSERT_TRUE(strstr(hbuf, "soa_vega_snipe") != NULL);
+
+        /* Write C17 driver testing Witness Types, SOA64 batch execution, and Phase-Space Attention */
+        FILE *drv = fopen("/tmp/flow_hott_att_drv.c", "w");
+        FLOW_ASSERT_TRUE(drv != NULL);
+        fputs(
+            "#include \"/tmp/flow_hott_attention.h\"\n"
+            "#include \"flow_jet.h\"\n"
+            "#include <assert.h>\n"
+            "#include <math.h>\n"
+            "#include <stdio.h>\n"
+            "\n"
+            "/* Hardware Gateway that ONLY accepts compile-time unforgeable lean_certified_OrderSlot */\n"
+            "static uint64_t g_gateway_orders_sent = 0;\n"
+            "static int flow_kgi_gateway_send_order(lean_certified_OrderSlot certified_token) {\n"
+            "    OrderSlot slot = flowc_uncertify_OrderSlot(certified_token);\n"
+            "    assert(slot.solvency_headroom >= 0.20);\n"
+            "    assert(slot.qty > 0.0);\n"
+            "    g_gateway_orders_sent++;\n"
+            "    return 1;\n"
+            "}\n"
+            "\n"
+            "static int regime_calm_mm(FlowJet *jet, const void *in, void *out) {\n"
+            "    (void)jet; (void)in;\n"
+            "    if (out) *(int *)out = 10;\n"
+            "    return 10;\n"
+            "}\n"
+            "static int regime_tmf_waterfall(FlowJet *jet, const void *in, void *out) {\n"
+            "    (void)jet; (void)in;\n"
+            "    if (out) *(int *)out = 20;\n"
+            "    return 20;\n"
+            "}\n"
+            "static int regime_emergency_fold(FlowJet *jet, const void *in, void *out) {\n"
+            "    (void)jet; (void)in;\n"
+            "    if (out) *(int *)out = 99;\n"
+            "    return 99;\n"
+            "}\n", drv);
+        fputs(
+            "int main(void) {\n"
+            "    /* 1. Subobject Classifier (Omega) -> Witness Type (Sigma x:A, P(x)) Verification */\n"
+            "    lean_certified_OrderSlot witness_slot;\n"
+            "    /* Solvency 0.12 < 0.20 must be rejected by Subobject Classifier */\n"
+            "    assert(lean_certified_build_order(1001ULL, 500.0, 2.0, 0.12, &witness_slot) == false);\n"
+            "    OrderSlot raw_bad = { .order_id = 1001ULL, .price = 500.0, .qty = 2.0, .solvency_headroom = 0.15 };\n"
+            "    assert(lean_certify_OrderSlot(raw_bad, &witness_slot) == false);\n"
+            "    /* Solvency 0.35 >= 0.20 and qty 2.0 > 0.0 succeeds and yields unforgeable token */\n"
+            "    assert(lean_certified_build_order(1002ULL, 500.0, 2.0, 0.35, &witness_slot) == true);\n"
+            "    assert(flow_kgi_gateway_send_order(witness_slot) == 1);\n"
+            "    assert(g_gateway_orders_sent == 1ULL);\n"
+            "\n"
+            "    /* 2. HoTT Univalence AOS[64] <-> SIMD SOA64 Automatic Transport & Vectorized Kernel */\n"
+            "    FlowHoTTUniverse *u0 = flow_hott_universe_global();\n"
+            "    assert(flow_hott_register_soa_equivalence(u0, \"JetState\", \"JetState_SOA64\", 4, sizeof(JetState), FLOW_SIMD_SOA_LANES, 0U, FLOW_SIEVE_SECURITY_CANONICAL_MASK) == 1);\n"
+            "    uint64_t ua_path = 0ULL;\n"
+            "    assert(flow_hott_verify_soa_univalence(u0, \"JetState\", \"JetState_SOA64\", FLOW_SIMD_SOA_LANES, &ua_path) == FLOW_KAN_FILLED_HOMOTOPIC);\n"
+            "    assert(ua_path != 0ULL);\n"
+            "\n"
+            "    JetState aos_chain[64];\n"
+            "    for (size_t i = 0; i < 64; ++i) {\n"
+            "        aos_chain[i].strike = 18000.0 + (double)i * 100.0;\n"
+            "        aos_chain[i].iv = 0.10 + (double)(i % 10) * 0.03;\n"
+            "        aos_chain[i].tte = 0.25;\n"
+            "        aos_chain[i].solvency = 0.40;\n"
+            "    }\n"
+            "    JetState_SOA64 soa_chain;\n"
+            "    flowc_ua_lift_to_soa_JetState(aos_chain, 64, &soa_chain);\n"
+            "    double simd_out[64] = {0};\n"
+            "    soa_vega_snipe(&soa_chain, 0.18, simd_out);\n"
+            "    for (size_t i = 0; i < 64; ++i) {\n"
+            "        double scalar_ref = vega_snipe(aos_chain[i], 0.18);\n"
+            "        assert(fabs(simd_out[i] - scalar_ref) < 1e-12);\n"
+            "    }\n"
+            "    JetState roundtrip[64];\n"
+            "    flowc_ua_lower_from_soa_JetState(&soa_chain, 64, roundtrip);\n"
+            "    for (size_t i = 0; i < 64; ++i) {\n"
+            "        assert(fabs(roundtrip[i].strike - aos_chain[i].strike) < 1e-12);\n"
+            "        assert(fabs(roundtrip[i].iv - aos_chain[i].iv) < 1e-12);\n"
+            "    }\n", drv);
+        fputs(
+            "    /* 3. Phase-Space Attention Router (Q, K_i, V_i) + Moreau Hysteresis + Kan Handover */\n"
+            "    FlowPhaseAttentionRouter router;\n"
+            "    assert(flow_phase_attention_init(&router, 2, 2U) == 1);\n"
+            "    /* Plane 0: H_reynolds <= 40.0 with Moreau Hysteresis [38.0, 42.0] */\n"
+            "    double c_p0[2] = { 1.0, 0.0 };\n"
+            "    assert(flow_phase_attention_set_plane(&router, 0, c_p0, 40.0, true, 38.0, 42.0) == 1);\n"
+            "    /* Plane 1: -Solvency <= -0.20 (i.e. Solvency >= 0.20) */\n"
+            "    double c_p1[2] = { 0.0, -1.0 };\n"
+            "    assert(flow_phase_attention_set_plane(&router, 1, c_p1, -0.20, false, 0.0, 0.0) == 1);\n"
+            "\n"
+            "    FlowPhaseAttentionHead h_calm = {\n"
+            "        .name = \"calm_mm\", .key_mask = 0x3ULL, .key_polarity = 0x3ULL,\n"
+            "        .state_sieve = 0x11ULL, .kan_boundary_filter = 0x01ULL, .priority = 10, .kernel = regime_calm_mm\n"
+            "    };\n"
+            "    FlowPhaseAttentionHead h_tmf = {\n"
+            "        .name = \"tmf_waterfall_ioc\", .key_mask = 0x3ULL, .key_polarity = 0x2ULL,\n"
+            "        .state_sieve = 0x13ULL, .kan_boundary_filter = 0x01ULL, .priority = 20, .kernel = regime_tmf_waterfall\n"
+            "    };\n"
+            "    FlowPhaseAttentionHead h_emerg = {\n"
+            "        .name = \"emergency_fold\", .key_mask = 0x2ULL, .key_polarity = 0x0ULL,\n"
+            "        .state_sieve = 0x01ULL, .kan_boundary_filter = 0x01ULL, .priority = 100, .kernel = regime_emergency_fold\n"
+            "    };\n"
+            "    uint32_t idx_calm = 0, idx_tmf = 0, idx_emerg = 0;\n"
+            "    assert(flow_phase_attention_register_head(&router, &h_calm, &idx_calm) == 1);\n"
+            "    assert(flow_phase_attention_register_head(&router, &h_tmf, &idx_tmf) == 1);\n"
+            "    assert(flow_phase_attention_register_head(&router, &h_emerg, &idx_emerg) == 1);\n"
+            "\n"
+            "    FlowJet jet;\n"
+            "    flow_jet_init(&jet, \"quant_jet\", \"PhaseAttentionTest\");\n"
+            "    int action = 0; uint32_t sel = 99;\n"
+            "    /* Step A: Calm regime (H=25.0 <= 38.0, Solvency=0.35 >= 0.20) -> calm_mm */\n"
+            "    double q1[8] = { 25.0, 0.35, 0 };\n"
+            "    assert(flow_phase_attention_route_and_step(&router, &jet, q1, NULL, &action, &sel) == 10);\n"
+            "    assert(sel == idx_calm && action == 10);\n"
+            "    /* Step B: Flutter inside Moreau deadband (H=41.0 in [38, 42]) -> stays in calm_mm! */\n"
+            "    double q2[8] = { 41.0, 0.35, 0 };\n"
+            "    assert(flow_phase_attention_route_and_step(&router, &jet, q2, NULL, &action, &sel) == 10);\n"
+            "    assert(sel == idx_calm && router.hysteresis_flutters_suppressed == 1ULL);\n"
+            "    /* Step C: Breakout above deadband (H=48.0 >= 42.0) -> homotopic switch to tmf_waterfall_ioc */\n"
+            "    double q3[8] = { 48.0, 0.35, 0 };\n"
+            "    assert(flow_phase_attention_route_and_step(&router, &jet, q3, NULL, &action, &sel) == 20);\n"
+            "    assert(sel == idx_tmf && router.context_switches == 1ULL);\n"
+            "    /* Step D: Solvency breach (Solvency=0.10 < 0.20) -> O(1) switch to emergency_fold */\n"
+            "    double q4[8] = { 48.0, 0.10, 0 };\n"
+            "    assert(flow_phase_attention_route_and_step(&router, &jet, q4, NULL, &action, &sel) == 99);\n"
+            "    assert(sel == idx_emerg);\n"
+            "    /* Step E: Kan Open-Box Singularity Obstruction -> blocked & diverted to emergency_fold */\n"
+            "    FlowPhaseAttentionHead h_bad_kan = {\n"
+            "        .name = \"rogue_non_homotopic\", .key_mask = 0x3ULL, .key_polarity = 0x3ULL,\n"
+            "        .state_sieve = 0x00ULL, .kan_boundary_filter = 0x01ULL, .priority = 50, .kernel = regime_calm_mm\n"
+            "    };\n"
+            "    uint32_t idx_bad = 0;\n"
+            "    assert(flow_phase_attention_register_head(&router, &h_bad_kan, &idx_bad) == 1);\n"
+            "    double q5[8] = { 20.0, 0.40, 0 };\n"
+            "    assert(flow_phase_attention_route_and_step(&router, &jet, q5, NULL, &action, &sel) == 99);\n"
+            "    assert(sel == idx_emerg && router.kan_singularity_blocks == 1ULL);\n"
+            "    return 0;\n"
+            "}\n", drv);
+        fclose(drv);
+
+        FLOW_ASSERT_EQ(system("cc -std=c17 -Wall -Wextra -Wpedantic -Werror -O2 -Isrc /tmp/flow_hott_att_drv.c /tmp/flow_hott_attention.c build/libflow.a -lm -lpthread -o /tmp/flow_hott_att_drv && /tmp/flow_hott_att_drv"), 0);
+
+        remove("/tmp/flow_hott_attention.lean");
+        remove("/tmp/flow_hott_attention.c");
+        remove("/tmp/flow_hott_attention.h");
+        remove("/tmp/flow_hott_att_drv.c");
+        remove("/tmp/flow_hott_att_drv");
+
+        printf("  ✓ Stage 13 Passed: Witness Types (lean_certified_<T>), Univalence SOA64 (flowc_soa_<fn>) & Phase-Space Attention Router verified.\n\n");
+    }
+
+    /* ======================================================================
+     * STAGE 14: Differential Cohesive HoTT, Discrete 4-Jet (J^4 E) & Homotopy Fiber
+     * ====================================================================== */
+    {
+        printf("--- [Stage 14: Differential Cohesive HoTT, Discrete 4-Jet (J^4 E) & Homotopy Fiber Synthesis] ---\n");
+        double bmf_section[32];
+        for (size_t i = 0; i < 32; ++i) {
+            bmf_section[i] = 1.0 + 0.25 * cos((double)i * 0.19634954084936207);
+        }
+        double rk_min[5] = { -10.0, -5.0, -5.0, -5.0, -5.0 };
+        double rk_max[5] = {  10.0,  5.0,  5.0,  5.0,  5.0 };
+
+        FlowDiscreteJetBundle jbundle;
+        FLOW_ASSERT_EQ(flow_jet_bundle_prolong_bmf(bmf_section, 32, rk_min, rk_max, &jbundle), 1);
+        FLOW_ASSERT_EQ(jbundle.is_holonomic_section, 1);
+        FLOW_ASSERT_TRUE(jbundle.cartan_kahler_defect <= 1e-12);
+
+        /* Diagnose 0-Type multi-solution fiber and collapse to (-2)-Type Contractible */
+        FlowHomotopyFiberReport hfiber;
+        FLOW_ASSERT_EQ(flow_hott_analyze_homotopy_fiber(0x07ULL, 0x3FULL, 0x07ULL, 0x10ULL, &hfiber), 1);
+        FLOW_ASSERT_EQ(hfiber.h_level, FLOW_HLEVEL_GROUPOID_SYMMETRY);
+        uint64_t w_sieve = 0ULL, pinned = 0ULL;
+        FLOW_ASSERT_EQ(flow_hott_collapse_fiber_contractible(&hfiber, &w_sieve, &pinned), 1);
+        FLOW_ASSERT_EQ(flow_hott_analyze_homotopy_fiber(0x07ULL, 0x3FULL, pinned, 0x10ULL, &hfiber), 1);
+        FLOW_ASSERT_EQ(hfiber.h_level, FLOW_HLEVEL_CONTRACTIBLE);
+        FLOW_ASSERT_EQ(hfiber.pi0_components, 1U);
+
+        /* Emit Commutative Cube & Bundle Projection Diagram */
+        FILE *md_fp = fopen("/tmp/flow_cohesive_cube.md", "w");
+        FLOW_ASSERT_TRUE(md_fp != NULL);
+        FLOW_ASSERT_EQ(flow_hott_emit_commutative_diagram(md_fp, &jbundle, &hfiber, "FlowCohesiveJet"), 1);
+        fclose(md_fp);
+
+        /* Emit Zero-Sorry Lean 4 specification and compile via flowc with --fiber-diagram */
+        FILE *lean_fp = fopen("/tmp/flow_cohesive_jet.lean", "w");
+        FLOW_ASSERT_TRUE(lean_fp != NULL);
+        FLOW_ASSERT_EQ(flow_hott_emit_lean_fiber_jet_spec(lean_fp, &jbundle, &hfiber, "FlowCohesiveJet"), 1);
+        fclose(lean_fp);
+
+        char cmd_cohesive[1024];
+        snprintf(cmd_cohesive, sizeof(cmd_cohesive),
+                 "%s/flowc /tmp/flow_cohesive_jet.lean -o /tmp/flow_cohesive_jet.c --target-c-header /tmp/flow_cohesive_jet.h --fiber-diagram /tmp/flow_cli_cube.md >/dev/null",
+                 FLOW_BUILD_DIR);
+        FLOW_ASSERT_EQ(system(cmd_cohesive), 0);
+
+        /* Compile and run a C17 test verifying the synthesized DiscreteJet4, SOA64 & HomotopyFiberWitness */
+        FILE *cj_drv = fopen("/tmp/flow_cohesive_drv.c", "w");
+        FLOW_ASSERT_TRUE(cj_drv != NULL);
+        fputs(
+            "#include \"/tmp/flow_cohesive_jet.h\"\n"
+            "#include <assert.h>\n"
+            "#include <math.h>\n"
+            "int main(void) {\n"
+            "    DiscreteJet4 j = { .j0_val = 1.0, .j1_grad = 0.2, .j2_curv = -0.1, .j3_skew = 0.05, .j4_kurt = 0.02 };\n"
+            "    double rk_e = lean_eval_rk_subbundle(j);\n"
+            "    assert(rk_e >= 0.0);\n"
+            "    HomotopyFiberWitness w_contr = { .witness_sieve = 7.0, .pi0_count = 1.0, .pi1_rank = 0.0, .j4_energy = rk_e };\n"
+            "    assert(lean_fiber_is_contractible(w_contr) == true);\n"
+            "    DiscreteJet4 jets[64];\n"
+            "    for (int i = 0; i < 64; ++i) jets[i] = j;\n"
+            "    DiscreteJet4_SOA64 soa_jets;\n"
+            "    flowc_ua_lift_to_soa_DiscreteJet4(jets, 64, &soa_jets);\n"
+            "    double out_rk[64] = {0};\n"
+            "    soa_eval_rk_subbundle(&soa_jets, out_rk);\n"
+            "    for (int i = 0; i < 64; ++i) assert(fabs(out_rk[i] - rk_e) < 1e-12);\n"
+            "    return 0;\n"
+            "}\n", cj_drv);
+        fclose(cj_drv);
+
+        FLOW_ASSERT_EQ(system("cc -std=c17 -Wall -Wextra -Wpedantic -Werror -O2 -Isrc /tmp/flow_cohesive_drv.c /tmp/flow_cohesive_jet.c build/libflow.a -lm -lpthread -o /tmp/flow_cohesive_drv && /tmp/flow_cohesive_drv"), 0);
+
+        remove("/tmp/flow_cohesive_cube.md");
+        remove("/tmp/flow_cli_cube.md");
+        remove("/tmp/flow_cohesive_jet.lean");
+        remove("/tmp/flow_cohesive_jet.c");
+        remove("/tmp/flow_cohesive_jet.h");
+        remove("/tmp/flow_cohesive_drv.c");
+        remove("/tmp/flow_cohesive_drv");
+
+        printf("  ✓ Stage 14 Passed: Differential Cohesive HoTT, Discrete 4-Jet (J^4 E) & Zero-Sorry Homotopy Fiber verified.\n\n");
+    }
+
     FLOW_TEST_SUITE_END();
     return 0;
 }

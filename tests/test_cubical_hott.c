@@ -272,5 +272,93 @@ int main(void) {
         printf("    * 64-Axis Basis Dictionary, Homotopic 1-Cell Decoder & Intent Projection 100%% SOUND\n");
     }
 
+    /* ========================================================================= */
+    /* 8. HoTT Univalence AOS <-> SIMD SOA Isomorphism in U_0                    */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(8, "HoTT Univalence AOS <-> SIMD SOA Isomorphism in U_0");
+    {
+        FlowHoTTUniverse u_soa;
+        flow_hott_universe_reset(&u_soa);
+
+        /* Register JetState[64] ~= JetState_SOA64 along FLOW_SIEVE_BIT_COLUMNAR_MORPH */
+        int reg_ok = flow_hott_register_soa_equivalence(&u_soa, "JetState", "JetState_SOA64",
+                                                        4, 32, FLOW_SIMD_SOA_LANES, 0U,
+                                                        FLOW_SIEVE_SECURITY_CANONICAL_MASK);
+        FLOW_ASSERT_EQ(reg_ok, 1);
+        FLOW_ASSERT_EQ(flow_hott_verify_universe_all(&u_soa), 1);
+
+        uint64_t ua_hash = 0ULL;
+        FlowKanStatus ua_st = flow_hott_verify_soa_univalence(&u_soa, "JetState", "JetState_SOA64",
+                                                              FLOW_SIMD_SOA_LANES, &ua_hash);
+        FLOW_ASSERT_EQ(ua_st, FLOW_KAN_FILLED_HOMOTOPIC);
+        FLOW_ASSERT_NE(ua_hash, 0ULL);
+
+        /* Negative test: wrong lane count or broken non-layout axis must be obstructed */
+        FLOW_ASSERT_EQ(flow_hott_verify_soa_univalence(&u_soa, "JetState", "JetState_SOA64", 32U, NULL),
+                       FLOW_KAN_OBSTRUCTED_SINGULARITY);
+
+        /* Register a type with a non-layout sieve mismatch and verify obstruction */
+        flow_hott_register_type(&u_soa, "BrokenSOA", FLOW_HOTT_LANG_LEAN, 4, 32 * 64, 64, 0U,
+                                FLOW_SIEVE_SECURITY_CANONICAL_MASK ^ 0x1ULL);
+        flow_hott_register_type(&u_soa, "BrokenSOA", FLOW_HOTT_LANG_C17,  4, 32 * 64, 64, 0U,
+                                FLOW_SIEVE_SECURITY_CANONICAL_MASK ^ 0x1ULL);
+        FLOW_ASSERT_EQ(flow_hott_verify_soa_univalence(&u_soa, "JetState", "BrokenSOA", FLOW_SIMD_SOA_LANES, NULL),
+                       FLOW_KAN_OBSTRUCTED_SINGULARITY);
+
+        printf("    * HoTT Univalence AOS[64] ~= SOA64 Path Lifting Verified (ua_hash=0x%016llx)\n",
+               (unsigned long long)ua_hash);
+    }
+
+    /* ========================================================================= */
+    /* 9. Differential Cohesive HoTT: Homotopy Fiber & Discrete 4-Jet (J^4 E)    */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(9, "Differential Cohesive HoTT: Homotopy Fiber (fib_{ev}(1)) & Discrete 4-Jet (J^4 E)");
+    {
+        FlowHomotopyFiberReport rep;
+
+        /* Case A: Empty Type (UNSAT, h_level = -1) when mandatory target axis is missing */
+        FLOW_ASSERT_EQ(flow_hott_analyze_homotopy_fiber(0x07ULL, 0x03ULL, 0x0ULL, 0x0ULL, &rep), 1);
+        FLOW_ASSERT_EQ(rep.h_level, FLOW_HLEVEL_EMPTY_UNSAT);
+        FLOW_ASSERT_EQ(rep.pi0_components, 0U);
+        FLOW_ASSERT_EQ(flow_hott_collapse_fiber_contractible(&rep, NULL, NULL), 0);
+
+        /* Case B: 1-Type Groupoid (A // G, h_level = 1) when symmetry orbit axes are unpinned */
+        FLOW_ASSERT_EQ(flow_hott_analyze_homotopy_fiber(0x03ULL, 0x3FULL, 0x03ULL, 0x30ULL, &rep), 1);
+        FLOW_ASSERT_EQ(rep.h_level, FLOW_HLEVEL_GROUPOID_SYMMETRY);
+        FLOW_ASSERT_EQ(rep.pi1_symmetry_generators, 2U); /* bits 4 and 5 */
+        FLOW_ASSERT_EQ(rep.pi0_components, 4U);          /* bits 2 and 3 => 2^2 = 4 */
+
+        /* Case C: 0-Type Discrete Set (h_level = 0, |pi_0| > 1) causing solver oscillation */
+        FLOW_ASSERT_EQ(flow_hott_analyze_homotopy_fiber(0x03ULL, 0x0FULL, 0x03ULL, 0x0ULL, &rep), 1);
+        FLOW_ASSERT_EQ(rep.h_level, FLOW_HLEVEL_SET_DISCRETE);
+        FLOW_ASSERT_EQ(rep.pi0_components, 4U);
+        FLOW_ASSERT_EQ(rep.pi1_symmetry_generators, 0U);
+        FLOW_ASSERT_EQ(rep.unconstrained_axes_mask, 0x0CULL);
+
+        /* Collapse multi-solution fiber to Contractible ((-2)-Type, isContr) */
+        uint64_t contracted_w = 0ULL, pinned_mask = 0ULL;
+        FLOW_ASSERT_EQ(flow_hott_collapse_fiber_contractible(&rep, &contracted_w, &pinned_mask), 1);
+        FLOW_ASSERT_EQ(flow_hott_analyze_homotopy_fiber(0x03ULL, 0x0FULL, pinned_mask, 0x0ULL, &rep), 1);
+        FLOW_ASSERT_EQ(rep.h_level, FLOW_HLEVEL_CONTRACTIBLE);
+        FLOW_ASSERT_EQ(rep.pi0_components, 1U);
+        FLOW_ASSERT_EQ(rep.pi1_symmetry_generators, 0U);
+
+        /* Discrete 4-Jet Bundle Prolongation j^4 s : M -> J^4 E over BMF lattice */
+        double section[16];
+        for (size_t i = 0; i < 16; ++i) {
+            /* Constant section s(x) = 2.5 has J^1 = J^2 = J^3 = J^4 = 0 */
+            section[i] = 2.5;
+        }
+        double rk_min[5] = { 0.0, -1.0, -1.0, -1.0, -1.0 };
+        double rk_max[5] = { 5.0,  1.0,  1.0,  1.0,  1.0 };
+        FlowDiscreteJetBundle bundle;
+        FLOW_ASSERT_EQ(flow_jet_bundle_prolong_bmf(section, 16, rk_min, rk_max, &bundle), 1);
+        FLOW_ASSERT_EQ(bundle.is_holonomic_section, 1);
+        FLOW_ASSERT_EQ(bundle.holonomic_mask, 0xFFFFULL);
+        FLOW_ASSERT_TRUE(bundle.cartan_kahler_defect <= 1e-12);
+
+        printf("    * Homotopy Fiber h-Level (-2, -1, 0, 1) & Discrete 4-Jet Prolongation (J^4 E) Verified\n");
+    }
+
     FLOW_TEST_SUITE_END();
 }

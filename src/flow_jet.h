@@ -102,6 +102,50 @@ typedef struct { double threshold_low;
 int flow_moreau_init(FlowMoreauHysteresis *hys, double x_low, double x_high, int initial_state);
 int flow_moreau_step(FlowMoreauHysteresis *hys, double input_signal);
 FlowSMTResult flow_moreau_verify_smt(const FlowMoreauHysteresis *hys, FlowSMTProofAttestation *proof_out);
+
+/* ============================================================================
+ * Phase-Space Attention Context Switch Router (Q, K_i, V_i) + Kan Handover
+ * ============================================================================ */
+#define FLOW_PHASE_ATTENTION_MAX_HEADS 16U
+#define FLOW_PHASE_ATTENTION_DIM       8U
+
+typedef int (*FlowPhaseRegimeKernelFn)(FlowJet *jet, const void *certified_input, void *action_out);
+
+typedef struct {
+    char name[64];
+    uint64_t key_mask;             /* Domain polytope hyperplane mask (K_i) */
+    uint64_t key_polarity;         /* Required satisfied half-space polarity on key_mask */
+    uint64_t state_sieve;          /* Cubical HoTT invariant sieve for this regime */
+    uint64_t kan_boundary_filter;  /* Invariant axes protected during state handover */
+    uint32_t priority;             /* Deterministic attention priority */
+    FlowPhaseRegimeKernelFn kernel;/* Synthesized C17 operator pointer (V_i) */
+    const void *user_unit;         /* Optional bound FlowUnit / user context */
+} FlowPhaseAttentionHead;
+
+typedef struct {
+    FlowHardwiredPolyhedralTemplate poly_template;
+    FlowMoreauHysteresis plane_hysteresis[FLOW_HARDWIRED_MAX_PLANES];
+    uint64_t hysteresis_enabled_mask;
+    FlowPhaseAttentionHead heads[FLOW_PHASE_ATTENTION_MAX_HEADS];
+    uint32_t head_count;
+    uint32_t active_regime_idx;
+    uint32_t emergency_regime_idx;
+    uint64_t last_query_sieve;
+    uint64_t total_routes;
+    uint64_t context_switches;
+    uint64_t kan_singularity_blocks;
+    uint64_t hysteresis_flutters_suppressed;
+} FlowPhaseAttentionRouter;
+
+int flow_phase_attention_init(FlowPhaseAttentionRouter *router, size_t phase_dim, uint32_t emergency_regime_idx);
+int flow_phase_attention_set_plane(FlowPhaseAttentionRouter *router, uint32_t plane_idx, const double coeffs[],
+                                   double bound, bool enable_hysteresis, double hys_low, double hys_high);
+int flow_phase_attention_register_head(FlowPhaseAttentionRouter *router, const FlowPhaseAttentionHead *head, uint32_t *idx_out);
+uint64_t flow_phase_attention_project_query(FlowPhaseAttentionRouter *router, const double state_vec[FLOW_PHASE_ATTENTION_DIM]);
+int flow_phase_attention_route_and_step(FlowPhaseAttentionRouter *router, FlowJet *jet,
+                                        const double state_vec[FLOW_PHASE_ATTENTION_DIM],
+                                        const void *certified_input, void *action_out,
+                                        uint32_t *selected_regime_out);
 #ifdef __cplusplus
 }
 #endif

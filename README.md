@@ -35,18 +35,20 @@ FLOW 的理論核心完全建立在離散立方體集（Discrete Cubical Sets）
 │     • 邊界篩網濾波與差分匹配：Mismatch = (Mask_p ^ Mask_q) & BoundaryFilter == 0      │
 │     • 零不匹配判定為同倫等價 (Kan Filled Homotopic)，非零即判定為拓撲奇點阻礙           │
 │                                                                                        │
-│  4️⃣ 格羅滕迪克拓撲子物件分類子 (Topos Subobject Classifier Ω = 2)                      │
+│  4️⃣ 格羅滕迪克拓撲子物件分類子 (Topos Subobject Classifier Ω = 2) 與見證型別           │
 │     • 映射同構：Hom(X, Ω) ≃ Sub(X)，子物件特徵標籤 χ ∈ {0, 1}                          │
-│     • 嚴格判定子物件在環境篩網（Ambient Sieve）中的包含封閉性                          │
+│     • 自動將 Lean 4 依賴型別 (Σ x : A, P(x)) 合成為 C17 編譯期不可偽造憑證             │
+│       (lean_certified_<T> / flowc_certify_<T>)，消除下游 I/O 未驗證呼叫                │
 │                                                                                        │
-│  5️⃣ 64 維超立方體微架構語義篩網 (I^64 Microarchitecture Semantic Sieve)               │
+│  5️⃣ 64 維超立方體微架構語義篩網與相空間注意力路由 (Phase-Space Attention Router)       │
 │     • 將記憶體、並發、排程、資料佈局與安全策略正交投影至 64 維幾何軸                   │
-│     • 提供拓撲狀態躍遷解碼器 (Transition Decoder) 與 1-Cell 同倫路徑導向               │
+│     • 以超平面內積投影 Q、多面體域遮罩 K_i、Moreau 遲滯防抖與 Kan 開盒同倫交接         │
+│       實現 O(1) 無分支策略上下文切換 (FlowPhaseAttentionRouter)                        │
 │                                                                                        │
-│  6️⃣ 內涵全域型別宇宙 U_0 與單價性原理 (Univalence Principle: A ≃ B ⟹ A =_U_0 B)       │
-│     • 註冊跨語言型別（Lean 4 標量規範 ⟷ C17 ABI）                                      │
-│     • 當欄位數量、位元長度、對齊邊界與篩網指紋同構時，宇宙自動證明兩型別等價           │
-│     • 生成單價性同倫路徑雜湊（Path Hash），驗證型別相等性                              │
+│  6️⃣ 內涵全域型別宇宙 U_0、單價性 AOS ⟷ SIMD SOA64 提升與微分凝聚 4-Jet (J^4 E)         │
+│     • 註冊跨語言型別（Lean 4 標量規範 ⟷ C17 ABI）並證明 A[64] ≃ A_SOA64                │
+│     • 自動合成 64 通道快取對齊 <Struct>_SOA64 與向量化算子 flowc_soa_<fn>              │
+│     • 支援同倫纖維 fib_{ev}(1) 之 h-Level (-2, -1, 0, 1) 診斷與離散 4-Jet 延拓         │
 │                                                                                        │
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -58,7 +60,8 @@ FLOW 的理論核心完全建立在離散立方體集（Discrete Cubical Sets）
 除了純粹的同倫代數與演繹驗證，FLOW 內建**歸納式知識合成引擎（Inductive Knowledge Synthesis Engine）**與輕量 C17 執行期模組：
 - **歸納式知識合成核心** (`induce.{h,c}`)：從未知採樣軌跡提取四階經驗矩與積分概率度量（IPM / Wasserstein-1 / KS），透過連分數逼近擬合精確有理數多項式（$c_k \in \mathbb{Q}$）、建構有限網格安全包絡（Computational Reflection via `by decide`）、執行 SMM 蒙地卡羅反向推導（Merton 跳躍擴散與 CIR Feller 條件 $2ab \ge \sigma^2$），並自動合成零 GC Lean 4 憑證與雙軌 C17 算子。
 - **代數密碼分析與偽隨機逆向審計外掛** (`plugins/cryptanalysis.{h,c,lean}`)：支援 `MT19937` $\mathbb{F}_2$ 逆淬火與 624 維逆扭轉（Untwisting）還原初始 `seed=42`、`PCG32` 64-bit 隱藏狀態重構、$64 \times 64$ $\mathbb{F}_2$ 線性系統求解、確定性低差異數列（Certified QMC）星號差異度驗證，以及硬體 Arbiter PUF 最小熵（NIST SP 800-90B $H_\infty$）與 Lipschitz 界限認證。
-- **2-Jet Forward AD 自動微分** (`flow_jet.h`)：二階 Taylor 展開微分鏈鎖律（Value, 1st Delta, 2nd Gamma）。
+- **子物件分類器見證型別與單價性 SIMD SOA64 自動傳輸** (`abi.c`, `backend.c`, `cubical_hott.{h,c}`)：將帶有 `Prop` 不變量的 Lean 4 `structure` 與定理契約合成為 C17 編譯期不可偽造憑證 `lean_certified_<T>`，並利用單價公理（$A[64] \simeq A_{\text{SOA64}}$）自動把單筆 `struct` 算子提升為 64 通道 AVX-512/NEON 友善的 `flowc_soa_<fn>` 批量算子。
+- **微分凝聚同倫（Differential Cohesive HoTT）、離散 4-Jet 纖維叢（$J^4 E$）與相空間注意力路由** (`cubical_hott.{h,c}`, `flow_jet.{h,c}`)：實作同倫纖維 $\mathrm{fib}_{ev_\Phi}(\mathbf{1})$ 的 $h$-Level（$-2$ 唯一解可收縮、$-1$ 空型別 UNSAT、$0$ 多解振盪集合、$1$ 對稱群胚 $A // G$）自動診斷與收縮釘死（Pinning Collapse）、位元流形離散 4-Jet 延拓 $j^4 s : M \to J^4 E$ 與 Cartan-Kähler 可積性檢驗，以及結合 Moreau 遲滯防抖與 Kan 開盒同倫交接的 $O(1)$ 相空間注意力路由器（`FlowPhaseAttentionRouter`）。
 - **QSBR 無鎖世代熱重載** (`reload.h`)：基於靜止狀態（Quiescent State）的世代動態切換與無鎖 Epoch 推進。
 - **無鎖快取對齊 SPSC 環形緩衝區** (`flow_spsc.h`)：純 C17 Header-only 單生產者單消費者佇列。
 
@@ -72,7 +75,7 @@ FLOW 的理論核心完全建立在離散立方體集（Discrete Cubical Sets）
 # 編譯 libflow.a, flowc 編譯器, flowy 內省工具與動態外掛 (embodied / cryptanalysis)
 make -j4 all
 
-# 執行全套領域測試與模糊測試 (572 項斷言 + 1,000 次模糊測試 100% 通過)
+# 執行全套領域測試與模糊測試 (628 項斷言 + 1,000 次模糊測試 100% 通過)
 make test
 ```
 
@@ -98,8 +101,8 @@ make test
 # 從外部 CSV 採樣軌跡自動歸納合成 Lean 4 憑證並直接編譯為 C17 算子
 ./build/flowc --induce samples.csv -o build/induced.c --target-c-header build/induced.h --emit-induced-lean build/induced.lean
 
-# 生成附帶 MATLAB MEX 分派器的 C17 接口
-./build/flowc spec.lean -o build/spec_mex.c --target-c-header build/spec.h --target-mex
+# 生成附帶 MATLAB MEX 分派器的 C17 接口與 4D 同倫交換立方體圖表
+./build/flowc spec.lean -o build/spec_mex.c --target-c-header build/spec.h --target-mex --fiber-diagram build/cohesive_cube.md
 ```
 
 ---
@@ -109,22 +112,22 @@ make test
 ```text
 FLOW/
 ├── src/
-│   ├── cubical_hott.{h,c}             # 64-Bit 離散 Cubical HoTT 核心、Kan 填塞器與單價宇宙 U_0
+│   ├── cubical_hott.{h,c}             # 64-Bit 離散 Cubical HoTT、單價 SOA64、同倫纖維 h-Level 與離散 4-Jet (J^4 E)
 │   ├── induce.{h,c}                   # 歸納式知識合成引擎：IPM 矩匹配、有理數擬合、網格反射、SMM 與 PRNG 逆向
 │   ├── flow.h / parser.c              # 標量 Lean 4 解析器與語義 IR 降階
-│   ├── backend.{h,c}                  # 純 C17 算子與雙軌 (double / Q32.32 fx64) 代碼生成
-│   ├── abi.{h,c} / registry.{h,c}     # C17 標頭檔與 MEX 分派器合成、型別指紋登錄與 DSO 載入
+│   ├── backend.{h,c}                  # 純 C17 算子、見證型別 (lean_certified_<T>) 與 SIMD SOA64 代碼生成
+│   ├── abi.{h,c} / registry.{h,c}     # C17 標頭檔、MEX 分派器合成、型別指紋登錄與 DSO 載入
 │   ├── flow_spsc.h                    # 快取行對齊的純 C17 無鎖 SPSC 環形緩衝區
-│   ├── flow_jet.h                     # 2-Jet Forward AD 二階自動微分算子
+│   ├── flow_jet.{h,c}                 # 2-Jet Forward AD 二階自動微分與 O(1) 相空間注意力路由器 (FlowPhaseAttentionRouter)
 │   ├── reload.{h,c}                   # 無鎖 QSBR 世代動態熱重載
 │   └── flowy.{h,c} / flowc.c / flowy_main.c # CLI 編譯器與同倫宇宙／歸納提煉工具
 ├── plugins/
 │   ├── embodied.{h,c,lean}            # 具身物理、1kHz/10kHz 阻抗控制與 ZMP 穩定包絡外掛
 │   └── cryptanalysis.{h,c,lean}       # MT19937/PCG32 狀態反演、GF(2) 求解器、QMC 去隨機化與硬體 PUF 認證外掛
 ├── tests/
-│   ├── test_cubical_hott.c            # Cubical HoTT 71 項同倫、Kan 與單價性核心測試
+│   ├── test_cubical_hott.c            # Cubical HoTT 99 項同倫、Kan、單價 SOA64、同倫纖維與 J^4 E 測試
 │   ├── test_concurrency.c             # 259 項 QSBR RCU、熱重載與無鎖池併發測試
-│   ├── test_system.c                  # 242 項 Lean 4 編譯、歸納合成引擎與密碼分析全鏈路測試
+│   ├── test_system.c                  # 270 項 Lean 4 編譯、見證型別、相空間注意力、歸納合成與密碼分析全鏈路測試
 │   └── hott_test_kit.h                # 輕量零依賴同倫測試套件
 └── Makefile                           # 純淨 C17 建置管道
 ```

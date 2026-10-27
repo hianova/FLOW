@@ -970,6 +970,355 @@ static int try_emit_enum_fsm_lut_c(FILE *output, const SemanticIR *ir, const Flo
     }
     return 1;
 }
+static void qualify_struct_fields_in_expr(const FlowLeanStruct *st, const char *prefix, const char *src, char *out, size_t out_max) {
+    if (!st || !prefix || !src || !out || out_max == 0) return;
+    char cur[1024] = {0}, next[1024] = {0};
+    snprintf(cur, sizeof(cur), "%s", src);
+    for (size_t fi = 0; fi < st->field_count; ++fi) {
+        const char *fn = st->fields[fi].name;
+        size_t flen = strlen(fn);
+        if (flen == 0) continue;
+        char repl[160];
+        snprintf(repl, sizeof(repl), "(%s%s)", prefix, fn);
+        size_t rlen = strlen(repl), slen = strlen(cur), j = 0;
+        for (size_t i = 0; i < slen && j + 4 < sizeof(next); ) {
+            if (i + flen <= slen && !strncmp(cur + i, fn, flen)) {
+                int l_ok = (i == 0) || (!isalnum((unsigned char)cur[i - 1]) && cur[i - 1] != '_' && cur[i - 1] != '.');
+                int r_ok = (i + flen == slen) || (!isalnum((unsigned char)cur[i + flen]) && cur[i + flen] != '_' && cur[i + flen] != '.');
+                if (l_ok && r_ok && j + rlen + 1 < sizeof(next)) {
+                    memcpy(next + j, repl, rlen);
+                    j += rlen;
+                    i += flen;
+                    continue;
+                }
+            }
+            next[j++] = cur[i++];
+        }
+        next[j] = '\0';
+        snprintf(cur, sizeof(cur), "%s", next);
+    }
+    snprintf(out, out_max, "%s", cur);
+}
+static int is_soa_eligible_fn(const SemanticIR *ir, const FlowLeanFunction *fn) {
+    if (!fn || fn->is_private || !fn->name[0] || fn->is_tuple_return || fn->param_count == 0) return 0;
+    const FlowLeanStruct *out_st = find_ir_lean_struct(ir, fn->return_type);
+    if (out_st && out_st->field_count == 0) return 0;
+    int has_struct_param = 0;
+    for (size_t pi = 0; pi < fn->param_count; ++pi) {
+        const FlowLeanStruct *in_st = find_ir_lean_struct(ir, fn->param_types[pi]);
+        if (in_st) {
+            if (in_st->field_count == 0) return 0;
+            has_struct_param = 1;
+        }
+    }
+    return has_struct_param;
+}
+static int rewrite_expr_soa_columnar(const SemanticIR *ir, const FlowLeanFunction *fn, const char *expr, char *out, size_t out_max) {
+    if (!ir || !fn || !expr || !out || out_max == 0) return 0;
+    char cur[FLOW_LEAN_BODY_MAX] = {0}, next[FLOW_LEAN_BODY_MAX] = {0};
+    snprintf(cur, sizeof(cur), "%s", expr);
+    for (size_t pi = 0; pi < fn->param_count; ++pi) {
+        const FlowLeanStruct *in_st = find_ir_lean_struct(ir, fn->param_types[pi]);
+        if (!in_st) continue;
+        const char *pname = fn->param_names[pi];
+        for (size_t sfi = 0; sfi < in_st->field_count; ++sfi) {
+            const char *fname = in_st->fields[sfi].name;
+            char pat[128], repl[160];
+            snprintf(pat, sizeof(pat), "%s.%s", pname, fname);
+            snprintf(repl, sizeof(repl), "_soa_%s_%s", pname, fname);
+            size_t plen = strlen(pat), rlen = strlen(repl), slen = strlen(cur), j = 0;
+            for (size_t i = 0; i < slen && j + 4 < sizeof(next); ) {
+                if (i + plen <= slen && !strncmp(cur + i, pat, plen)) {
+                    int l_ok = (i == 0) || (!isalnum((unsigned char)cur[i - 1]) && cur[i - 1] != '_' && cur[i - 1] != '.');
+                    int r_ok = (i + plen == slen) || (!isalnum((unsigned char)cur[i + plen]) && cur[i + plen] != '_' && cur[i + plen] != '.');
+                    if (l_ok && r_ok && j + rlen + 1 < sizeof(next)) {
+                        memcpy(next + j, repl, rlen);
+                        j += rlen;
+                        i += plen;
+                        continue;
+                    }
+                }
+                next[j++] = cur[i++];
+            }
+            next[j] = '\0';
+            snprintf(cur, sizeof(cur), "%s", next);
+        }
+        if (body_has_ident_tok(cur, pname)) return 0;
+    }
+    snprintf(out, out_max, "%s", cur);
+    return 1;
+}
+static void emit_lean_hott_witness_and_soa_types(FILE *output, const SemanticIR *ir, int is_header_inline) {
+    if (!output) return;
+    fputs(
+        "#ifndef FLOW_LEAN_PRIMITIVE_WITNESS_TYPES_DEFINED\n"
+        "#define FLOW_LEAN_PRIMITIVE_WITNESS_TYPES_DEFINED\n"
+        "typedef struct { bool _verified; } lean_certified_bool;\n"
+        "typedef struct { double _verified; } lean_certified_double;\n"
+        "typedef struct { float _verified; } lean_certified_float;\n"
+        "typedef struct { uint64_t _verified; } lean_certified_uint64_t;\n"
+        "typedef struct { int64_t _verified; } lean_certified_int64_t;\n"
+        "typedef struct { uint32_t _verified; } lean_certified_uint32_t;\n"
+        "typedef struct { int32_t _verified; } lean_certified_int32_t;\n"
+        "typedef struct { uint16_t _verified; } lean_certified_uint16_t;\n"
+        "typedef struct { int16_t _verified; } lean_certified_int16_t;\n"
+        "typedef struct { uint8_t _verified; } lean_certified_uint8_t;\n"
+        "typedef struct { int8_t _verified; } lean_certified_int8_t;\n"
+        "typedef struct { size_t _verified; } lean_certified_size_t;\n"
+        "typedef struct { ptrdiff_t _verified; } lean_certified_ptrdiff_t;\n"
+        "#endif\n",
+        output);
+    if (!ir) return;
+    for (size_t ei = 0; ei < ir->lean_enum_count; ++ei) {
+        const FlowLeanEnum *en = &ir->lean_enums[ei];
+        fprintf(output,
+            "#ifndef FLOW_LEAN_CERTIFIED_ENUM_%s_DEFINED\n"
+            "#define FLOW_LEAN_CERTIFIED_ENUM_%s_DEFINED\n"
+            "typedef struct { %s _verified; } lean_certified_%s;\n"
+            "#endif\n",
+            en->name, en->name, en->name, en->name);
+    }
+    for (size_t si = 0; si < ir->lean_struct_count; ++si) {
+        const FlowLeanStruct *st = &ir->lean_structs[si];
+        LeanExprMode st_mode = LEAN_EXPR_UINT;
+        for (size_t fi = 0; fi < st->field_count; ++fi) {
+            if (!strcmp(st->fields[fi].c_type, "double") || !strcmp(st->fields[fi].c_type, "float")) { st_mode = LEAN_EXPR_FLOAT; break; }
+            if (!strncmp(st->fields[fi].c_type, "int", 3)) st_mode = LEAN_EXPR_INT;
+        }
+        fprintf(output,
+            "#ifndef FLOW_LEAN_CERTIFIED_STRUCT_%s_DEFINED\n"
+            "#define FLOW_LEAN_CERTIFIED_STRUCT_%s_DEFINED\n"
+            "typedef struct { %s _verified; } lean_certified_%s;\n"
+            "static inline __attribute__((unused)) %s flowc_uncertify_%s(lean_certified_%s _w) { return _w._verified; }\n"
+            "static inline __attribute__((unused)) bool flowc_certify_%s(%s _raw, lean_certified_%s *_out_witness) {\n"
+            "    (void)_raw;\n"
+            "    if (_out_witness) __builtin_memset(_out_witness, 0, sizeof(*_out_witness));\n",
+            st->name, st->name, st->name, st->name, st->name, st->name, st->name, st->name, st->name, st->name);
+        for (size_t fi = 0; fi < st->field_count; ++fi) {
+            if (!strcmp(st->fields[fi].c_type, "double") || !strcmp(st->fields[fi].c_type, "float"))
+                fprintf(output, "    if (!isfinite(_raw.%s)) return false;\n", st->fields[fi].name);
+        }
+        for (size_t iv = 0; iv < st->invariant_count; ++iv) {
+            if (!st->invariants[iv][0]) continue;
+            char qinv[1024] = {0};
+            qualify_struct_fields_in_expr(st, "_raw.", st->invariants[iv], qinv, sizeof(qinv));
+            fprintf(output, "    if (!(");
+            emit_lean_expr_as_c_ex(output, ir, qinv, st_mode, is_header_inline);
+            fprintf(output, ")) return false;\n");
+        }
+        fprintf(output,
+            "    if (_out_witness) _out_witness->_verified = _raw;\n"
+            "    return true;\n"
+            "}\n"
+            "#endif\n");
+        if (!is_header_inline) {
+            fprintf(output,
+                "bool lean_certify_%s(%s _raw, lean_certified_%s *_out_witness);\n"
+                "bool lean_certify_%s(%s _raw, lean_certified_%s *_out_witness) {\n"
+                "    return flowc_certify_%s(_raw, _out_witness);\n"
+                "}\n",
+                st->name, st->name, st->name, st->name, st->name, st->name, st->name);
+        }
+        if (st->field_count > 0) {
+            fprintf(output,
+                "#ifndef FLOW_LEAN_SOA64_%s_DEFINED\n"
+                "#define FLOW_LEAN_SOA64_%s_DEFINED\n"
+                "#ifndef FLOW_SIMD_SOA_LANES\n"
+                "#define FLOW_SIMD_SOA_LANES 64U\n"
+                "#endif\n"
+                "typedef struct __attribute__((aligned(64))) {\n",
+                st->name, st->name);
+            for (size_t fi = 0; fi < st->field_count; ++fi)
+                fprintf(output, "    %s %s[FLOW_SIMD_SOA_LANES];\n", st->fields[fi].c_type, st->fields[fi].name);
+            fprintf(output,
+                "} %s_SOA64;\n"
+                "static inline __attribute__((unused)) void flowc_ua_lift_to_soa_%s(const %s * __restrict _aos, size_t _count, %s_SOA64 * __restrict _soa) {\n"
+                "    if (!_aos || !_soa) return;\n"
+                "    size_t _n = _count < FLOW_SIMD_SOA_LANES ? _count : FLOW_SIMD_SOA_LANES;\n"
+                "    for (size_t _i = 0; _i < _n; ++_i) {\n",
+                st->name, st->name, st->name, st->name);
+            for (size_t fi = 0; fi < st->field_count; ++fi)
+                fprintf(output, "        _soa->%s[_i] = _aos[_i].%s;\n", st->fields[fi].name, st->fields[fi].name);
+            fprintf(output, "    }\n    for (size_t _i = _n; _i < FLOW_SIMD_SOA_LANES; ++_i) {\n");
+            for (size_t fi = 0; fi < st->field_count; ++fi)
+                fprintf(output, "        _soa->%s[_i] = (%s)0;\n", st->fields[fi].name, st->fields[fi].c_type);
+            fprintf(output,
+                "    }\n}\n"
+                "static inline __attribute__((unused)) void flowc_ua_lower_from_soa_%s(const %s_SOA64 * __restrict _soa, size_t _count, %s * __restrict _aos) {\n"
+                "    if (!_soa || !_aos) return;\n"
+                "    size_t _n = _count < FLOW_SIMD_SOA_LANES ? _count : FLOW_SIMD_SOA_LANES;\n"
+                "    for (size_t _i = 0; _i < _n; ++_i) {\n",
+                st->name, st->name, st->name);
+            for (size_t fi = 0; fi < st->field_count; ++fi)
+                fprintf(output, "        _aos[_i].%s = _soa->%s[_i];\n", st->fields[fi].name, st->fields[fi].name);
+            fprintf(output, "    }\n}\n#endif\n");
+        }
+    }
+}
+static void emit_lean_soa_fn_c(FILE *output, const SemanticIR *ir, const FlowLeanFunction *fn, int is_header_inline) {
+    if (!output || !is_soa_eligible_fn(ir, fn)) return;
+    const char *ret_c = lean_type_to_c_type(ir, fn->return_type);
+    const FlowLeanStruct *out_st = find_ir_lean_struct(ir, fn->return_type);
+    LeanExprMode fmode = infer_fn_expr_mode(fn);
+    if (!is_header_inline) {
+        fprintf(output, "void soa_%s(", fn->name);
+        for (size_t pi = 0; pi < fn->param_count; ++pi) {
+            const FlowLeanStruct *in_st = find_ir_lean_struct(ir, fn->param_types[pi]);
+            if (in_st)
+                fprintf(output, "%sconst %s_SOA64 * __restrict %s", pi > 0 ? ", " : "", in_st->name, fn->param_names[pi]);
+            else
+                fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
+        }
+        if (out_st)
+            fprintf(output, ", %s_SOA64 * __restrict _out_soa);\n", out_st->name);
+        else
+            fprintf(output, ", %s * __restrict _out_batch);\n", ret_c);
+    }
+    if (is_header_inline)
+        fprintf(output, "#ifndef FLOW_INLINE_SOA_%s_DEFINED\n#define FLOW_INLINE_SOA_%s_DEFINED\n", fn->name, fn->name);
+    fprintf(output, "%svoid %s_%s(",
+            is_header_inline ? "static inline __attribute__((unused)) " : "",
+            is_header_inline ? "flowc_soa" : "soa",
+            fn->name);
+    for (size_t pi = 0; pi < fn->param_count; ++pi) {
+        const FlowLeanStruct *in_st = find_ir_lean_struct(ir, fn->param_types[pi]);
+        if (in_st)
+            fprintf(output, "%sconst %s_SOA64 * __restrict %s", pi > 0 ? ", " : "", in_st->name, fn->param_names[pi]);
+        else
+            fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
+    }
+    if (out_st)
+        fprintf(output, ", %s_SOA64 * __restrict _out_soa) {\n    ", out_st->name);
+    else
+        fprintf(output, ", %s * __restrict _out_batch) {\n    ", ret_c);
+    for (size_t pi = 0; pi < fn->param_count; ++pi)
+        fprintf(output, "(void)%s; ", fn->param_names[pi]);
+    fprintf(output, "\n    if (!%s", out_st ? "_out_soa" : "_out_batch");
+    for (size_t pi = 0; pi < fn->param_count; ++pi) {
+        if (find_ir_lean_struct(ir, fn->param_types[pi]))
+            fprintf(output, " || !%s", fn->param_names[pi]);
+    }
+    fprintf(output, ") return;\n");
+    for (size_t pi = 0; pi < fn->param_count; ++pi) {
+        if (!find_ir_lean_struct(ir, fn->param_types[pi]) && (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32")))
+            fprintf(output, "    if (!isfinite(%s)) %s = 0.0;\n", fn->param_names[pi], fn->param_names[pi]);
+    }
+    int can_col = 1;
+    char soa_body[FLOW_LEAN_BODY_MAX] = {0};
+    char soa_fexprs[FLOW_FIELD_MAX][256];
+    memset(soa_fexprs, 0, sizeof(soa_fexprs));
+    if (fn->is_struct_transform && out_st) {
+        for (size_t ai = 0; ai < fn->field_assign_count; ++ai) {
+            if (!rewrite_expr_soa_columnar(ir, fn, fn->field_assign_exprs[ai], soa_fexprs[ai], sizeof(soa_fexprs[ai]))) {
+                can_col = 0;
+                break;
+            }
+        }
+    } else {
+        can_col = rewrite_expr_soa_columnar(ir, fn, fn->body, soa_body, sizeof(soa_body));
+    }
+    fputs("#if defined(__clang__)\n#pragma clang loop vectorize(enable)\n#elif defined(__GNUC__)\n#pragma GCC ivdep\n#endif\n"
+          "    for (size_t _lane = 0; _lane < FLOW_SIMD_SOA_LANES; ++_lane) {\n", output);
+    if (can_col) {
+        for (size_t pi = 0; pi < fn->param_count; ++pi) {
+            const FlowLeanStruct *in_st = find_ir_lean_struct(ir, fn->param_types[pi]);
+            if (!in_st) continue;
+            for (size_t sfi = 0; sfi < in_st->field_count; ++sfi) {
+                const char *sfc = in_st->fields[sfi].c_type;
+                const char *fname = in_st->fields[sfi].name;
+                fprintf(output, "        %s _soa_%s_%s = %s->%s[_lane];\n", sfc, fn->param_names[pi], fname, fn->param_names[pi], fname);
+                if (!strcmp(sfc, "double") || !strcmp(sfc, "float"))
+                    fprintf(output, "        if (!isfinite(_soa_%s_%s)) _soa_%s_%s = (%s)0.0;\n", fn->param_names[pi], fname, fn->param_names[pi], fname, sfc);
+                fprintf(output, "        (void)_soa_%s_%s;\n", fn->param_names[pi], fname);
+            }
+        }
+        if (fn->is_struct_transform && out_st) {
+            for (size_t sfi = 0; sfi < out_st->field_count; ++sfi) {
+                const char *fname = out_st->fields[sfi].name;
+                const char *fc = out_st->fields[sfi].c_type;
+                const char *fexpr = NULL;
+                for (size_t ai = 0; ai < fn->field_assign_count; ++ai) {
+                    if (strcmp(fn->field_assign_names[ai], fname) == 0) {
+                        fexpr = soa_fexprs[ai];
+                        break;
+                    }
+                }
+                if (!fexpr) {
+                    fprintf(output, "        _out_soa->%s[_lane] = (%s)0;\n", fname, fc);
+                    continue;
+                }
+                LeanExprMode fm = infer_c_type_expr_mode(fc, fmode);
+                if (!strcmp(fc, "double") || !strcmp(fc, "float")) {
+                    fprintf(output, "        { %s _v = (%s)(", fc, fc);
+                    emit_lean_expr_as_c_ex(output, ir, fexpr, LEAN_EXPR_FLOAT, is_header_inline);
+                    fprintf(output, "); _out_soa->%s[_lane] = isfinite(_v) ? _v : (%s)0.0; }\n", fname, fc);
+                } else {
+                    fprintf(output, "        _out_soa->%s[_lane] = (%s)(", fname, fc);
+                    emit_lean_expr_as_c_ex(output, ir, fexpr, fm, is_header_inline);
+                    fprintf(output, ");\n");
+                }
+            }
+        } else {
+            const char *tail_c = NULL; size_t tail_c_len = 0;
+            emit_lean_let_statements_and_tail(output, ir, soa_body, fmode, is_header_inline, &tail_c, &tail_c_len);
+            if (!strcmp(fn->return_type, "Float") || !strcmp(fn->return_type, "Float32")) {
+                fprintf(output, "        %s _flow_ret = (%s)(", ret_c, ret_c);
+                emit_norm_lean_slice(output, ir, tail_c, tail_c_len, fmode, is_header_inline);
+                fprintf(output, ");\n        _out_batch[_lane] = isfinite(_flow_ret) ? _flow_ret : (%s)0.0;\n", ret_c);
+            } else {
+                fprintf(output, "        _out_batch[_lane] = (%s)(", ret_c);
+                emit_norm_lean_slice(output, ir, tail_c, tail_c_len, fmode, is_header_inline);
+                fprintf(output, ");\n");
+            }
+        }
+    } else {
+        for (size_t pi = 0; pi < fn->param_count; ++pi) {
+            const FlowLeanStruct *in_st = find_ir_lean_struct(ir, fn->param_types[pi]);
+            if (!in_st) continue;
+            fprintf(output, "        %s _in_%zu;\n", in_st->name, pi);
+            for (size_t sfi = 0; sfi < in_st->field_count; ++sfi)
+                fprintf(output, "        _in_%zu.%s = %s->%s[_lane];\n", pi, in_st->fields[sfi].name, fn->param_names[pi], in_st->fields[sfi].name);
+        }
+        fprintf(output, "        %s _r = %s%s(", ret_c, is_header_inline ? "flowc_" : "", fn->name);
+        for (size_t pi = 0; pi < fn->param_count; ++pi) {
+            if (find_ir_lean_struct(ir, fn->param_types[pi]))
+                fprintf(output, "%s_in_%zu", pi > 0 ? ", " : "", pi);
+            else
+                fprintf(output, "%s%s", pi > 0 ? ", " : "", fn->param_names[pi]);
+        }
+        fprintf(output, ");\n");
+        if (out_st) {
+            for (size_t sfi = 0; sfi < out_st->field_count; ++sfi)
+                fprintf(output, "        _out_soa->%s[_lane] = _r.%s;\n", out_st->fields[sfi].name, out_st->fields[sfi].name);
+        } else {
+            fprintf(output, "        _out_batch[_lane] = _r;\n");
+        }
+    }
+    fprintf(output, "    }\n}\n");
+    if (is_header_inline) {
+        fprintf(output, "#endif\n");
+    } else {
+        fprintf(output,
+            "#ifndef FLOW_INLINE_SOA_%s_DEFINED\n"
+            "#define FLOW_INLINE_SOA_%s_DEFINED\n"
+            "static inline __attribute__((unused)) void flowc_soa_%s(",
+            fn->name, fn->name, fn->name);
+        for (size_t pi = 0; pi < fn->param_count; ++pi) {
+            const FlowLeanStruct *in_st = find_ir_lean_struct(ir, fn->param_types[pi]);
+            if (in_st)
+                fprintf(output, "%sconst %s_SOA64 * __restrict %s", pi > 0 ? ", " : "", in_st->name, fn->param_names[pi]);
+            else
+                fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
+        }
+        if (out_st)
+            fprintf(output, ", %s_SOA64 * __restrict _out_soa) {\n    soa_%s(", out_st->name, fn->name);
+        else
+            fprintf(output, ", %s * __restrict _out_batch) {\n    soa_%s(", ret_c, fn->name);
+        for (size_t pi = 0; pi < fn->param_count; ++pi)
+            fprintf(output, "%s%s", pi > 0 ? ", " : "", fn->param_names[pi]);
+        fprintf(output, ", %s);\n}\n#endif\n", out_st ? "_out_soa" : "_out_batch");
+    }
+}
 static void emit_lean_contract_wrapper_c(FILE *output, const SemanticIR *ir, const FlowLeanFunction *fn, int is_header_inline) {
     if (!output || !fn || fn->is_private || !fn->name[0] || !strncmp(fn->name, "lean_", 5)) return;
     if (ir) {
@@ -1049,6 +1398,87 @@ static void emit_lean_contract_wrapper_c(FILE *output, const SemanticIR *ir, con
         }
     }
     fprintf(output, "    return _ret;\n}\n");
+    if (!fn->is_tuple_return) {
+        if (!is_header_inline) {
+            fprintf(output, "bool lean_certified_%s(", fn->name);
+            for (size_t pi = 0; pi < fn->param_count; ++pi)
+                fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
+            fprintf(output, "%slean_certified_%s *_out_witness);\n", fn->param_count > 0 ? ", " : "", ret_c);
+        }
+        if (is_header_inline)
+            fprintf(output, "#ifndef FLOW_INLINE_CERTIFIED_%s_DEFINED\n#define FLOW_INLINE_CERTIFIED_%s_DEFINED\n", fn->name, fn->name);
+        fprintf(output, "%sbool %s_%s(",
+                is_header_inline ? "static inline __attribute__((unused)) " : "",
+                is_header_inline ? "flowc_certified" : "lean_certified",
+                fn->name);
+        for (size_t pi = 0; pi < fn->param_count; ++pi)
+            fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
+        fprintf(output, "%slean_certified_%s *_out_witness) {\n    ", fn->param_count > 0 ? ", " : "", ret_c);
+        for (size_t pi = 0; pi < fn->param_count; ++pi)
+            fprintf(output, "(void)%s; ", fn->param_names[pi]);
+        fprintf(output, "\n    if (_out_witness) __builtin_memset(_out_witness, 0, sizeof(*_out_witness));\n");
+        for (size_t pi = 0; pi < fn->param_count; ++pi) {
+            const FlowLeanStruct *in_st = find_ir_lean_struct(ir, fn->param_types[pi]);
+            if (in_st) {
+                fprintf(output, "    { lean_certified_%s _in_w_%zu; if (!flowc_certify_%s(%s, &_in_w_%zu)) return false; }\n",
+                        in_st->name, pi, in_st->name, fn->param_names[pi], pi);
+            } else if (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32")) {
+                fprintf(output, "    if (!isfinite(%s)) return false;\n", fn->param_names[pi]);
+            }
+        }
+        if (fn->precond_expr[0]) {
+            fprintf(output, "    if (!(");
+            emit_lean_expr_as_c_ex(output, ir, fn->precond_expr, fmode, is_header_inline);
+            fprintf(output, ")) return false;\n");
+        }
+        fprintf(output, "    %s _ret = %s%s(", ret_c, is_header_inline ? "flowc_" : "", fn->name);
+        for (size_t pi = 0; pi < fn->param_count; ++pi)
+            fprintf(output, "%s%s", pi > 0 ? ", " : "", fn->param_names[pi]);
+        fprintf(output, ");\n");
+        if (!strcmp(ret_c, "double") || !strcmp(ret_c, "float"))
+            fprintf(output, "    if (!isfinite(_ret)) return false;\n");
+        if (fn->thm_guard_count > 0) {
+            for (size_t gi = 0; gi < fn->thm_guard_count; ++gi) {
+                if (fn->thm_hyp_exprs[gi][0]) {
+                    fprintf(output, "    if ((");
+                    emit_lean_expr_as_c_ex(output, ir, fn->thm_hyp_exprs[gi], fmode, is_header_inline);
+                    fprintf(output, ") && !(");
+                    emit_lean_expr_as_c_ex(output, ir, fn->thm_conc_exprs[gi], fmode, is_header_inline);
+                    fprintf(output, ")) return false;\n");
+                } else {
+                    fprintf(output, "    if (!(");
+                    emit_lean_expr_as_c_ex(output, ir, fn->thm_conc_exprs[gi], fmode, is_header_inline);
+                    fprintf(output, ")) return false;\n");
+                }
+            }
+        } else if (fn->postcond_expr[0]) {
+            fprintf(output, "    if (!(");
+            emit_lean_expr_as_c_ex(output, ir, fn->postcond_expr, fmode, is_header_inline);
+            fprintf(output, ")) return false;\n");
+        }
+        const FlowLeanStruct *out_st = find_ir_lean_struct(ir, fn->return_type);
+        if (out_st) {
+            fprintf(output, "    return flowc_certify_%s(_ret, _out_witness);\n}\n", out_st->name);
+        } else {
+            fprintf(output, "    if (_out_witness) _out_witness->_verified = _ret;\n    return true;\n}\n");
+        }
+        if (is_header_inline) {
+            fprintf(output, "#endif\n");
+        } else {
+            fprintf(output,
+                "#ifndef FLOW_INLINE_CERTIFIED_%s_DEFINED\n"
+                "#define FLOW_INLINE_CERTIFIED_%s_DEFINED\n"
+                "static inline __attribute__((unused)) bool flowc_certified_%s(",
+                fn->name, fn->name, fn->name);
+            for (size_t pi = 0; pi < fn->param_count; ++pi)
+                fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
+            fprintf(output, "%slean_certified_%s *_out_witness) {\n    return lean_certified_%s(", fn->param_count > 0 ? ", " : "", ret_c, fn->name);
+            for (size_t pi = 0; pi < fn->param_count; ++pi)
+                fprintf(output, "%s%s", pi > 0 ? ", " : "", fn->param_names[pi]);
+            fprintf(output, "%s_out_witness);\n}\n#endif\n", fn->param_count > 0 ? ", " : "");
+        }
+    }
+    emit_lean_soa_fn_c(output, ir, fn, is_header_inline);
 }
 static void emit_single_lean_fn_c(FILE *output, const SemanticIR *ir, const FlowLeanFunction *fn, size_t fi, int is_header_inline) {
     const char *ret_c = lean_type_to_c_type(ir, fn->return_type);
@@ -1349,16 +1779,17 @@ void flow_emit_inline_lean_kernels(FILE *output, const SemanticIR *ir) {
         "void flow_ab_shadow_reset(void);\n"
         "#endif\n",
         output);
+    fputs("#if defined(__clang__)\n#pragma clang diagnostic push\n#pragma clang diagnostic ignored \"-Wtautological-unsigned-zero-compare\"\n"
+          "#elif defined(__GNUC__)\n#pragma GCC diagnostic push\n#pragma GCC diagnostic ignored \"-Wtype-limits\"\n#endif\n", output);
+    emit_lean_hott_witness_and_soa_types(output, ir, 1);
     if (ir && ir->lean_function_count > 0) {
         fprintf(output,
-            "/* Zero-Overhead Static Inline C17 Operators (%zu) */\n"
-            "#if defined(__clang__)\n#pragma clang diagnostic push\n#pragma clang diagnostic ignored \"-Wtautological-unsigned-zero-compare\"\n"
-            "#elif defined(__GNUC__)\n#pragma GCC diagnostic push\n#pragma GCC diagnostic ignored \"-Wtype-limits\"\n#endif\n",
+            "/* Zero-Overhead Static Inline C17 Operators (%zu) */\n",
             ir->lean_function_count);
         for (size_t fi = 0; fi < ir->lean_function_count; ++fi)
             emit_single_lean_fn_c(output, ir, &ir->lean_functions[fi], fi, 1);
-        fputs("#if defined(__clang__)\n#pragma clang diagnostic pop\n#elif defined(__GNUC__)\n#pragma GCC diagnostic pop\n#endif\n", output);
     }
+    fputs("#if defined(__clang__)\n#pragma clang diagnostic pop\n#elif defined(__GNUC__)\n#pragma GCC diagnostic pop\n#endif\n", output);
 }
 void flow_emit_abi_exports(FILE *output, const SemanticIR *ir, const Component *c, size_t cap) {
     size_t stride = (ir && ir->input_stride_bytes > 0) ? ir->input_stride_bytes : 8;
@@ -1446,6 +1877,7 @@ void flow_emit_abi_exports(FILE *output, const SemanticIR *ir, const Component *
     int estop_en = (ir && strcmp(ir->fallback_policy, "emergency_stop") == 0) ? 1 : 0;
     fputs("#if defined(__clang__)\n#pragma clang diagnostic push\n#pragma clang diagnostic ignored \"-Wtautological-unsigned-zero-compare\"\n"
           "#elif defined(__GNUC__)\n#pragma GCC diagnostic push\n#pragma GCC diagnostic ignored \"-Wtype-limits\"\n#endif\n", output);
+    emit_lean_hott_witness_and_soa_types(output, ir, 0);
     if (ir && ir->lean_function_count > 0) {
         for (size_t fi = 0; fi < ir->lean_function_count; ++fi)
             emit_single_lean_fn_c(output, ir, &ir->lean_functions[fi], fi, 0);

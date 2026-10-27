@@ -260,6 +260,7 @@ uint64_t flow_cubical_get_module_mask(const char *module_id);
  * ============================================================================
  */
 #define FLOW_HOTT_UNIVERSE_MAX_TYPES 128
+#define FLOW_SIMD_SOA_LANES 64U
 
 typedef enum {
     FLOW_HOTT_LANG_LEAN     = 0,
@@ -293,6 +294,76 @@ int flow_hott_register_type(FlowHoTTUniverse *u, const char *name, FlowHoTTLangO
                             uint32_t fx_scale_bits, uint64_t sieve_fingerprint);
 FlowKanStatus flow_hott_verify_univalence(FlowHoTTUniverse *u, const char *type_name, uint64_t *path_hash_out);
 int flow_hott_verify_universe_all(FlowHoTTUniverse *u);
+int flow_hott_register_soa_equivalence(FlowHoTTUniverse *u, const char *aos_name, const char *soa_name,
+                                       size_t field_count, size_t aos_byte_size, size_t simd_lanes,
+                                       uint32_t fx_scale_bits, uint64_t base_sieve);
+FlowKanStatus flow_hott_verify_soa_univalence(FlowHoTTUniverse *u, const char *aos_name, const char *soa_name,
+                                              size_t simd_lanes, uint64_t *ua_path_hash_out);
+
+/*
+ * ============================================================================
+ * Differential Cohesive HoTT: Homotopy Fiber (fib_{ev}(1)) & Discrete k-Jet (J^4 E)
+ * ============================================================================
+ */
+typedef enum {
+    FLOW_HLEVEL_CONTRACTIBLE      = -2, /* isContr(fib_{ev}(1)): Unique SAT, |pi_0| = 1, pi_1 = 0 */
+    FLOW_HLEVEL_EMPTY_UNSAT       = -1, /* fib_{ev}(1) -> 0 (Empty Type / UNSAT) */
+    FLOW_HLEVEL_SET_DISCRETE      =  0, /* 0-Type (Set): |pi_0| > 1, pi_k = 0 (k >= 1) */
+    FLOW_HLEVEL_GROUPOID_SYMMETRY =  1  /* 1-Type (Groupoid A // G): non-trivial symmetry loop pi_1 != 0 */
+} FlowHomotopyLevel;
+
+typedef struct {
+    FlowHomotopyLevel h_level;
+    uint32_t pi0_components;            /* |pi_0(fib_f(d))|: Model count (#SAT / connected components) */
+    uint32_t pi1_symmetry_generators;   /* Rank of fundamental group pi_1(fib_f(d)) from symmetry group G */
+    uint64_t canonical_witness_sieve;   /* Selected base witness a_0 in A */
+    uint64_t unconstrained_axes_mask;   /* Free axes causing |pi_0| > 1 solver oscillation */
+    uint64_t symmetry_orbit_mask;       /* Free axes participating in G-symmetry involution */
+    uint64_t recommended_pinning_mask;  /* Constraint mask required to collapse fib_f(d) to isContr */
+    int is_contractible_after_quotient; /* 1 if quotienting A // G and pinning collapses |pi_0| -> 1 */
+    char diagnostic_summary[256];
+} FlowHomotopyFiberReport;
+
+#define FLOW_JET_BUNDLE_MAX_SITES 64U
+
+typedef struct {
+    double j0_val;              /* Base value s(x) in Fiber E */
+    double j1_grad;             /* 1st-order discrete finite difference (drift) */
+    double j2_curv;             /* 2nd-order discrete Laplacian (diffusion/curvature) */
+    double j3_skew;             /* 3rd-order discrete skewness tensor truncation (J^3 E) */
+    double j4_kurt;             /* 4th-order discrete kurtosis tensor truncation (J^4 E) */
+    uint8_t in_rk_submanifold;  /* 1 if local 4-jet j^4 s(x) lies inside constraint subbundle R_k */
+} FlowDiscreteJetFiber;
+
+typedef struct {
+    size_t site_count;
+    FlowDiscreteJetFiber jets[FLOW_JET_BUNDLE_MAX_SITES];
+    double global_j1_mean;
+    double global_j2_variance;
+    double global_j3_skewness;
+    double global_j4_kurtosis;
+    double rk_bounds_min[5];    /* Lower bounds on J^0..J^4 defining subbundle R_k subset J^4 E */
+    double rk_bounds_max[5];    /* Upper bounds on J^0..J^4 defining subbundle R_k subset J^4 E */
+    uint64_t holonomic_mask;    /* Bit i = 1 iff j^4 s(x_i) in R_k */
+    int is_holonomic_section;   /* 1 iff forall x in M, j^4 s(x) in R_k and Cartan-Kahler integrable */
+    double cartan_kahler_defect;/* Max discrete mixed-difference commutator defect */
+} FlowDiscreteJetBundle;
+
+int flow_hott_analyze_homotopy_fiber(uint64_t target_mask, uint64_t feasible_sieve,
+                                     uint64_t pinned_axes_mask, uint64_t symmetry_orbit_mask,
+                                     FlowHomotopyFiberReport *report_out);
+int flow_hott_collapse_fiber_contractible(const FlowHomotopyFiberReport *fiber,
+                                          uint64_t *contracted_witness_out,
+                                          uint64_t *augmented_pinned_mask_out);
+int flow_jet_bundle_prolong_bmf(const double *section_values, size_t count,
+                                const double rk_min[5], const double rk_max[5],
+                                FlowDiscreteJetBundle *bundle_out);
+int flow_hott_emit_commutative_diagram(FILE *out, const FlowDiscreteJetBundle *bundle,
+                                       const FlowHomotopyFiberReport *fiber,
+                                       const char *module_name);
+int flow_hott_emit_lean_fiber_jet_spec(FILE *out, const FlowDiscreteJetBundle *bundle,
+                                       const FlowHomotopyFiberReport *fiber,
+                                       const char *namespace_name);
 
 #ifdef __cplusplus
 }

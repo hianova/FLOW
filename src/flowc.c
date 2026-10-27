@@ -3,6 +3,7 @@
 #include "registry.h"
 #include "abi.h"
 #include "induce.h"
+#include "cubical_hott.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -22,6 +23,7 @@ static void flowc_print_usage(FILE *out) {
         "  --target-c-header <file.h>    Emit static inline double/fx64 C17 header & FlowStatusCode\n"
         "  --target-mex                  Append MATLAB MEX C17 mexFunction dispatcher to <output.c>\n"
         "  --target-lean <file.lean>     Emit & verify Lean 4 formal soundness certificate\n"
+        "  --fiber-diagram <out.md>      Emit Differential Cohesive HoTT & Commutative Cube diagram\n"
         "  --reload-adapter              Generate live reload QSBR wrapper adapter\n"
         "  --ieee64                      Force IEEE 754 64-bit floating point ABI\n"
         "  --fx64                        Force Q32.32 fixed point ABI\n"
@@ -55,6 +57,7 @@ int flowc_main(int argc, char **argv) {
     const char *output_path = NULL;
     const char *target_c_header = NULL;
     const char *target_lean = NULL;
+    const char *fiber_diagram_path = NULL;
     char auto_output_buf[512] = {0};
 
     static FlowSpec spec;
@@ -109,6 +112,8 @@ int flowc_main(int argc, char **argv) {
             target_mex = 1;
         } else if (!strcmp(argv[arg], "--target-lean") && arg + 1 < argc) {
             target_lean = argv[++arg];
+        } else if (!strcmp(argv[arg], "--fiber-diagram") && arg + 1 < argc) {
+            fiber_diagram_path = argv[++arg];
         } else if (!strcmp(argv[arg], "--ieee64") || !strcmp(argv[arg], "--float-abi=ieee64")) {
             force_ieee64 = 1;
         } else if (!strcmp(argv[arg], "--fx64") || !strcmp(argv[arg], "--float-abi=fx64")) {
@@ -362,6 +367,28 @@ int flowc_main(int argc, char **argv) {
     }
 
     printf("  SMT proof: status=%s (%s)\n", flow_smt_result_name(status), proof.proof_summary);
+
+    if (fiber_diagram_path) {
+        FlowDiscreteJetBundle jbundle;
+        FlowHomotopyFiberReport hfiber;
+        double sample_sec[16];
+        for (size_t si = 0; si < 16; ++si) {
+            sample_sec[si] = 1.0 + 0.125 * sin((double)si * 0.39269908169872414);
+        }
+        flow_jet_bundle_prolong_bmf(sample_sec, 16, NULL, NULL, &jbundle);
+        uint64_t req_mask = FLOW_SIEVE_SECURITY_CANONICAL_MASK;
+        uint64_t comp_mask = FLOW_SIEVE_SECURITY_CANONICAL_MASK | (ir.lean_struct_count > 0 ? (1ULL << FLOW_SIEVE_BIT_COLUMNAR_MORPH) : 0ULL);
+        flow_hott_analyze_homotopy_fiber(req_mask, comp_mask, comp_mask, 0ULL, &hfiber);
+        FILE *dfp = fopen(fiber_diagram_path, "w");
+        if (dfp) {
+            flow_hott_emit_commutative_diagram(dfp, &jbundle, &hfiber,
+                                               ir.project_name[0] ? ir.project_name : component->id);
+            fclose(dfp);
+            printf("  fiber-diagram: wrote %s (h_level=%d, |pi_0|=%u)\n",
+                   fiber_diagram_path, (int)hfiber.h_level, hfiber.pi0_components);
+        }
+    }
+
     flow_ir_cleanup(&ir);
     return EXIT_SUCCESS;
 }

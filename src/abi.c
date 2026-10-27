@@ -105,6 +105,20 @@ static int abi_fn_has_lean_wrapper(const SemanticIR *ir, const FlowLeanFunction 
     }
     return 1;
 }
+static int abi_fn_has_soa_variant(const SemanticIR *ir, const FlowLeanFunction *fn) {
+    if (!fn || fn->is_private || !fn->name[0] || fn->is_tuple_return || fn->param_count == 0) return 0;
+    const FlowLeanStruct *out_st = abi_find_lean_struct(ir, fn->return_type);
+    if (out_st && out_st->field_count == 0) return 0;
+    int has_struct_param = 0;
+    for (size_t pi = 0; pi < fn->param_count; ++pi) {
+        const FlowLeanStruct *in_st = abi_find_lean_struct(ir, fn->param_types[pi]);
+        if (in_st) {
+            if (in_st->field_count == 0) return 0;
+            has_struct_param = 1;
+        }
+    }
+    return has_struct_param;
+}
 static const char *abi_lean_c_type(const char *t) { return abi_lookup_scalar_by_lean(t)->c; }
 static const char *abi_lean_c_type_ir(const SemanticIR *ir, const char *t) {
     if (abi_find_lean_struct(ir, t) || abi_find_lean_enum(ir, t)) return t;
@@ -178,7 +192,21 @@ int flow_abi_build_for_component(const SemanticIR *ir, const Component *comp, Fl
     abi->primary_fn.params[2].type = (FlowType){FLOW_TYPE_BYTES, "uint8_t*", sizeof(void*), sizeof(void*), 0, NULL}; abi->primary_fn.params[2].ownership = FLOW_OWN_MUT_BORROW;
     abi->primary_fn.return_type = (FlowType){FLOW_TYPE_I32, "int32_t", 4, 4, 0, NULL};
     abi->primary_fn.return_ownership = FLOW_OWN_BORROW; abi->primary_fn.error_policy = FLOW_ERR_STATUS_CODE; abi->primary_fn.effects = abi->control_contract.effects;
-    snprintf(abi->primary_fn.docstring, sizeof(abi->primary_fn.docstring), "Executes %s flow pipeline transformation.", comp->id); return 1; }
+    snprintf(abi->primary_fn.docstring, sizeof(abi->primary_fn.docstring), "Executes %s flow pipeline transformation.", comp->id);
+    if (ir->lean_struct_count > 0) {
+        FlowHoTTUniverse *u0 = flow_hott_universe_global();
+        for (size_t si = 0; si < ir->lean_struct_count; ++si) {
+            const FlowLeanStruct *st = &ir->lean_structs[si];
+            char soa_name[96];
+            snprintf(soa_name, sizeof(soa_name), "%s_SOA64", st->name);
+            size_t st_bytes = st->byte_size > 0 ? st->byte_size : (st->field_count * 8U);
+            size_t f_cnt = st->field_count > 0 ? st->field_count : 1U;
+            flow_hott_register_soa_equivalence(u0, st->name, soa_name, f_cnt, st_bytes,
+                                               FLOW_SIMD_SOA_LANES, ir->float_abi_ieee64 ? 0U : 32U,
+                                               FLOW_SIEVE_SECURITY_CANONICAL_MASK);
+        }
+    }
+    return 1; }
 int flow_abi_emit_c_header(FILE *output, const FlowComponentABI *abi) { if (!output || !abi) return 0; char id_upper[64] = {0}, id_safe[64];
     sanitize_ident(abi->component_id, id_safe, sizeof(id_safe));
     for (size_t i = 0; id_safe[i] && i + 1 < sizeof(id_upper); ++i) id_upper[i] = (char)toupper((unsigned char)id_safe[i]); fprintf(output,
@@ -244,6 +272,12 @@ int flow_abi_emit_c_header(FILE *output, const FlowComponentABI *abi) { if (!out
         abi->primary_fn.docstring, abi->primary_fn.params[0].ownership == FLOW_OWN_MUT_BORROW ? "mut_borrow" : "borrow",
         abi->primary_fn.name, id_safe, id_safe, id_safe, id_safe, id_safe, id_safe, id_safe, id_safe, id_safe, abi->destroy_fn.docstring, abi->destroy_fn.name, id_safe);
     flow_emit_inline_lean_kernels(output, abi->ir);
+    if (abi->ir && abi->ir->lean_struct_count > 0) {
+        for (size_t si = 0; si < abi->ir->lean_struct_count; ++si) {
+            const FlowLeanStruct *st = &abi->ir->lean_structs[si];
+            fprintf(output, "bool lean_certify_%s(%s _raw, lean_certified_%s *_out_witness);\n", st->name, st->name, st->name);
+        }
+    }
     if (abi->ir && abi->ir->lean_function_count > 0) {
         fprintf(output, "/* Pure .lean Exported Computational Operators (%zu) */\n", abi->ir->lean_function_count);
         for (size_t fi = 0; fi < abi->ir->lean_function_count; ++fi) {
@@ -282,6 +316,30 @@ int flow_abi_emit_c_header(FILE *output, const FlowComponentABI *abi) { if (!out
                         fprintf(output, "%s%s *out_%zu", (fn->param_count > 0 || ti > 0) ? ", " : "", abi_lean_c_type_ir(abi->ir, fn->tuple_types[ti]), ti);
                 }
                 fprintf(output, ");\n");
+                if (!fn->is_tuple_return) {
+                    fprintf(output, "bool lean_certified_%s(", fn->name);
+                    for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                        char p_ident[96];
+                        fprintf(output, "%s%s %s", pi > 0 ? ", " : "", abi_lean_c_type_ir(abi->ir, fn->param_types[pi]), abi_escape_c_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                    }
+                    fprintf(output, "%slean_certified_%s *_out_witness);\n", fn->param_count > 0 ? ", " : "", abi_lean_c_type_ir(abi->ir, fn->return_type));
+                }
+            }
+            if (abi_fn_has_soa_variant(abi->ir, fn)) {
+                fprintf(output, "void soa_%s(", fn->name);
+                for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                    char p_ident[96];
+                    const FlowLeanStruct *in_st = abi_find_lean_struct(abi->ir, fn->param_types[pi]);
+                    if (in_st)
+                        fprintf(output, "%sconst %s_SOA64 * __restrict %s", pi > 0 ? ", " : "", in_st->name, abi_escape_c_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                    else
+                        fprintf(output, "%s%s %s", pi > 0 ? ", " : "", abi_lean_c_type_ir(abi->ir, fn->param_types[pi]), abi_escape_c_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
+                }
+                const FlowLeanStruct *out_st = abi_find_lean_struct(abi->ir, fn->return_type);
+                if (out_st)
+                    fprintf(output, ", %s_SOA64 * __restrict _out_soa);\n", out_st->name);
+                else
+                    fprintf(output, ", %s * __restrict _out_batch);\n", abi_lean_c_type_ir(abi->ir, fn->return_type));
             }
             if (abi_fn_has_jet2_variant(abi->ir, fn)) {
                 fprintf(output, "FlowJetScalar2 jet2_%s(", fn->name);

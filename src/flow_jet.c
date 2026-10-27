@@ -225,6 +225,133 @@ int flow_moreau_step(FlowMoreauHysteresis *hys, double input_signal) { if (!hys)
         hys->threshold_low, hys->threshold_high, hys->discrete_state, (unsigned long long)hys->flutters_suppressed); }
 
 /* ============================================================================
+ * Phase-Space Attention Context Switch Router (Q, K_i, V_i) + Kan Handover
+ * ============================================================================ */
+int flow_phase_attention_init(FlowPhaseAttentionRouter *router, size_t phase_dim, uint32_t emergency_regime_idx) {
+    if (!router) return 0;
+    memset(router, 0, sizeof(*router));
+    if (!flow_hardwired_template_init(&router->poly_template, phase_dim)) return 0;
+    atomic_store_explicit(&router->poly_template.active_mask, 0ULL, memory_order_release);
+    router->emergency_regime_idx = emergency_regime_idx;
+    return 1;
+}
+
+int flow_phase_attention_set_plane(FlowPhaseAttentionRouter *router, uint32_t plane_idx, const double coeffs[],
+                                   double bound, bool enable_hysteresis, double hys_low, double hys_high) {
+    if (!router || !coeffs || plane_idx >= FLOW_HARDWIRED_MAX_PLANES) return 0;
+    size_t dim = router->poly_template.dimension;
+    for (size_t j = 0; j < FLOW_HARDWIRED_MAX_DIM; ++j)
+        router->poly_template.coeffs[plane_idx][j] = (j < dim) ? coeffs[j] : 0.0;
+    atomic_store_explicit(&router->poly_template.b_constants[plane_idx], bound, memory_order_relaxed);
+    uint64_t cur_mask = atomic_load_explicit(&router->poly_template.active_mask, memory_order_relaxed);
+    atomic_store_explicit(&router->poly_template.active_mask, cur_mask | (1ULL << plane_idx), memory_order_release);
+    if (enable_hysteresis && hys_low < hys_high) {
+        flow_moreau_init(&router->plane_hysteresis[plane_idx], hys_low, hys_high, 0);
+        router->hysteresis_enabled_mask |= (1ULL << plane_idx);
+    } else {
+        router->hysteresis_enabled_mask &= ~(1ULL << plane_idx);
+    }
+    return 1;
+}
+
+int flow_phase_attention_register_head(FlowPhaseAttentionRouter *router, const FlowPhaseAttentionHead *head, uint32_t *idx_out) {
+    if (!router || !head || router->head_count >= FLOW_PHASE_ATTENTION_MAX_HEADS) return 0;
+    uint32_t idx = router->head_count++;
+    router->heads[idx] = *head;
+    if (idx == 0) router->active_regime_idx = 0;
+    if (idx_out) *idx_out = idx;
+    return 1;
+}
+
+uint64_t flow_phase_attention_project_query(FlowPhaseAttentionRouter *router, const double state_vec[FLOW_PHASE_ATTENTION_DIM]) {
+    if (!router || !state_vec) return 0ULL;
+    FlowHardwiredEvalResult eval_res;
+    memset(&eval_res, 0, sizeof(eval_res));
+    flow_hardwired_eval(&router->poly_template, state_vec, &eval_res);
+    uint64_t active = atomic_load_explicit(&router->poly_template.active_mask, memory_order_acquire);
+    uint64_t q_sieve = (~eval_res.violated_mask) & active;
+    uint64_t hys_mask = router->hysteresis_enabled_mask & active;
+    if (hys_mask != 0ULL) {
+        size_t dim = router->poly_template.dimension;
+        uint64_t rem = hys_mask;
+        while (rem != 0ULL) {
+            uint32_t p = (uint32_t)__builtin_ctzll(rem);
+            rem &= (rem - 1ULL);
+            double dot = 0.0;
+            for (size_t j = 0; j < dim; ++j)
+                dot += router->poly_template.coeffs[p][j] * eval_res.projected_x[j];
+            uint64_t prev_flutters = router->plane_hysteresis[p].flutters_suppressed;
+            int violated = flow_moreau_step(&router->plane_hysteresis[p], dot);
+            router->hysteresis_flutters_suppressed += (router->plane_hysteresis[p].flutters_suppressed - prev_flutters);
+            if (violated) q_sieve &= ~(1ULL << p);
+            else          q_sieve |= (1ULL << p);
+        }
+    }
+    router->last_query_sieve = q_sieve;
+    return q_sieve;
+}
+
+int flow_phase_attention_route_and_step(FlowPhaseAttentionRouter *router, FlowJet *jet,
+                                        const double state_vec[FLOW_PHASE_ATTENTION_DIM],
+                                        const void *certified_input, void *action_out,
+                                        uint32_t *selected_regime_out) {
+    if (!router || router->head_count == 0) return -1;
+    double fallback_vec[FLOW_PHASE_ATTENTION_DIM] = {0};
+    const double *q_vec = state_vec;
+    if (!q_vec) {
+        if (jet) {
+            for (size_t j = 0; j < FLOW_PHASE_ATTENTION_DIM; ++j) fallback_vec[j] = jet->payload.q[j];
+        }
+        q_vec = fallback_vec;
+    }
+    uint64_t q_sieve = flow_phase_attention_project_query(router, q_vec);
+    uint32_t match_mask = 0U;
+    for (uint32_t i = 0; i < router->head_count; ++i) {
+        uint64_t km = router->heads[i].key_mask;
+        uint64_t kp = router->heads[i].key_polarity & km;
+        uint32_t matched = ((q_sieve & km) == kp) ? 1U : 0U;
+        match_mask |= (matched << i);
+    }
+    uint32_t target_idx = (router->emergency_regime_idx < router->head_count) ? router->emergency_regime_idx : 0U;
+    if (match_mask != 0U) {
+        uint32_t first_idx = (uint32_t)__builtin_ctz(match_mask);
+        target_idx = first_idx;
+        uint32_t best_prio = router->heads[first_idx].priority;
+        uint32_t rem = match_mask & (match_mask - 1U);
+        while (rem != 0U) {
+            uint32_t cand = (uint32_t)__builtin_ctz(rem);
+            rem &= (rem - 1U);
+            if (router->heads[cand].priority > best_prio) {
+                best_prio = router->heads[cand].priority;
+                target_idx = cand;
+            }
+        }
+    }
+    if (target_idx != router->active_regime_idx) {
+        const FlowPhaseAttentionHead *prev_h = &router->heads[router->active_regime_idx];
+        const FlowPhaseAttentionHead *next_h = &router->heads[target_idx];
+        uint64_t mismatch = 0ULL;
+        if (flow_kan_check_homotopy(prev_h->state_sieve, next_h->state_sieve, next_h->kan_boundary_filter, &mismatch) != FLOW_KAN_FILLED_HOMOTOPIC) {
+            router->kan_singularity_blocks++;
+            target_idx = (router->emergency_regime_idx < router->head_count) ? router->emergency_regime_idx : 0U;
+        }
+        if (target_idx != router->active_regime_idx) {
+            router->active_regime_idx = target_idx;
+            router->context_switches++;
+        }
+    }
+    if (jet) {
+        jet->payload.bmf_subspace_mask = router->heads[target_idx].state_sieve;
+        jet->payload.section.cubical_sieve = q_sieve;
+    }
+    router->total_routes++;
+    if (selected_regime_out) *selected_regime_out = target_idx;
+    if (router->heads[target_idx].kernel)
+        return router->heads[target_idx].kernel(jet, certified_input, action_out);
+    return 0;
+}
+
+/* ============================================================================
  * Hardware Telemetry, Cycle Probes & NUMA Topology (folded into flow_jet.c)
  * ============================================================================ */
 #if defined(__APPLE__)
