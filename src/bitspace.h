@@ -233,11 +233,11 @@ int flow_swarm_step(FlowSwarmCluster *cluster, size_t steps_per_particle); int f
 int flow_swarm_search(const FlowBitSpace *space, size_t particle_count, size_t cycles, uint32_t seed, int measured, FlowBitSearchResult *result_out);
 
 /* =========================================================================
- * FLOW Zero-Float Exact Numerics Engine (C17 port of SEARU no_std_tool::numerics)
- *   1. math: Q16.16 (exp_approx_q16, rsqrt_approx_i32, silu_approx_i8) &
- *            Q32.32 (flow_fx64_t) Lossless Fixed-Point ALU + Bitwise IEEE-754 Codec
+ * FLOW Exact Numerics & IEEE-754 / 2-Jet / BigInt Engine
+ *   1. math: Fast Integer Approximations (exp_approx_q16, rsqrt_approx_i32, silu_approx_i8)
+ *            & Hardware IEEE-754 Double + 2-Jet Forward AD
  *   2. bignum: U256 ([uint64_t; 4]), 512-bit mul_wide, Montgomery Reduction, Miller-Rabin
- *   3. linalg: Stack-allocated i-k-j Fixed-Point Matrix, MSE Loss & Gradient Descent
+ *   3. linalg: Stack-allocated i-k-j IEEE-754 Matrix, MSE Loss & Gradient Descent
  *   4. random: Pure bitwise Xoshiro256** + SplitMix64 PRNG
  * ========================================================================= */
 #ifndef FLOW_EXACT_NUMERICS_DEFINED
@@ -253,50 +253,11 @@ __extension__ typedef unsigned __int128 flow_u128_t;
 #define FLOW_FX16_EXP_BOUND  (10 * FLOW_FX16_ONE)
 #define FLOW_FX16_LOG2E      INT64_C(94548)
 
-typedef int64_t flow_fx64_t;
-#define FLOW_FX_SHIFT        32
-#define FLOW_FX_ONE          (INT64_C(1) << FLOW_FX_SHIFT)
-#define FLOW_FX_HALF         (INT64_C(1) << (FLOW_FX_SHIFT - 1))
-#define FLOW_FX_FRAC_MASK    (FLOW_FX_ONE - 1)
-#define FLOW_FX64_NONE       INT64_MIN
-#define FLOW_FX64_MAX        INT64_MAX
-#define FLOW_FX64_MIN        (-INT64_MAX)
-#define FLOW_FX_PI           INT64_C(13493037705)
-#define FLOW_FX_TWO_PI       INT64_C(26986075409)
-#define FLOW_FX_HALF_PI      INT64_C(6746518852)
-#define FLOW_FX_QTR_PI       INT64_C(3373259426)
-#define FLOW_FX_LN2          INT64_C(2977044472)
-#define FLOW_FX_INV_LN2      INT64_C(6196328019)
-#define FLOW_FX_EXP_MIN      (-22 * FLOW_FX_ONE)
-#define FLOW_FX_EXP_MAX      (21 * FLOW_FX_ONE)
-#define FLOW_FX_INV_FACT3    INT64_C(715827883)
-#define FLOW_FX_INV_FACT4    INT64_C(178956971)
-#define FLOW_FX_INV_FACT5    INT64_C(35791394)
-#define FLOW_FX_INV_FACT6    INT64_C(5965232)
-#define FLOW_FX_INV_FACT7    INT64_C(852176)
-#define FLOW_FX_INV_FACT9    INT64_C(11836)
-#define FLOW_FX_INV_3        INT64_C(1431655765)
-#define FLOW_FX_INV_5        INT64_C(858993459)
-#define FLOW_FX_INV_7        INT64_C(613566757)
-#define FLOW_FX_ATAN_C0      INT64_C(4216574283)
-#define FLOW_FX_ATAN_C1      INT64_C(843018725)
-#define FLOW_NEWTON_64BIT_ITERS 6
-
-#define FLOW_IEEE754_SIGN_SHIFT   63U
-#define FLOW_IEEE754_MANT_BITS    52U
-#define FLOW_IEEE754_EXP_MASK     UINT64_C(0x7FF)
-#define FLOW_IEEE754_EXP_BIAS     1023
-#define FLOW_IEEE754_MANT_MASK    UINT64_C(0x000FFFFFFFFFFFFF)
-#define FLOW_IEEE754_IMPLICIT_BIT (UINT64_C(1) << FLOW_IEEE754_MANT_BITS)
-#define FLOW_IEEE754_ABS_MASK     UINT64_C(0x7FFFFFFFFFFFFFFF)
-#define FLOW_FX_MAX_INT_EXP       31
-#define FLOW_FX_MIN_SUBNORM_EXP   (-32)
-#define FLOW_FX_MANT_TO_Q32_SHIFT 20
-
 #define FLOW_U256_LIMBS           4
 #define FLOW_U512_LIMBS           8
 #define FLOW_U256_BITS            256U
 #define FLOW_WORD_BITS            64U
+#define FLOW_NEWTON_64BIT_ITERS   5
 #define FLOW_SPLITMIX64_MUL1      UINT64_C(0xbf58476d1ce4e5b9)
 #define FLOW_SPLITMIX64_MUL2      UINT64_C(0x94d049bb133111eb)
 
@@ -333,229 +294,6 @@ static inline __attribute__((unused)) int flow_silu_approx_i8(int8_t x, int8_t *
     else if (res_i32 > INT8_MAX) { res_i32 = INT8_MAX; } \
     *out = (int8_t)res_i32; \
     return 1; \
-} \
-static inline __attribute__((unused)) flow_fx64_t flow_fx64_from_double(double d) { \
-    uint64_t bits = 0; \
-    memcpy(&bits, &d, sizeof(bits)); \
-    uint32_t raw_exp = (uint32_t)((bits >> FLOW_IEEE754_MANT_BITS) & FLOW_IEEE754_EXP_MASK); \
-    if (raw_exp == FLOW_IEEE754_EXP_MASK) { return FLOW_FX64_NONE; } \
-    if ((bits & FLOW_IEEE754_ABS_MASK) == 0ULL || raw_exp == 0U) { return 0; } \
-    int sign = (int)(bits >> FLOW_IEEE754_SIGN_SHIFT); \
-    int32_t exp = (int32_t)raw_exp - FLOW_IEEE754_EXP_BIAS; \
-    if (exp >= FLOW_FX_MAX_INT_EXP) { return FLOW_FX64_NONE; } \
-    if (exp < FLOW_FX_MIN_SUBNORM_EXP) { return 0; } \
-    uint64_t mant = (bits & FLOW_IEEE754_MANT_MASK) | FLOW_IEEE754_IMPLICIT_BIT; \
-    int32_t shift = FLOW_FX_MANT_TO_Q32_SHIFT - exp; \
-    uint64_t mag = (shift > 0) ? ((mant + (UINT64_C(1) << (shift - 1))) >> shift) : (mant << (-shift)); \
-    if (mag > (uint64_t)INT64_MAX) { return FLOW_FX64_NONE; } \
-    return sign ? -(flow_fx64_t)mag : (flow_fx64_t)mag; \
-} \
-static inline __attribute__((unused)) double flow_fx64_to_double(flow_fx64_t x) { \
-    if (x == 0 || x == FLOW_FX64_NONE) { return 0.0; } \
-    uint64_t sign = (x < 0) ? (UINT64_C(1) << FLOW_IEEE754_SIGN_SHIFT) : 0ULL; \
-    uint64_t mag = (x < 0) ? (0ULL - (uint64_t)x) : (uint64_t)x; \
-    int msb = (int)(FLOW_WORD_BITS - 1U) - __builtin_clzll(mag); \
-    int32_t exp = msb - FLOW_FX_SHIFT; \
-    uint64_t mant53 = (msb <= (int)FLOW_IEEE754_MANT_BITS) \
-        ? (mag << ((int)FLOW_IEEE754_MANT_BITS - msb)) \
-        : ((mag + (UINT64_C(1) << (msb - ((int)FLOW_IEEE754_MANT_BITS + 1)))) >> (msb - (int)FLOW_IEEE754_MANT_BITS)); \
-    if (mant53 & (UINT64_C(1) << (FLOW_IEEE754_MANT_BITS + 1U))) { mant53 >>= 1U; exp++; } \
-    uint64_t bits = sign | ((uint64_t)(exp + FLOW_IEEE754_EXP_BIAS) << FLOW_IEEE754_MANT_BITS) | (mant53 & FLOW_IEEE754_MANT_MASK); \
-    double out = 0.0; \
-    memcpy(&out, &bits, sizeof(out)); \
-    return out; \
-}
-
-#define FLOW_EXACT_ALU_C17 \
-static inline __attribute__((unused)) flow_fx64_t flow_fx64_add(flow_fx64_t a, flow_fx64_t b) { \
-    if (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE) return FLOW_FX64_NONE; \
-    flow_i128_t s = (flow_i128_t)a + (flow_i128_t)b; \
-    return (s > (flow_i128_t)INT64_MAX || s < -(flow_i128_t)INT64_MAX) ? FLOW_FX64_NONE : (flow_fx64_t)s; \
-} \
-static inline __attribute__((unused)) flow_fx64_t flow_fx64_sub(flow_fx64_t a, flow_fx64_t b) { \
-    if (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE) return FLOW_FX64_NONE; \
-    flow_i128_t d = (flow_i128_t)a - (flow_i128_t)b; \
-    return (d > (flow_i128_t)INT64_MAX || d < -(flow_i128_t)INT64_MAX) ? FLOW_FX64_NONE : (flow_fx64_t)d; \
-} \
-static inline __attribute__((unused)) flow_fx64_t flow_fx64_neg(flow_fx64_t x) { \
-    return (x == FLOW_FX64_NONE) ? FLOW_FX64_NONE : -x; \
-} \
-static inline __attribute__((unused)) flow_fx64_t flow_fx64_abs(flow_fx64_t x) { \
-    return (x == FLOW_FX64_NONE) ? FLOW_FX64_NONE : (x < 0 ? -x : x); \
-} \
-static inline __attribute__((unused)) flow_fx64_t flow_fx64_mul(flow_fx64_t a, flow_fx64_t b) { \
-    if (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE) return FLOW_FX64_NONE; \
-    flow_i128_t prod = (flow_i128_t)a * (flow_i128_t)b, half = (flow_i128_t)FLOW_FX_HALF; \
-    flow_i128_t res = (prod >= 0) ? ((prod + half) >> FLOW_FX_SHIFT) : -(((-prod) + half) >> FLOW_FX_SHIFT); \
-    return (res > (flow_i128_t)INT64_MAX || res < -(flow_i128_t)INT64_MAX) ? FLOW_FX64_NONE : (flow_fx64_t)res; \
-} \
-static inline __attribute__((unused)) flow_fx64_t flow_fx64_div(flow_fx64_t a, flow_fx64_t b) { \
-    if (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE || b == 0) return 0; \
-    int neg = (a < 0) ^ (b < 0); \
-    flow_u128_t ua = (flow_u128_t)(a < 0 ? (0ULL - (uint64_t)a) : (uint64_t)a); \
-    flow_u128_t ub = (flow_u128_t)(b < 0 ? (0ULL - (uint64_t)b) : (uint64_t)b); \
-    flow_u128_t q = ((ua << FLOW_FX_SHIFT) + (ub >> 1U)) / ub; \
-    return (q > (flow_u128_t)INT64_MAX) ? FLOW_FX64_NONE : (neg ? -(flow_fx64_t)q : (flow_fx64_t)q); \
-} \
-static inline __attribute__((unused)) flow_fx64_t flow_fx64_mod(flow_fx64_t a, flow_fx64_t b) { \
-    return (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE || b == 0) ? 0 : (a % b); \
-} \
-static inline __attribute__((unused)) flow_fx64_t flow_fx64_floor(flow_fx64_t x) { \
-    return (x == FLOW_FX64_NONE) ? FLOW_FX64_NONE : (flow_fx64_t)((uint64_t)x & ~(uint64_t)FLOW_FX_FRAC_MASK); \
-} \
-static inline __attribute__((unused)) flow_fx64_t flow_fx64_ceil(flow_fx64_t x) { \
-    if (x == FLOW_FX64_NONE || ((uint64_t)x & (uint64_t)FLOW_FX_FRAC_MASK) == 0ULL) return x; \
-    return flow_fx64_add(flow_fx64_floor(x), FLOW_FX_ONE); \
-} \
-static inline __attribute__((unused)) flow_fx64_t flow_fx64_round(flow_fx64_t x) { \
-    if (x == FLOW_FX64_NONE) return FLOW_FX64_NONE; \
-    flow_fx64_t s = flow_fx64_add(x >= 0 ? x : -x, FLOW_FX_HALF); \
-    return (s == FLOW_FX64_NONE) ? FLOW_FX64_NONE : (x >= 0 ? flow_fx64_floor(s) : -flow_fx64_floor(s)); \
-} \
-static inline __attribute__((unused)) flow_fx64_t flow_fx64_max(flow_fx64_t a, flow_fx64_t b) { \
-    return (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE) ? FLOW_FX64_NONE : (a > b ? a : b); \
-} \
-static inline __attribute__((unused)) flow_fx64_t flow_fx64_min(flow_fx64_t a, flow_fx64_t b) { \
-    return (a == FLOW_FX64_NONE || b == FLOW_FX64_NONE) ? FLOW_FX64_NONE : (a < b ? a : b); \
-} \
-static inline __attribute__((unused)) flow_fx64_t flow_fx64_of_nat(uint64_t x) { \
-    return (x > (uint64_t)INT32_MAX) ? FLOW_FX64_NONE : (flow_fx64_t)(x << FLOW_FX_SHIFT); \
-} \
-static inline __attribute__((unused)) flow_fx64_t flow_fx64_of_int(int64_t x) { \
-    return (x > (int64_t)INT32_MAX || x < -(int64_t)INT32_MAX) ? FLOW_FX64_NONE : (flow_fx64_t)((uint64_t)x << FLOW_FX_SHIFT); \
-}
-
-#define FLOW_EXACT_EXP_LOG_C17 \
-static inline __attribute__((unused)) flow_fx64_t flow_fx64_sqrt(flow_fx64_t x) { \
-    if (x <= 0 || x == FLOW_FX64_NONE) { return 0; } \
-    uint64_t ux = (uint64_t)x; \
-    int msb = (int)(FLOW_WORD_BITS - 1U) - __builtin_clzll(ux); \
-    flow_u128_t target = ((flow_u128_t)ux) << FLOW_FX_SHIFT; \
-    uint64_t y = UINT64_C(1) << ((msb + FLOW_FX_SHIFT) / 2); \
-    for (int i = 0; i < FLOW_NEWTON_64BIT_ITERS; ++i) { \
-        y = (uint64_t)(((flow_u128_t)y + target / y) >> 1U); \
-    } \
-    return (flow_fx64_t)y; \
-} \
-static inline __attribute__((unused)) flow_fx64_t flow_fx64_exp(flow_fx64_t x) { \
-    if (x == FLOW_FX64_NONE) { return FLOW_FX64_NONE; } \
-    if (x <= FLOW_FX_EXP_MIN) { return 0; } \
-    if (x >= FLOW_FX_EXP_MAX) { return FLOW_FX64_NONE; } \
-    int64_t x_log2e = (int64_t)(((flow_i128_t)x * FLOW_FX_INV_LN2) >> FLOW_FX_SHIFT); \
-    int32_t k = (int32_t)((x_log2e >= 0 ? (x_log2e + FLOW_FX_HALF) : (x_log2e - FLOW_FX_HALF)) >> FLOW_FX_SHIFT); \
-    flow_fx64_t r = x - (flow_fx64_t)k * FLOW_FX_LN2; \
-    flow_fx64_t p = FLOW_FX_INV_FACT7; \
-    p = FLOW_FX_INV_FACT6 + flow_fx64_mul(r, p); \
-    p = FLOW_FX_INV_FACT5 + flow_fx64_mul(r, p); \
-    p = FLOW_FX_INV_FACT4 + flow_fx64_mul(r, p); \
-    p = FLOW_FX_INV_FACT3 + flow_fx64_mul(r, p); \
-    p = FLOW_FX_HALF + flow_fx64_mul(r, p); \
-    p = FLOW_FX_ONE + flow_fx64_mul(r, p); \
-    p = FLOW_FX_ONE + flow_fx64_mul(r, p); \
-    if (k >= 0) { \
-        if (k >= FLOW_FX_MAX_INT_EXP || (p >> ((int)(FLOW_WORD_BITS - 2U) - k)) > 0) { return FLOW_FX64_NONE; } \
-        return (flow_fx64_t)((uint64_t)p << k); \
-    } \
-    if (k <= -(int)(FLOW_WORD_BITS - 2U)) { return 0; } \
-    return p >> (-k); \
-} \
-static inline __attribute__((unused)) flow_fx64_t flow_fx64_log(flow_fx64_t x) { \
-    if (x <= 0 || x == FLOW_FX64_NONE) { return 0; } \
-    uint64_t ux = (uint64_t)x; \
-    int msb = (int)(FLOW_WORD_BITS - 1U) - __builtin_clzll(ux); \
-    int32_t k = msb - FLOW_FX_SHIFT; \
-    flow_fx64_t m = (msb >= FLOW_FX_SHIFT) ? (flow_fx64_t)(ux >> (msb - FLOW_FX_SHIFT)) : (flow_fx64_t)(ux << (FLOW_FX_SHIFT - msb)); \
-    flow_fx64_t z = flow_fx64_div(m - FLOW_FX_ONE, m + FLOW_FX_ONE); \
-    flow_fx64_t z2 = flow_fx64_mul(z, z); \
-    flow_fx64_t poly = FLOW_FX_INV_7; \
-    poly = FLOW_FX_INV_5 + flow_fx64_mul(z2, poly); \
-    poly = FLOW_FX_INV_3 + flow_fx64_mul(z2, poly); \
-    poly = FLOW_FX_ONE + flow_fx64_mul(z2, poly); \
-    flow_fx64_t ln_m = flow_fx64_mul(2 * z, poly); \
-    return (flow_fx64_t)k * FLOW_FX_LN2 + ln_m; \
-} \
-static inline __attribute__((unused)) flow_fx64_t flow_fx64_pow(flow_fx64_t base, flow_fx64_t exp) { \
-    if (base == FLOW_FX64_NONE || exp == FLOW_FX64_NONE) { return FLOW_FX64_NONE; } \
-    if (exp == 0) { return FLOW_FX_ONE; } \
-    if (((uint64_t)exp & (uint64_t)FLOW_FX_FRAC_MASK) == 0ULL && exp > 0 && exp <= ((flow_fx64_t)FLOW_WORD_BITS * FLOW_FX_ONE)) { \
-        uint64_t n = (uint64_t)(exp >> FLOW_FX_SHIFT); \
-        flow_fx64_t r = FLOW_FX_ONE, b = base; \
-        while (n > 0ULL) { \
-            if (n & 1ULL) { r = flow_fx64_mul(r, b); } \
-            b = flow_fx64_mul(b, b); \
-            n >>= 1U; \
-        } \
-        return r; \
-    } \
-    if (base <= 0) { return 0; } \
-    return flow_fx64_exp(flow_fx64_mul(exp, flow_fx64_log(base))); \
-}
-
-#define FLOW_EXACT_TRIG_QUANT_C17 \
-static inline __attribute__((unused)) flow_fx64_t flow_fx64_sin(flow_fx64_t x) { \
-    if (x == FLOW_FX64_NONE) { return FLOW_FX64_NONE; } \
-    flow_fx64_t r = x % FLOW_FX_TWO_PI; \
-    if (r > FLOW_FX_PI) { r -= FLOW_FX_TWO_PI; } \
-    else if (r < -FLOW_FX_PI) { r += FLOW_FX_TWO_PI; } \
-    if (r > FLOW_FX_HALF_PI) { r = FLOW_FX_PI - r; } \
-    else if (r < -FLOW_FX_HALF_PI) { r = -FLOW_FX_PI - r; } \
-    if (r == FLOW_FX_HALF_PI) { return FLOW_FX_ONE; } \
-    else if (r == -FLOW_FX_HALF_PI) { return -FLOW_FX_ONE; } \
-    flow_fx64_t r2 = flow_fx64_mul(r, r); \
-    flow_fx64_t p = FLOW_FX_INV_FACT9; \
-    p = -FLOW_FX_INV_FACT7 + flow_fx64_mul(r2, p); \
-    p = FLOW_FX_INV_FACT5 + flow_fx64_mul(r2, p); \
-    p = -FLOW_FX_INV_FACT3 + flow_fx64_mul(r2, p); \
-    p = FLOW_FX_ONE + flow_fx64_mul(r2, p); \
-    return flow_fx64_mul(r, p); \
-} \
-static inline __attribute__((unused)) flow_fx64_t flow_fx64_cos(flow_fx64_t x) { \
-    if (x == FLOW_FX64_NONE) { return FLOW_FX64_NONE; } \
-    if (x == 0) { return FLOW_FX_ONE; } \
-    flow_fx64_t r = x % FLOW_FX_TWO_PI; \
-    return flow_fx64_sin(r + FLOW_FX_HALF_PI); \
-} \
-static inline __attribute__((unused)) flow_fx64_t flow_fx64_atan2(flow_fx64_t y, flow_fx64_t x) { \
-    if (y == FLOW_FX64_NONE || x == FLOW_FX64_NONE || (y == 0 && x == 0)) { return 0; } \
-    if (x == 0) { return y < 0 ? -FLOW_FX_HALF_PI : FLOW_FX_HALF_PI; } \
-    if (y == 0) { return x < 0 ? FLOW_FX_PI : 0; } \
-    flow_fx64_t sx = x, sy = y; \
-    if (flow_fx64_abs(sx) > (INT64_MAX >> 2) || flow_fx64_abs(sy) > (INT64_MAX >> 2)) { \
-        sx >>= 2; \
-        sy >>= 2; \
-    } \
-    flow_fx64_t abs_y = flow_fx64_abs(sy) + 1; \
-    flow_fx64_t angle = 0; \
-    if (sx >= 0) { \
-        flow_fx64_t r = flow_fx64_div(sx - abs_y, sx + abs_y); \
-        flow_fx64_t r2 = flow_fx64_mul(r, r); \
-        angle = FLOW_FX_QTR_PI + flow_fx64_mul(flow_fx64_mul(FLOW_FX_ATAN_C1, r2) - FLOW_FX_ATAN_C0, r); \
-    } else { \
-        flow_fx64_t r = flow_fx64_div(sx + abs_y, abs_y - sx); \
-        flow_fx64_t r2 = flow_fx64_mul(r, r); \
-        angle = (3 * FLOW_FX_QTR_PI) + flow_fx64_mul(flow_fx64_mul(FLOW_FX_ATAN_C1, r2) - FLOW_FX_ATAN_C0, r); \
-    } \
-    return y < 0 ? -angle : angle; \
-} \
-static inline __attribute__((unused)) uint64_t flow_quantize_fx(flow_fx64_t val, flow_fx64_t min_v, flow_fx64_t max_v, uint32_t bits) { \
-    if (val == FLOW_FX64_NONE || min_v == FLOW_FX64_NONE || max_v == FLOW_FX64_NONE || max_v <= min_v || bits == 0 || bits > (uint32_t)FLOW_FX_SHIFT) { return 0ULL; } \
-    flow_fx64_t c = val < min_v ? min_v : (val > max_v ? max_v : val); \
-    uint64_t max_q = (1ULL << bits) - 1ULL; \
-    flow_u128_t diff_c = (flow_u128_t)((flow_i128_t)c - (flow_i128_t)min_v); \
-    flow_u128_t den = (flow_u128_t)((flow_i128_t)max_v - (flow_i128_t)min_v); \
-    flow_u128_t num = diff_c * (flow_u128_t)max_q; \
-    return (uint64_t)((num + (den >> 1)) / den); \
-} \
-static inline __attribute__((unused)) flow_fx64_t flow_dequantize_fx(uint64_t code, flow_fx64_t min_v, flow_fx64_t max_v, uint32_t bits) { \
-    if (min_v == FLOW_FX64_NONE || max_v == FLOW_FX64_NONE || max_v <= min_v || bits == 0 || bits > (uint32_t)FLOW_FX_SHIFT) { return 0; } \
-    uint64_t max_q = (1ULL << bits) - 1ULL; \
-    uint64_t c = code > max_q ? max_q : code; \
-    flow_u128_t span = (flow_u128_t)((flow_i128_t)max_v - (flow_i128_t)min_v); \
-    flow_i128_t delta = (flow_i128_t)(((flow_u128_t)c * span + (max_q >> 1)) / max_q); \
-    flow_i128_t res = (flow_i128_t)min_v + delta; \
-    if (res > (flow_i128_t)INT64_MAX) { return INT64_MAX; } \
-    if (res < -(flow_i128_t)INT64_MAX) { return -INT64_MAX; } \
-    return (flow_fx64_t)res; \
 }
 
 #define FLOW_LEAN_NAT_OPS_C17 \
@@ -695,9 +433,6 @@ static inline __attribute__((unused)) FlowJetScalar2 flow_jet2_min(FlowJetScalar
 #define FLOW_JET2_OPS_C17 FLOW_JET2_ALU_C17 FLOW_JET2_MATH_C17
 
 FLOW_EXACT_CODEC_C17
-FLOW_EXACT_ALU_C17
-FLOW_EXACT_EXP_LOG_C17
-FLOW_EXACT_TRIG_QUANT_C17
 #ifndef FLOW_LEAN_NAT_OPS_DEFINED
 #define FLOW_LEAN_NAT_OPS_DEFINED
 FLOW_LEAN_NAT_OPS_C17
@@ -737,12 +472,12 @@ void flow_xoshiro256ss_init(FlowXoshiro256SS *rng, uint64_t seed);
 uint64_t flow_xoshiro256ss_next_u64(FlowXoshiro256SS *rng);
 int flow_xoshiro256ss_next_bool(FlowXoshiro256SS *rng);
 
-void flow_fx_mat_mul_ikj(size_t R, size_t K, size_t C, const flow_fx64_t *a, const flow_fx64_t *b, flow_fx64_t *out);
-flow_fx64_t flow_fx_mse_loss(size_t N, size_t OUT, const flow_fx64_t *predictions, const flow_fx64_t *targets);
-void flow_fx_gradient_descent_step(size_t N, size_t IN, size_t OUT,
-                                   const flow_fx64_t *inputs, flow_fx64_t *weights,
-                                   const flow_fx64_t *predictions, const flow_fx64_t *targets,
-                                   flow_fx64_t learning_rate);
+void flow_mat_mul_ikj(size_t R, size_t K, size_t C, const double *a, const double *b, double *out);
+double flow_mse_loss(size_t N, size_t OUT, const double *predictions, const double *targets);
+void flow_gradient_descent_step(size_t N, size_t IN, size_t OUT,
+                                const double *inputs, double *weights,
+                                const double *predictions, const double *targets,
+                                double learning_rate);
 #endif /* FLOW_EXACT_NUMERICS_DEFINED */
 
 /* ============================================================================

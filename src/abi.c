@@ -13,122 +13,8 @@ static void sanitize_ident(const char *in, char *out, size_t max_len) { size_t j
     for (size_t i = 0; in[i] && j + 1 < max_len; ++i) out[j++] = (isalnum((unsigned char)in[i]) || in[i] == '_') ? in[i] : '_'; out[j] = '\0'; }
 static void to_pascal_case(const char *in, char *out, size_t max_len) { size_t j = 0; int cap = 1; for (size_t i = 0; in[i] && j + 1 < max_len; ++i) {
         if (in[i] == '_' || in[i] == '-') cap = 1; else { out[j++] = cap ? (char)toupper((unsigned char)in[i]) : in[i]; cap = 0; } } out[j] = '\0'; }
-static const FlowLeanStruct *abi_find_lean_struct(const SemanticIR *ir, const char *name) {
-    if (!ir || !name || !name[0]) return NULL;
-    for (size_t i = 0; i < ir->lean_struct_count; ++i)
-        if (strcmp(ir->lean_structs[i].name, name) == 0) return &ir->lean_structs[i];
-    return NULL;
-}
-static const FlowLeanEnum *abi_find_lean_enum(const SemanticIR *ir, const char *name) {
-    if (!ir || !name || !name[0]) return NULL;
-    for (size_t i = 0; i < ir->lean_enum_count; ++i)
-        if (strcmp(ir->lean_enums[i].name, name) == 0) return &ir->lean_enums[i];
-    return NULL;
-}
-typedef struct {
-    const char *lean;
-    const char *c;
-} AbiScalarTypeEntry;
-static const AbiScalarTypeEntry ABI_SCALAR_TYPES[] = {
-    { "Bool",    "bool"      },
-    { "Float",   "double"    },
-    { "Float32", "float"     },
-    { "UInt32",  "uint32_t"  },
-    { "Int32",   "int32_t"   },
-    { "UInt16",  "uint16_t"  },
-    { "Int16",   "int16_t"   },
-    { "UInt8",   "uint8_t"   },
-    { "Int8",    "int8_t"    },
-    { "USize",   "size_t"    },
-    { "ISize",   "ptrdiff_t" },
-    { "Int",     "int64_t"   },
-    { "Int64",   "int64_t"   },
-    { "UInt64",  "uint64_t"  }
-};
-static const AbiScalarTypeEntry *abi_lookup_scalar_by_lean(const char *t) {
-    if (t) for (size_t i = 0; i < sizeof(ABI_SCALAR_TYPES) / sizeof(ABI_SCALAR_TYPES[0]); ++i)
-        if (!strcmp(t, ABI_SCALAR_TYPES[i].lean)) return &ABI_SCALAR_TYPES[i];
-    return &ABI_SCALAR_TYPES[sizeof(ABI_SCALAR_TYPES) / sizeof(ABI_SCALAR_TYPES[0]) - 1];
-}
-static int abi_fn_has_fx_variant(const SemanticIR *ir, const FlowLeanFunction *fn) {
-    if (!fn || fn->is_private || (ir && ir->float_abi_ieee64)) return 0;
-    int has_float = (!strcmp(fn->return_type, "Float") || !strcmp(fn->return_type, "Float32"));
-    int has_struct = fn->is_struct_transform || (abi_find_lean_struct(ir, fn->return_type) != NULL);
-    for (size_t pi = 0; pi < fn->param_count; ++pi) {
-        if (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32")) has_float = 1;
-        if (abi_find_lean_struct(ir, fn->param_types[pi])) has_struct = 1;
-    }
-    if (fn->is_tuple_return && fn->tuple_arity >= 2) {
-        for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
-            if (!strcmp(fn->tuple_types[ti], "Float") || !strcmp(fn->tuple_types[ti], "Float32")) has_float = 1;
-    }
-    return has_float && !has_struct;
-}
-static int abi_body_has_ident_tok(const char *s, const char *ident) {
-    if (!s || !ident || !ident[0]) return 0;
-    size_t ilen = strlen(ident);
-    for (const char *p = strstr(s, ident); p; p = strstr(p + 1, ident)) {
-        int l_ok = (p == s) || (!isalnum((unsigned char)p[-1]) && p[-1] != '_' && p[-1] != '.');
-        int r_ok = !isalnum((unsigned char)p[ilen]) && p[ilen] != '_' && p[ilen] != '.';
-        if (l_ok && r_ok) return 1;
-    }
-    return 0;
-}
-static int abi_fn_has_jet2_variant_depth(const SemanticIR *ir, const FlowLeanFunction *fn, int depth) {
-    if (depth > 4 || !fn || fn->is_struct_transform || fn->is_tuple_return || fn->param_count == 0) return 0;
-    if (strcmp(fn->return_type, "Float") != 0 && strcmp(fn->return_type, "Float32") != 0) return 0;
-    if (strstr(fn->body, "let (") != NULL) return 0;
-    for (size_t pi = 0; pi < fn->param_count; ++pi) {
-        if (abi_find_lean_struct(ir, fn->param_types[pi])) return 0;
-        if (strcmp(fn->param_types[pi], "Float") != 0 && strcmp(fn->param_types[pi], "Float32") != 0) return 0;
-    }
-    if (ir) {
-        for (size_t k = 0; k < ir->lean_function_count; ++k) {
-            if (&ir->lean_functions[k] == fn) continue;
-            if (abi_body_has_ident_tok(fn->body, ir->lean_functions[k].name) &&
-                !abi_fn_has_jet2_variant_depth(ir, &ir->lean_functions[k], depth + 1)) return 0;
-        }
-    }
-    return 1;
-}
-static int abi_fn_has_jet2_variant(const SemanticIR *ir, const FlowLeanFunction *fn) {
-    if (!fn || fn->is_private) return 0;
-    return abi_fn_has_jet2_variant_depth(ir, fn, 0);
-}
-static int abi_fn_has_lean_wrapper(const SemanticIR *ir, const FlowLeanFunction *fn) {
-    if (!fn || fn->is_private || !fn->name[0] || !strncmp(fn->name, "lean_", 5)) return 0;
-    if (ir) {
-        char cand[FLOW_NAME + 8];
-        snprintf(cand, sizeof(cand), "lean_%s", fn->name);
-        for (size_t i = 0; i < ir->lean_function_count; ++i)
-            if (!strcmp(ir->lean_functions[i].name, cand)) return 0;
-    }
-    return 1;
-}
-static int abi_fn_has_soa_variant(const SemanticIR *ir, const FlowLeanFunction *fn) {
-    if (!fn || fn->is_private || fn->is_result_return || !fn->name[0] || fn->is_tuple_return || fn->param_count == 0) return 0;
-    const FlowLeanStruct *out_st = abi_find_lean_struct(ir, fn->return_type);
-    if (out_st && out_st->field_count == 0) return 0;
-    int has_struct_param = 0;
-    for (size_t pi = 0; pi < fn->param_count; ++pi) {
-        const FlowLeanStruct *in_st = abi_find_lean_struct(ir, fn->param_types[pi]);
-        if (in_st) {
-            if (in_st->field_count == 0) return 0;
-            has_struct_param = 1;
-        }
-    }
-    return has_struct_param;
-}
-static const char *abi_lean_c_type(const char *t) { return abi_lookup_scalar_by_lean(t)->c; }
-static const char *abi_lean_c_type_ir(const SemanticIR *ir, const char *t) {
-    if (abi_find_lean_struct(ir, t) || abi_find_lean_enum(ir, t)) return t;
-    return abi_lean_c_type(t);
-}
-static const char *abi_lean_fx_c_type_ir(const SemanticIR *ir, const char *t) {
-    if (!t) return "uint64_t";
-    if (!strcmp(t, "Float") || !strcmp(t, "Float32")) return "flow_fx64_t";
-    return abi_lean_c_type_ir(ir, t);
-}
+#define abi_find_lean_struct flow_ir_find_struct
+#define abi_lean_c_type_ir   flow_ir_type_to_c
 static const char *abi_escape_kw_suffix(const char *in, const char *const *kw, char *out, size_t max_len) {
     if (!in || !in[0]) {
         if (out && max_len > 0) snprintf(out, max_len, "_");
@@ -202,7 +88,7 @@ int flow_abi_build_for_component(const SemanticIR *ir, const Component *comp, Fl
             size_t st_bytes = st->byte_size > 0 ? st->byte_size : (st->field_count * 8U);
             size_t f_cnt = st->field_count > 0 ? st->field_count : 1U;
             flow_hott_register_soa_equivalence(u0, st->name, soa_name, f_cnt, st_bytes,
-                                               FLOW_SIMD_SOA_LANES, ir->float_abi_ieee64 ? 0U : 32U,
+                                               FLOW_SIMD_SOA_LANES, 0U,
                                                FLOW_SIEVE_SECURITY_CANONICAL_MASK);
         }
     }
@@ -291,19 +177,7 @@ int flow_abi_emit_c_header(FILE *output, const FlowComponentABI *abi) { if (!out
         fprintf(output, "/* Pure .lean Exported Computational Operators (%zu) */\n", abi->ir->lean_function_count);
         for (size_t fi = 0; fi < abi->ir->lean_function_count; ++fi) {
             const FlowLeanFunction *fn = &abi->ir->lean_functions[fi];
-            if (fn->is_private) continue;
-            if (abi_fn_has_fx_variant(abi->ir, fn)) {
-                fprintf(output, "%s %s_fx(", abi_lean_fx_c_type_ir(abi->ir, fn->return_type), fn->name);
-                for (size_t pi = 0; pi < fn->param_count; ++pi) {
-                    char p_ident[96];
-                    fprintf(output, "%s%s %s", pi > 0 ? ", " : "", abi_lean_fx_c_type_ir(abi->ir, fn->param_types[pi]), abi_escape_c_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
-                }
-                if (fn->is_tuple_return && fn->tuple_arity >= 2) {
-                    for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
-                        fprintf(output, "%s%s *out_%zu", (fn->param_count > 0 || ti > 0) ? ", " : "", abi_lean_fx_c_type_ir(abi->ir, fn->tuple_types[ti]), ti);
-                }
-                fprintf(output, ");\n");
-            }
+            if (!(fn->variant_mask & FLOW_FN_VAR_PRIMARY)) continue;
             fprintf(output, "%s %s(", abi_lean_c_type_ir(abi->ir, fn->return_type), fn->name);
             for (size_t pi = 0; pi < fn->param_count; ++pi) {
                 char p_ident[96];
@@ -314,7 +188,7 @@ int flow_abi_emit_c_header(FILE *output, const FlowComponentABI *abi) { if (!out
                     fprintf(output, "%s%s *out_%zu", (fn->param_count > 0 || ti > 0) ? ", " : "", abi_lean_c_type_ir(abi->ir, fn->tuple_types[ti]), ti);
             }
             fprintf(output, ");\n");
-            if (abi_fn_has_lean_wrapper(abi->ir, fn)) {
+            if (fn->variant_mask & FLOW_FN_VAR_LEAN) {
                 fprintf(output, "%s lean_%s(", abi_lean_c_type_ir(abi->ir, fn->return_type), fn->name);
                 for (size_t pi = 0; pi < fn->param_count; ++pi) {
                     char p_ident[96];
@@ -325,7 +199,7 @@ int flow_abi_emit_c_header(FILE *output, const FlowComponentABI *abi) { if (!out
                         fprintf(output, "%s%s *out_%zu", (fn->param_count > 0 || ti > 0) ? ", " : "", abi_lean_c_type_ir(abi->ir, fn->tuple_types[ti]), ti);
                 }
                 fprintf(output, ");\n");
-                if (!fn->is_tuple_return) {
+                if (fn->variant_mask & FLOW_FN_VAR_CERTIFIED) {
                     const char *rc = abi_lean_c_type_ir(abi->ir, fn->return_type);
                     fprintf(output, "bool lean_certified_%s(", fn->name);
                     for (size_t pi = 0; pi < fn->param_count; ++pi) {
@@ -339,7 +213,7 @@ int flow_abi_emit_c_header(FILE *output, const FlowComponentABI *abi) { if (!out
                         fprintf(output, "%s%s %s", pi > 0 ? ", " : "", abi_lean_c_type_ir(abi->ir, fn->param_types[pi]), abi_escape_c_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
                     }
                     fprintf(output, "%s);\n", fn->param_count == 0 ? "void" : "");
-                    if (!strcmp(rc, "double")) {
+                    if (fn->variant_mask & FLOW_FN_VAR_BOUNDARY) {
                         fprintf(output, "double lean_boundary_%s(", fn->name);
                         for (size_t pi = 0; pi < fn->param_count; ++pi) {
                             char p_ident[96];
@@ -349,7 +223,7 @@ int flow_abi_emit_c_header(FILE *output, const FlowComponentABI *abi) { if (!out
                     }
                 }
             }
-            if (abi_fn_has_soa_variant(abi->ir, fn)) {
+            if (fn->variant_mask & FLOW_FN_VAR_SOA64) {
                 fprintf(output, "void soa_%s(", fn->name);
                 for (size_t pi = 0; pi < fn->param_count; ++pi) {
                     char p_ident[96];
@@ -365,7 +239,7 @@ int flow_abi_emit_c_header(FILE *output, const FlowComponentABI *abi) { if (!out
                 else
                     fprintf(output, ", %s * __restrict _out_batch);\n", abi_lean_c_type_ir(abi->ir, fn->return_type));
             }
-            if (abi_fn_has_jet2_variant(abi->ir, fn)) {
+            if (fn->variant_mask & FLOW_FN_VAR_JET2) {
                 fprintf(output, "FlowJetScalar2 jet2_%s(", fn->name);
                 for (size_t pi = 0; pi < fn->param_count; ++pi) {
                     char p_ident[96];
@@ -406,7 +280,7 @@ int flow_abi_emit_mex_dispatcher(FILE *output, const SemanticIR *ir) {
         for (size_t pi = 0; pi < fn->param_count; ++pi)
             if (abi_find_lean_struct(ir, fn->param_types[pi])) { has_struct_param = 1; break; }
         if (has_struct_param) continue;
-        int wraps = abi_fn_has_lean_wrapper(ir, fn) ? 2 : 1;
+        int wraps = (fn->variant_mask & FLOW_FN_VAR_LEAN) ? 2 : 1;
         for (int w = 0; w < wraps; ++w) {
             const char *pfx = (w == 1) ? "lean_" : "";
             fprintf(output,
@@ -436,7 +310,7 @@ int flow_abi_emit_mex_dispatcher(FILE *output, const SemanticIR *ir) {
                 fputs(");\n        if (plhs) plhs[0] = mxCreateDoubleScalar(_res);\n        return;\n    }\n", output);
             }
         }
-        if (abi_fn_has_jet2_variant(ir, fn)) {
+        if (fn->variant_mask & FLOW_FN_VAR_JET2) {
             fprintf(output,
                 "    if (strcmp(_cmd, \"jet2_%s\") == 0) {\n"
                 "        if (nrhs != %zu && nrhs != %zu) { mexErrMsgIdAndTxt(\"FLOW:nrhs\", \"Expected %zu (or %zu with diff_idx) arguments for jet2_%s.\"); return; }\n"

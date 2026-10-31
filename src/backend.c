@@ -1,5 +1,6 @@
 #include "backend.h"
 #include "bitspace.h"
+#include "cubical_hott.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -80,35 +81,9 @@ static void emit_reload_adapter(FILE *output, const Component *c, size_t cap, si
         "static FlowUnit FLOW_RELOAD_UNIT = { .abi_version = FLOW_RELOAD_ABI_VERSION, .constraint_hash = UINT64_C(0xF001), .capability_hash = UINT64_C(0xF002), .name = \"%s\", .init = flow_reload_init, .run = flow_reload_run, .apply = flow_reload_apply_unit, .drop = flow_reload_drop, .schema = &FLOW_RELOAD_SCHEMA };\n"
         "const FlowUnit *flow_generated_unit(void) { FLOW_RELOAD_UNIT.semantic_schema_hash = flow_schema_hash(&FLOW_RELOAD_SCHEMA); return &FLOW_RELOAD_UNIT; }\n", c->id);
 }
-static const char *lean_scalar_to_c_type(const char *t) {
-    if (!t) return "uint64_t";
-    if (!strcmp(t, "Bool")) return "bool";
-    if (!strcmp(t, "Float") || !strcmp(t, "\xe2\x84\x9d") || !strcmp(t, "Real")) return "double";
-    if (!strcmp(t, "Float32")) return "float";
-    if (!strcmp(t, "UInt32")) return "uint32_t";
-    if (!strcmp(t, "Int32")) return "int32_t";
-    if (!strcmp(t, "UInt16")) return "uint16_t";
-    if (!strcmp(t, "Int16")) return "int16_t";
-    if (!strcmp(t, "UInt8")) return "uint8_t";
-    if (!strcmp(t, "Int8")) return "int8_t";
-    if (!strcmp(t, "Int") || !strcmp(t, "Int64")) return "int64_t";
-    return "uint64_t";
-}
-static const FlowLeanStruct *find_ir_lean_struct(const SemanticIR *ir, const char *name) {
-    if (!ir || !name || !name[0]) return NULL;
-    for (size_t i = 0; i < ir->lean_struct_count; ++i)
-        if (strcmp(ir->lean_structs[i].name, name) == 0) return &ir->lean_structs[i];
-    return NULL;
-}
-static const char *lean_type_to_c_type(const SemanticIR *ir, const char *t) {
-    if (!t) return "uint64_t";
-    if (find_ir_lean_struct(ir, t)) return t;
-    if (ir) {
-        for (size_t i = 0; i < ir->lean_enum_count; ++i)
-            if (strcmp(ir->lean_enums[i].name, t) == 0) return t;
-    }
-    return lean_scalar_to_c_type(t);
-}
+#define find_ir_lean_struct flow_ir_find_struct
+#define find_ir_lean_enum   flow_ir_find_enum
+#define lean_type_to_c_type flow_ir_type_to_c
 static int is_lean_kw_at(const char *p, const char *start, const char *end, const char *kw, size_t kwlen) {
     if ((size_t)(end - p) < kwlen || strncmp(p, kw, kwlen) != 0) return 0;
     int l_ok = (p == start) || isspace((unsigned char)p[-1]) || p[-1] == '(';
@@ -130,13 +105,7 @@ static void subst_lean_var(const char *src, size_t src_len, const char *var, con
     }
     out[j] = '\0';
 }
-typedef enum { LEAN_EXPR_NAT = 0, LEAN_EXPR_UINT = 1, LEAN_EXPR_INT = 2, LEAN_EXPR_FLOAT = 3, LEAN_EXPR_FX64 = 4, LEAN_EXPR_JET2 = 5 } LeanExprMode;
-static const FlowLeanEnum *find_ir_lean_enum(const SemanticIR *ir, const char *name) {
-    if (!ir || !name || !name[0]) return NULL;
-    for (size_t i = 0; i < ir->lean_enum_count; ++i)
-        if (!strcmp(ir->lean_enums[i].name, name)) return &ir->lean_enums[i];
-    return NULL;
-}
+typedef enum { LEAN_EXPR_NAT = 0, LEAN_EXPR_UINT = 1, LEAN_EXPR_INT = 2, LEAN_EXPR_FLOAT = 3, LEAN_EXPR_JET2 = 4 } LeanExprMode;
 static int body_has_ident_tok(const char *s, const char *ident) {
     if (!s || !ident || !ident[0]) return 0;
     size_t ilen = strlen(ident);
@@ -147,25 +116,9 @@ static int body_has_ident_tok(const char *s, const char *ident) {
     }
     return 0;
 }
-static int is_jet2_eligible_fn_depth(const SemanticIR *ir, const FlowLeanFunction *fn, int depth) {
-    if (depth > 4 || !fn || fn->is_struct_transform || fn->is_tuple_return || fn->is_result_return || fn->param_count == 0) return 0;
-    if (strcmp(fn->return_type, "Float") != 0 && strcmp(fn->return_type, "Float32") != 0) return 0;
-    if (strstr(fn->body, "let (") != NULL || strstr(fn->body, "match ") != NULL) return 0;
-    for (size_t pi = 0; pi < fn->param_count; ++pi) {
-        if (fn->param_is_result[pi] || find_ir_lean_struct(ir, fn->param_types[pi])) return 0;
-        if (strcmp(fn->param_types[pi], "Float") != 0 && strcmp(fn->param_types[pi], "Float32") != 0) return 0;
-    }
-    if (ir) {
-        for (size_t k = 0; k < ir->lean_function_count; ++k) {
-            if (&ir->lean_functions[k] == fn) continue;
-            if (body_has_ident_tok(fn->body, ir->lean_functions[k].name) &&
-                !is_jet2_eligible_fn_depth(ir, &ir->lean_functions[k], depth + 1)) return 0;
-        }
-    }
-    return 1;
-}
 static int is_jet2_eligible_fn(const SemanticIR *ir, const FlowLeanFunction *fn) {
-    return is_jet2_eligible_fn_depth(ir, fn, 0);
+    (void)ir;
+    return fn && ((fn->variant_mask & FLOW_FN_VAR_JET2) != 0);
 }
 static size_t split_comma_slices(const char *s, size_t len, const char **out_s, size_t *out_l, size_t max_parts) {
     const char *end = s + len, *cur = s;
@@ -368,10 +321,6 @@ static void emit_norm_lean_slice(FILE *out, const SemanticIR *ir, const char *s,
                                 fputs(res_some ? "(!flowc_is_boundary_nan(" : "(flowc_is_boundary_nan(", out);
                                 emit_norm_lean_slice(out, ir, sc_s[m], sc_l[m], mode, is_header_inline);
                                 fputs("))", out);
-                            } else if (mode == LEAN_EXPR_FX64) {
-                                fputc('(', out);
-                                emit_norm_lean_slice(out, ir, sc_s[m], sc_l[m], mode, is_header_inline);
-                                fputs(res_some ? " != FLOW_FX64_NONE)" : " == FLOW_FX64_NONE)", out);
                             } else {
                                 fputc('(', out);
                                 emit_norm_lean_slice(out, ir, sc_s[m], sc_l[m], mode, is_header_inline);
@@ -422,7 +371,7 @@ static void emit_norm_lean_slice(FILE *out, const SemanticIR *ir, const char *s,
                 if (*p == '(') pd++; else if (*p == ')' && pd > 0) pd--;
                 if (pd != 0) continue;
                 if (p[0] == '^' && p[-1] != '^' && (p + 1 == end || p[1] != '^')) {
-                    const char *fn_pow = (mode == LEAN_EXPR_JET2) ? "flow_jet2_pow(" : ((mode == LEAN_EXPR_FX64) ? "flow_fx64_pow(" : ((mode == LEAN_EXPR_FLOAT) ? "flow_float_pow(" : ((mode == LEAN_EXPR_INT) ? "flow_int_pow(" : "flow_nat_pow(")));
+                    const char *fn_pow = (mode == LEAN_EXPR_JET2) ? "flow_jet2_pow(" : ((mode == LEAN_EXPR_FLOAT) ? "flow_float_pow(" : ((mode == LEAN_EXPR_INT) ? "flow_int_pow(" : "flow_nat_pow("));
                     fputs(fn_pow, out); emit_norm_lean_slice(out, ir, s, (size_t)(p - s), mode, is_header_inline);
                     fputs(", ", out); emit_norm_lean_slice(out, ir, p + 1, (size_t)(end - (p + 1)), mode, is_header_inline); fputc(')', out); return;
                 }
@@ -477,15 +426,11 @@ static void emit_norm_lean_slice(FILE *out, const SemanticIR *ir, const char *s,
                     if ((wl == 4 && (!strncmp(ws, "then", 4) || !strncmp(ws, "else", 4) || !strncmp(ws, "with", 4))) ||
                         (wl == 2 && (!strncmp(ws, "in", 2) || !strncmp(ws, "if", 2))) ||
                         (wl == 3 && !strncmp(ws, "let", 3)) ||
-                        (wl > 9 && (!strncmp(ws, "flow_nat_", 9) || !strncmp(ws, "flow_float_", 11) || !strncmp(ws, "flow_fx64_", 10) || !strncmp(ws, "flow_jet2_", 10))) ||
+                        (wl > 9 && (!strncmp(ws, "flow_nat_", 9) || !strncmp(ws, "flow_float_", 11) || !strncmp(ws, "flow_jet2_", 10))) ||
                         find_ir_lean_fn_len(ir, ws, wl) != NULL)
                         continue;
                     if (mode == LEAN_EXPR_JET2) {
                         fprintf(out, "flow_jet2_%s(", p[0] == '+' ? "add" : "sub");
-                        emit_norm_lean_slice(out, ir, s, (size_t)(p - s), mode, is_header_inline); fputs(", ", out); emit_norm_lean_slice(out, ir, p + 1, (size_t)(end - (p + 1)), mode, is_header_inline); fputc(')', out); return;
-                    }
-                    if (mode == LEAN_EXPR_FX64) {
-                        fprintf(out, "flow_fx64_%s(", p[0] == '+' ? "add" : "sub");
                         emit_norm_lean_slice(out, ir, s, (size_t)(p - s), mode, is_header_inline); fputs(", ", out); emit_norm_lean_slice(out, ir, p + 1, (size_t)(end - (p + 1)), mode, is_header_inline); fputc(')', out); return;
                     }
                     if (mode == LEAN_EXPR_FLOAT) {
@@ -501,10 +446,6 @@ static void emit_norm_lean_slice(FILE *out, const SemanticIR *ir, const char *s,
             if (pass == 9 && (p[0] == '*' || p[0] == '/' || p[0] == '%')) {
                 if (mode == LEAN_EXPR_JET2) {
                     fprintf(out, "flow_jet2_%s(", p[0] == '*' ? "mul" : (p[0] == '/' ? "div" : "mod"));
-                    emit_norm_lean_slice(out, ir, s, (size_t)(p - s), mode, is_header_inline); fputs(", ", out); emit_norm_lean_slice(out, ir, p + 1, (size_t)(end - (p + 1)), mode, is_header_inline); fputc(')', out); return;
-                }
-                if (mode == LEAN_EXPR_FX64) {
-                    fprintf(out, "flow_fx64_%s(", p[0] == '*' ? "mul" : (p[0] == '/' ? "div" : "mod"));
                     emit_norm_lean_slice(out, ir, s, (size_t)(p - s), mode, is_header_inline); fputs(", ", out); emit_norm_lean_slice(out, ir, p + 1, (size_t)(end - (p + 1)), mode, is_header_inline); fputc(')', out); return;
                 }
                 if (mode == LEAN_EXPR_FLOAT) {
@@ -527,9 +468,6 @@ static void emit_norm_lean_slice(FILE *out, const SemanticIR *ir, const char *s,
         for (size_t i = 1; i < len; ++i) if (s[i] == '.') { has_dot = 1; break; }
         if (mode == LEAN_EXPR_JET2) {
             fputs("flow_jet2_neg(", out); emit_norm_lean_slice(out, ir, s + 1, len - 1, LEAN_EXPR_JET2, is_header_inline); fputc(')', out); return;
-        }
-        if (mode == LEAN_EXPR_FX64) {
-            fputs("flow_fx64_neg(", out); emit_norm_lean_slice(out, ir, s + 1, len - 1, LEAN_EXPR_FX64, is_header_inline); fputc(')', out); return;
         }
         if (mode == LEAN_EXPR_FLOAT || has_dot) {
             fputs("flow_float_neg(", out); emit_norm_lean_slice(out, ir, s + 1, len - 1, LEAN_EXPR_FLOAT, is_header_inline); fputc(')', out); return;
@@ -582,8 +520,6 @@ static void emit_norm_lean_slice(FILE *out, const SemanticIR *ir, const char *s,
                 fputs("flowc_make_boundary_nan(0x0FFFU, 0U, (uint8_t)FLOW_BOUNDARY_EXPLICIT_NONE, 62U, (uint16_t)(", out);
                 emit_norm_lean_slice(out, ir, tok_s[1], tok_l[1], LEAN_EXPR_UINT, is_header_inline);
                 fputs("))", out);
-            } else if (mode == LEAN_EXPR_FX64) {
-                fputs("FLOW_FX64_NONE", out);
             } else if (mode == LEAN_EXPR_JET2) {
                 fputs("flow_jet2_const(0.0)", out);
             } else {
@@ -592,13 +528,6 @@ static void emit_norm_lean_slice(FILE *out, const SemanticIR *ir, const char *s,
             return;
         }
         if (tok_l[0] == 13 && !strncmp(tok_s[0], "flow_quantize", 13) && tok_cnt == 5) {
-            if (mode == LEAN_EXPR_FX64) {
-                fputs("flow_quantize_fx((flow_fx64_t)(", out); emit_norm_lean_slice(out, ir, tok_s[1], tok_l[1], LEAN_EXPR_FX64, is_header_inline);
-                fputs("), (flow_fx64_t)(", out); emit_norm_lean_slice(out, ir, tok_s[2], tok_l[2], LEAN_EXPR_FX64, is_header_inline);
-                fputs("), (flow_fx64_t)(", out); emit_norm_lean_slice(out, ir, tok_s[3], tok_l[3], LEAN_EXPR_FX64, is_header_inline);
-                fputs("), (uint32_t)(", out); emit_norm_lean_slice(out, ir, tok_s[4], tok_l[4], LEAN_EXPR_UINT, is_header_inline);
-                fputs("))", out); return;
-            }
             fputs("flow_quantize((double)(", out); emit_norm_lean_slice(out, ir, tok_s[1], tok_l[1], LEAN_EXPR_FLOAT, is_header_inline);
             fputs("), (double)(", out); emit_norm_lean_slice(out, ir, tok_s[2], tok_l[2], LEAN_EXPR_FLOAT, is_header_inline);
             fputs("), (double)(", out); emit_norm_lean_slice(out, ir, tok_s[3], tok_l[3], LEAN_EXPR_FLOAT, is_header_inline);
@@ -606,13 +535,6 @@ static void emit_norm_lean_slice(FILE *out, const SemanticIR *ir, const char *s,
             fputs("))", out); return;
         }
         if (tok_l[0] == 15 && !strncmp(tok_s[0], "flow_dequantize", 15) && tok_cnt == 5) {
-            if (mode == LEAN_EXPR_FX64) {
-                fputs("flow_dequantize_fx((uint64_t)(", out); emit_norm_lean_slice(out, ir, tok_s[1], tok_l[1], LEAN_EXPR_UINT, is_header_inline);
-                fputs("), (flow_fx64_t)(", out); emit_norm_lean_slice(out, ir, tok_s[2], tok_l[2], LEAN_EXPR_FX64, is_header_inline);
-                fputs("), (flow_fx64_t)(", out); emit_norm_lean_slice(out, ir, tok_s[3], tok_l[3], LEAN_EXPR_FX64, is_header_inline);
-                fputs("), (uint32_t)(", out); emit_norm_lean_slice(out, ir, tok_s[4], tok_l[4], LEAN_EXPR_UINT, is_header_inline);
-                fputs("))", out); return;
-            }
             fputs("flow_dequantize((uint64_t)(", out); emit_norm_lean_slice(out, ir, tok_s[1], tok_l[1], LEAN_EXPR_UINT, is_header_inline);
             fputs("), (double)(", out); emit_norm_lean_slice(out, ir, tok_s[2], tok_l[2], LEAN_EXPR_FLOAT, is_header_inline);
             fputs("), (double)(", out); emit_norm_lean_slice(out, ir, tok_s[3], tok_l[3], LEAN_EXPR_FLOAT, is_header_inline);
@@ -626,7 +548,6 @@ static void emit_norm_lean_slice(FILE *out, const SemanticIR *ir, const char *s,
             if (op_len == 6 && !strncmp(op_suf, "of_nat", 6)) arg_mode = LEAN_EXPR_UINT;
             else if (op_len == 6 && !strncmp(op_suf, "of_int", 6)) arg_mode = LEAN_EXPR_INT;
             if (mode == LEAN_EXPR_JET2) fprintf(out, "flow_jet2_%.*s(", (int)op_len, op_suf);
-            else if (mode == LEAN_EXPR_FX64) fprintf(out, "flow_fx64_%.*s(", (int)op_len, op_suf);
             else fprintf(out, "%.*s(", (int)tok_l[0], tok_s[0]);
             for (size_t ti = 1; ti < tok_cnt; ++ti) {
                 if (ti > 1) fputs(", ", out);
@@ -643,8 +564,7 @@ static void emit_norm_lean_slice(FILE *out, const SemanticIR *ir, const char *s,
             }
             fputc(')', out); return;
         }
-        int use_fx = (callee && mode == LEAN_EXPR_FX64 && !(ir && ir->float_abi_ieee64) && infer_fn_expr_mode(callee) == LEAN_EXPR_FLOAT);
-        fprintf(out, "%s%.*s%s(", (callee && is_header_inline) ? "flowc_" : "", (int)tok_l[0], tok_s[0], use_fx ? "_fx" : "");
+        fprintf(out, "%s%.*s(", (callee && is_header_inline) ? "flowc_" : "", (int)tok_l[0], tok_s[0]);
         for (size_t ti = 1; ti < tok_cnt; ++ti) {
             if (ti > 1) fputs(", ", out);
             emit_norm_lean_slice(out, ir, tok_s[ti], tok_l[ti], mode, is_header_inline);
@@ -653,7 +573,6 @@ static void emit_norm_lean_slice(FILE *out, const SemanticIR *ir, const char *s,
     }
     if ((len == 4 && !strncmp(s, "none", 4)) || (len == 8 && !strncmp(s, "boundary", 8))) {
         if (mode == LEAN_EXPR_FLOAT) fputs("flowc_make_boundary_nan(0x0FFFU, 0U, (uint8_t)FLOW_BOUNDARY_EXPLICIT_NONE, 62U, 0U)", out);
-        else if (mode == LEAN_EXPR_FX64) fputs("FLOW_FX64_NONE", out);
         else if (mode == LEAN_EXPR_JET2) fputs("flow_jet2_const(0.0)", out);
         else fputs("0ULL", out);
         return;
@@ -663,19 +582,6 @@ static void emit_norm_lean_slice(FILE *out, const SemanticIR *ir, const char *s,
     }
     if (mode == LEAN_EXPR_JET2 && len > 0 && len < 64 && isdigit((unsigned char)s[0])) {
         fprintf(out, "flow_jet2_const(%.*s)", (int)len, s); return;
-    }
-    if (mode == LEAN_EXPR_FX64 && len > 0 && len < 64 && isdigit((unsigned char)s[0])) {
-        char nbuf[64];
-        memcpy(nbuf, s, len);
-        nbuf[len] = '\0';
-        char *ep = NULL;
-        double d = strtod(nbuf, &ep);
-        if (ep && *ep == '\0') {
-            flow_fx64_t fx = flow_fx64_from_double(d);
-            if (fx == INT64_MIN) fputs("FLOW_FX64_NONE", out);
-            else fprintf(out, "INT64_C(%lld)", (long long)fx);
-            return;
-        }
     }
     fprintf(out, "%.*s", (int)len, s);
 }
@@ -717,30 +623,8 @@ static void emit_lean_expr_as_c_ex(FILE *out, const SemanticIR *ir, const char *
     norm[j] = '\0'; emit_norm_lean_slice(out, ir, norm, j, mode, is_header_inline);
 }
 static void emit_lean_nat_and_float_ops(FILE *output) {
-    fputs(
-        "#ifndef FLOW_EXACT_NUMERICS_DEFINED\n#define FLOW_EXACT_NUMERICS_DEFINED\n"
-        "#if defined(__GNUC__) || defined(__clang__)\n"
-        "__extension__ typedef __int128 flow_i128_t;\n"
-        "__extension__ typedef unsigned __int128 flow_u128_t;\n"
-        "#endif\n"
-        "typedef int64_t flow_fx64_t;\n"
-        "#define FLOW_FX_SHIFT 32\n"
-        "#define FLOW_FX_ONE (INT64_C(1) << 32)\n"
-        "#define FLOW_FX_HALF (INT64_C(1) << 31)\n"
-        "#define FLOW_FX_FRAC_MASK ((INT64_C(1) << 32) - 1)\n"
-        "#define FLOW_FX64_NONE INT64_MIN\n"
-        "#define FLOW_FX64_MAX INT64_MAX\n"
-        "#define FLOW_FX64_MIN (-INT64_MAX)\n"
-        "#define FLOW_FX16_SHIFT 16\n"
-        "#define FLOW_FX16_ONE (1 << 16)\n",
-        output);
+    fputs("#ifndef FLOW_EXACT_NUMERICS_DEFINED\n#define FLOW_EXACT_NUMERICS_DEFINED\n", output);
     fputs(FLOW_STR(FLOW_EXACT_CODEC_C17), output);
-    fputc('\n', output);
-    fputs(FLOW_STR(FLOW_EXACT_ALU_C17), output);
-    fputc('\n', output);
-    fputs(FLOW_STR(FLOW_EXACT_EXP_LOG_C17), output);
-    fputc('\n', output);
-    fputs(FLOW_STR(FLOW_EXACT_TRIG_QUANT_C17), output);
     fputs("\n#endif /* FLOW_EXACT_NUMERICS_DEFINED */\n#ifndef FLOW_JET_SCALAR2_DEFINED\n#define FLOW_JET_SCALAR2_DEFINED\ntypedef struct { double v; double d1; double d2; } FlowJetScalar2;\n#endif\n#ifndef FLOW_LEAN_NAT_OPS_DEFINED\n#define FLOW_LEAN_NAT_OPS_DEFINED\n", output);
     fputs(FLOW_STR(FLOW_LEAN_NAT_OPS_C17), output);
     fputc('\n', output);
@@ -750,11 +634,6 @@ static void emit_lean_nat_and_float_ops(FILE *output) {
     fputc('\n', output);
     fputs(FLOW_STR(FLOW_JET2_MATH_C17), output);
     fputs("\n#endif\n", output);
-}
-static const char *lean_type_to_fx_c_type(const SemanticIR *ir, const char *t) {
-    if (!t) return "uint64_t";
-    if (!strcmp(t, "Float") || !strcmp(t, "Float32")) return "flow_fx64_t";
-    return lean_type_to_c_type(ir, t);
 }
 static void emit_lean_let_statements_and_tail(FILE *output, const SemanticIR *ir, const char *body, LeanExprMode mode, int is_header_inline, const char **tail_out, size_t *tail_len_out) {
     const char *s = body ? body : "";
@@ -797,7 +676,7 @@ static void emit_lean_let_statements_and_tail(FILE *output, const SemanticIR *ir
         const char *ps = s + 3, *pe = ce;
         while (ps < pe && isspace((unsigned char)*ps)) ++ps;
         while (pe > ps && isspace((unsigned char)pe[-1])) --pe;
-        const char *default_ct = (mode == LEAN_EXPR_JET2) ? "FlowJetScalar2" : ((mode == LEAN_EXPR_FX64) ? "flow_fx64_t" : ((mode == LEAN_EXPR_FLOAT) ? "double" : ((mode == LEAN_EXPR_INT) ? "int64_t" : "uint64_t")));
+        const char *default_ct = (mode == LEAN_EXPR_JET2) ? "FlowJetScalar2" : ((mode == LEAN_EXPR_FLOAT) ? "double" : ((mode == LEAN_EXPR_INT) ? "int64_t" : "uint64_t"));
         if (pe - ps >= 2 && ps[0] == '(' && pe[-1] == ')') {
             char tvars[FLOW_TUPLE_MAX][FLOW_NAME] = {{0}}; size_t tcnt = 0;
             const char *q = ps + 1, *qe = pe - 1;
@@ -821,11 +700,10 @@ static void emit_lean_let_statements_and_tail(FILE *output, const SemanticIR *ir
                 for (size_t ti = 0; ti < tcnt; ++ti) {
                     const char *vct = default_ct;
                     if (callee && ti < callee->tuple_arity)
-                        vct = (mode == LEAN_EXPR_FX64) ? lean_type_to_fx_c_type(ir, callee->tuple_types[ti]) : lean_type_to_c_type(ir, callee->tuple_types[ti]);
+                        vct = lean_type_to_c_type(ir, callee->tuple_types[ti]);
                     fprintf(output, "    %s %s = (%s)0;\n", vct, tvars[ti], vct);
                 }
-                int use_fx = (callee && mode == LEAN_EXPR_FX64 && !(ir && ir->float_abi_ieee64) && infer_fn_expr_mode(callee) == LEAN_EXPR_FLOAT);
-                fprintf(output, "    (void)%s%.*s%s(", (callee && is_header_inline) ? "flowc_" : "", (int)tok_l[0], tok_s[0], use_fx ? "_fx" : "");
+                fprintf(output, "    (void)%s%.*s(", (callee && is_header_inline) ? "flowc_" : "", (int)tok_l[0], tok_s[0]);
                 for (size_t ai = 1; ai < tok_cnt; ++ai) {
                     if (ai > 1) fputs(", ", output);
                     emit_norm_lean_slice(output, ir, tok_s[ai], tok_l[ai], mode, is_header_inline);
@@ -1100,18 +978,8 @@ static void qualify_struct_fields_in_expr(const FlowLeanStruct *st, const char *
     snprintf(out, out_max, "%s", cur);
 }
 static int is_soa_eligible_fn(const SemanticIR *ir, const FlowLeanFunction *fn) {
-    if (!fn || fn->is_private || fn->is_result_return || !fn->name[0] || fn->is_tuple_return || fn->param_count == 0) return 0;
-    const FlowLeanStruct *out_st = find_ir_lean_struct(ir, fn->return_type);
-    if (out_st && out_st->field_count == 0) return 0;
-    int has_struct_param = 0;
-    for (size_t pi = 0; pi < fn->param_count; ++pi) {
-        const FlowLeanStruct *in_st = find_ir_lean_struct(ir, fn->param_types[pi]);
-        if (in_st) {
-            if (in_st->field_count == 0) return 0;
-            has_struct_param = 1;
-        }
-    }
-    return has_struct_param;
+    (void)ir;
+    return fn && ((fn->variant_mask & FLOW_FN_VAR_SOA64) != 0);
 }
 static int rewrite_expr_soa_columnar(const SemanticIR *ir, const FlowLeanFunction *fn, const char *expr, char *out, size_t out_max) {
     if (!ir || !fn || !expr || !out || out_max == 0) return 0;
@@ -1166,58 +1034,10 @@ static void emit_lean_hott_witness_and_soa_types(FILE *output, const SemanticIR 
         "    FLOW_BOUNDARY_HIT_COLLAPSE       = 5,\n"
         "    FLOW_BOUNDARY_EXPLICIT_NONE      = 6\n"
         "} FlowBoundaryViolationKind;\n"
-        "#endif\n"
-        "static inline __attribute__((unused)) uint64_t flowc_make_boundary_tag(uint16_t fn_id, uint8_t guard_idx, uint8_t kind, uint8_t axis, uint16_t code) {\n"
-        "    uint64_t k4 = (uint64_t)((kind == 0U ? 1U : kind) & 0x0FU);\n"
-        "    return FLOW_BOUNDARY_QNAN_MAGIC |\n"
-        "           (((uint64_t)(fn_id & 0x0FFFU)) << 32U) |\n"
-        "           (((uint64_t)guard_idx) << 24U) |\n"
-        "           (k4 << 20U) |\n"
-        "           (((uint64_t)(axis & 0x3FU)) << 12U) |\n"
-        "           ((uint64_t)(code & 0x0FFFU));\n"
-        "}\n"
-        "static inline __attribute__((unused)) bool flowc_is_boundary_tag(uint64_t raw_bits) {\n"
-        "    return (raw_bits & FLOW_BOUNDARY_QNAN_PREFIX_MASK) == FLOW_BOUNDARY_QNAN_MAGIC;\n"
-        "}\n"
-        "static inline __attribute__((unused)) double flowc_make_boundary_nan(uint16_t fn_id, uint8_t guard_idx, uint8_t kind, uint8_t axis, uint16_t code) {\n"
-        "    uint64_t bits = flowc_make_boundary_tag(fn_id, guard_idx, kind, axis, code);\n"
-        "    double out = 0.0;\n"
-        "    __builtin_memcpy(&out, &bits, sizeof(out));\n"
-        "    return out;\n"
-        "}\n",
-        output);
-    fputs(
-        "static inline __attribute__((unused)) bool flowc_is_boundary_nan(double val) {\n"
-        "    uint64_t bits = 0ULL;\n"
-        "    __builtin_memcpy(&bits, &val, sizeof(bits));\n"
-        "    if (flowc_is_boundary_tag(bits)) return true;\n"
-        "    return !isfinite(val);\n"
-        "}\n"
-        "static inline __attribute__((unused)) uint64_t flowc_extract_boundary_tag(double val) {\n"
-        "    uint64_t bits = 0ULL;\n"
-        "    __builtin_memcpy(&bits, &val, sizeof(bits));\n"
-        "    if (flowc_is_boundary_tag(bits)) return bits;\n"
-        "    if (!isfinite(val)) return flowc_make_boundary_tag(0U, 0U, (uint8_t)FLOW_BOUNDARY_DOMAIN_SINGULARITY, 49U, 0U);\n"
-        "    return 0ULL;\n"
-        "}\n"
-        "static inline __attribute__((unused)) double flowc_stamp_boundary_fn_id(double val, uint16_t fn_id) {\n"
-        "    uint64_t bits = 0ULL;\n"
-        "    __builtin_memcpy(&bits, &val, sizeof(bits));\n"
-        "    if (flowc_is_boundary_tag(bits)) {\n"
-        "        if (((bits >> 32U) & 0x0FFFULL) == 0x0FFFULL)\n"
-        "            bits = (bits & ~(0x0FFFULL << 32U)) | (((uint64_t)(fn_id & 0x0FFFU)) << 32U);\n"
-        "    } else if (!isfinite(val)) {\n"
-        "        bits = flowc_make_boundary_tag(fn_id, 0U, (uint8_t)FLOW_BOUNDARY_DOMAIN_SINGULARITY, 49U, 0U);\n"
-        "    }\n"
-        "    double out = 0.0;\n"
-        "    __builtin_memcpy(&out, &bits, sizeof(out));\n"
-        "    return out;\n"
-        "}\n"
-        "static inline __attribute__((unused)) uint16_t flowc_boundary_code(double val) {\n"
-        "    return (uint16_t)(flowc_extract_boundary_tag(val) & 0x0FFFULL);\n"
-        "}\n"
         "#endif\n",
         output);
+    fputs(FLOW_STR(FLOW_HOTT_BOUNDARY_HELPERS_C17), output);
+    fputs("\n#endif\n", output);
     fputs(
         "#ifndef FLOW_LEAN_PRIMITIVE_WITNESS_TYPES_DEFINED\n"
         "#define FLOW_LEAN_PRIMITIVE_WITNESS_TYPES_DEFINED\n"
@@ -1568,13 +1388,7 @@ static void emit_lean_soa_fn_c(FILE *output, const SemanticIR *ir, const FlowLea
     }
 }
 static void emit_lean_contract_wrapper_c(FILE *output, const SemanticIR *ir, const FlowLeanFunction *fn, size_t fn_idx, int is_header_inline) {
-    if (!output || !fn || fn->is_private || !fn->name[0] || !strncmp(fn->name, "lean_", 5)) return;
-    if (ir) {
-        char cand[FLOW_NAME + 8];
-        snprintf(cand, sizeof(cand), "lean_%s", fn->name);
-        for (size_t i = 0; i < ir->lean_function_count; ++i)
-            if (!strcmp(ir->lean_functions[i].name, cand)) return;
-    }
+    if (!output || !fn || !(fn->variant_mask & FLOW_FN_VAR_LEAN)) return;
     const char *ret_c = lean_type_to_c_type(ir, fn->return_type);
     LeanExprMode fmode = infer_fn_expr_mode(fn);
     int is_res_float = fn->is_result_return && (!strcmp(ret_c, "double") || !strcmp(ret_c, "float"));
@@ -1915,10 +1729,6 @@ static void emit_lean_contract_wrapper_c(FILE *output, const SemanticIR *ir, con
 static void emit_single_lean_fn_c(FILE *output, const SemanticIR *ir, const FlowLeanFunction *fn, size_t fi, int is_header_inline) {
     const char *ret_c = lean_type_to_c_type(ir, fn->return_type);
     LeanExprMode fmode = infer_fn_expr_mode(fn);
-    int has_struct_param = 0;
-    for (size_t pi = 0; pi < fn->param_count; ++pi) {
-        if (find_ir_lean_struct(ir, fn->param_types[pi])) { has_struct_param = 1; break; }
-    }
     int is_static_fn = is_header_inline || fn->is_private;
     uint16_t fid16 = (uint16_t)(fi & 0x0FFFU);
     if (fn->is_struct_transform) {
@@ -1978,60 +1788,6 @@ static void emit_single_lean_fn_c(FILE *output, const SemanticIR *ir, const Flow
         return;
     }
     if (fn->is_tuple_return && fn->tuple_arity >= 2) {
-        int is_fx_tuple = !(ir && ir->float_abi_ieee64) && (fmode == LEAN_EXPR_FLOAT && !has_struct_param);
-        for (size_t ti = 0; !(ir && ir->float_abi_ieee64) && !is_fx_tuple && !has_struct_param && ti < fn->tuple_arity; ++ti)
-            if (!strcmp(fn->tuple_types[ti], "Float") || !strcmp(fn->tuple_types[ti], "Float32")) is_fx_tuple = 1;
-        if (is_fx_tuple) {
-            const char *ret_fx_c = lean_type_to_fx_c_type(ir, fn->return_type);
-            if (!is_static_fn) {
-                fprintf(output, "%s %s_fx(", ret_fx_c, fn->name);
-                for (size_t pi = 0; pi < fn->param_count; ++pi)
-                    fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_fx_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
-                for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
-                    fprintf(output, "%s%s *out_%zu", (fn->param_count > 0 || ti > 0) ? ", " : "", lean_type_to_fx_c_type(ir, fn->tuple_types[ti]), ti);
-                fprintf(output, ");\n");
-            }
-            fprintf(output, "%s%s %s%s_fx(", is_static_fn ? "static inline __attribute__((unused)) " : "", ret_fx_c, is_header_inline ? "flowc_" : "", fn->name);
-            for (size_t pi = 0; pi < fn->param_count; ++pi)
-                fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_fx_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
-            for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
-                fprintf(output, "%s%s *out_%zu", (fn->param_count > 0 || ti > 0) ? ", " : "", lean_type_to_fx_c_type(ir, fn->tuple_types[ti]), ti);
-            fprintf(output, ") {\n");
-            int fx_param_cnt = 0;
-            for (size_t pi = 0; pi < fn->param_count; ++pi) {
-                fprintf(output, "    (void)%s;\n", fn->param_names[pi]);
-                if (!fn->param_is_result[pi] && (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32"))) fx_param_cnt++;
-            }
-            if (fx_param_cnt > 0) {
-                fprintf(output, "    if (");
-                int seen_fp = 0;
-                for (size_t pi = 0; pi < fn->param_count; ++pi) {
-                    if (!fn->param_is_result[pi] && (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32"))) {
-                        fprintf(output, "%s%s == FLOW_FX64_NONE", seen_fp ? " || " : "", fn->param_names[pi]);
-                        seen_fp++;
-                    }
-                }
-                fprintf(output, ") {\n");
-                for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
-                    fprintf(output, "        if (out_%zu) *out_%zu = (%s)0;\n", ti, ti, lean_type_to_fx_c_type(ir, fn->tuple_types[ti]));
-                fprintf(output, "        return (%s)0;\n    }\n", ret_fx_c);
-            }
-            const char *tail_fx = NULL; size_t tail_fx_len = 0;
-            const char *seg_s[FLOW_TUPLE_MAX], *seg_e[FLOW_TUPLE_MAX];
-            emit_lean_let_statements_and_tail(output, ir, fn->body, LEAN_EXPR_FX64, is_header_inline, &tail_fx, &tail_fx_len);
-            split_tuple_tail_slices(tail_fx, tail_fx_len, fn->tuple_arity, seg_s, seg_e);
-            for (size_t ti = 0; ti < fn->tuple_arity; ++ti) {
-                const char *tc_fx = lean_type_to_fx_c_type(ir, fn->tuple_types[ti]);
-                LeanExprMode tm = (!strcmp(tc_fx, "flow_fx64_t")) ? LEAN_EXPR_FX64 : infer_c_type_expr_mode(tc_fx, LEAN_EXPR_FX64);
-                fprintf(output, "    %s _flow_t%zu = (%s)(", tc_fx, ti, tc_fx);
-                emit_norm_lean_slice(output, ir, seg_s[ti], (size_t)(seg_e[ti] - seg_s[ti]), tm, is_header_inline);
-                fprintf(output, ");\n");
-                if (!strcmp(tc_fx, "flow_fx64_t"))
-                    fprintf(output, "    if (_flow_t%zu == FLOW_FX64_NONE) _flow_t%zu = 0;\n", ti, ti);
-                fprintf(output, "    if (out_%zu) *out_%zu = _flow_t%zu;\n", ti, ti, ti);
-            }
-            fprintf(output, "    return (%s)_flow_t0;\n}\n", ret_fx_c);
-        }
         if (!is_static_fn) {
             fprintf(output, "%s %s(", ret_c, fn->name);
             for (size_t pi = 0; pi < fn->param_count; ++pi)
@@ -2084,51 +1840,6 @@ static void emit_single_lean_fn_c(FILE *output, const SemanticIR *ir, const Flow
         fprintf(output, "    return (%s)_flow_t0;\n}\n", ret_c);
         emit_lean_contract_wrapper_c(output, ir, fn, fi, is_header_inline);
         return;
-    }
-    if (!(ir && ir->float_abi_ieee64) && fmode == LEAN_EXPR_FLOAT && !has_struct_param) {
-        const char *ret_fx_c = lean_type_to_fx_c_type(ir, fn->return_type);
-        if (!is_static_fn) {
-            fprintf(output, "%s %s_fx(", ret_fx_c, fn->name);
-            for (size_t pi = 0; pi < fn->param_count; ++pi)
-                fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_fx_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
-            fprintf(output, ");\n");
-        }
-        fprintf(output, "%s%s %s%s_fx(", is_static_fn ? "static inline __attribute__((unused)) " : "", ret_fx_c, is_header_inline ? "flowc_" : "", fn->name);
-        for (size_t pi = 0; pi < fn->param_count; ++pi)
-            fprintf(output, "%s%s %s", pi > 0 ? ", " : "", lean_type_to_fx_c_type(ir, fn->param_types[pi]), fn->param_names[pi]);
-        fprintf(output, ") {\n    ");
-        int fx_param_cnt = 0;
-        for (size_t pi = 0; pi < fn->param_count; ++pi) {
-            fprintf(output, "(void)%s; ", fn->param_names[pi]);
-            if (!fn->param_is_result[pi] && (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32"))) fx_param_cnt++;
-        }
-        if (fx_param_cnt > 0) {
-            fprintf(output, "\n    if (");
-            int seen_fp = 0;
-            for (size_t pi = 0; pi < fn->param_count; ++pi) {
-                if (!fn->param_is_result[pi] && (!strcmp(fn->param_types[pi], "Float") || !strcmp(fn->param_types[pi], "Float32"))) {
-                    fprintf(output, "%s%s == FLOW_FX64_NONE", seen_fp ? " || " : "", fn->param_names[pi]);
-                    seen_fp++;
-                }
-            }
-            fprintf(output, ") return (%s)%s;\n", ret_fx_c, fn->is_result_return ? "FLOW_FX64_NONE" : "0");
-        } else {
-            fputc('\n', output);
-        }
-        const char *tail_fx = NULL; size_t tail_fx_len = 0;
-        emit_lean_let_statements_and_tail(output, ir, fn->body, LEAN_EXPR_FX64, is_header_inline, &tail_fx, &tail_fx_len);
-        if (!strcmp(fn->return_type, "Float") || !strcmp(fn->return_type, "Float32")) {
-            fprintf(output, "    flow_fx64_t _flow_ret = (flow_fx64_t)(");
-            emit_norm_lean_slice(output, ir, tail_fx, tail_fx_len, LEAN_EXPR_FX64, is_header_inline);
-            if (fn->is_result_return)
-                fprintf(output, ");\n    return _flow_ret;\n}\n");
-            else
-                fprintf(output, ");\n    return (_flow_ret == FLOW_FX64_NONE) ? 0 : _flow_ret;\n}\n");
-        } else {
-            fprintf(output, "    return (%s)(", ret_fx_c);
-            emit_norm_lean_slice(output, ir, tail_fx, tail_fx_len, LEAN_EXPR_FX64, is_header_inline);
-            fprintf(output, ");\n}\n");
-        }
     }
     if (!is_static_fn) {
         fprintf(output, "%s %s(", ret_c, fn->name);

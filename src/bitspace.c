@@ -708,43 +708,42 @@ uint64_t flow_xoshiro256ss_next_u64(FlowXoshiro256SS *rng) {
 int flow_xoshiro256ss_next_bool(FlowXoshiro256SS *rng) {
     return (int)(flow_xoshiro256ss_next_u64(rng) & 1ULL);
 }
-void flow_fx_mat_mul_ikj(size_t R, size_t K, size_t C, const flow_fx64_t *a, const flow_fx64_t *b, flow_fx64_t *out) {
+void flow_mat_mul_ikj(size_t R, size_t K, size_t C, const double *a, const double *b, double *out) {
     if (!a || !b || !out) return;
-    memset(out, 0, sizeof(flow_fx64_t) * R * C);
+    memset(out, 0, sizeof(double) * R * C);
     for (size_t i = 0; i < R; ++i) {
         for (size_t k = 0; k < K; ++k) {
-            flow_fx64_t aik = a[i * K + k];
+            double aik = a[i * K + k];
             for (size_t j = 0; j < C; ++j) {
-                out[i * C + j] = flow_fx64_add(out[i * C + j], flow_fx64_mul(aik, b[k * C + j]));
+                out[i * C + j] += aik * b[k * C + j];
             }
         }
     }
 }
-flow_fx64_t flow_fx_mse_loss(size_t N, size_t OUT, const flow_fx64_t *predictions, const flow_fx64_t *targets) {
-    if (!predictions || !targets || N == 0 || OUT == 0) return 0;
+double flow_mse_loss(size_t N, size_t OUT, const double *predictions, const double *targets) {
+    if (!predictions || !targets || N == 0 || OUT == 0) return 0.0;
     size_t count = N * OUT;
-    flow_fx64_t sum_sq = 0;
+    double sum_sq = 0.0;
     for (size_t i = 0; i < count; ++i) {
-        flow_fx64_t diff = flow_fx64_sub(predictions[i], targets[i]);
-        sum_sq = flow_fx64_add(sum_sq, flow_fx64_mul(diff, diff));
+        double diff = predictions[i] - targets[i];
+        sum_sq += diff * diff;
     }
-    return flow_fx64_div(sum_sq, (flow_fx64_t)count << FLOW_FX_SHIFT);
+    return sum_sq / (double)count;
 }
-void flow_fx_gradient_descent_step(size_t N, size_t IN, size_t OUT,
-                                   const flow_fx64_t *inputs, flow_fx64_t *weights,
-                                   const flow_fx64_t *predictions, const flow_fx64_t *targets,
-                                   flow_fx64_t learning_rate) {
+void flow_gradient_descent_step(size_t N, size_t IN, size_t OUT,
+                                const double *inputs, double *weights,
+                                const double *predictions, const double *targets,
+                                double learning_rate) {
     if (!inputs || !weights || !predictions || !targets || N == 0) return;
-    flow_fx64_t factor = flow_fx64_div(2LL << FLOW_FX_SHIFT, (flow_fx64_t)N << FLOW_FX_SHIFT);
-    flow_fx64_t scale = flow_fx64_mul(factor, learning_rate);
+    double scale = (2.0 / (double)N) * learning_rate;
     for (size_t i = 0; i < IN; ++i) {
         for (size_t j = 0; j < OUT; ++j) {
-            flow_fx64_t grad_ij = 0;
+            double grad_ij = 0.0;
             for (size_t n = 0; n < N; ++n) {
-                flow_fx64_t diff = flow_fx64_sub(predictions[n * OUT + j], targets[n * OUT + j]);
-                grad_ij = flow_fx64_add(grad_ij, flow_fx64_mul(inputs[n * IN + i], diff));
+                double diff = predictions[n * OUT + j] - targets[n * OUT + j];
+                grad_ij += inputs[n * IN + i] * diff;
             }
-            weights[i * OUT + j] = flow_fx64_sub(weights[i * OUT + j], flow_fx64_mul(grad_ij, scale));
+            weights[i * OUT + j] -= grad_ij * scale;
         }
     }
 }
