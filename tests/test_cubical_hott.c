@@ -360,5 +360,53 @@ int main(void) {
         printf("    * Homotopy Fiber h-Level (-2, -1, 0, 1) & Discrete 4-Jet Prolongation (J^4 E) Verified\n");
     }
 
+    /* ========================================================================= */
+    /* 10. HIT Exception Quotient (SpaceWithException) & dM Quiet NaN Pullback   */
+    /* ========================================================================= */
+    FLOW_STAGE_BEGIN(10, "HIT Exception Quotient (SpaceWithException) & Zero-Branch dM Quiet NaN Pullback");
+    {
+        /* 10a. HIT Pushout Quotient M / ExcZone: collapse 4 exception axes in 16-axis space */
+        FlowHITExceptionQuotient hit_q;
+        FLOW_ASSERT_EQ(flow_hott_quotient_exception_zone(0xFFFFULL, 0x0F00ULL, 3U, &hit_q), 1);
+        FLOW_ASSERT_EQ(hit_q.ambient_dof, 16U);
+        FLOW_ASSERT_EQ(hit_q.exception_zone_dof, 4U);
+        FLOW_ASSERT_EQ(hit_q.quotient_interior_dof, 12U);
+        FLOW_ASSERT_EQ(hit_q.interior_sieve, 0xF0FFULL);
+        FLOW_ASSERT_EQ(hit_q.collapsed_boundary_points, 1U);
+        FLOW_ASSERT_TRUE(flow_hott_is_boundary_tag(hit_q.canonical_boundary_tag));
+
+        /* 10b. Zero-Branch IEEE-754 Quiet NaN Payload Propagation along dM */
+        double b_nan = flow_result_float_boundary(5U, 2U, FLOW_BOUNDARY_THM_IMPLIES,
+                                                  (uint8_t)FLOW_SIEVE_BIT_LEAN_CERTIFIED, 404U);
+        FLOW_ASSERT_TRUE(flow_result_float_is_boundary(b_nan));
+
+        /* Hardware FPU arithmetic must propagate the exact 51-bit Quiet NaN payload branchlessly */
+        double fpu_propagated = ((b_nan * 4.0) + 2.0) / 3.0;
+        FLOW_ASSERT_TRUE(flow_result_float_is_boundary(fpu_propagated));
+        uint64_t extracted_tag = flow_result_float_extract_tag(fpu_propagated);
+        FLOW_ASSERT_TRUE(flow_hott_is_boundary_tag(extracted_tag));
+
+        /* 10c. Decode 64-bit boundary tag back to Topos & Lean 4 contract provenance */
+        FlowBoundaryCertificateReport cert;
+        FLOW_ASSERT_EQ(flow_hott_decode_boundary_exception(extracted_tag, NULL, &cert), 1);
+        FLOW_ASSERT_EQ(cert.is_on_boundary, 1);
+        FLOW_ASSERT_EQ(cert.fn_id, 5U);
+        FLOW_ASSERT_EQ(cert.guard_idx, 2U);
+        FLOW_ASSERT_EQ((int)cert.violation_kind, (int)FLOW_BOUNDARY_THM_IMPLIES);
+        FLOW_ASSERT_EQ(cert.cubical_axis, (uint8_t)FLOW_SIEVE_BIT_LEAN_CERTIFIED);
+        FLOW_ASSERT_EQ(cert.user_code, 404U);
+
+        /* Verify interior values are classified as M^o contractible interior */
+        double ok_val = flow_result_float_interior(42.5);
+        FLOW_ASSERT_EQ(flow_result_float_is_boundary(ok_val), 0);
+        uint64_t ok_bits = 0ULL;
+        memcpy(&ok_bits, &ok_val, sizeof(ok_bits));
+        FLOW_ASSERT_EQ(flow_hott_decode_boundary_exception(ok_bits, NULL, &cert), 1);
+        FLOW_ASSERT_EQ(cert.is_on_boundary, 0);
+        FLOW_ASSERT_EQ((int)cert.violation_kind, (int)FLOW_BOUNDARY_OK);
+
+        printf("    * HIT SpaceWithException Quotient (16 -> 12+1 pt) & IEEE-754 Quiet NaN dM Pullback Verified\n");
+    }
+
     FLOW_TEST_SUITE_END();
 }

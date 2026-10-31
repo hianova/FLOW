@@ -203,6 +203,37 @@ int flow_induce_load_csv_samples(const char *csv_path,
                                  double **x_out, double **y_out,
                                  size_t *count_out, int *is_bivariate_out);
 
+/* ============================================================================
+ * 7. White-Box .lean Direct Patching & Formal Verification Gate (flowy patch)
+ * ============================================================================ */
+
+typedef struct {
+    int                           patch_verified;
+    uint64_t                      trigger_boundary_tag;
+    FlowBoundaryCertificateReport boundary_cert;
+    FlowInducedPolyModel          induced_poly;
+    FlowGridEnvelope              induced_grid;
+    FlowSMMResult                 induced_smm;
+    char                          base_spec_path[256];
+    char                          patched_spec_path[256];
+    char                          patched_fn_name[64];
+    size_t                        base_fn_count;
+    size_t                        patched_fn_count;
+    size_t                        base_thm_count;
+    size_t                        patched_thm_count;
+    uint64_t                      pre_sieve_mask;
+    uint64_t                      post_sieve_mask;
+    char                          diff_summary[1024];
+} FlowLeanPatchReport;
+
+int flow_induce_patch_lean_spec(const char *base_lean_path,
+                                const char *out_patched_lean_path,
+                                uint64_t trigger_boundary_tag,
+                                const double *x_samples,
+                                const double *y_samples,
+                                size_t sample_count,
+                                FlowLeanPatchReport *report_out);
+
 #ifdef __cplusplus
 }
 #endif

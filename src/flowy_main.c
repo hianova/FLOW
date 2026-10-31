@@ -252,10 +252,11 @@ static int flowy_run_cmd(int argc, char **argv) {
 
 static void flowy_print_usage(FILE *out) {
     fprintf(out,
-        "FLOW 2.0 Living System & C17 Toolchain (flowy) v2.5.0\n"
+        "FLOW 2.0 Living System & C17 Toolchain (flowy) v" FLOW_VERSION_STRING " (git: " FLOW_GIT_PROVENANCE ")\n"
         "Usage: flowy <command> [options...]\n\n"
         "Primary Commands:\n"
         "  induce / discover [--benchmark|<file.csv>]  Induce Lean 4 invariants, SMM params & PRNG seed audit\n"
+        "  patch <base.lean> [csv] [-b 0x...] -o <out> Synthesize & verify white-box .lean patch from dM boundary & data\n"
         "  topos / hott                                Inspect 64-Bit Cubical HoTT Sieve & Type Universe U_0\n"
         "  audit                                       Run HoTT U_0 univalence & C17 ABI soundness audit\n"
         "  build [--shared] <spec.lean>                Build standalone AOT binary or C17 shared library (--shared)\n"
@@ -275,7 +276,7 @@ int main(int argc, char **argv) {
     }
 
     if (!strcmp(argv[1], "-v") || !strcmp(argv[1], "--version") || !strcmp(argv[1], "version")) {
-        printf("FLOW System Framework (flowy) v2.5.0 | Cubical HoTT & Topos U_0\n");
+        printf("FLOW System Framework (flowy) v" FLOW_VERSION_STRING " (git: " FLOW_GIT_PROVENANCE ") | Cubical HoTT & Topos U_0\n");
         return EXIT_SUCCESS;
     }
 
@@ -284,6 +285,10 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[1], "induce") || !strcmp(argv[1], "--induce") ||
         !strcmp(argv[1], "discover") || !strcmp(argv[1], "--discover")) {
         return cmd_induce_run(argc - 2, argv + 2);
+    }
+    if (!strcmp(argv[1], "patch") || !strcmp(argv[1], "--patch")) {
+        flow_registry_init();
+        return cmd_patch_run(argc - 2, argv + 2);
     }
 
     flow_registry_init();
@@ -309,7 +314,7 @@ int main(int argc, char **argv) {
     }
 
     static const char *const inspect_aliases[] = {
-        "why", "--why", "timeline", "--timeline",
+        "why", "--why", "boundary", "--boundary", "timeline", "--timeline",
         "explain-decisions", "audit", "--audit", "topos", "--topos",
         "hott", "--hott", "cubical", "--cubical", NULL
     };

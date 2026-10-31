@@ -26,3 +26,22 @@ FLOW 將語義 IR（`SemanticIR`）、系統核心結構與註冊元件（`Compo
    - 提供跨平台零 IEEE-754 漂移之 **$Q32.32$ 定點數算術（`flow_fx64_t`）**、$Q16.16$ 快速超越函數、定點線性代數（`flow_fx_mat_mul_ikj`、`flow_fx_gradient_descent_step`）與 **256-bit 無符號大整數 Montgomery 模乘／Miller-Rabin 質數檢定（`FlowU256`，通過 `secp256k1` 驗證）**。
 2. **幾何多胞形邊界系統（`FlowPolyhedron`，[`src/cubical_hott.h`](../../src/cubical_hott.h)）**：
    - 將仿射約束（`FlowAffineConstraint`）與多面體結構統一內聚於同倫標頭檔中，利用整數線性不等式 $A \cdot x \le b$ 定義多維參數之封閉凸多面體，在編譯期求得最佳排程與對齊邊界，保證實時管線絕不超出硬體快取容量。
+
+---
+
+## 3.3 高階歸納型別奇異點塌縮（HIT `SpaceWithException`）與流形邊界拉回 $\partial M$
+
+在微分內聚同倫型別論（Differential Cohesive HoTT）中，執行期錯誤、除以零或定義域違規並非主觀隨意的例外跳躍，而是軌跡在相空間流形 $M$ 上觸碰**奇異邊界子流形 $\partial M$（Exception Submanifold）**：
+
+1. **高階歸納型別同倫推出商空間（HIT Pushout Quotient `SpaceWithException`）**：
+   - 給定環境狀態流形 $M$ 與奇異區域 $\text{ExcZone} \hookrightarrow M$，FLOW 透過同倫推出將整個奇異子空間塌縮（Quotient Contraction）為單一規範邊界基點 $\text{collapse} \in \partial M$：
+     $$\text{SpaceWithException}(M, \text{ExcZone}) \;\simeq\; M / \text{ExcZone} \;=\; M^\circ \sqcup \{\text{collapse}\}$$
+   - 在 [`src/cubical_hott.h`](../../src/cubical_hott.h) 中，`flow_hott_quotient_exception_zone` 將 64-bit 立方篩分解為內部可縮流形 $M^\circ = M \setminus \text{ExcZone}$ 與單一規範邊界點 $\partial M$，消除發散狀態空間的組合爆炸。
+2. **IEEE-754 Quiet NaN 51-Bit 拓撲證書載荷（`FLOW_BOUNDARY_QNAN_MAGIC`）**：
+   - 當算子由內部 $M^\circ$ 跨越至邊界 $\partial M$ 時，FLOW 將違規來源直接編碼進 64-bit IEEE-754 Quiet NaN 的 51-bit 載荷區段（`0x7FF8400000000000ULL | payload`）：
+     - `Bits [43:32]`：`fn_id`（12-bit Lean 4 算子編號）
+     - `Bits [31:24]`：`guard_idx`（8-bit 定理守衛索引）
+     - `Bits [23:20]`：`violation_kind`（`PRECOND`、`POSTCOND`、`THM_IMPLIES`、`DOMAIN_SINGULARITY`、`HIT_COLLAPSE`、`EXPLICIT_NONE`）
+     - `Bits [19:12]`：`cubical_axis`（6-bit 64 維立方同倫軸 `FlowCubicalAxisBit`）
+     - `Bits [11:0]`：`user_code`（12-bit 使用者邊界診斷碼）
+   - 由於硬體 FPU 原生支援 Quiet NaN 載荷傳遞，邊界點可在無分支（0-Branch）管線中沿 $\partial M$ 自由傳播，直到在觀測邊界由 `flow_hott_decode_boundary_exception` 或 `./build/flowy why <0x7ff84...>` 解碼還原為完整的 Topos 與 Lean 4 定理違規證書。

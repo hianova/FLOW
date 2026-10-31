@@ -63,3 +63,26 @@ int main(void) {
 | 檔案與模組 | 應用領域與驗證規模 | Pure `.lean` 湧現機制 |
 | :--- | :--- | :--- |
 | **具身雙足反射控制核心**<br>[`plugins/embodied.lean`](../../plugins/embodied.lean) | **1kHz 雙足機器人關節扭矩限制、PD 反射控制律與步態核函數** | 自動合成 `isTorqueWithinLimit`、`dampedAngularAccel`、`pdReflexLaw`、`embodiedStepKernel` 之 `double` / `flow_fx64_t` 雙軌算子與 `lean_*` 合約。 |
+
+---
+
+## 4.4 HoTT 邊界型別語法（`Option` / `FlowResult` / `SpaceWithException`）與 `flowy why` 自省
+
+除了傳統回傳 `0` 的保護包裝（`lean_<fn>`）與子型別證人包裝（`lean_certified_<fn>`），FLOW 原生支援在 `.lean` 中撰寫**零分配同倫邊界型別與模式匹配**，並自動合成兩類零開銷邊界合約包裝：
+
+1. **原生 `.lean` 邊界建構子與模式匹配語法**：
+   - 支援回傳與參數型別 `Option <T>`、`FlowResult <T>` 與 `SpaceWithException <T> <Prop>`。
+   - 支援建構子 `some v` / `none`、`interior v` / `boundary <code_u12>`、`point v` / `collapse`，以及載荷綁定模式匹配：
+     ```lean
+     def safe_reciprocal (x : Float) (h_pos : x > 0.0) : FlowResult Float :=
+       if x > 0.001 then interior (1.0 / x) else boundary 77
+
+     def recover_or_default (r : FlowResult Float) (fallback : Float) : Float :=
+       match r with
+       | interior v => v + 1.0
+       | boundary b => fallback
+     ```
+2. **雙軌零成本邊界拉回包裝器（`lean_boundary_<fn>` 與 `lean_try_<fn>`）**：
+   - **`lean_boundary_<fn>` / `flowc_boundary_<fn>`**：針對 `Float`（`double`）算子，當前置條件（`h_pos`）、定理實質蘊含守衛或顯式 `boundary <code>` 觸發時，直接回傳編碼了 `(fn_id, guard_idx, violation_kind, cubical_axis, user_code)` 的 **IEEE-754 Quiet NaN**，在硬體 FPU 管線中以零分支指令傳播。
+   - **`lean_try_<fn>` / `flowc_try_<fn>`**：針對任意非 Tuple 算子，回傳 `lean_result_<T>`（`struct { <T> value; uint64_t boundary_tag; }`），當 `boundary_tag == 0` 時代表結果位於可縮內部 $M^\circ$，否則可直接呼叫 `flowc_decode_boundary_tag` 解碼違規的 Lean 4 定理名稱與守衛表達式。
+   - **CLI 形式化自省（`flowy why`）**：將觀測到的 64-bit 邊界 NaN 位元組傳入 `./build/flowy why 0x7ff84... <spec.lean>`，即可瞬間還原觸發邊界拉回的算子名稱、定理名稱、守衛條件與 64-bit 立方同倫軸。

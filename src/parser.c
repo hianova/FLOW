@@ -213,7 +213,9 @@ static void normalize_lean_body(const char *in, char *out, size_t max_len) {
         {"Float.ofInt", 11, "flow_float_of_int", 17}, {"Real.abs", 8, "flow_float_abs", 14}, {"Real.floor", 10, "flow_float_floor", 16}, {"Real.ceil", 9, "flow_float_ceil", 15},
         {"Real.round", 10, "flow_float_round", 16}, {"Real.sqrt", 9, "flow_float_sqrt", 15}, {"Real.exp", 8, "flow_float_exp", 14}, {"Real.log", 8, "flow_float_log", 14},
         {"Real.sin", 8, "flow_float_sin", 14}, {"Real.cos", 8, "flow_float_cos", 14}, {"Real.atan2", 10, "flow_float_atan2", 16}, {"Real.pow", 8, "flow_float_pow", 14},
-        {"Real.max", 8, "flow_float_max", 14}, {"Real.min", 8, "flow_float_min", 14}, {"f_abs", 5, "flow_float_abs", 14}, {"f_max", 5, "flow_float_max", 14}, {"f_min", 5, "flow_float_min", 14}
+        {"Real.max", 8, "flow_float_max", 14}, {"Real.min", 8, "flow_float_min", 14}, {"f_abs", 5, "flow_float_abs", 14}, {"f_max", 5, "flow_float_max", 14}, {"f_min", 5, "flow_float_min", 14},
+        {"Option.some", 11, "some", 4}, {"Option.none", 11, "none", 4},
+        {"FlowResult.interior", 19, "interior", 8}, {"FlowResult.boundary", 19, "boundary", 8}
     };
     char abs_buf[FLOW_LEAN_BODY_MAX] = {0};
     rewrite_lean_abs_bars(in, abs_buf, sizeof(abs_buf));
@@ -260,7 +262,8 @@ static int is_valid_scalar_lean_body_str(const FlowSpec *spec, const FlowLeanFun
     static const char *const KW[] = {
         "if", "then", "else", "let", "in", "match", "with", "true", "false", "decide", "flow_nat_min", "flow_nat_max", "flow_quantize", "flow_dequantize",
         "flow_float_abs", "flow_float_floor", "flow_float_ceil", "flow_float_round", "flow_float_sqrt", "flow_float_exp", "flow_float_log", "flow_float_sin",
-        "flow_float_cos", "flow_float_atan2", "flow_float_pow", "flow_float_max", "flow_float_min", "flow_float_of_nat", "flow_float_of_int", "_", "_ret", NULL
+        "flow_float_cos", "flow_float_atan2", "flow_float_pow", "flow_float_max", "flow_float_min", "flow_float_of_nat", "flow_float_of_int",
+        "some", "none", "interior", "boundary", "Option", "FlowResult", "SpaceWithException", "point", "collapse", "_", "_ret", NULL
     };
     char let_vars[32][FLOW_NAME]; size_t let_cnt = 0; if (!b || !b[0]) return 0;
     if (strstr(b, "->") || strstr(b, "<->") || strstr(b, "\xe2\x86\x92") || strstr(b, "\xe2\x86\x94")) return 0;
@@ -281,6 +284,24 @@ static int is_valid_scalar_lean_body_str(const FlowSpec *spec, const FlowLeanFun
                     if (lv[0] && let_cnt < 32) strncpy(let_vars[let_cnt++], lv, FLOW_NAME - 1);
                 }
             } else { char lv[FLOW_NAME] = {0}; if (sscanf(vs, "%63[^ :=\t\r\n]", lv) == 1 && lv[0] && let_cnt < 32) strncpy(let_vars[let_cnt++], lv, FLOW_NAME - 1); }
+        } else if (*p == '|' && (p == b || p[-1] != '|') && p[1] != '|') {
+            const char *ms = p + 1;
+            while (*ms && isspace((unsigned char)*ms)) ++ms;
+            if (*ms == '(') { ++ms; while (*ms && isspace((unsigned char)*ms)) ++ms; }
+            size_t clen = 0;
+            if (!strncmp(ms, "some", 4) && isspace((unsigned char)ms[4])) clen = 4;
+            else if (!strncmp(ms, "interior", 8) && isspace((unsigned char)ms[8])) clen = 8;
+            else if (!strncmp(ms, "boundary", 8) && isspace((unsigned char)ms[8])) clen = 8;
+            else if (!strncmp(ms, "point", 5) && isspace((unsigned char)ms[5])) clen = 5;
+            if (clen > 0) {
+                ms += clen;
+                while (*ms && isspace((unsigned char)*ms)) ++ms;
+                char mv[FLOW_NAME] = {0}; size_t mk = 0;
+                while (*ms && (isalnum((unsigned char)*ms) || *ms == '_')) { if (mk + 1 < sizeof(mv)) mv[mk++] = *ms; ++ms; }
+                if (mv[0] && strcmp(mv, "_") != 0 && let_cnt < 32) {
+                    strncpy(let_vars[let_cnt++], mv, FLOW_NAME - 1);
+                }
+            }
         }
     }
     for (const char *p = b; *p; ) {
@@ -418,7 +439,17 @@ static void try_add_lean_function(FlowSpec *spec, LeanConstTable *consts, const 
         if (fn->tuple_arity >= 2) { ret_is_tuple = 1; fn->is_tuple_return = 1; strncpy(fn->return_type, fn->tuple_types[0], sizeof(fn->return_type) - 1); }
     }
     if (!ret_is_tuple) {
-        char ret_t[FLOW_NAME] = {0}, extra[16] = {0}; if (sscanf(ret_raw, "%63s %15s", ret_t, extra) != 1) { free(fn); return; }
+        char rt1[FLOW_NAME] = {0}, rt2[FLOW_NAME] = {0}, rt3[FLOW_NAME] = {0}, extra[16] = {0};
+        int rntok = sscanf(ret_raw, "%63s %63s %63s %15s", rt1, rt2, rt3, extra);
+        const char *ret_t = rt1;
+        if ((rntok == 2 && (!strcmp(rt1, "Option") || !strcmp(rt1, "FlowResult") || !strcmp(rt1, "SpaceWithException"))) ||
+            (rntok == 3 && (!strcmp(rt1, "FlowResult") || !strcmp(rt1, "SpaceWithException")))) {
+            fn->is_result_return = 1;
+            ret_t = rt2;
+        } else if (rntok != 1) {
+            free(fn);
+            return;
+        }
         const char *norm_ret = normalize_lean_type_token(ret_t);
         ret_is_struct = (find_lean_struct(spec, norm_ret) != NULL); ret_is_scalar = is_scalar_lean_type(norm_ret) || (find_lean_enum(spec, norm_ret) != NULL);
         if (!ret_is_struct && !ret_is_scalar) { free(fn); return; }
@@ -437,13 +468,26 @@ static void try_add_lean_function(FlowSpec *spec, LeanConstTable *consts, const 
             }
             p = rp + 1; continue;
         }
-        char pt[FLOW_NAME] = {0}, pextra[16] = {0}; if (sscanf(p_rhs, "%63s %15s", pt, pextra) != 1) { free(fn); return; }
+        char pt1[FLOW_NAME] = {0}, pt2[FLOW_NAME] = {0}, pt3[FLOW_NAME] = {0}, pextra[16] = {0};
+        int pntok = sscanf(p_rhs, "%63s %63s %63s %15s", pt1, pt2, pt3, pextra);
+        int param_is_res = 0;
+        const char *pt = pt1;
+        if ((pntok == 2 && (!strcmp(pt1, "Option") || !strcmp(pt1, "FlowResult") || !strcmp(pt1, "SpaceWithException"))) ||
+            (pntok == 3 && (!strcmp(pt1, "FlowResult") || !strcmp(pt1, "SpaceWithException")))) {
+            param_is_res = 1;
+            pt = pt2;
+        } else if (pntok != 1) {
+            free(fn);
+            return;
+        }
         const char *norm_pt = normalize_lean_type_token(pt);
         if (!is_scalar_lean_type(norm_pt) && !find_lean_struct(spec, norm_pt) && !find_lean_enum(spec, norm_pt)) { free(fn); return; }
         for (char *tok = strtok(grp, " \t\n\r"); tok; tok = strtok(NULL, " \t\n\r")) {
             if (fn->param_count >= FLOW_LEAN_PARAM_MAX) { free(fn); return; }
             strncpy(fn->param_names[fn->param_count], tok, sizeof(fn->param_names[0]) - 1);
-            strncpy(fn->param_types[fn->param_count], norm_pt, sizeof(fn->param_types[0]) - 1); fn->param_count++;
+            strncpy(fn->param_types[fn->param_count], norm_pt, sizeof(fn->param_types[0]) - 1);
+            fn->param_is_result[fn->param_count] = (uint8_t)param_is_res;
+            fn->param_count++;
         }
         p = rp + 1;
     }
@@ -496,6 +540,7 @@ static void try_add_lean_function(FlowSpec *spec, LeanConstTable *consts, const 
                 if ((!prev->thm_hyp_exprs[gi][0] || is_valid_scalar_lean_body_str(spec, fn, prev->thm_hyp_exprs[gi])) &&
                     is_valid_scalar_lean_body_str(spec, fn, prev->thm_conc_exprs[gi])) {
                     size_t dgi = fn->thm_guard_count++;
+                    strncpy(fn->thm_names[dgi], prev->thm_names[gi], sizeof(fn->thm_names[0]) - 1);
                     strncpy(fn->thm_hyp_exprs[dgi], prev->thm_hyp_exprs[gi], sizeof(fn->thm_hyp_exprs[0]) - 1);
                     strncpy(fn->thm_conc_exprs[dgi], prev->thm_conc_exprs[gi], sizeof(fn->thm_conc_exprs[0]) - 1);
                 }
@@ -601,6 +646,8 @@ static int check_lean_rt_def_gate(const char *def_sig, const char *def_body) {
 static void extract_lean_theorem_contract(FlowSpec *spec, const LeanConstTable *consts, const char *thm_line) {
     if (!spec || !thm_line || !starts_with(thm_line, "theorem ")) return;
     char tbuf[FLOW_LEAN_BODY_MAX] = {0}; strncpy(tbuf, thm_line, sizeof(tbuf) - 1);
+    char thm_name[FLOW_NAME] = {0};
+    (void)sscanf(tbuf + 8, "%63[^ (:{\t\r\n]", thm_name);
     char *ce = strstr(tbuf, ":="); if (ce) *ce = '\0';
     int pd = 0; char *prop_colon = NULL;
     for (char *p = tbuf + 8; *p; ++p) { if (*p == '(' || *p == '{') pd++; else if (*p == ')' || *p == '}') pd--; else if (pd == 0 && *p == ':') { prop_colon = p; break; } }
@@ -614,7 +661,11 @@ static void extract_lean_theorem_contract(FlowSpec *spec, const LeanConstTable *
         if (gl < sizeof(grp)) {
             memcpy(grp, lp + 1, gl); char *col = strchr(grp, ':');
             if (col) {
-                *col = '\0'; char *raw_ptype = trim(col + 1); const char *ptype = normalize_lean_type_token(raw_ptype);
+                *col = '\0'; char *raw_ptype = trim(col + 1);
+                char rpt1[FLOW_NAME] = {0}, rpt2[FLOW_NAME] = {0};
+                int rnt = sscanf(raw_ptype, "%63s %63s", rpt1, rpt2);
+                const char *ptype = normalize_lean_type_token(
+                    (rnt >= 2 && (!strcmp(rpt1, "Option") || !strcmp(rpt1, "FlowResult") || !strcmp(rpt1, "SpaceWithException"))) ? rpt2 : raw_ptype);
                 if (is_scalar_lean_type(ptype) || find_lean_struct(spec, ptype) || find_lean_enum(spec, ptype)) {
                     for (char *tok = strtok(grp, " \t"); tok && thm_param_cnt < FLOW_LEAN_PARAM_MAX; tok = strtok(NULL, " \t")) { strncpy(thm_params[thm_param_cnt++], tok, FLOW_NAME - 1); thm_params[thm_param_cnt - 1][FLOW_NAME - 1] = '\0'; }
                 } else if (is_lean_erased_proof_field(raw_ptype) && hyp_cnt < 16 &&
@@ -668,6 +719,7 @@ static void extract_lean_theorem_contract(FlowSpec *spec, const LeanConstTable *
         }
         if (!dup_g && fn->thm_guard_count < FLOW_LEAN_THM_GUARD_MAX) {
             size_t gi = fn->thm_guard_count++;
+            strncpy(fn->thm_names[gi], thm_name, sizeof(fn->thm_names[0]) - 1);
             strncpy(fn->thm_hyp_exprs[gi], thm_hyp, sizeof(fn->thm_hyp_exprs[0]) - 1);
             strncpy(fn->thm_conc_exprs[gi], cnext, sizeof(fn->thm_conc_exprs[0]) - 1);
         }
@@ -815,7 +867,9 @@ int parse_spec(FILE *input, FlowSpec *spec) {
             }
         } else if (sscanf(line, "inductive %63s", sym) == 1) {
             saw_lean = 1;
-            if (spec->lean_enum_count < FLOW_LEAN_ENUM_MAX) {
+            if (!strcmp(sym, "Option") || !strcmp(sym, "FlowResult") || !strcmp(sym, "SpaceWithException")) {
+                cur_en = NULL;
+            } else if (spec->lean_enum_count < FLOW_LEAN_ENUM_MAX) {
                 cur_en = &spec->lean_enums[spec->lean_enum_count++]; memset(cur_en, 0, sizeof(*cur_en)); strncpy(cur_en->name, sym, FLOW_NAME - 1);
                 if (!parse_lean_inductive_variants(cur_en, line, !is_ext_lib)) { free(consts); free(clean_src); return 0; }
             }

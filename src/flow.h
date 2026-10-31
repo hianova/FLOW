@@ -5,6 +5,24 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <time.h>
+
+#define FLOW_VERSION_MAJOR 2
+#define FLOW_VERSION_MINOR 6
+#define FLOW_VERSION_PATCH 0
+#ifndef FLOW_VERSION_STRING
+#define FLOW_VERSION_STRING "2.6.0"
+#endif
+#ifndef FLOW_GIT_BRANCH
+#define FLOW_GIT_BRANCH "main"
+#endif
+#ifndef FLOW_GIT_COMMIT
+#define FLOW_GIT_COMMIT "unknown"
+#endif
+#ifndef FLOW_GIT_DIRTY
+#define FLOW_GIT_DIRTY "clean"
+#endif
+#define FLOW_GIT_PROVENANCE FLOW_GIT_BRANCH "@" FLOW_GIT_COMMIT "-" FLOW_GIT_DIRTY
+
 #define FLOW_LINE 512
 #define FLOW_NAME 64
 #define FLOW_NODE_MAX 32
@@ -52,8 +70,11 @@ typedef struct {
     char precond_expr[256];
     char postcond_expr[512];
     size_t thm_guard_count;
+    char thm_names[FLOW_LEAN_THM_GUARD_MAX][FLOW_NAME];
     char thm_hyp_exprs[FLOW_LEAN_THM_GUARD_MAX][256];
     char thm_conc_exprs[FLOW_LEAN_THM_GUARD_MAX][256];
+    int is_result_return;
+    uint8_t param_is_result[FLOW_LEAN_PARAM_MAX];
     int is_private;
     uint64_t estimated_wcet_ns;
 } FlowLeanFunction;

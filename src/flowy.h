@@ -34,6 +34,7 @@ const char *flowy_language_name(FlowLanguage lang);
 
 /* Cubical HoTT & Topos report */
 void flowy_print_cubical_topos_report(FILE *out);
+int flowy_print_boundary_certificate(uint64_t raw_bits, const char *opt_lean_spec, FILE *out);
 
 /* CLI Subcommand handlers */
 int cmd_inspect_run(int argc, char **argv);
@@ -41,5 +42,8 @@ void cmd_inspect_print_usage(FILE *out);
 
 int cmd_induce_run(int argc, char **argv);
 void cmd_induce_print_usage(FILE *out);
+
+int cmd_patch_run(int argc, char **argv);
+void cmd_patch_print_usage(FILE *out);
 
 #endif /* FLOW_FLOWY_H */

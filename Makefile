@@ -1,7 +1,16 @@
 export PATH := /opt/homebrew/bin:/usr/local/bin:$(PATH)
 
 CC ?= clang
+FLOW_VERSION := $(shell tr -d '[:space:]' < VERSION 2>/dev/null || echo "2.6.0")
+GIT_BRANCH   := $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "detached")
+GIT_COMMIT   := $(shell git rev-parse --short=8 HEAD 2>/dev/null || echo "unknown")
+GIT_DIRTY    := $(shell git status --porcelain -uno 2>/dev/null | grep -q . && echo "dirty" || echo "clean")
+PROVENANCE_DEFS := -DFLOW_VERSION_STRING=\"$(FLOW_VERSION)\" \
+                   -DFLOW_GIT_BRANCH=\"$(GIT_BRANCH)\" \
+                   -DFLOW_GIT_COMMIT=\"$(GIT_COMMIT)\" \
+                   -DFLOW_GIT_DIRTY=\"$(GIT_DIRTY)\"
 CFLAGS ?= -std=c17 -Wall -Wextra -Wpedantic -O2 -Isrc -Iplugins -Itests
+CFLAGS += $(PROVENANCE_DEFS)
 LDLIBS ?= -lm
 THREAD_FLAGS ?= -pthread
 

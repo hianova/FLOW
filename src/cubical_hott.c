@@ -916,7 +916,13 @@ int flow_hott_emit_commutative_diagram(FILE *out, const FlowDiscreteJetBundle *b
     fprintf(out, "- **Canonical Witness Sieve ($a_0 \\in A$)**: `0x%llx`\n", (unsigned long long)fiber->canonical_witness_sieve);
     fprintf(out, "- **Unconstrained Oscillation Axes**: `0x%llx`\n", (unsigned long long)fiber->unconstrained_axes_mask);
     fprintf(out, "- **Recommended Contractible Pinning Mask**: `0x%llx`\n", (unsigned long long)fiber->recommended_pinning_mask);
-    fprintf(out, "- **Diagnostic Summary**: `%s`\n", fiber->diagnostic_summary);
+    fprintf(out, "- **Diagnostic Summary**: `%s`\n\n", fiber->diagnostic_summary);
+
+    fprintf(out, "## 4. HIT Singularity Contraction (`SpaceWithException`) & Zero-Cost Boundary ($\\partial M$)\n\n");
+    fprintf(out, "- **Interior Stratum ($M^\\circ$)**: Contractible $(-2)$-Type (`isContr(fib(spec))`)\n");
+    fprintf(out, "- **Singularity Pullback ($\\partial M = f^{-1}(\\mathrm{Exception}) \\hookrightarrow M$)**: Quotiented via HIT point collapse (`collapse : ExceptionZone x -> ExceptionZone y -> point x = point y`) to 1 canonical 0D boundary sink\n");
+    fprintf(out, "- **Hardware Encoding**: IEEE-754 Quiet NaN Payload (`0x%016llx | payload`) propagating branchlessly along $\\partial M$\n",
+            (unsigned long long)FLOW_BOUNDARY_QNAN_MAGIC);
     return 1;
 }
 
@@ -931,7 +937,8 @@ int flow_hott_emit_lean_fiber_jet_spec(FILE *out, const FlowDiscreteJetBundle *b
      * compiles directly through `flowc` into C17 + Witness Types + SOA64 SIMD.
      */
     fprintf(out, "-- Auto- synthesized by flow_hott_emit_lean_fiber_jet_spec (%s)\n", ns);
-    fprintf(out, "-- Differential Cohesive HoTT: Discrete 4-Jet Bundle J^4 E & Homotopy Fiber fib_{ev}(1)\n\n");
+    fprintf(out, "-- Differential Cohesive HoTT: Discrete 4-Jet Bundle J^4 E & Homotopy Fiber fib_{ev}(1)\n");
+    fprintf(out, "-- HIT Singularity Quotient: SpaceWithException (M / ExceptionZone ~= M^o u {dM})\n\n");
 
     fprintf(out, "structure DiscreteJet4 where\n");
     fprintf(out, "  j0_val : Float\n");
@@ -967,6 +974,12 @@ int flow_hott_emit_lean_fiber_jet_spec(FILE *out, const FlowDiscreteJetBundle *b
     fprintf(out, "def step_holonomic_jet (jet : DiscreteJet4) : Float :=\n");
     fprintf(out, "  jet.j0_val + 0.5 * jet.j1_grad + 0.125 * jet.j2_curv - 0.0625 * jet.j4_kurt\n\n");
 
+    fprintf(out, "def safe_holonomic_step (jet : DiscreteJet4) : FlowResult Float :=\n");
+    fprintf(out, "  if eval_rk_subbundle jet <= 64.0 then\n");
+    fprintf(out, "    interior (step_holonomic_jet jet)\n");
+    fprintf(out, "  else\n");
+    fprintf(out, "    boundary 1\n\n");
+
     fprintf(out, "theorem rk_subbundle_holonomic (jet : DiscreteJet4) :\n");
     fprintf(out, "  eval_rk_subbundle jet >= 0.0 := by\n");
     fprintf(out, "  trivial\n\n");
@@ -975,6 +988,158 @@ int flow_hott_emit_lean_fiber_jet_spec(FILE *out, const FlowDiscreteJetBundle *b
     fprintf(out, "  fiber_is_contractible w = true := by\n");
     fprintf(out, "  trivial\n");
 
+    return 1;
+}
+
+const char *flow_hott_boundary_kind_name(FlowBoundaryViolationKind kind) {
+    switch (kind) {
+        case FLOW_BOUNDARY_OK:                 return "INTERIOR_OK";
+        case FLOW_BOUNDARY_PRECOND:            return "PRECONDITION_VIOLATION";
+        case FLOW_BOUNDARY_POSTCOND:           return "POSTCONDITION_VIOLATION";
+        case FLOW_BOUNDARY_THM_IMPLIES:        return "THEOREM_IMPLICATION_RUPTURE";
+        case FLOW_BOUNDARY_DOMAIN_SINGULARITY: return "DOMAIN_SINGULARITY_NAN";
+        case FLOW_BOUNDARY_HIT_COLLAPSE:       return "HIT_EXCEPTION_ZONE_COLLAPSE";
+        case FLOW_BOUNDARY_EXPLICIT_NONE:      return "EXPLICIT_BOUNDARY_NONE";
+        default:                               return "BOUNDARY_UNKNOWN";
+    }
+}
+
+int flow_hott_quotient_exception_zone(uint64_t ambient_sieve, uint64_t exception_zone_mask,
+                                      uint16_t fn_id, FlowHITExceptionQuotient *quotient_out) {
+    if (!quotient_out) return 0;
+    memset(quotient_out, 0, sizeof(*quotient_out));
+
+    uint64_t exc_in_m = ambient_sieve & exception_zone_mask;
+    uint64_t interior = ambient_sieve & ~exc_in_m;
+
+    quotient_out->normal_h_level            = FLOW_HLEVEL_CONTRACTIBLE;      /* (-2)-Type isContr */
+    quotient_out->ruptured_h_level          = FLOW_HLEVEL_GROUPOID_SYMMETRY; /* 1-Type Groupoid (pi_1 != 0) */
+    quotient_out->univalence_applicable     = 0;                             /* (-2)-Type !~= 1-Type */
+    quotient_out->ambient_sieve             = ambient_sieve;
+    quotient_out->exception_zone_mask       = exc_in_m;
+    quotient_out->interior_sieve            = interior;
+    quotient_out->ambient_dof               = flow_hott_popcount64(ambient_sieve);
+    quotient_out->exception_zone_dof        = flow_hott_popcount64(exc_in_m);
+    quotient_out->quotient_interior_dof     = flow_hott_popcount64(interior);
+    quotient_out->collapsed_boundary_points = (exc_in_m != 0ULL) ? 1U : 0U;
+
+    uint8_t primary_axis = (uint8_t)FLOW_SIEVE_BIT_LEAN_CERTIFIED;
+    for (uint8_t b = 0; b < 64U; ++b) {
+        if (exc_in_m & (1ULL << b)) {
+            primary_axis = b;
+            break;
+        }
+    }
+    quotient_out->canonical_boundary_tag = flow_hott_make_boundary_tag(
+        fn_id, 0U, (uint8_t)FLOW_BOUNDARY_HIT_COLLAPSE, primary_axis,
+        (uint16_t)quotient_out->exception_zone_dof);
+
+    snprintf(quotient_out->summary, sizeof(quotient_out->summary),
+             "SpaceWithException HIT Quotient: (-2)-Type !~= 1-Type (Univalence inapplicable); "
+             "collapsed %u exception axes (0x%llx) -> 1 boundary point dM (0x%016llx), DOF %u -> %u + %u",
+             quotient_out->exception_zone_dof,
+             (unsigned long long)exc_in_m,
+             (unsigned long long)quotient_out->canonical_boundary_tag,
+             quotient_out->ambient_dof,
+             quotient_out->quotient_interior_dof,
+             quotient_out->collapsed_boundary_points);
+    return 1;
+}
+
+int flow_hott_decode_boundary_exception(uint64_t raw_bits, const SemanticIR *ir,
+                                        FlowBoundaryCertificateReport *report_out) {
+    if (!report_out) return 0;
+    memset(report_out, 0, sizeof(*report_out));
+    report_out->raw_bits = raw_bits;
+
+    if (!flow_hott_is_boundary_tag(raw_bits)) {
+        /* Check if raw_bits is a generic IEEE-754 NaN or Infinity */
+        uint64_t exp_bits = (raw_bits >> 52U) & 0x7FFULL;
+        if (exp_bits == 0x7FFULL && raw_bits != 0ULL) {
+            report_out->is_on_boundary = 1;
+            report_out->violation_kind = FLOW_BOUNDARY_DOMAIN_SINGULARITY;
+            report_out->violation_kind_name = flow_hott_boundary_kind_name(FLOW_BOUNDARY_DOMAIN_SINGULARITY);
+            report_out->cubical_axis = (uint8_t)FLOW_SIEVE_BIT_BOUNDED_RANGE;
+            report_out->axis_info = flow_cubical_get_axis_info(report_out->cubical_axis);
+            snprintf(report_out->fn_name, sizeof(report_out->fn_name), "<hardware_fpu>");
+            snprintf(report_out->theorem_name, sizeof(report_out->theorem_name), "ieee754_domain_finite");
+            snprintf(report_out->guard_expr, sizeof(report_out->guard_expr), "isfinite(x)");
+            snprintf(report_out->diagnostic, sizeof(report_out->diagnostic),
+                     "[dM Boundary Pullback] Raw IEEE-754 Singularity (0x%016llx) -> %s on Axis#%u (%s)",
+                     (unsigned long long)raw_bits,
+                     report_out->violation_kind_name,
+                     (unsigned)report_out->cubical_axis,
+                     (report_out->axis_info && report_out->axis_info->axis_name) ? report_out->axis_info->axis_name : "bounded_range");
+            return 1;
+        }
+        report_out->is_on_boundary = 0;
+        report_out->violation_kind = FLOW_BOUNDARY_OK;
+        report_out->violation_kind_name = flow_hott_boundary_kind_name(FLOW_BOUNDARY_OK);
+        snprintf(report_out->fn_name, sizeof(report_out->fn_name), "<interior>");
+        snprintf(report_out->theorem_name, sizeof(report_out->theorem_name), "isContr(fib(spec))");
+        snprintf(report_out->guard_expr, sizeof(report_out->guard_expr), "True");
+        snprintf(report_out->diagnostic, sizeof(report_out->diagnostic),
+                 "[M^o Interior] Value 0x%016llx inhabits contractible (-2)-Type fiber isContr(fib(spec))",
+                 (unsigned long long)raw_bits);
+        return 1;
+    }
+
+    report_out->is_on_boundary = 1;
+    report_out->fn_id          = (uint16_t)((raw_bits >> 32U) & 0x0FFFU);
+    report_out->guard_idx      = (uint8_t)((raw_bits >> 24U) & 0xFFU);
+    uint8_t k_raw              = (uint8_t)((raw_bits >> 20U) & 0x0FU);
+    report_out->violation_kind = (k_raw <= (uint8_t)FLOW_BOUNDARY_EXPLICIT_NONE)
+                                 ? (FlowBoundaryViolationKind)k_raw
+                                 : FLOW_BOUNDARY_DOMAIN_SINGULARITY;
+    report_out->cubical_axis   = (uint8_t)((raw_bits >> 12U) & 0x3FU);
+    report_out->user_code      = (uint16_t)(raw_bits & 0x0FFFU);
+    report_out->violation_kind_name = flow_hott_boundary_kind_name(report_out->violation_kind);
+    report_out->axis_info      = flow_cubical_get_axis_info(report_out->cubical_axis);
+
+    snprintf(report_out->fn_name, sizeof(report_out->fn_name), "fn#%u", (unsigned)report_out->fn_id);
+    snprintf(report_out->theorem_name, sizeof(report_out->theorem_name), "guard#%u", (unsigned)report_out->guard_idx);
+    snprintf(report_out->guard_expr, sizeof(report_out->guard_expr), "<contract_guard>");
+
+    if (ir && report_out->fn_id < ir->lean_function_count) {
+        const FlowLeanFunction *fn = &ir->lean_functions[report_out->fn_id];
+        snprintf(report_out->fn_name, sizeof(report_out->fn_name), "%s", fn->name);
+        if (report_out->violation_kind == FLOW_BOUNDARY_PRECOND && fn->precond_expr[0]) {
+            snprintf(report_out->theorem_name, sizeof(report_out->theorem_name), "%s_precond", fn->name);
+            snprintf(report_out->guard_expr, sizeof(report_out->guard_expr), "%s", fn->precond_expr);
+        } else if (report_out->violation_kind == FLOW_BOUNDARY_THM_IMPLIES &&
+                   report_out->guard_idx < fn->thm_guard_count) {
+            const char *tname = fn->thm_names[report_out->guard_idx][0]
+                                ? fn->thm_names[report_out->guard_idx]
+                                : "lean_theorem_guard";
+            snprintf(report_out->theorem_name, sizeof(report_out->theorem_name), "%s", tname);
+            if (fn->thm_hyp_exprs[report_out->guard_idx][0]) {
+                snprintf(report_out->guard_expr, sizeof(report_out->guard_expr), "(%s) => (%s)",
+                         fn->thm_hyp_exprs[report_out->guard_idx],
+                         fn->thm_conc_exprs[report_out->guard_idx]);
+            } else {
+                snprintf(report_out->guard_expr, sizeof(report_out->guard_expr), "%s",
+                         fn->thm_conc_exprs[report_out->guard_idx]);
+            }
+        } else if (report_out->violation_kind == FLOW_BOUNDARY_POSTCOND && fn->postcond_expr[0]) {
+            snprintf(report_out->theorem_name, sizeof(report_out->theorem_name), "%s_postcond", fn->name);
+            snprintf(report_out->guard_expr, sizeof(report_out->guard_expr), "%s", fn->postcond_expr);
+        } else if (report_out->violation_kind == FLOW_BOUNDARY_EXPLICIT_NONE) {
+            snprintf(report_out->theorem_name, sizeof(report_out->theorem_name), "SpaceWithException.collapse");
+            snprintf(report_out->guard_expr, sizeof(report_out->guard_expr), "boundary(%u)", (unsigned)report_out->user_code);
+        }
+    }
+
+    snprintf(report_out->diagnostic, sizeof(report_out->diagnostic),
+             "[dM Boundary Pullback] QuietNaN=0x%016llx | Fn: %s (id=%u) | Kind: %s | Theorem: %s | Guard: %s | Cubical Axis#%u [%s] | Code=%u",
+             (unsigned long long)raw_bits,
+             report_out->fn_name,
+             (unsigned)report_out->fn_id,
+             report_out->violation_kind_name,
+             report_out->theorem_name,
+             report_out->guard_expr,
+             (unsigned)report_out->cubical_axis,
+             (report_out->axis_info && report_out->axis_info->axis_name) ? report_out->axis_info->axis_name : "axis",
+             (unsigned)report_out->user_code);
     return 1;
 }
 

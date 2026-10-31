@@ -1674,6 +1674,153 @@ int main(void) {
         printf("  ✓ Stage 14 Passed: Differential Cohesive HoTT, Discrete 4-Jet (J^4 E) & Zero-Sorry Homotopy Fiber verified.\n\n");
     }
 
+    /* ---------------------------------------------------------------------- */
+    /* Stage 15: HoTT Boundary Pullback (dM), SpaceWithException & flowy why  */
+    /* ---------------------------------------------------------------------- */
+    FLOW_STAGE_BEGIN(15, "HoTT Boundary Pullback (dM), Option/FlowResult/SpaceWithException & flowy why");
+    {
+        const char *hott_err_lean = "/tmp/flow_hott_boundary.lean";
+        FILE *hb_fp = fopen(hott_err_lean, "w");
+        FLOW_ASSERT_TRUE(hb_fp != NULL);
+        fputs(
+            "namespace FlowHoTTBoundary\n\n"
+            "inductive FlowResult (α : Type) where\n"
+            "  | interior : α → FlowResult α\n"
+            "  | boundary : Nat → FlowResult α\n\n"
+            "inductive SpaceWithException (M : Type) (Exc : Prop) where\n"
+            "  | point    : M → SpaceWithException M Exc\n"
+            "  | collapse : SpaceWithException M Exc\n\n"
+            "def safe_reciprocal (x : Float) (h_pos : x > 0.0) : FlowResult Float :=\n"
+            "  if x > 0.001 then interior (1.0 / x) else boundary 77\n\n"
+            "def recover_or_default (r : FlowResult Float) (fallback : Float) : Float :=\n"
+            "  match r with\n"
+            "  | interior v => v + 1.0\n"
+            "  | boundary b => fallback\n\n"
+            "def option_scale (opt_x : Option Float) (gain : Float) : Option Float :=\n"
+            "  match opt_x with\n"
+            "  | some v => if v >= 0.0 then some (v * gain) else none\n"
+            "  | none => none\n\n"
+            "theorem safe_reciprocal_bounded (x : Float) :\n"
+            "    x >= 0.01 → safe_reciprocal x <= 100.0 := by\n"
+            "  decide\n\n"
+            "end FlowHoTTBoundary\n",
+            hb_fp);
+        fclose(hb_fp);
+
+        char cmd_hb[1024];
+        snprintf(cmd_hb, sizeof(cmd_hb),
+                 "%s/flowc %s -o /tmp/flow_hott_boundary.c --target-c-header /tmp/flow_hott_boundary.h",
+                 FLOW_BUILD_DIR, hott_err_lean);
+        FLOW_ASSERT_EQ(system(cmd_hb), 0);
+
+        FILE *hb_drv = fopen("/tmp/flow_hott_boundary_drv.c", "w");
+        FLOW_ASSERT_TRUE(hb_drv != NULL);
+        fputs(
+            "#include \"/tmp/flow_hott_boundary.h\"\n"
+            "#include <assert.h>\n"
+            "#include <math.h>\n"
+            "#include <stdio.h>\n"
+            "#include <string.h>\n"
+            "int main(void) {\n"
+            "    /* 1. Interior evaluation (x = 0.5 -> 1/0.5 = 2.0 <= 100.0) */\n"
+            "    double v_ok = lean_boundary_safe_reciprocal(0.5);\n"
+            "    assert(!flowc_is_boundary_nan(v_ok));\n"
+            "    assert(fabs(v_ok - 2.0) < 1e-12);\n"
+            "    assert(fabs(recover_or_default(v_ok, -99.0) - 3.0) < 1e-12);\n\n"
+            "    /* 2. Explicit boundary 77 (0 < x <= 0.001) & branchless FPU propagation */\n"
+            "    double v_b77 = lean_boundary_safe_reciprocal(0.0005);\n"
+            "    assert(flowc_is_boundary_nan(v_b77));\n"
+            "    double v_prop = (v_b77 * 8.0 - 3.0) / 2.0;\n"
+            "    assert(flowc_is_boundary_nan(v_prop));\n"
+            "    assert(flowc_boundary_code(v_prop) == 77U);\n"
+            "    assert(fabs(recover_or_default(v_prop, 42.0) - 42.0) < 1e-12);\n\n"
+            "    /* 3. Precondition violation (x = -1.0 violates h_pos : x > 0.0) */\n"
+            "    lean_result_double r_pre = lean_try_safe_reciprocal(-1.0);\n"
+            "    assert(r_pre.boundary_tag != 0ULL);\n"
+            "    const char *fn_n = NULL, *thm_n = NULL, *grd_e = NULL;\n"
+            "    uint8_t k = 0, ax = 0; uint16_t code = 0;\n"
+            "    assert(flowc_decode_boundary_tag(r_pre.boundary_tag, &fn_n, &thm_n, &grd_e, &k, &ax, &code) == true);\n"
+            "    assert(strcmp(fn_n, \"safe_reciprocal\") == 0);\n"
+            "    assert(strcmp(thm_n, \"safe_reciprocal_precond\") == 0);\n"
+            "    assert(k == (uint8_t)FLOW_BOUNDARY_PRECOND && ax == 51U);\n\n"
+            "    /* 4. Option Float pattern matching (some / none) */\n"
+            "    double opt_ok = option_scale(3.5, 2.0);\n"
+            "    assert(!flowc_is_boundary_nan(opt_ok) && fabs(opt_ok - 7.0) < 1e-12);\n"
+            "    double opt_neg = option_scale(-2.0, 2.0);\n"
+            "    assert(flowc_is_boundary_nan(opt_neg));\n"
+            "    double opt_chain = option_scale(opt_neg, 5.0);\n"
+            "    assert(flowc_is_boundary_nan(opt_chain));\n\n"
+            "    /* Write precondition boundary tag hex to file for flowy why CLI verification */\n"
+            "    FILE *tf = fopen(\"/tmp/flow_btag.txt\", \"w\");\n"
+            "    assert(tf != NULL);\n"
+            "    fprintf(tf, \"0x%016llx\", (unsigned long long)r_pre.boundary_tag);\n"
+            "    fclose(tf);\n"
+            "    return 0;\n"
+            "}\n",
+            hb_drv);
+        fclose(hb_drv);
+
+        FLOW_ASSERT_EQ(system("cc -std=c17 -Wall -Wextra -Wpedantic -Werror -O2 -Isrc /tmp/flow_hott_boundary_drv.c /tmp/flow_hott_boundary.c build/libflow.a -lm -lpthread -o /tmp/flow_hott_boundary_drv && /tmp/flow_hott_boundary_drv"), 0);
+
+        /* Verify flowy why <hex> <spec.lean> decodes the exact function and guard */
+        char hex_tag[64] = {0};
+        FILE *tf = fopen("/tmp/flow_btag.txt", "r");
+        FLOW_ASSERT_TRUE(tf != NULL);
+        FLOW_ASSERT_TRUE(fgets(hex_tag, sizeof(hex_tag), tf) != NULL);
+        fclose(tf);
+
+        char why_cmd[1024];
+        snprintf(why_cmd, sizeof(why_cmd),
+                 "%s/flowy why %s %s > /tmp/flow_why_out.txt",
+                 FLOW_BUILD_DIR, hex_tag, hott_err_lean);
+        FLOW_ASSERT_EQ(system(why_cmd), 0);
+
+        FILE *wf = fopen("/tmp/flow_why_out.txt", "r");
+        FLOW_ASSERT_TRUE(wf != NULL);
+        char why_buf[2048] = {0};
+        size_t nread = fread(why_buf, 1, sizeof(why_buf) - 1, wf);
+        fclose(wf);
+        FLOW_ASSERT_TRUE(nread > 0);
+        FLOW_ASSERT_TRUE(strstr(why_buf, "safe_reciprocal") != NULL);
+        FLOW_ASSERT_TRUE(strstr(why_buf, "PRECONDITION_VIOLATION") != NULL);
+
+        /* Verify flowy patch synthesizes a formally verified white-box .lean patch from dM boundary tag */
+        char patch_cmd[1024];
+        snprintf(patch_cmd, sizeof(patch_cmd),
+                 "%s/flowy patch %s -b %s -o /tmp/flow_hott_patched.lean > /dev/null && "
+                 "%s/flowc /tmp/flow_hott_patched.lean -o /tmp/flow_hott_patched.c --target-c-header /tmp/flow_hott_patched.h > /dev/null",
+                 FLOW_BUILD_DIR, hott_err_lean, hex_tag, FLOW_BUILD_DIR);
+        FLOW_ASSERT_EQ(system(patch_cmd), 0);
+
+        FILE *pf = fopen("/tmp/flow_hott_patched.lean", "r");
+        FLOW_ASSERT_TRUE(pf != NULL);
+        char p_buf[4096] = {0};
+        (void)fread(p_buf, 1, sizeof(p_buf) - 1, pf);
+        fclose(pf);
+        FLOW_ASSERT_TRUE(strstr(p_buf, "-- Provenance           : flowy v") != NULL);
+
+        FILE *phf = fopen("/tmp/flow_hott_patched.h", "r");
+        FLOW_ASSERT_TRUE(phf != NULL);
+        char ph_buf[4096] = {0};
+        (void)fread(ph_buf, 1, sizeof(ph_buf) - 1, phf);
+        fclose(phf);
+        FLOW_ASSERT_TRUE(strstr(ph_buf, "FLOW_GENERATED_BY_VERSION") != NULL);
+        FLOW_ASSERT_TRUE(strstr(ph_buf, "FLOW_GENERATED_BY_GIT_REV") != NULL);
+
+        remove(hott_err_lean);
+        remove("/tmp/flow_hott_boundary.c");
+        remove("/tmp/flow_hott_boundary.h");
+        remove("/tmp/flow_hott_boundary_drv.c");
+        remove("/tmp/flow_hott_boundary_drv");
+        remove("/tmp/flow_btag.txt");
+        remove("/tmp/flow_why_out.txt");
+        remove("/tmp/flow_hott_patched.lean");
+        remove("/tmp/flow_hott_patched.c");
+        remove("/tmp/flow_hott_patched.h");
+
+        printf("  ✓ Stage 15 Passed: HoTT Boundary Pullback (dM), SpaceWithException, IEEE-754 Quiet NaN & flowy why verified.\n\n");
+    }
+
     FLOW_TEST_SUITE_END();
     return 0;
 }

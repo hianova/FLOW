@@ -1,6 +1,7 @@
 #include "flowy.h"
 #include "cubical_hott.h"
 #include "induce.h"
+#include "registry.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -138,10 +139,66 @@ void flowy_print_cubical_topos_report(FILE *out) {
                 (unsigned long long)path_hash,
                 st == FLOW_KAN_FILLED_HOMOTOPIC ? "A ~= B => A = B" : "OBSTRUCTED");
     }
+
+    FlowHITExceptionQuotient hit_q = {0};
+    if (flow_hott_quotient_exception_zone(0xFFFFULL, 0x0F00ULL, 0U, &hit_q)) {
+        fprintf(out, "  * [HIT Quotient] SpaceWithException(M, ExcZone) | M^o=%u DOF | dM=%u collapsed -> 1 pt (Tag=0x%016llx)\n",
+                hit_q.quotient_interior_dof,
+                hit_q.exception_zone_dof,
+                (unsigned long long)hit_q.canonical_boundary_tag);
+    }
+}
+
+int flowy_print_boundary_certificate(uint64_t raw_bits, const char *opt_lean_spec, FILE *out) {
+    if (!out) return 0;
+    FlowBoundaryCertificateReport rep = {0};
+    int decoded = 0;
+
+    if (opt_lean_spec && opt_lean_spec[0]) {
+        FILE *fp = fopen(opt_lean_spec, "r");
+        if (fp) {
+            FlowSpec *spec = (FlowSpec *)calloc(1, sizeof(FlowSpec));
+            SemanticIR *ir = (SemanticIR *)calloc(1, sizeof(SemanticIR));
+            if (spec && ir && parse_spec(fp, spec)) {
+                lower_to_ir(spec, ir);
+                decoded = flow_hott_decode_boundary_exception(raw_bits, ir, &rep);
+                flow_ir_cleanup(ir);
+            }
+            free(spec);
+            free(ir);
+            fclose(fp);
+        }
+    }
+    if (!decoded) {
+        decoded = flow_hott_decode_boundary_exception(raw_bits, NULL, &rep);
+    }
+    if (!decoded) return 0;
+
+    fprintf(out,
+            "[FLOW HoTT Boundary Pullback & Topos Certificate | v" FLOW_VERSION_STRING " (git: " FLOW_GIT_PROVENANCE ")]\n"
+            "%s\n"
+            "  * Bit-Pattern  : 0x%016llx (%s)\n"
+            "  * Operator     : %s (fn_id=%u, guard_idx=%u)\n"
+            "  * Violation    : %s (code=%u)\n"
+            "  * Theorem      : %s\n"
+            "  * Guard        : %s\n"
+            "  * Cubical Axis : Bit#%u [%s] (%s)\n",
+            rep.diagnostic,
+            (unsigned long long)rep.raw_bits,
+            rep.is_on_boundary ? "dM Boundary Singularity" : "M^o Contractible Interior",
+            rep.fn_name, (unsigned)rep.fn_id, (unsigned)rep.guard_idx,
+            rep.violation_kind_name ? rep.violation_kind_name : "OK",
+            (unsigned)rep.user_code,
+            rep.theorem_name,
+            rep.guard_expr,
+            (unsigned)rep.cubical_axis,
+            (rep.axis_info && rep.axis_info->axis_name) ? rep.axis_info->axis_name : "axis",
+            (rep.axis_info && rep.axis_info->policy_contract) ? rep.axis_info->policy_contract : "True");
+    return 1;
 }
 
 void cmd_inspect_print_usage(FILE *out) {
-    fprintf(out, "Usage: flowy inspect <why|timeline|audit|topos> [options...]\n");
+    fprintf(out, "Usage: flowy inspect <why [0x<nan_tag> [spec.lean]]|boundary <0x<nan_tag>> [spec.lean]|timeline|audit|topos>\n");
 }
 
 int cmd_inspect_run(int argc, char **argv) {
@@ -156,7 +213,15 @@ int cmd_inspect_run(int argc, char **argv) {
         return EXIT_SUCCESS;
     }
 
-    if (!strcmp(sub, "why")) {
+    if (!strcmp(sub, "why") || !strcmp(sub, "boundary")) {
+        if (argc >= 2 && argv[1] && argv[1][0] != '-') {
+            char *endp = NULL;
+            uint64_t raw_bits = strtoull(argv[1], &endp, 0);
+            if (endp && endp != argv[1]) {
+                const char *spec_path = (argc >= 3 && argv[2][0] != '-') ? argv[2] : NULL;
+                return flowy_print_boundary_certificate(raw_bits, spec_path, stdout) ? EXIT_SUCCESS : EXIT_FAILURE;
+            }
+        }
         flowy_print_decision_explanation(flow_decision_logger_latest(NULL), stdout);
         return EXIT_SUCCESS;
     }
@@ -301,5 +366,94 @@ int cmd_induce_run(int argc, char **argv) {
 
     free(xs);
     free(ys);
+    return EXIT_SUCCESS;
+}
+
+void cmd_patch_print_usage(FILE *out) {
+    fprintf(out,
+        "Usage: flowy patch <base.lean> [<samples.csv>] [-b 0x<boundary_nan_tag>] -o <patched.lean>\n"
+        "Options:\n"
+        "  <base.lean>             Original Lean 4 specification to patch\n"
+        "  <samples.csv>           Empirical trajectory samples for Q[x] & envelope induction\n"
+        "  -b 0x<boundary_nan_tag> Observed HoTT dM Quiet NaN boundary tag from runtime\n"
+        "  -o <patched.lean>       Output path for formally verified white-box patched .lean\n");
+}
+
+int cmd_patch_run(int argc, char **argv) {
+    const char *base_lean = NULL;
+    const char *csv_path = NULL;
+    const char *out_lean = NULL;
+    uint64_t btag = 0ULL;
+
+    for (int i = 0; i < argc; ++i) {
+        if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help") || !strcmp(argv[i], "help")) {
+            cmd_patch_print_usage(stdout);
+            return EXIT_SUCCESS;
+        } else if ((!strcmp(argv[i], "-b") || !strcmp(argv[i], "--boundary")) && i + 1 < argc) {
+            btag = strtoull(argv[++i], NULL, 0);
+        } else if (!strcmp(argv[i], "-o") && i + 1 < argc) {
+            out_lean = argv[++i];
+        } else if (argv[i][0] != '-') {
+            if (!base_lean) base_lean = argv[i];
+            else if (!csv_path) csv_path = argv[i];
+        }
+    }
+
+    if (!base_lean || !out_lean) {
+        cmd_patch_print_usage(stderr);
+        return EXIT_FAILURE;
+    }
+
+    double *xs = NULL;
+    double *ys = NULL;
+    size_t n = 0;
+    int is_biv = 0;
+
+    if (csv_path) {
+        if (!flow_induce_load_csv_samples(csv_path, &xs, &ys, &n, &is_biv)) {
+            fprintf(stderr, "flowy patch: failed to load samples from '%s'\n", csv_path);
+            return EXIT_FAILURE;
+        }
+    } else {
+        n = 1024;
+        xs = (double *)malloc(n * sizeof(double));
+        ys = (double *)malloc(n * sizeof(double));
+        if (!xs || !ys) {
+            free(xs);
+            free(ys);
+            return EXIT_FAILURE;
+        }
+        flow_induce_simulate_cir(1.6, 2.5, 0.85, 2.5, 0.02, 42ULL, ys, n);
+        for (size_t i = 0; i < n; ++i) xs[i] = (double)i / (double)n;
+    }
+
+    FlowLeanPatchReport rep;
+    int ok = flow_induce_patch_lean_spec(base_lean, out_lean, btag, xs, ys, n, &rep);
+    free(xs);
+    free(ys);
+
+    if (!ok) {
+        fprintf(stderr, "flowy patch: failed to synthesize or verify patch for '%s'\n", base_lean);
+        return EXIT_FAILURE;
+    }
+
+    printf("[FLOW White-Box .lean Direct Patching Engine | v" FLOW_VERSION_STRING " (git: " FLOW_GIT_PROVENANCE ")]\n");
+    printf("  1. Base Specification : %s (%zu defs, %zu theorems)\n",
+           rep.base_spec_path, rep.base_fn_count, rep.base_thm_count);
+    printf("  2. Boundary Trigger   : 0x%016llx -> Fn: %s | Theorem: %s | Guard: %s\n",
+           (unsigned long long)rep.trigger_boundary_tag,
+           rep.boundary_cert.fn_name,
+           rep.boundary_cert.theorem_name,
+           rep.boundary_cert.guard_expr);
+    printf("  3. Induced Q[x] Patch : (%lld/%lld) + (%lld/%lld)*x + (%lld/%lld)*x^2 | Envelope=[%lld, %lld]\n",
+           (long long)rep.induced_poly.coeffs[0].num, (long long)rep.induced_poly.coeffs[0].den,
+           (long long)rep.induced_poly.coeffs[1].num, (long long)rep.induced_poly.coeffs[1].den,
+           (long long)rep.induced_poly.coeffs[2].num, (long long)rep.induced_poly.coeffs[2].den,
+           (long long)rep.induced_grid.certified_lower_bound,
+           (long long)rep.induced_grid.certified_upper_bound);
+    printf("  4. Patched Output     : %s (%zu defs, %zu theorems | Verified=%s)\n",
+           rep.patched_spec_path, rep.patched_fn_count, rep.patched_thm_count,
+           rep.patch_verified ? "YES (Zero-Sorry, Zero-GC, Univalent)" : "NO");
+    printf("  ✓ %s\n", rep.diff_summary);
     return EXIT_SUCCESS;
 }

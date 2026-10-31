@@ -587,8 +587,8 @@ static inline __attribute__((unused)) double flow_float_log(double x) { return x
 static inline __attribute__((unused)) double flow_float_sin(double x) { return __builtin_sin(x); } \
 static inline __attribute__((unused)) double flow_float_cos(double x) { return __builtin_cos(x); } \
 static inline __attribute__((unused)) double flow_float_atan2(double y, double x) { return __builtin_atan2(y, x); } \
-static inline __attribute__((unused)) double flow_float_max(double a, double b) { return a > b ? a : b; } \
-static inline __attribute__((unused)) double flow_float_min(double a, double b) { return a < b ? a : b; } \
+static inline __attribute__((unused)) double flow_float_max(double a, double b) { return __builtin_isnan(a) ? a : (__builtin_isnan(b) ? b : (a > b ? a : b)); } \
+static inline __attribute__((unused)) double flow_float_min(double a, double b) { return __builtin_isnan(a) ? a : (__builtin_isnan(b) ? b : (a < b ? a : b)); } \
 static inline __attribute__((unused)) double flow_float_of_nat(uint64_t x) { return (double)x; } \
 static inline __attribute__((unused)) double flow_float_of_int(int64_t x) { return (double)x; } \
 static inline __attribute__((unused)) uint64_t flow_quantize(double val, double min_v, double max_v, uint32_t bits) { \

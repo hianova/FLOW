@@ -13,7 +13,7 @@
 
 static void flowc_print_usage(FILE *out) {
     fprintf(out,
-        "FLOW Lean 4 -> C17 Formal Synthesizer (flowc) v2.5.0 | Lean-RT & Cubical HoTT\n"
+        "FLOW Lean 4 -> C17 Formal Synthesizer (flowc) v" FLOW_VERSION_STRING " (git: " FLOW_GIT_PROVENANCE ") | Lean-RT & Cubical HoTT\n"
         "Usage: flowc <input.lean | --induce data.csv> [-o <output.c>] [options]\n"
         "Options:\n"
         "  -o <output.c>                 Target C17 source path (default: <input>.c)\n"
@@ -91,7 +91,7 @@ int flowc_main(int argc, char **argv) {
     }
 
     if (!strcmp(argv[1], "-v") || !strcmp(argv[1], "--version") || !strcmp(argv[1], "version")) {
-        printf("FLOW Modern Declarative Compiler (flowc) v2.5.0 | Lean-RT & Cubical HoTT\n");
+        printf("FLOW Modern Declarative Compiler (flowc) v" FLOW_VERSION_STRING " (git: " FLOW_GIT_PROVENANCE ") | Lean-RT & Cubical HoTT\n");
         return EXIT_SUCCESS;
     }
 

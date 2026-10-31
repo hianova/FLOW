@@ -365,6 +365,155 @@ int flow_hott_emit_lean_fiber_jet_spec(FILE *out, const FlowDiscreteJetBundle *b
                                        const FlowHomotopyFiberReport *fiber,
                                        const char *namespace_name);
 
+/*
+ * ============================================================================
+ * HIT Singularity Contraction (SpaceWithException) & Zero-Cost Boundary (dM)
+ * ============================================================================
+ * 1. Why Univalence Cannot Equate Normal and Exception States:
+ *    - Interior states (M^\circ) satisfy system invariants: isContr(fib(spec)) (h-level -2).
+ *    - Exception states rupture invariants into a 1-Type Groupoid (pi_1 != 0, h-level 1).
+ *    - Because (-2)-Type !~= 1-Type, Univalence (A ~= B) ~= (A = B) is inapplicable.
+ * 2. Higher Inductive Type (HIT) Point Contraction (`SpaceWithException`):
+ *    - Quotients the entire exception submanifold U_exception subset M into a single
+ *      0-dimensional boundary sink dM via `collapse : ExceptionZone x -> ExceptionZone y -> point x = point y`.
+ * 3. Zero-Cost Hardware Pullback (`FlowResult` / IEEE-754 Quiet NaN Payload):
+ *    - Encodes (fn_id, guard_idx, violation_kind, cubical_axis, user_code) into the
+ *      51-bit mantissa payload of an IEEE-754 Quiet NaN (`0x7FF8400000000000ULL`),
+ *      propagating branchlessly through hardware FPU pipelines along dM.
+ * ============================================================================
+ */
+#define FLOW_BOUNDARY_QNAN_MAGIC        UINT64_C(0x7FF8400000000000)
+#define FLOW_BOUNDARY_QNAN_PREFIX_MASK  UINT64_C(0x7FFCF00000000000)
+#define FLOW_BOUNDARY_PAYLOAD_MASK      UINT64_C(0x00000FFFFFFFFFFF)
+
+#ifndef FLOW_BOUNDARY_VIOLATION_KIND_DEFINED
+#define FLOW_BOUNDARY_VIOLATION_KIND_DEFINED
+typedef enum {
+    FLOW_BOUNDARY_OK                 = 0, /* Interior point in M^\circ */
+    FLOW_BOUNDARY_PRECOND            = 1, /* Precondition guard failed */
+    FLOW_BOUNDARY_POSTCOND           = 2, /* Postcondition guard failed */
+    FLOW_BOUNDARY_THM_IMPLIES        = 3, /* Theorem implication hyp => conc ruptured */
+    FLOW_BOUNDARY_DOMAIN_SINGULARITY = 4, /* Non-finite / division-by-zero / NaN domain */
+    FLOW_BOUNDARY_HIT_COLLAPSE       = 5, /* SpaceWithException HIT point collapse */
+    FLOW_BOUNDARY_EXPLICIT_NONE      = 6  /* Explicit Option.none / FlowResult.boundary */
+} FlowBoundaryViolationKind;
+#endif
+
+typedef struct {
+    FlowHomotopyLevel normal_h_level;      /* (-2)-Type isContr in interior M^\circ */
+    FlowHomotopyLevel ruptured_h_level;    /* 1-Type Groupoid when constraints rupture */
+    int univalence_applicable;             /* Always 0: (-2)-Type !~= 1-Type */
+    uint64_t ambient_sieve;                /* Ambient manifold M sieve */
+    uint64_t exception_zone_mask;          /* Submanifold U_exception subset M */
+    uint64_t interior_sieve;               /* M^\circ = M \ U_exception */
+    uint32_t ambient_dof;                  /* popcount(ambient_sieve) */
+    uint32_t exception_zone_dof;           /* popcount(exception_zone_mask) */
+    uint32_t quotient_interior_dof;        /* popcount(interior_sieve) */
+    uint32_t collapsed_boundary_points;    /* 1: all x,y in ExceptionZone collapsed to dM */
+    uint64_t canonical_boundary_tag;       /* Canonical 0D sink tag on dM */
+    char summary[256];
+} FlowHITExceptionQuotient;
+
+typedef struct {
+    uint64_t value;
+    uint64_t boundary_tag;
+} FlowResultU64;
+
+typedef struct {
+    int is_on_boundary;
+    uint64_t raw_bits;
+    uint16_t fn_id;
+    uint8_t guard_idx;
+    FlowBoundaryViolationKind violation_kind;
+    uint8_t cubical_axis;
+    uint16_t user_code;
+    const char *violation_kind_name;
+    char fn_name[64];
+    char theorem_name[64];
+    char guard_expr[256];
+    const FlowCubicalAxisInfo *axis_info;
+    char diagnostic[512];
+} FlowBoundaryCertificateReport;
+
+static inline uint64_t flow_hott_make_boundary_tag(uint16_t fn_id, uint8_t guard_idx,
+                                                   uint8_t violation_kind, uint8_t cubical_axis,
+                                                   uint16_t user_code) {
+    uint64_t kind4 = (uint64_t)((violation_kind == 0U ? 1U : violation_kind) & 0x0FU);
+    uint64_t payload = (((uint64_t)(fn_id & 0x0FFFU)) << 32U) |
+                       (((uint64_t)guard_idx) << 24U) |
+                       (kind4 << 20U) |
+                       (((uint64_t)(cubical_axis & 0x3FU)) << 12U) |
+                       ((uint64_t)(user_code & 0x0FFFU));
+    return FLOW_BOUNDARY_QNAN_MAGIC | payload;
+}
+
+static inline bool flow_hott_is_boundary_tag(uint64_t raw_bits) {
+    return (raw_bits & FLOW_BOUNDARY_QNAN_PREFIX_MASK) == FLOW_BOUNDARY_QNAN_MAGIC;
+}
+
+static inline double flow_result_float_interior(double val) {
+    return val;
+}
+
+static inline double flow_result_float_from_tag(uint64_t tag) {
+    uint64_t bits = flow_hott_is_boundary_tag(tag)
+        ? tag
+        : flow_hott_make_boundary_tag(0U, 0U, (uint8_t)FLOW_BOUNDARY_EXPLICIT_NONE,
+                                      (uint8_t)FLOW_SIEVE_BIT_LEAN_CERTIFIED, (uint16_t)(tag & 0x0FFFU));
+    double out = 0.0;
+    __builtin_memcpy(&out, &bits, sizeof(out));
+    return out;
+}
+
+static inline double flow_result_float_boundary(uint16_t fn_id, uint8_t guard_idx,
+                                                uint8_t violation_kind, uint8_t cubical_axis,
+                                                uint16_t user_code) {
+    uint64_t bits = flow_hott_make_boundary_tag(fn_id, guard_idx, violation_kind, cubical_axis, user_code);
+    double out = 0.0;
+    __builtin_memcpy(&out, &bits, sizeof(out));
+    return out;
+}
+
+static inline bool flow_result_float_is_boundary(double val) {
+    uint64_t bits = 0ULL;
+    __builtin_memcpy(&bits, &val, sizeof(bits));
+    if (flow_hott_is_boundary_tag(bits)) return true;
+    return !__builtin_isfinite(val);
+}
+
+static inline uint64_t flow_result_float_extract_tag(double val) {
+    uint64_t bits = 0ULL;
+    __builtin_memcpy(&bits, &val, sizeof(bits));
+    if (flow_hott_is_boundary_tag(bits)) return bits;
+    if (!__builtin_isfinite(val)) {
+        return flow_hott_make_boundary_tag(0U, 0U, (uint8_t)FLOW_BOUNDARY_DOMAIN_SINGULARITY,
+                                           (uint8_t)FLOW_SIEVE_BIT_BOUNDED_RANGE, 0U);
+    }
+    return 0ULL;
+}
+
+static inline FlowResultU64 flow_result_u64_interior(uint64_t val) {
+    FlowResultU64 r = { val, 0ULL };
+    return r;
+}
+
+static inline FlowResultU64 flow_result_u64_boundary(uint16_t fn_id, uint8_t guard_idx,
+                                                     uint8_t violation_kind, uint8_t cubical_axis,
+                                                     uint16_t user_code) {
+    FlowResultU64 r = { 0ULL, flow_hott_make_boundary_tag(fn_id, guard_idx, violation_kind, cubical_axis, user_code) };
+    return r;
+}
+
+static inline bool flow_result_u64_is_boundary(FlowResultU64 r) {
+    return r.boundary_tag != 0ULL;
+}
+
+const char *flow_hott_boundary_kind_name(FlowBoundaryViolationKind kind);
+int flow_hott_quotient_exception_zone(uint64_t ambient_sieve, uint64_t exception_zone_mask,
+                                      uint16_t fn_id, FlowHITExceptionQuotient *quotient_out);
+int flow_hott_decode_boundary_exception(uint64_t raw_bits, const SemanticIR *ir,
+                                        FlowBoundaryCertificateReport *report_out);
+
 #ifdef __cplusplus
 }
 #endif
