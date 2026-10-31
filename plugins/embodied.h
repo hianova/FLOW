@@ -6,15 +6,15 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
-#define FLOW_MAX_JOINTS 16
-#define FLOW_SUPPORT_POLYGON_VERTICES 8
-#define FLOW_PHYSICS_GRAVITY_MPS2       9.81
-#define FLOW_EMBODIED_DEFAULT_JOINTS    6U
-#define FLOW_EMBODIED_DEFAULT_MASS_KG   25.0
-#define FLOW_EMBODIED_DEFAULT_DT_SEC    0.001
-#define FLOW_EMBODIED_DEFAULT_MAX_ACCEL 50.0
+#define FLOW_MAX_JOINTS                  16
+#define FLOW_SUPPORT_POLYGON_VERTICES    8
+#define FLOW_PHYSICS_GRAVITY_MPS2        9.81
+#define FLOW_EMBODIED_DEFAULT_JOINTS     6U
+#define FLOW_EMBODIED_DEFAULT_MASS_KG    25.0
+#define FLOW_EMBODIED_DEFAULT_DT_SEC     0.001
+#define FLOW_EMBODIED_DEFAULT_MAX_ACCEL  50.0
 #define FLOW_EMBODIED_DEFAULT_MAX_TORQUE 80.0
-#define FLOW_EMBODIED_DEFAULT_COM_Z     0.65
+#define FLOW_EMBODIED_DEFAULT_COM_Z      0.65
 typedef struct {
     double joint_angles[FLOW_MAX_JOINTS];
     double joint_velocities[FLOW_MAX_JOINTS];
@@ -60,22 +60,37 @@ typedef struct {
     bool is_passivity_maintained;
 } FlowMoriZwanzigImpedanceController;
 
-int flow_embodied_mz_init(FlowMoriZwanzigImpedanceController *ctrl, size_t joint_count, const double memory_kernel[], size_t tap_count);
-int flow_embodied_mz_step_10khz(FlowMoriZwanzigImpedanceController *ctrl, const double current_q[], const double current_v[],
-                                const double target_q[], const double target_v[], double torques_out[], double dt);
-int flow_embodied_mz_simulate_impact(FlowMoriZwanzigImpedanceController *ctrl, double impact_impulse_ns,
-                                     double *settling_time_ms_out, double *peak_torque_out);
-FlowSMTResult flow_embodied_mz_verify_smt(const FlowMoriZwanzigImpedanceController *ctrl, FlowSMTProofAttestation *proof_out);
+int flow_embodied_mz_init(FlowMoriZwanzigImpedanceController *ctrl, size_t joint_count,
+                          const double memory_kernel[], size_t tap_count);
+int flow_embodied_mz_step_10khz(FlowMoriZwanzigImpedanceController *ctrl, const double current_q[],
+                                const double current_v[], const double target_q[],
+                                const double target_v[], double torques_out[], double dt);
+int flow_embodied_mz_simulate_impact(FlowMoriZwanzigImpedanceController *ctrl,
+                                     double impact_impulse_ns, double *settling_time_ms_out,
+                                     double *peak_torque_out);
+FlowSMTResult flow_embodied_mz_verify_smt(const FlowMoriZwanzigImpedanceController *ctrl,
+                                          FlowSMTProofAttestation *proof_out);
 
 /* ============================================================================
  * 6-DoF IMU Attitude Filter & Hardware Primitive Driver
  * ============================================================================ */
-typedef struct { float accel_m_s2[3], gyro_rad_s[3], mag_uT[3], temp_celsius; uint64_t timestamp_ns; uint32_t sequence; } FlowIMUSample;
-typedef struct { float roll_rad, pitch_rad, yaw_rad, alpha; uint64_t samples_processed; uint32_t drift_spikes_rejected; } FlowIMUAttitudeFilter;
+typedef struct {
+    float accel_m_s2[3], gyro_rad_s[3], mag_uT[3], temp_celsius;
+    uint64_t timestamp_ns;
+    uint32_t sequence;
+} FlowIMUSample;
+typedef struct {
+    float roll_rad, pitch_rad, yaw_rad, alpha;
+    uint64_t samples_processed;
+    uint32_t drift_spikes_rejected;
+} FlowIMUAttitudeFilter;
 void flow_imu_filter_init(FlowIMUAttitudeFilter *filter, float alpha);
-void flow_imu_filter_update(FlowIMUAttitudeFilter *filter, const FlowIMUSample *sample, float dt_seconds);
+void flow_imu_filter_update(FlowIMUAttitudeFilter *filter, const FlowIMUSample *sample,
+                            float dt_seconds);
 const FlowPrimitiveDriver *flow_primitive_imu_driver(void);
-FlowSMTResult flow_imu_verify_bounds_smt(const FlowIMUSample *sample, const FlowIMUAttitudeFilter *filter, FlowSMTProofAttestation *proof_out);
+FlowSMTResult flow_imu_verify_bounds_smt(const FlowIMUSample *sample,
+                                         const FlowIMUAttitudeFilter *filter,
+                                         FlowSMTProofAttestation *proof_out);
 
 /* ============================================================================
  * SocketCAN / CAN-FD Real-Time Motor Control Bus Driver
@@ -91,8 +106,8 @@ FlowSMTResult flow_imu_verify_bounds_smt(const FlowIMUSample *sample, const Flow
 
 typedef struct {
     uint32_t can_id;
-    uint8_t  len, flags, res0, res1;
-    uint8_t  data[FLOW_CAN_MAX_DLEN];
+    uint8_t len, flags, res0, res1;
+    uint8_t data[FLOW_CAN_MAX_DLEN];
 } FlowCANFrame;
 
 typedef enum {
@@ -128,6 +143,7 @@ void flow_can_close(FlowCANBus *bus);
 int flow_can_create_loopback_pair(FlowCANBus **bus_a_out, FlowCANBus **bus_b_out);
 const FlowPrimitiveDriver *flow_primitive_can_driver(void);
 FlowSMTResult flow_can_verify_arbitration_smt(uint32_t emergency_id, uint32_t background_id,
-                                              uint32_t bus_bitrate_kbps, double max_allowed_latency_us,
+                                              uint32_t bus_bitrate_kbps,
+                                              double max_allowed_latency_us,
                                               FlowSMTProofAttestation *proof_out);
 #endif

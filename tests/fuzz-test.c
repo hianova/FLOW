@@ -10,7 +10,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define FUZZ_CHECK(cond) if (!(cond)) { fprintf(stderr, "fuzz-test assertion failed at %s:%d: %s\n", __FILE__, __LINE__, #cond); exit(1); }
+#define FUZZ_CHECK(cond)                                                                         \
+    if (!(cond)) {                                                                               \
+        fprintf(stderr, "fuzz-test assertion failed at %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+        exit(1);                                                                                 \
+    }
 
 int LLVMFuzzerInitialize(int *argc, char ***argv);
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
@@ -23,10 +27,12 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
-    if (data == NULL || size == 0 || size > 65536) return 0;
+    if (data == NULL || size == 0 || size > 65536)
+        return 0;
 
     FILE *mem = fmemopen((void *)data, size, "r");
-    if (!mem) return 0;
+    if (!mem)
+        return 0;
 
     static FlowSpec spec;
     memset(&spec, 0, sizeof(spec));
@@ -73,7 +79,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 #ifndef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
 static uint64_t fuzz_prng(uint64_t *state) {
     uint64_t x = *state;
-    if (x == 0) x = UINT64_C(0xdeadbeefcafebabe);
+    if (x == 0)
+        x = UINT64_C(0xdeadbeefcafebabe);
     x ^= x << 13;
     x ^= x >> 7;
     x ^= x << 17;

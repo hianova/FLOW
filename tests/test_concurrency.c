@@ -26,7 +26,8 @@ static void *concur_reader_thread(void *arg) {
     ConcurWorkerArg *w = (ConcurWorkerArg *)arg;
     FlowReloadReader r;
     memset(&r, 0, sizeof(r));
-    if (flow_reload_reader_register(w->ctx, &r) != FLOW_RELOAD_OK) return NULL;
+    if (flow_reload_reader_register(w->ctx, &r) != FLOW_RELOAD_OK)
+        return NULL;
     atomic_fetch_add_explicit(w->readers_ready, 1, memory_order_release);
     uint64_t in_v = 3, out_v = 0;
     while (!atomic_load_explicit(w->stop_flag, memory_order_acquire)) {
@@ -101,15 +102,13 @@ int main(void) {
     /* ========================================================================= */
     FLOW_STAGE_BEGIN(1, "QSBR Lock-Free Reader Fast Path & Quiescent Checkpoints");
     {
-        FlowUnit unit = {
-            .abi_version = FLOW_RELOAD_ABI_VERSION,
-            .name = "qsbr_concur_unit",
-            .layout = FLOW_LAYOUT_DEFAULT,
-            .init = mock_concur_init,
-            .run = mock_concur_run,
-            .drop = mock_concur_drop,
-            .migrate = mock_concur_migrate
-        };
+        FlowUnit unit = {.abi_version = FLOW_RELOAD_ABI_VERSION,
+                         .name = "qsbr_concur_unit",
+                         .layout = FLOW_LAYOUT_DEFAULT,
+                         .init = mock_concur_init,
+                         .run = mock_concur_run,
+                         .drop = mock_concur_drop,
+                         .migrate = mock_concur_migrate};
 
         FlowReloadContext *ctx = flow_reload_create(NULL);
         FLOW_ASSERT_TRUE(ctx != NULL);
@@ -134,7 +133,8 @@ int main(void) {
         FLOW_ASSERT_EQ(flow_reload_reader_unregister(&reader), FLOW_RELOAD_OK);
         flow_reload_destroy(ctx);
 
-        printf("  ✓ Stage 1 Passed: QSBR lock-free reader loop & offline/online cycle validated.\n\n");
+        printf(
+            "  ✓ Stage 1 Passed: QSBR lock-free reader loop & offline/online cycle validated.\n\n");
     }
 
     /* ========================================================================= */
@@ -145,15 +145,13 @@ int main(void) {
         FlowReloadContext *ctx = flow_reload_create(NULL);
         FLOW_ASSERT_TRUE(ctx != NULL);
 
-        FlowUnit v1 = {
-            .abi_version = FLOW_RELOAD_ABI_VERSION,
-            .name = "module_v1",
-            .layout = FLOW_LAYOUT_DEFAULT,
-            .init = mock_concur_init,
-            .run = mock_concur_run,
-            .drop = mock_concur_drop,
-            .migrate = mock_concur_migrate
-        };
+        FlowUnit v1 = {.abi_version = FLOW_RELOAD_ABI_VERSION,
+                       .name = "module_v1",
+                       .layout = FLOW_LAYOUT_DEFAULT,
+                       .init = mock_concur_init,
+                       .run = mock_concur_run,
+                       .drop = mock_concur_drop,
+                       .migrate = mock_concur_migrate};
 
         FLOW_ASSERT_EQ(flow_reload_activate(ctx, &v1), FLOW_RELOAD_OK);
         FLOW_ASSERT_EQ(flow_reload_generation(ctx), 1ULL);
@@ -196,13 +194,14 @@ int main(void) {
         void *v3_state = NULL;
         FLOW_ASSERT_EQ(v2.init(NULL, &v3_state), 0);
         FLOW_ASSERT_EQ(flow_reload_publish(ctx, &v2, v3_state), FLOW_RELOAD_OK);
-        /* Reader is still pinned on generation 2 -> synchronize must time out and reclaim must return 0 */
+        /* Reader is still pinned on generation 2 -> synchronize must time out and reclaim must
+         * return 0 */
         FLOW_ASSERT_EQ(flow_qsbr_synchronize(ctx, 50000ULL), FLOW_RELOAD_BUSY);
         FLOW_ASSERT_EQ(flow_reload_reclaim(ctx), 0ULL);
 
-        /* Reservation-Before-Publication (qsbr.rs philosophy): saturate retired queue up to FLOW_RELOAD_MAX_RETIRED_DEPTH
-         * while reader remains pinned; the next publish/activate MUST abort with FLOW_RELOAD_JOURNAL_FULL
-         * without mutating current generation or state! */
+        /* Reservation-Before-Publication (qsbr.rs philosophy): saturate retired queue up to
+         * FLOW_RELOAD_MAX_RETIRED_DEPTH while reader remains pinned; the next publish/activate MUST
+         * abort with FLOW_RELOAD_JOURNAL_FULL without mutating current generation or state! */
         for (size_t r_i = 2; r_i < FLOW_RELOAD_MAX_RETIRED_DEPTH; ++r_i) {
             FLOW_ASSERT_EQ(flow_reload_activate(ctx, &v2), FLOW_RELOAD_OK);
         }
@@ -238,12 +237,10 @@ int main(void) {
         atomic_int readers_ready = 0;
         atomic_int stop_flag = 0;
         atomic_uint_fast64_t calls_done = 0;
-        ConcurWorkerArg warg = {
-            .ctx = ctx,
-            .readers_ready = &readers_ready,
-            .stop_flag = &stop_flag,
-            .calls_done = &calls_done
-        };
+        ConcurWorkerArg warg = {.ctx = ctx,
+                                .readers_ready = &readers_ready,
+                                .stop_flag = &stop_flag,
+                                .calls_done = &calls_done};
         pthread_t tids[4];
         for (int t = 0; t < 4; ++t) {
             FLOW_ASSERT_EQ(pthread_create(&tids[t], NULL, concur_reader_thread, &warg), 0);
@@ -267,7 +264,8 @@ int main(void) {
         FLOW_ASSERT_TRUE(atomic_load(&calls_done) >= 8);
 
         flow_reload_destroy(ctx);
-        printf("  ✓ Stage 2 Passed: Zero-downtime hot-swap bumped generation 1 -> 2 with state migrated & MT QSBR verified.\n\n");
+        printf(
+            "  ✓ Stage 2 Passed: Zero-downtime hot-swap bumped generation 1 -> 2 with state migrated & MT QSBR verified.\n\n");
     }
 
     /* ========================================================================= */
@@ -279,10 +277,7 @@ int main(void) {
         FLOW_ASSERT_EQ(sizeof(FlowReloadReader) % 64, 0ULL);
 
         FlowJITConfig config = {
-            .enable_lto = 1,
-            .opt_level = 3,
-            .initial_code_heap_bytes = 2 * 1024 * 1024
-        };
+            .enable_lto = 1, .opt_level = 3, .initial_code_heap_bytes = 2 * 1024 * 1024};
         FlowJITEngine *engine = flow_jit_create(&config);
         FLOW_ASSERT_TRUE(engine != NULL);
 
@@ -298,7 +293,8 @@ int main(void) {
         for (int i = 0; i < 3; ++i) {
             char name[32];
             snprintf(name, sizeof(name), "concur_unit_%d", i);
-            FLOW_ASSERT_TRUE(flow_jit_compile_llvm_ir(engine, ir_code, name, FLOW_LAYOUT_SOA, &units[i], &blocks[i]));
+            FLOW_ASSERT_TRUE(flow_jit_compile_llvm_ir(engine, ir_code, name, FLOW_LAYOUT_SOA,
+                                                      &units[i], &blocks[i]));
             FLOW_ASSERT_NE(blocks[i].start_ip, 0ULL);
             FLOW_ASSERT_EQ(blocks[i].code_bytes, 4096ULL);
         }
@@ -307,7 +303,8 @@ int main(void) {
         FLOW_ASSERT_EQ(stats.tlb_shootdowns_avoided, 3ULL);
 
         flow_jit_destroy(engine);
-        printf("  ✓ Stage 3 Passed: 3 JIT units compiled into dual-mapped heap without TLB shootdowns.\n\n");
+        printf(
+            "  ✓ Stage 3 Passed: 3 JIT units compiled into dual-mapped heap without TLB shootdowns.\n\n");
     }
 
     /* ========================================================================= */
@@ -315,67 +312,53 @@ int main(void) {
     /* ========================================================================= */
     FLOW_STAGE_BEGIN(4, "Dynamic Environment Morphing: Adaptive Workload Convergence");
     {
-        FlowUnit unit_fast = {
-            .abi_version = FLOW_RELOAD_ABI_VERSION,
-            .name = "fast_throughput_sharded",
-            .layout = FLOW_LAYOUT_AOS,
-            .init = mock_concur_init,
-            .run = mock_concur_run,
-            .drop = mock_concur_drop,
-            .migrate = mock_concur_migrate
-        };
-        FlowUnit unit_compact = {
-            .abi_version = FLOW_RELOAD_ABI_VERSION,
-            .name = "compact_soa_array",
-            .layout = FLOW_LAYOUT_SOA,
-            .init = mock_concur_init,
-            .run = mock_concur_run,
-            .drop = mock_concur_drop,
-            .migrate = mock_concur_migrate
-        };
+        FlowUnit unit_fast = {.abi_version = FLOW_RELOAD_ABI_VERSION,
+                              .name = "fast_throughput_sharded",
+                              .layout = FLOW_LAYOUT_AOS,
+                              .init = mock_concur_init,
+                              .run = mock_concur_run,
+                              .drop = mock_concur_drop,
+                              .migrate = mock_concur_migrate};
+        FlowUnit unit_compact = {.abi_version = FLOW_RELOAD_ABI_VERSION,
+                                 .name = "compact_soa_array",
+                                 .layout = FLOW_LAYOUT_SOA,
+                                 .init = mock_concur_init,
+                                 .run = mock_concur_run,
+                                 .drop = mock_concur_drop,
+                                 .migrate = mock_concur_migrate};
 
         FlowReloadContext *reload_ctx = flow_reload_create(NULL);
         FLOW_ASSERT_TRUE(reload_ctx != NULL);
         FLOW_ASSERT_EQ(flow_reload_activate(reload_ctx, &unit_fast), FLOW_RELOAD_OK);
 
-        FlowAdaptiveConfig config = {
-            .sample_window = 10,
-            .cooldown_calls = 5,
-            .journal_capacity = 32,
-            .min_improvement_percent = 5.0,
-            .policy = {
-                .flow_name = "browser_pipeline",
-                .domain_contract = "web",
-                .input_capacity = 4096,
-                .memory_limit_bytes = 1024 * 1024
-            }
-        };
+        FlowAdaptiveConfig config = {.sample_window = 10,
+                                     .cooldown_calls = 5,
+                                     .journal_capacity = 32,
+                                     .min_improvement_percent = 5.0,
+                                     .policy = {.flow_name = "browser_pipeline",
+                                                .domain_contract = "web",
+                                                .input_capacity = 4096,
+                                                .memory_limit_bytes = 1024 * 1024}};
 
-        FlowAdaptiveCandidate candidates[2] = {
-            {
-                .name = "fast_throughput_sharded",
-                .unit = &unit_fast,
-                .flow_binding = "browser_pipeline",
-                .domain_contract = "web",
-                .latency_score = 95,
-                .memory_score = 30,
-                .memory_fixed_bytes = 65536,
-                .memory_bytes_per_capacity = 16
-            },
-            {
-                .name = "compact_soa_array",
-                .unit = &unit_compact,
-                .flow_binding = "browser_pipeline",
-                .domain_contract = "web",
-                .latency_score = 50,
-                .memory_score = 98,
-                .memory_fixed_bytes = 2048,
-                .memory_bytes_per_capacity = 4
-            }
-        };
+        FlowAdaptiveCandidate candidates[2] = {{.name = "fast_throughput_sharded",
+                                                .unit = &unit_fast,
+                                                .flow_binding = "browser_pipeline",
+                                                .domain_contract = "web",
+                                                .latency_score = 95,
+                                                .memory_score = 30,
+                                                .memory_fixed_bytes = 65536,
+                                                .memory_bytes_per_capacity = 16},
+                                               {.name = "compact_soa_array",
+                                                .unit = &unit_compact,
+                                                .flow_binding = "browser_pipeline",
+                                                .domain_contract = "web",
+                                                .latency_score = 50,
+                                                .memory_score = 98,
+                                                .memory_fixed_bytes = 2048,
+                                                .memory_bytes_per_capacity = 4}};
 
-        FlowAdaptiveController *controller = flow_adaptive_create(
-            reload_ctx, NULL, &config, candidates, 2, 0, mock_probe);
+        FlowAdaptiveController *controller =
+            flow_adaptive_create(reload_ctx, NULL, &config, candidates, 2, 0, mock_probe);
         FLOW_ASSERT_TRUE(controller != NULL);
 
         FlowReloadReader reader;
@@ -386,17 +369,15 @@ int main(void) {
         FLOW_ASSERT_EQ(flow_adaptive_call(controller, &reader, &in_val, &out_val), FLOW_RELOAD_OK);
         FLOW_ASSERT_EQ(flow_adaptive_current_index(controller), 0ULL);
 
-        FlowEnvironmentState env_critical = {
-            .pressure_level = FLOW_ENV_PRESSURE_MEMORY_CRITICAL,
-            .available_ram_bytes = 8 * 1024 * 1024,
-            .active_concurrent_tabs = 100,
-            .l2_cache_bytes = 512 * 1024,
-            .measured_miss_rate = 0.05
-        };
+        FlowEnvironmentState env_critical = {.pressure_level = FLOW_ENV_PRESSURE_MEMORY_CRITICAL,
+                                             .available_ram_bytes = 8 * 1024 * 1024,
+                                             .active_concurrent_tabs = 100,
+                                             .l2_cache_bytes = 512 * 1024,
+                                             .measured_miss_rate = 0.05};
 
         size_t morphed_index = 0;
-        FlowAdaptiveStatus morph_status = flow_adaptive_handle_pressure_event(
-            controller, &env_critical, &morphed_index);
+        FlowAdaptiveStatus morph_status =
+            flow_adaptive_handle_pressure_event(controller, &env_critical, &morphed_index);
 
         FLOW_ASSERT_EQ(morph_status, FLOW_ADAPTIVE_OK);
         FLOW_ASSERT_EQ(morphed_index, 1ULL);
@@ -414,7 +395,6 @@ int main(void) {
 
         printf("  ✓ Stage 4 Passed: Dynamic environment morphing adapted to workload storm.\n\n");
     }
-
 
     FLOW_TEST_SUITE_END();
     return 0;

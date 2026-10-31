@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, "feat/**", "refactor/**" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  verify-c17:
+    name: C17 Zero-Warning Build & HoTT Test Suite (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest ]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build & Run All 4 Test Suites + CLI Smoke Tests (-Werror)
+        run: make clean && make test CC=clang

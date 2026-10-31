@@ -29,7 +29,8 @@ int main(void) {
         for (uint8_t a = 0; a <= 1; ++a) {
             for (uint8_t b = 0; b <= 1; ++b) {
                 FlowDeMorganInterval lhs = flow_demorgan_not(flow_demorgan_and(a, b));
-                FlowDeMorganInterval rhs = flow_demorgan_or(flow_demorgan_not(a), flow_demorgan_not(b));
+                FlowDeMorganInterval rhs =
+                    flow_demorgan_or(flow_demorgan_not(a), flow_demorgan_not(b));
                 FLOW_ASSERT_EQ(lhs, rhs);
             }
         }
@@ -40,10 +41,12 @@ int main(void) {
         FLOW_ASSERT_EQ(flow_demorgan_word_not(flow_demorgan_word_not(w1)), w1);
 
         uint64_t word_lhs = flow_demorgan_word_not(flow_demorgan_word_and(w1, w2));
-        uint64_t word_rhs = flow_demorgan_word_or(flow_demorgan_word_not(w1), flow_demorgan_word_not(w2));
+        uint64_t word_rhs =
+            flow_demorgan_word_or(flow_demorgan_word_not(w1), flow_demorgan_word_not(w2));
         FLOW_ASSERT_EQ(word_lhs, word_rhs);
 
-        printf("    * De Morgan Involutive Duality verified across 64 parallel dimensions in 1 CPU cycle\n");
+        printf(
+            "    * De Morgan Involutive Duality verified across 64 parallel dimensions in 1 CPU cycle\n");
     }
 
     /* ========================================================================= */
@@ -69,7 +72,8 @@ int main(void) {
         FLOW_ASSERT_EQ(degen & 0x03ULL, 0x03ULL);
         FLOW_ASSERT_TRUE(degen & (1ULL << 4));
 
-        /* Cubical face commutation relation: partial_i^e partial_j^d == partial_{j-1}^d partial_i^e for i < j */
+        /* Cubical face commutation relation: partial_i^e partial_j^d == partial_{j-1}^d partial_i^e
+         * for i < j */
         uint32_t i = 2, j = 5;
         uint64_t base_sieve = 0x123456789ABCDEF0ULL;
         uint64_t lhs = flow_cubical_face_proj(flow_cubical_face_proj(base_sieve, j, 1), i, 0);
@@ -87,7 +91,8 @@ int main(void) {
         /* Test 1: Compatible boundary paths (Kan filler exists -> Homotopic) */
         uint64_t path_p = 0x0000FFFF00001234ULL;
         uint64_t path_q = 0x0000FFFF00005678ULL;
-        uint64_t boundary_filter = 0xFFFF000000000000ULL | 0x0000FFFF00000000ULL; /* Upper 32 bits clamped */
+        uint64_t boundary_filter =
+            0xFFFF000000000000ULL | 0x0000FFFF00000000ULL; /* Upper 32 bits clamped */
 
         uint64_t mismatch = 0;
         FlowKanStatus status = flow_kan_check_homotopy(path_p, path_q, boundary_filter, &mismatch);
@@ -102,7 +107,8 @@ int main(void) {
         FLOW_ASSERT_TRUE(mismatch != 0ULL);
         FLOW_ASSERT_EQ(mismatch, 0x0001000000000000ULL);
 
-        printf("    * Kan Box Filling verified: Mismatch=0 => Homotopic; Mismatch!=0 => Singularity\n");
+        printf(
+            "    * Kan Box Filling verified: Mismatch=0 => Homotopic; Mismatch!=0 => Singularity\n");
     }
 
     /* ========================================================================= */
@@ -164,7 +170,8 @@ int main(void) {
         FLOW_ASSERT_EQ(poly.lower_bounds[0], pre_lower);
         FLOW_ASSERT_EQ(poly.upper_bounds[0], pre_upper);
 
-        printf("    * Handover Protocol: Integer shift Delta applied on homotopic; Abort on obstruction\n");
+        printf(
+            "    * Handover Protocol: Integer shift Delta applied on homotopic; Abort on obstruction\n");
     }
 
     /* ========================================================================= */
@@ -203,7 +210,7 @@ int main(void) {
         FLOW_ASSERT_EQ(sec->is_transversal, 1);
 
         /* SMT Verification */
-        FlowCubicalSieve sieve = { .arrows = ~0ULL, .dimension = 64, .is_closed = 1 };
+        FlowCubicalSieve sieve = {.arrows = ~0ULL, .dimension = 64, .is_closed = 1};
         FlowSMTProofAttestation proof;
         memset(&proof, 0, sizeof(proof));
         FlowSMTResult res = flow_cubical_verify_smt(&sieve, 0x1234ULL, 0x1234ULL, ~0ULL, &proof);
@@ -264,12 +271,14 @@ int main(void) {
         FLOW_ASSERT_NE(m_sim, m_phy);
 
         /* Negative SMT check on obstructed Kan open box */
-        FlowCubicalSieve bad_sieve = { .arrows = ~0ULL, .dimension = 64, .is_closed = 1 };
+        FlowCubicalSieve bad_sieve = {.arrows = ~0ULL, .dimension = 64, .is_closed = 1};
         FlowSMTProofAttestation bad_proof;
         FLOW_SMT_PROOF_POISON(&bad_proof);
-        FLOW_ASSERT_EQ(flow_cubical_verify_smt(&bad_sieve, 0x1ULL, 0x0ULL, 0x1ULL, &bad_proof), FLOW_SMT_VIOLATION_SAT);
+        FLOW_ASSERT_EQ(flow_cubical_verify_smt(&bad_sieve, 0x1ULL, 0x0ULL, 0x1ULL, &bad_proof),
+                       FLOW_SMT_VIOLATION_SAT);
 
-        printf("    * 64-Axis Basis Dictionary, Homotopic 1-Cell Decoder & Intent Projection 100%% SOUND\n");
+        printf(
+            "    * 64-Axis Basis Dictionary, Homotopic 1-Cell Decoder & Intent Projection 100%% SOUND\n");
     }
 
     /* ========================================================================= */
@@ -281,8 +290,8 @@ int main(void) {
         flow_hott_universe_reset(&u_soa);
 
         /* Register JetState[64] ~= JetState_SOA64 along FLOW_SIEVE_BIT_COLUMNAR_MORPH */
-        int reg_ok = flow_hott_register_soa_equivalence(&u_soa, "JetState", "JetState_SOA64",
-                                                        4, 32, FLOW_SIMD_SOA_LANES, 0U,
+        int reg_ok = flow_hott_register_soa_equivalence(&u_soa, "JetState", "JetState_SOA64", 4, 32,
+                                                        FLOW_SIMD_SOA_LANES, 0U,
                                                         FLOW_SIEVE_SECURITY_CANONICAL_MASK);
         FLOW_ASSERT_EQ(reg_ok, 1);
         FLOW_ASSERT_EQ(flow_hott_verify_universe_all(&u_soa), 1);
@@ -294,15 +303,17 @@ int main(void) {
         FLOW_ASSERT_NE(ua_hash, 0ULL);
 
         /* Negative test: wrong lane count or broken non-layout axis must be obstructed */
-        FLOW_ASSERT_EQ(flow_hott_verify_soa_univalence(&u_soa, "JetState", "JetState_SOA64", 32U, NULL),
-                       FLOW_KAN_OBSTRUCTED_SINGULARITY);
+        FLOW_ASSERT_EQ(
+            flow_hott_verify_soa_univalence(&u_soa, "JetState", "JetState_SOA64", 32U, NULL),
+            FLOW_KAN_OBSTRUCTED_SINGULARITY);
 
         /* Register a type with a non-layout sieve mismatch and verify obstruction */
         flow_hott_register_type(&u_soa, "BrokenSOA", FLOW_HOTT_LANG_LEAN, 4, 32 * 64, 64, 0U,
                                 FLOW_SIEVE_SECURITY_CANONICAL_MASK ^ 0x1ULL);
-        flow_hott_register_type(&u_soa, "BrokenSOA", FLOW_HOTT_LANG_C17,  4, 32 * 64, 64, 0U,
+        flow_hott_register_type(&u_soa, "BrokenSOA", FLOW_HOTT_LANG_C17, 4, 32 * 64, 64, 0U,
                                 FLOW_SIEVE_SECURITY_CANONICAL_MASK ^ 0x1ULL);
-        FLOW_ASSERT_EQ(flow_hott_verify_soa_univalence(&u_soa, "JetState", "BrokenSOA", FLOW_SIMD_SOA_LANES, NULL),
+        FLOW_ASSERT_EQ(flow_hott_verify_soa_univalence(&u_soa, "JetState", "BrokenSOA",
+                                                       FLOW_SIMD_SOA_LANES, NULL),
                        FLOW_KAN_OBSTRUCTED_SINGULARITY);
 
         printf("    * HoTT Univalence AOS[64] ~= SOA64 Path Lifting Verified (ua_hash=0x%016llx)\n",
@@ -312,7 +323,8 @@ int main(void) {
     /* ========================================================================= */
     /* 9. Differential Cohesive HoTT: Homotopy Fiber & Discrete 4-Jet (J^4 E)    */
     /* ========================================================================= */
-    FLOW_STAGE_BEGIN(9, "Differential Cohesive HoTT: Homotopy Fiber (fib_{ev}(1)) & Discrete 4-Jet (J^4 E)");
+    FLOW_STAGE_BEGIN(
+        9, "Differential Cohesive HoTT: Homotopy Fiber (fib_{ev}(1)) & Discrete 4-Jet (J^4 E)");
     {
         FlowHomotopyFiberReport rep;
 
@@ -323,13 +335,15 @@ int main(void) {
         FLOW_ASSERT_EQ(flow_hott_collapse_fiber_contractible(&rep, NULL, NULL), 0);
 
         /* Case B: 1-Type Groupoid (A // G, h_level = 1) when symmetry orbit axes are unpinned */
-        FLOW_ASSERT_EQ(flow_hott_analyze_homotopy_fiber(0x03ULL, 0x3FULL, 0x03ULL, 0x30ULL, &rep), 1);
+        FLOW_ASSERT_EQ(flow_hott_analyze_homotopy_fiber(0x03ULL, 0x3FULL, 0x03ULL, 0x30ULL, &rep),
+                       1);
         FLOW_ASSERT_EQ(rep.h_level, FLOW_HLEVEL_GROUPOID_SYMMETRY);
         FLOW_ASSERT_EQ(rep.pi1_symmetry_generators, 2U); /* bits 4 and 5 */
         FLOW_ASSERT_EQ(rep.pi0_components, 4U);          /* bits 2 and 3 => 2^2 = 4 */
 
         /* Case C: 0-Type Discrete Set (h_level = 0, |pi_0| > 1) causing solver oscillation */
-        FLOW_ASSERT_EQ(flow_hott_analyze_homotopy_fiber(0x03ULL, 0x0FULL, 0x03ULL, 0x0ULL, &rep), 1);
+        FLOW_ASSERT_EQ(flow_hott_analyze_homotopy_fiber(0x03ULL, 0x0FULL, 0x03ULL, 0x0ULL, &rep),
+                       1);
         FLOW_ASSERT_EQ(rep.h_level, FLOW_HLEVEL_SET_DISCRETE);
         FLOW_ASSERT_EQ(rep.pi0_components, 4U);
         FLOW_ASSERT_EQ(rep.pi1_symmetry_generators, 0U);
@@ -338,7 +352,8 @@ int main(void) {
         /* Collapse multi-solution fiber to Contractible ((-2)-Type, isContr) */
         uint64_t contracted_w = 0ULL, pinned_mask = 0ULL;
         FLOW_ASSERT_EQ(flow_hott_collapse_fiber_contractible(&rep, &contracted_w, &pinned_mask), 1);
-        FLOW_ASSERT_EQ(flow_hott_analyze_homotopy_fiber(0x03ULL, 0x0FULL, pinned_mask, 0x0ULL, &rep), 1);
+        FLOW_ASSERT_EQ(
+            flow_hott_analyze_homotopy_fiber(0x03ULL, 0x0FULL, pinned_mask, 0x0ULL, &rep), 1);
         FLOW_ASSERT_EQ(rep.h_level, FLOW_HLEVEL_CONTRACTIBLE);
         FLOW_ASSERT_EQ(rep.pi0_components, 1U);
         FLOW_ASSERT_EQ(rep.pi1_symmetry_generators, 0U);
@@ -349,21 +364,23 @@ int main(void) {
             /* Constant section s(x) = 2.5 has J^1 = J^2 = J^3 = J^4 = 0 */
             section[i] = 2.5;
         }
-        double rk_min[5] = { 0.0, -1.0, -1.0, -1.0, -1.0 };
-        double rk_max[5] = { 5.0,  1.0,  1.0,  1.0,  1.0 };
+        double rk_min[5] = {0.0, -1.0, -1.0, -1.0, -1.0};
+        double rk_max[5] = {5.0, 1.0, 1.0, 1.0, 1.0};
         FlowDiscreteJetBundle bundle;
         FLOW_ASSERT_EQ(flow_jet_bundle_prolong_bmf(section, 16, rk_min, rk_max, &bundle), 1);
         FLOW_ASSERT_EQ(bundle.is_holonomic_section, 1);
         FLOW_ASSERT_EQ(bundle.holonomic_mask, 0xFFFFULL);
         FLOW_ASSERT_TRUE(bundle.cartan_kahler_defect <= 1e-12);
 
-        printf("    * Homotopy Fiber h-Level (-2, -1, 0, 1) & Discrete 4-Jet Prolongation (J^4 E) Verified\n");
+        printf(
+            "    * Homotopy Fiber h-Level (-2, -1, 0, 1) & Discrete 4-Jet Prolongation (J^4 E) Verified\n");
     }
 
     /* ========================================================================= */
     /* 10. HIT Exception Quotient (SpaceWithException) & dM Quiet NaN Pullback   */
     /* ========================================================================= */
-    FLOW_STAGE_BEGIN(10, "HIT Exception Quotient (SpaceWithException) & Zero-Branch dM Quiet NaN Pullback");
+    FLOW_STAGE_BEGIN(
+        10, "HIT Exception Quotient (SpaceWithException) & Zero-Branch dM Quiet NaN Pullback");
     {
         /* 10a. HIT Pushout Quotient M / ExcZone: collapse 4 exception axes in 16-axis space */
         FlowHITExceptionQuotient hit_q;
@@ -405,7 +422,8 @@ int main(void) {
         FLOW_ASSERT_EQ(cert.is_on_boundary, 0);
         FLOW_ASSERT_EQ((int)cert.violation_kind, (int)FLOW_BOUNDARY_OK);
 
-        printf("    * HIT SpaceWithException Quotient (16 -> 12+1 pt) & IEEE-754 Quiet NaN dM Pullback Verified\n");
+        printf(
+            "    * HIT SpaceWithException Quotient (16 -> 12+1 pt) & IEEE-754 Quiet NaN dM Pullback Verified\n");
     }
 
     FLOW_TEST_SUITE_END();
