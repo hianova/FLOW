@@ -606,22 +606,13 @@ int main(void) {
             "#include \"%s\"\n"
             "typedef double (*exec_quote_fn)(double, double, double, double, double *, double *);\n"
             "typedef double (*quote_spread_fn)(double, double, double, double);\n"
-            "typedef flow_fx64_t (*exec_quote_fx_fn)(flow_fx64_t, flow_fx64_t, flow_fx64_t, flow_fx64_t, flow_fx64_t *, flow_fx64_t *);\n"
-            "typedef flow_fx64_t (*quote_spread_fx_fn)(flow_fx64_t, flow_fx64_t, flow_fx64_t, flow_fx64_t);\n"
             "typedef void (*ab_rec_fn)(uint32_t, double, double, double);\n"
             "typedef uint64_t (*ab_get_u64_fn)(void);\n"
             "typedef uint64_t (*ab_get_fn_u64_fn)(uint32_t);\n"
             "typedef void (*ab_reset_fn)(void);\n"
             "int main(void) {\n"
-            "    flow_fx64_t fx_bid = 0, fx_ask = 0;\n"
             "    exec_bilateral_quote_tuple_t tup_check = { 0.0, 0.0 };\n"
             "    (void)tup_check;\n"
-            "    flow_fx64_t fx_ret0 = flowc_exec_bilateral_quote_fx(100LL * FLOW_FX_ONE, 4LL * FLOW_FX_ONE, -2LL * FLOW_FX_ONE, FLOW_FX_ONE >> 2, &fx_bid, &fx_ask);\n"
-            "    assert(fx_ret0 == fx_bid);\n"
-            "    assert(fx_bid == (99LL * FLOW_FX_ONE + (FLOW_FX_ONE >> 2)));\n"
-            "    assert(fx_ask == (101LL * FLOW_FX_ONE + (FLOW_FX_ONE >> 2)));\n"
-            "    flow_fx64_t fx_sprd = flowc_quote_spread_fx(100LL * FLOW_FX_ONE, 4LL * FLOW_FX_ONE, -2LL * FLOW_FX_ONE, FLOW_FX_ONE >> 2);\n"
-            "    assert(fx_sprd == 2LL * FLOW_FX_ONE);\n"
             "    double inl_bid = 0.0, inl_ask = 0.0;\n"
             "    double ret0 = flowc_exec_bilateral_quote(100.0, 4.0, -2.0, 0.25, &inl_bid, &inl_ask);\n"
             "    assert(fabs(ret0 - inl_bid) < 1e-9);\n"
@@ -639,14 +630,12 @@ int main(void) {
             "    assert(desc != NULL && desc->abi_major == 1 && desc->descriptor_size >= 64);\n"
             "    exec_quote_fn dso_quote = (exec_quote_fn)dlsym(h, \"exec_bilateral_quote\");\n"
             "    quote_spread_fn dso_spread = (quote_spread_fn)dlsym(h, \"quote_spread\");\n"
-            "    exec_quote_fx_fn dso_quote_fx = (exec_quote_fx_fn)dlsym(h, \"exec_bilateral_quote_fx\");\n"
-            "    quote_spread_fx_fn dso_spread_fx = (quote_spread_fx_fn)dlsym(h, \"quote_spread_fx\");\n"
             "    ab_rec_fn dso_ab_rec = (ab_rec_fn)dlsym(h, \"flow_ab_shadow_record\");\n"
             "    ab_get_u64_fn dso_ab_calls = (ab_get_u64_fn)dlsym(h, \"flow_ab_shadow_get_calls\");\n"
             "    ab_get_u64_fn dso_ab_mis = (ab_get_u64_fn)dlsym(h, \"flow_ab_shadow_get_mismatches\");\n"
             "    ab_get_fn_u64_fn dso_ab_fn = (ab_get_fn_u64_fn)dlsym(h, \"flow_ab_shadow_get_fn_calls\");\n"
             "    ab_reset_fn dso_ab_reset = (ab_reset_fn)dlsym(h, \"flow_ab_shadow_reset\");\n"
-            "    assert(dso_quote && dso_spread && dso_quote_fx && dso_spread_fx && dso_ab_rec && dso_ab_calls && dso_ab_mis && dso_ab_fn && dso_ab_reset);\n"
+            "    assert(dso_quote && dso_spread && dso_ab_rec && dso_ab_calls && dso_ab_mis && dso_ab_fn && dso_ab_reset);\n"
             "    dso_ab_reset();\n"
             "    double dso_bid = 0.0, dso_ask = 0.0;\n"
             "    dso_quote(100.0, 4.0, -2.0, 0.25, &dso_bid, &dso_ask);\n"
@@ -677,9 +666,9 @@ int main(void) {
     }
 
     /* ========================================================================= */
-    /* STAGE 9: FlowExactNumerics — Fixed-Point Q16.16/Q32.32, U256 & Linalg     */
+    /* STAGE 9: FlowExactNumerics — Q16.16 Approximators, U256 & IEEE-754 Linalg */
     /* ========================================================================= */
-    FLOW_STAGE_BEGIN(9, "FlowExactNumerics: Lossless Fixed-Point Q16.16/Q32.32, 256-Bit BigInt & Fixed-Point Linalg");
+    FLOW_STAGE_BEGIN(9, "FlowExactNumerics: Q16.16 Approximators, 256-Bit BigInt & IEEE-754 Linalg");
     {
         int32_t exp_0 = 0;
         FLOW_ASSERT_EQ(flow_exp_approx_q16(0, &exp_0), 1);
@@ -689,9 +678,8 @@ int main(void) {
         FLOW_ASSERT_EQ(flow_rsqrt_approx_i32(16U, &rsqrt_16), 1);
         FLOW_ASSERT_EQ(rsqrt_16, 16384U);
 
-        FLOW_ASSERT_EQ(flow_fx64_from_double(1.0), FLOW_FX_ONE);
-        FLOW_ASSERT_EQ(flow_fx64_from_double(NAN), FLOW_FX64_NONE);
-        FLOW_ASSERT_EQ(flow_fx64_sqrt(9LL * FLOW_FX_ONE), 3LL * FLOW_FX_ONE);
+        FLOW_ASSERT_EQ(flow_quantize(0.5, 0.0, 1.0, 16U), 32768ULL);
+        FLOW_ASSERT_TRUE(fabs(flow_dequantize(32768ULL, 0.0, 1.0, 16U) - 0.5) < 1e-4);
 
         static const uint64_t secp_bases[] = { 2ULL, 3ULL, 5ULL, 7ULL };
         FlowU256 p_secp;
@@ -703,18 +691,18 @@ int main(void) {
         FlowU256 even_res = flow_u256_mod_pow(big_base, flow_u256_from_u64(2ULL), flow_u256_from_u64(1000ULL));
         FLOW_ASSERT_EQ(even_res.w[0], 729ULL);
 
-        flow_fx64_t x_in[2]    = { 1LL * FLOW_FX_ONE, 2LL * FLOW_FX_ONE };
-        flow_fx64_t w_param[2] = { 0LL, 0LL };
-        flow_fx64_t preds[1]   = { 0LL };
-        flow_fx64_t tgts[1]    = { 5LL * FLOW_FX_ONE };
-        flow_fx_mat_mul_ikj(1, 2, 1, x_in, w_param, preds);
-        flow_fx64_t loss_before = flow_fx_mse_loss(1, 1, preds, tgts);
-        flow_fx_gradient_descent_step(1, 2, 1, x_in, w_param, preds, tgts, FLOW_FX_ONE / 10);
-        flow_fx_mat_mul_ikj(1, 2, 1, x_in, w_param, preds);
-        flow_fx64_t loss_after = flow_fx_mse_loss(1, 1, preds, tgts);
+        double x_in[2]    = { 1.0, 2.0 };
+        double w_param[2] = { 0.0, 0.0 };
+        double preds[1]   = { 0.0 };
+        double tgts[1]    = { 5.0 };
+        flow_mat_mul_ikj(1, 2, 1, x_in, w_param, preds);
+        double loss_before = flow_mse_loss(1, 1, preds, tgts);
+        flow_gradient_descent_step(1, 2, 1, x_in, w_param, preds, tgts, 0.1);
+        flow_mat_mul_ikj(1, 2, 1, x_in, w_param, preds);
+        double loss_after = flow_mse_loss(1, 1, preds, tgts);
         FLOW_ASSERT_TRUE(loss_after < loss_before);
 
-        printf("  ✓ Stage 9 Passed: FlowExactNumerics (Q16.16/Q32.32, 256-bit secp256k1 BigInt & fixed-point linalg) verified.\n\n");
+        printf("  ✓ Stage 9 Passed: FlowExactNumerics (Q16.16, 256-bit secp256k1 BigInt & IEEE-754 linalg) verified.\n\n");
     }
 
     /* ========================================================================= */
@@ -753,8 +741,8 @@ int main(void) {
               "    assert(TickRing_pop(&ring, &out_px) == 1 && out_px == 101.25);\n"
               "    FlowJet jet;\n"
               "    assert(flow_jet_init(&jet, \"rt_jet\", \"Minimal RT Jet\") == 1);\n"
-              "    flow_fx64_t a = flow_fx64_from_double(3.5), b = flow_fx64_from_double(2.0);\n"
-              "    assert(flow_fx64_to_double(flow_fx64_mul(a, b)) == 7.0);\n"
+              "    FlowJetScalar2 a = flow_jet2_var(3.5), b = flow_jet2_const(2.0);\n"
+              "    assert(flow_jet2_mul(a, b).v == 7.0 && flow_jet2_mul(a, b).d1 == 2.0);\n"
               "    FlowReloadContext *rctx = flow_reload_create(NULL);\n"
               "    assert(rctx != NULL);\n"
               "    flow_reload_destroy(rctx);\n"
@@ -834,7 +822,7 @@ int main(void) {
               "int main(void) {\n"
               "    void *dl = dlopen(\"/tmp/libflow_ff.so\", RTLD_NOW);\n"
               "    assert(dl != NULL);\n"
-              "    /* Pure double mode (float_abi_ieee64) emits zero _fx symbols */\n"
+              "    /* Unified IEEE-754 double ABI emits zero legacy _fx symbols */\n"
               "    assert(dlsym(dl, \"clamp_spread_fx\") == NULL);\n"
               "    ec_fn_t fn_ec = (ec_fn_t)dlsym(dl, \"extreme_compound\");\n"
               "    mf12_fn_t fn_mf = (mf12_fn_t)dlsym(dl, \"multi_factor_12\");\n"

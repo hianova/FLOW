@@ -7,10 +7,10 @@
 #include <time.h>
 
 #define FLOW_VERSION_MAJOR 2
-#define FLOW_VERSION_MINOR 6
+#define FLOW_VERSION_MINOR 7
 #define FLOW_VERSION_PATCH 0
 #ifndef FLOW_VERSION_STRING
-#define FLOW_VERSION_STRING "2.6.0"
+#define FLOW_VERSION_STRING "2.7.0"
 #endif
 #ifndef FLOW_GIT_BRANCH
 #define FLOW_GIT_BRANCH "main"
@@ -51,6 +51,16 @@ typedef struct {
     char invariants[FLOW_LEAN_STRUCT_INV_MAX][128];
 } FlowLeanStruct;
 typedef struct { char name[FLOW_NAME]; char variants[16][FLOW_NAME]; size_t variant_count; } FlowLeanEnum;
+typedef enum {
+    FLOW_FN_VAR_PRIMARY   = (1u << 0), /* <fn> / flowc_<fn> */
+    FLOW_FN_VAR_JET2      = (1u << 1), /* jet2_<fn> / flowc_jet2_<fn> */
+    FLOW_FN_VAR_LEAN      = (1u << 2), /* lean_<fn> / flowc_lean_<fn> */
+    FLOW_FN_VAR_CERTIFIED = (1u << 3), /* lean_certified_<fn> / flowc_certified_<fn> */
+    FLOW_FN_VAR_TRY       = (1u << 4), /* lean_try_<fn> / flowc_try_<fn> */
+    FLOW_FN_VAR_BOUNDARY  = (1u << 5), /* lean_boundary_<fn> / flowc_boundary_<fn> */
+    FLOW_FN_VAR_SOA64     = (1u << 6)  /* soa_<fn> / flowc_soa_<fn> */
+} FlowOperatorVariantBit;
+
 typedef struct {
     char name[FLOW_NAME];
     char return_type[FLOW_NAME];
@@ -76,6 +86,7 @@ typedef struct {
     int is_result_return;
     uint8_t param_is_result[FLOW_LEAN_PARAM_MAX];
     int is_private;
+    uint32_t variant_mask;
     uint64_t estimated_wcet_ns;
 } FlowLeanFunction;
 typedef struct { char name[FLOW_NAME]; char anchored_fn[FLOW_NAME]; } FlowLeanTheorem;
@@ -176,6 +187,11 @@ static inline uint32_t flow_crc32_ieee(const void *data, size_t length) {
 
 int parse_spec(FILE *input, FlowSpec *spec); void lower_to_ir(const FlowSpec *spec, SemanticIR *ir);
 int flow_verify_lean_theorems(const char *lean_source, char *err_msg, size_t err_size);
+const char *flow_lean_scalar_to_c_type(const char *lean_type);
+const FlowLeanStruct *flow_ir_find_struct(const SemanticIR *ir, const char *name);
+const FlowLeanEnum   *flow_ir_find_enum(const SemanticIR *ir, const char *name);
+const char *flow_ir_type_to_c(const SemanticIR *ir, const char *lean_type);
+void flow_ir_compute_fn_variants(SemanticIR *ir);
 
 #ifndef FLOW_SMT_RESULT_DEFINED
 #define FLOW_SMT_RESULT_DEFINED

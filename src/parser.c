@@ -796,7 +796,7 @@ int parse_spec(FILE *input, FlowSpec *spec) {
     FlowLeanStruct *cur_st = NULL; FlowLeanEnum *cur_en = NULL;
     memset(spec, 0, sizeof(*spec)); strncpy(spec->flow_name, "lean_module", FLOW_NAME - 1);
     spec->max_count = 1024; spec->input_stride_bytes = 8; spec->input_align_bytes = 8; spec->state_schema_version = 1;
-    spec->deterministic = 1; spec->lean_certified = 1; spec->bounded = 1; spec->memory_mb = 64;
+    spec->deterministic = 1; spec->lean_certified = 1; spec->bounded = 1; spec->memory_mb = 64; spec->float_abi_ieee64 = 1;
     char *saveptr = NULL;
     for (char *raw_line = strtok_r(clean_src, "\n", &saveptr); raw_line; raw_line = strtok_r(NULL, "\n", &saveptr)) {
         int line_indent = 0;
@@ -908,6 +908,99 @@ int parse_spec(FILE *input, FlowSpec *spec) {
     if (struct_bytes > 0) spec->input_stride_bytes = (struct_bytes + 7u) & ~7u;
     return saw_lean;
 }
+const char *flow_lean_scalar_to_c_type(const char *t) {
+    if (!t) return "uint64_t";
+    if (!strcmp(t, "Bool")) return "bool";
+    if (!strcmp(t, "Float") || !strcmp(t, "\xe2\x84\x9d") || !strcmp(t, "Real")) return "double";
+    if (!strcmp(t, "Float32")) return "float";
+    if (!strcmp(t, "UInt32")) return "uint32_t";
+    if (!strcmp(t, "Int32")) return "int32_t";
+    if (!strcmp(t, "UInt16")) return "uint16_t";
+    if (!strcmp(t, "Int16")) return "int16_t";
+    if (!strcmp(t, "UInt8")) return "uint8_t";
+    if (!strcmp(t, "Int8")) return "int8_t";
+    if (!strcmp(t, "Int") || !strcmp(t, "Int64")) return "int64_t";
+    return "uint64_t";
+}
+const FlowLeanStruct *flow_ir_find_struct(const SemanticIR *ir, const char *name) {
+    if (!ir || !name || !name[0]) return NULL;
+    for (size_t i = 0; i < ir->lean_struct_count; ++i)
+        if (!strcmp(ir->lean_structs[i].name, name)) return &ir->lean_structs[i];
+    return NULL;
+}
+const FlowLeanEnum *flow_ir_find_enum(const SemanticIR *ir, const char *name) {
+    if (!ir || !name || !name[0]) return NULL;
+    for (size_t i = 0; i < ir->lean_enum_count; ++i)
+        if (!strcmp(ir->lean_enums[i].name, name)) return &ir->lean_enums[i];
+    return NULL;
+}
+const char *flow_ir_type_to_c(const SemanticIR *ir, const char *t) {
+    if (!t) return "uint64_t";
+    if (flow_ir_find_struct(ir, t) || flow_ir_find_enum(ir, t)) return t;
+    return flow_lean_scalar_to_c_type(t);
+}
+static int ir_fn_is_jet2_eligible_depth(const SemanticIR *ir, const FlowLeanFunction *fn, int depth) {
+    if (depth > 4 || !fn || fn->is_struct_transform || fn->is_tuple_return || fn->is_result_return || fn->param_count == 0) return 0;
+    if (strcmp(fn->return_type, "Float") != 0 && strcmp(fn->return_type, "Float32") != 0) return 0;
+    if (strstr(fn->body, "let (") != NULL || strstr(fn->body, "match ") != NULL) return 0;
+    for (size_t pi = 0; pi < fn->param_count; ++pi) {
+        if (fn->param_is_result[pi] || flow_ir_find_struct(ir, fn->param_types[pi])) return 0;
+        if (strcmp(fn->param_types[pi], "Float") != 0 && strcmp(fn->param_types[pi], "Float32") != 0) return 0;
+    }
+    if (ir) {
+        for (size_t k = 0; k < ir->lean_function_count; ++k) {
+            if (&ir->lean_functions[k] == fn) continue;
+            if (has_word_match(fn->body, ir->lean_functions[k].name) &&
+                !ir_fn_is_jet2_eligible_depth(ir, &ir->lean_functions[k], depth + 1)) return 0;
+        }
+    }
+    return 1;
+}
+void flow_ir_compute_fn_variants(SemanticIR *ir) {
+    if (!ir) return;
+    for (size_t fi = 0; fi < ir->lean_function_count; ++fi) {
+        FlowLeanFunction *fn = &ir->lean_functions[fi];
+        uint32_t mask = 0;
+        if (fn->name[0]) {
+            if (!fn->is_private)
+                mask |= FLOW_FN_VAR_PRIMARY;
+            if (ir_fn_is_jet2_eligible_depth(ir, fn, 0))
+                mask |= FLOW_FN_VAR_JET2;
+            if (!fn->is_private && strncmp(fn->name, "lean_", 5) != 0) {
+                char cand[FLOW_NAME + 8];
+                snprintf(cand, sizeof(cand), "lean_%s", fn->name);
+                int has_conflict = 0;
+                for (size_t j = 0; j < ir->lean_function_count; ++j) {
+                    if (!strcmp(ir->lean_functions[j].name, cand)) { has_conflict = 1; break; }
+                }
+                if (!has_conflict) {
+                    mask |= FLOW_FN_VAR_LEAN;
+                    if (!fn->is_tuple_return) {
+                        mask |= FLOW_FN_VAR_CERTIFIED | FLOW_FN_VAR_TRY;
+                        if (!strcmp(flow_ir_type_to_c(ir, fn->return_type), "double"))
+                            mask |= FLOW_FN_VAR_BOUNDARY;
+                    }
+                    if (!fn->is_result_return && !fn->is_tuple_return && fn->param_count > 0) {
+                        const FlowLeanStruct *out_st = flow_ir_find_struct(ir, fn->return_type);
+                        if (!(out_st && out_st->field_count == 0)) {
+                            int has_st_param = 0, bad_st = 0;
+                            for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                                const FlowLeanStruct *in_st = flow_ir_find_struct(ir, fn->param_types[pi]);
+                                if (in_st) {
+                                    if (in_st->field_count == 0) { bad_st = 1; break; }
+                                    has_st_param = 1;
+                                }
+                            }
+                            if (has_st_param && !bad_st)
+                                mask |= FLOW_FN_VAR_SOA64;
+                        }
+                    }
+                }
+            }
+        }
+        fn->variant_mask = mask;
+    }
+}
 static void add_fact(SemanticIR *ir, FlowFactKind kind, const char *detail) {
     if (ir->fact_count >= FLOW_NODE_MAX) return;
     ir->facts[ir->fact_count].kind = kind; strncpy(ir->facts[ir->fact_count++].detail, detail, FLOW_NAME - 1);
@@ -924,4 +1017,5 @@ void lower_to_ir(const FlowSpec *spec, SemanticIR *ir) {
     if (ir->fact_deterministic) add_fact(ir, FLOW_FACT_DETERMINISM, "deterministic");
     if (ir->fact_lean_certified) add_fact(ir, FLOW_FACT_LEAN_CERTIFIED, "lean_certified");
     if (ir->memory_limit_mb > 0 || ir->arena_limit_bytes > 0 || ir->sla_latency_ns > 0 || ir->fact_deterministic) add_fact(ir, FLOW_FACT_CONSTRAINT, "require");
+    flow_ir_compute_fn_variants(ir);
 }

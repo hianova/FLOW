@@ -269,6 +269,49 @@ static void flowy_print_usage(FILE *out) {
         "  -h, --help                                  Show this help message\n");
 }
 
+static int flowy_build_entry(int argc, char **argv) {
+    return flowy_build_cmd(argc, argv, 0);
+}
+
+static int flowy_induce_entry(int argc, char **argv) {
+    return cmd_induce_run(argc - 2, argv + 2);
+}
+
+static int flowy_patch_entry(int argc, char **argv) {
+    flow_registry_init();
+    return cmd_patch_run(argc - 2, argv + 2);
+}
+
+static int flowy_inspect_entry(int argc, char **argv) {
+    flow_registry_init();
+    if (argc < 3 || is_help_flag(argv[2])) {
+        cmd_inspect_print_usage(stdout);
+        return EXIT_SUCCESS;
+    }
+    return cmd_inspect_run(argc - 2, argv + 2);
+}
+
+static int flowy_inspect_alias_entry(int argc, char **argv) {
+    flow_registry_init();
+    return cmd_inspect_run(argc - 1, argv + 1);
+}
+
+static int flowy_lang_entry(int argc, char **argv) {
+    if (argc >= 3) {
+        FlowLanguage nl = flowy_parse_language(argv[2]);
+        flowy_set_language(nl);
+        printf("FLOW language switched to: %s\n", flowy_language_name(nl));
+    } else {
+        printf("Active FLOW language: %s\n", flowy_language_name(flowy_get_language()));
+    }
+    return EXIT_SUCCESS;
+}
+
+typedef struct {
+    const char *const *names;
+    int (*handler)(int argc, char **argv);
+} FlowCliCommand;
+
 int main(int argc, char **argv) {
     if (argc < 2 || is_help_flag(argv[1])) {
         flowy_print_usage(stdout);
@@ -280,20 +323,7 @@ int main(int argc, char **argv) {
         return EXIT_SUCCESS;
     }
 
-    if (!strcmp(argv[1], "run")) return flowy_run_cmd(argc, argv);
-    if (!strcmp(argv[1], "build") || !strcmp(argv[1], "compile")) return flowy_build_cmd(argc, argv, 0);
-    if (!strcmp(argv[1], "induce") || !strcmp(argv[1], "--induce") ||
-        !strcmp(argv[1], "discover") || !strcmp(argv[1], "--discover")) {
-        return cmd_induce_run(argc - 2, argv + 2);
-    }
-    if (!strcmp(argv[1], "patch") || !strcmp(argv[1], "--patch")) {
-        flow_registry_init();
-        return cmd_patch_run(argc - 2, argv + 2);
-    }
-
-    flow_registry_init();
     flowy_set_language(flowy_detect_system_language());
-
     for (int i = 1; i < argc; ++i) {
         if ((!strcmp(argv[i], "--lang") || !strcmp(argv[i], "-l")) && i + 1 < argc) {
             flowy_set_language(flowy_parse_language(argv[i + 1]));
@@ -305,32 +335,32 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (!strcmp(argv[1], "inspect")) {
-        if (argc < 3 || is_help_flag(argv[2])) {
-            cmd_inspect_print_usage(stdout);
-            return EXIT_SUCCESS;
-        }
-        return cmd_inspect_run(argc - 2, argv + 2);
-    }
-
-    static const char *const inspect_aliases[] = {
+    static const char *const run_names[]     = { "run", NULL };
+    static const char *const build_names[]   = { "build", "compile", NULL };
+    static const char *const induce_names[]  = { "induce", "--induce", "discover", "--discover", NULL };
+    static const char *const patch_names[]   = { "patch", "--patch", NULL };
+    static const char *const inspect_names[] = { "inspect", NULL };
+    static const char *const alias_names[]   = {
         "why", "--why", "boundary", "--boundary", "timeline", "--timeline",
         "explain-decisions", "audit", "--audit", "topos", "--topos",
         "hott", "--hott", "cubical", "--cubical", NULL
     };
-    if (match_any(argv[1], inspect_aliases)) {
-        return cmd_inspect_run(argc - 1, argv + 1);
-    }
+    static const char *const lang_names[]    = { "lang", "language", NULL };
 
-    if (!strcmp(argv[1], "lang") || !strcmp(argv[1], "language")) {
-        if (argc >= 3) {
-            FlowLanguage nl = flowy_parse_language(argv[2]);
-            flowy_set_language(nl);
-            printf("FLOW language switched to: %s\n", flowy_language_name(nl));
-        } else {
-            printf("Active FLOW language: %s\n", flowy_language_name(flowy_get_language()));
+    static const FlowCliCommand FLOW_CLI_COMMANDS[] = {
+        { run_names,     flowy_run_cmd             },
+        { build_names,   flowy_build_entry         },
+        { induce_names,  flowy_induce_entry        },
+        { patch_names,   flowy_patch_entry         },
+        { inspect_names, flowy_inspect_entry       },
+        { alias_names,   flowy_inspect_alias_entry },
+        { lang_names,    flowy_lang_entry          }
+    };
+
+    for (size_t ci = 0; ci < sizeof(FLOW_CLI_COMMANDS) / sizeof(FLOW_CLI_COMMANDS[0]); ++ci) {
+        if (match_any(argv[1], FLOW_CLI_COMMANDS[ci].names)) {
+            return FLOW_CLI_COMMANDS[ci].handler(argc, argv);
         }
-        return EXIT_SUCCESS;
     }
 
     fprintf(stderr, "Unknown command: %s\n\n", argv[1]);

@@ -20,13 +20,12 @@ static void flowc_print_usage(FILE *out) {
         "  --induce <samples.csv>        Induce Lean 4 spec & formal certificate from data trajectory\n"
         "  --induce-mode <mode>          Induction mode: composite (default), poly, grid, smm-cir, smm-merton, prng\n"
         "  --emit-induced-lean <f.lean>  Write synthesized Lean 4 specification to <f.lean>\n"
-        "  --target-c-header <file.h>    Emit static inline double/fx64 C17 header & FlowStatusCode\n"
+        "  --target-c-header <file.h>    Emit static inline IEEE-754 C17 header & FlowStatusCode\n"
         "  --target-mex                  Append MATLAB MEX C17 mexFunction dispatcher to <output.c>\n"
         "  --target-lean <file.lean>     Emit & verify Lean 4 formal soundness certificate\n"
         "  --fiber-diagram <out.md>      Emit Differential Cohesive HoTT & Commutative Cube diagram\n"
         "  --reload-adapter              Generate live reload QSBR wrapper adapter\n"
-        "  --ieee64                      Force IEEE 754 64-bit floating point ABI\n"
-        "  --fx64                        Force Q32.32 fixed point ABI\n"
+        "  --ieee64                      IEEE 754 64-bit floating point ABI (default)\n"
         "  -v, --version                 Show version information\n"
         "  -h, --help                    Show this help message\n");
 }
@@ -116,8 +115,6 @@ int flowc_main(int argc, char **argv) {
             fiber_diagram_path = argv[++arg];
         } else if (!strcmp(argv[arg], "--ieee64") || !strcmp(argv[arg], "--float-abi=ieee64")) {
             force_ieee64 = 1;
-        } else if (!strcmp(argv[arg], "--fx64") || !strcmp(argv[arg], "--float-abi=fx64")) {
-            force_ieee64 = -1;
         } else if (!strcmp(argv[arg], "-h") || !strcmp(argv[arg], "--help")) {
             flowc_print_usage(stdout);
             return EXIT_SUCCESS;
