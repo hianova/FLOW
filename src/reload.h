@@ -12,11 +12,7 @@ typedef enum { FLOW_SMT_UNINITIALIZED = 0, FLOW_SMT_PROVEN_UNSAT = 1, FLOW_SMT_V
 typedef struct FlowSMTProofAttestation FlowSMTProofAttestation;
 #define FLOW_RELOAD_ABI_VERSION UINT32_C(3)
 #define FLOW_RELOAD_MAX_RETIRED_DEPTH (sizeof(uint64_t) * 8U)
-typedef struct FlowReloadContext FlowReloadContext; struct FlowPlanArtifact; struct SemanticIR; struct FlowWavefrontRing;
-typedef struct FlowBumpQsbrArena { uint8_t *buffer; size_t capacity, cursor, total_allocs, total_folds; uint64_t generation, bound_wavefront_epoch; uint32_t active_readers; } FlowBumpQsbrArena;
-int flow_bump_qsbr_init(FlowBumpQsbrArena *arena, void *backing_memory, size_t capacity);
-void *flow_bump_qsbr_alloc(FlowBumpQsbrArena *arena, size_t size_bytes);
-int flow_bump_qsbr_quiescent_fold(FlowBumpQsbrArena *arena);
+typedef struct FlowReloadContext FlowReloadContext; struct FlowPlanArtifact; struct SemanticIR;
 typedef enum { FLOW_MUTATION_UPSERT = 1, FLOW_MUTATION_DELETE = 2 } FlowMutationKind;
 typedef struct { FlowMutationKind kind; uint64_t sequence; const void *key; size_t key_size; const void *value; size_t value_size; } FlowMutation;
 enum { FLOW_SCHEMA_FIELD_DEFAULTABLE = UINT32_C(1) << 0, FLOW_SCHEMA_FIELD_PERSISTENT = UINT32_C(1) << 1, FLOW_SCHEMA_FIELD_ORDERED = UINT32_C(1) << 2 };
@@ -46,7 +42,6 @@ int flow_schema_migration_compatible(const FlowSchema *old_schema, const FlowSch
 void flow_qsbr_checkpoint(FlowReloadReader *reader); void flow_qsbr_offline(FlowReloadReader *reader); void flow_qsbr_online(FlowReloadReader *reader);
 int flow_qsbr_call(FlowReloadContext *context, const void *input, void *output); int flow_qsbr_synchronize(FlowReloadContext *context, uint64_t timeout_ns);
 size_t flow_qsbr_reclaim(FlowReloadContext *context);
-int flow_reload_bind_wavefront(FlowReloadContext *context, const struct FlowWavefrontRing *ring); int flow_reload_bind_arena(FlowReloadContext *context, struct FlowBumpQsbrArena *arena);
 FlowSMTResult flow_reload_verify_topological_safety_smt(const FlowReloadContext *context, FlowSMTProofAttestation *proof_out);
 typedef struct FlowAdaptiveController FlowAdaptiveController;
 typedef struct { const char *flow_name, *domain_contract, *resource, *capability; size_t input_capacity, memory_limit_bytes; int require_parallelizable; } FlowAdaptivePolicy;

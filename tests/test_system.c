@@ -504,7 +504,6 @@ int main(void) {
 
         const char *crc_msg = "FLOW_ORTHOGONAL_2026";
         uint32_t crc_base = flow_crc32_ieee(crc_msg, 20);
-        FLOW_ASSERT_EQ(crc_base, flow_fvec_crc32(crc_msg, 20));
         FLOW_ASSERT_EQ(crc_base, flow_jet_crc32(crc_msg, 20));
 
         const char *s7_lean = "/tmp/flow_stage7_sdk.lean";

@@ -24,16 +24,18 @@ static int is_lean_erased_proof_field(const char *t_expr) {
 }
 static size_t parse_lean_type_bytes(const char *t) {
     if (!t || !*t) return 0;
-    if (!strncmp(t, "UInt64", 6) || !strncmp(t, "Int64", 5) || !strncmp(t, "Float", 5) || !strncmp(t, "\xe2\x84\x9d", 3) || !strncmp(t, "Real", 4) || !strncmp(t, "Nat", 3) || !strncmp(t, "USize", 5)) return 8;
-    if (!strncmp(t, "UInt32", 6) || !strncmp(t, "Int32", 5) || !strncmp(t, "Float32", 7)) return 4;
-    if (!strncmp(t, "UInt16", 6) || !strncmp(t, "Int16", 5)) return 2;
-    if (!strncmp(t, "UInt8", 5) || !strncmp(t, "Int8", 4) || !strncmp(t, "Bool", 4)) return 1;
-    if (!strcmp(t, "Int") || (!strncmp(t, "Int", 3) && !isalnum((unsigned char)t[3]))) return 8;
+#define FLOW_MATCH_SCALAR_BYTES(lean_name, norm_lean, c_type, sz, mode) \
+    if (!strncmp(t, lean_name, sizeof(lean_name) - 1) && !isalnum((unsigned char)t[sizeof(lean_name) - 1])) return (sz);
+    FLOW_LEAN_SCALAR_TYPES_X(FLOW_MATCH_SCALAR_BYTES)
+#undef FLOW_MATCH_SCALAR_BYTES
     return isupper((unsigned char)t[0]) ? 8 : 0;
 }
 static int is_scalar_lean_type(const char *t) {
-    static const char *const S[] = {"Nat", "UInt64", "USize", "Int", "Int64", "UInt32", "Int32", "UInt16", "Int16", "UInt8", "Int8", "Bool", "Float", "Float32", "\xe2\x84\x9d", "Real", NULL};
-    for (int i = 0; t && *t && S[i]; ++i) if (!strcmp(t, S[i])) return 1;
+    if (!t || !*t) return 0;
+#define FLOW_IS_SCALAR_TYPE(lean_name, norm_lean, c_type, sz, mode) \
+    if (!strcmp(t, lean_name)) return 1;
+    FLOW_LEAN_SCALAR_TYPES_X(FLOW_IS_SCALAR_TYPE)
+#undef FLOW_IS_SCALAR_TYPE
     return 0;
 }
 static const FlowLeanStruct *find_lean_struct(const FlowSpec *spec, const char *name) {
@@ -46,19 +48,15 @@ static const FlowLeanEnum *find_lean_enum(const FlowSpec *spec, const char *name
 }
 static void lean_type_to_c_info(const FlowSpec *spec, const char *lt, char *c_out, size_t c_sz, char *lean_out, size_t l_sz, size_t *bytes_out) {
     const char *ct = "uint64_t", *norm_lt = "UInt64"; size_t b = 8;
-    if (!strcmp(lt, "Float") || !strcmp(lt, "\xe2\x84\x9d") || !strcmp(lt, "Real")) { ct = "double"; norm_lt = "Float"; b = 8; }
-    else if (!strcmp(lt, "Float32")) { ct = "float"; norm_lt = "Float32"; b = 4; }
-    else if (!strcmp(lt, "UInt64") || !strcmp(lt, "Nat") || !strcmp(lt, "USize")) { ct = "uint64_t"; norm_lt = lt; b = 8; }
-    else if (!strcmp(lt, "Int") || !strcmp(lt, "Int64")) { ct = "int64_t"; norm_lt = lt; b = 8; }
-    else if (!strcmp(lt, "UInt32")) { ct = "uint32_t"; norm_lt = "UInt32"; b = 4; }
-    else if (!strcmp(lt, "Int32")) { ct = "int32_t"; norm_lt = "Int32"; b = 4; }
-    else if (!strcmp(lt, "UInt16")) { ct = "uint16_t"; norm_lt = "UInt16"; b = 2; }
-    else if (!strcmp(lt, "Int16")) { ct = "int16_t"; norm_lt = "Int16"; b = 2; }
-    else if (!strcmp(lt, "UInt8")) { ct = "uint8_t"; norm_lt = "UInt8"; b = 1; }
-    else if (!strcmp(lt, "Int8")) { ct = "int8_t"; norm_lt = "Int8"; b = 1; }
-    else if (!strcmp(lt, "Bool")) { ct = "bool"; norm_lt = "Bool"; b = 1; }
-    else if (find_lean_enum(spec, lt)) { ct = "uint32_t"; norm_lt = "UInt32"; b = 4; }
-    else { b = parse_lean_type_bytes(lt); if (!b) b = 8; }
+    int matched = 0;
+#define FLOW_MAP_SCALAR_INFO(lean_name, norm_lean, c_type, sz, mode) \
+    if (!matched && lt && !strcmp(lt, lean_name)) { ct = c_type; norm_lt = norm_lean; b = (sz); matched = 1; }
+    FLOW_LEAN_SCALAR_TYPES_X(FLOW_MAP_SCALAR_INFO)
+#undef FLOW_MAP_SCALAR_INFO
+    if (!matched) {
+        if (find_lean_enum(spec, lt)) { ct = "uint32_t"; norm_lt = "UInt32"; b = 4; }
+        else { b = parse_lean_type_bytes(lt); if (!b) b = 8; }
+    }
     strncpy(c_out, ct, c_sz - 1); c_out[c_sz - 1] = '\0'; strncpy(lean_out, norm_lt, l_sz - 1); lean_out[l_sz - 1] = '\0';
     if (bytes_out) *bytes_out = b;
 }
@@ -204,39 +202,51 @@ static void rewrite_lean_abs_bars(const char *in, char *out, size_t max_len) {
     strncpy(out, cur, max_len - 1);
     out[max_len - 1] = '\0';
 }
-static void normalize_lean_body(const char *in, char *out, size_t max_len) {
+void flow_lean_normalize_expr(const char *src, char *dst, size_t dst_size) {
     static const struct { const char *lean_fn; size_t l_len; const char *c_fn; size_t c_len; } BUILTIN_MAP[] = {
-        {"Nat.min", 7, "flow_nat_min", 12}, {"Nat.max", 7, "flow_nat_max", 12}, {"Float.abs", 9, "flow_float_abs", 14}, {"Float.floor", 11, "flow_float_floor", 16},
-        {"Float.ceil", 10, "flow_float_ceil", 15}, {"Float.round", 11, "flow_float_round", 16}, {"Float.sqrt", 10, "flow_float_sqrt", 15}, {"Float.exp", 9, "flow_float_exp", 14},
-        {"Float.log", 9, "flow_float_log", 14}, {"Float.sin", 9, "flow_float_sin", 14}, {"Float.cos", 9, "flow_float_cos", 14}, {"Float.atan2", 11, "flow_float_atan2", 16},
-        {"Float.pow", 9, "flow_float_pow", 14}, {"Float.max", 9, "flow_float_max", 14}, {"Float.min", 9, "flow_float_min", 14}, {"Float.ofNat", 11, "flow_float_of_nat", 17},
-        {"Float.ofInt", 11, "flow_float_of_int", 17}, {"Real.abs", 8, "flow_float_abs", 14}, {"Real.floor", 10, "flow_float_floor", 16}, {"Real.ceil", 9, "flow_float_ceil", 15},
-        {"Real.round", 10, "flow_float_round", 16}, {"Real.sqrt", 9, "flow_float_sqrt", 15}, {"Real.exp", 8, "flow_float_exp", 14}, {"Real.log", 8, "flow_float_log", 14},
-        {"Real.sin", 8, "flow_float_sin", 14}, {"Real.cos", 8, "flow_float_cos", 14}, {"Real.atan2", 10, "flow_float_atan2", 16}, {"Real.pow", 8, "flow_float_pow", 14},
-        {"Real.max", 8, "flow_float_max", 14}, {"Real.min", 8, "flow_float_min", 14}, {"f_abs", 5, "flow_float_abs", 14}, {"f_max", 5, "flow_float_max", 14}, {"f_min", 5, "flow_float_min", 14},
-        {"Option.some", 11, "some", 4}, {"Option.none", 11, "none", 4},
-        {"FlowResult.interior", 19, "interior", 8}, {"FlowResult.boundary", 19, "boundary", 8}
+#define FLOW_BUILTIN_ENTRY(l_fn, c_fn) { l_fn, sizeof(l_fn) - 1, c_fn, sizeof(c_fn) - 1 },
+        FLOW_LEAN_BUILTIN_OPS_X(FLOW_BUILTIN_ENTRY)
+#undef FLOW_BUILTIN_ENTRY
     };
-    char abs_buf[FLOW_LEAN_BODY_MAX] = {0};
-    rewrite_lean_abs_bars(in, abs_buf, sizeof(abs_buf));
+    if (!src || !dst || dst_size == 0) return;
     size_t j = 0;
-    for (size_t i = 0; abs_buf[i] && j + 20 < max_len; ) {
-        if (!strncmp(abs_buf + i, "\xe2\x89\xa4", 3)) { out[j++] = '<'; out[j++] = '='; i += 3; continue; }
-        if (!strncmp(abs_buf + i, "\xe2\x89\xa5", 3)) { out[j++] = '>'; out[j++] = '='; i += 3; continue; }
-        if (!strncmp(abs_buf + i, "\xe2\x89\xa0", 3)) { out[j++] = '!'; out[j++] = '='; i += 3; continue; }
-        if (!strncmp(abs_buf + i, "\xe2\x88\xa7", 3)) { out[j++] = '&'; out[j++] = '&'; i += 3; continue; }
-        if (!strncmp(abs_buf + i, "\xe2\x88\xa8", 3)) { out[j++] = '|'; out[j++] = '|'; i += 3; continue; }
-        if (!strncmp(abs_buf + i, "\xc2\xac", 2)) { out[j++] = '!'; i += 2; continue; }
+    for (size_t i = 0; src[i] && j + 20 < dst_size; ) {
+        if (!strncmp(src + i, "\xe2\x89\xa4", 3)) { dst[j++] = '<'; dst[j++] = '='; i += 3; continue; }
+        if (!strncmp(src + i, "\xe2\x89\xa5", 3)) { dst[j++] = '>'; dst[j++] = '='; i += 3; continue; }
+        if (!strncmp(src + i, "\xe2\x89\xa0", 3)) { dst[j++] = '!'; dst[j++] = '='; i += 3; continue; }
+        if (!strncmp(src + i, "\xe2\x88\xa7", 3)) { dst[j++] = '&'; dst[j++] = '&'; i += 3; continue; }
+        if (!strncmp(src + i, "\xe2\x88\xa8", 3)) { dst[j++] = '|'; dst[j++] = '|'; i += 3; continue; }
+        if (!strncmp(src + i, "\xc2\xac", 2)) { dst[j++] = '!'; i += 2; continue; }
         int mapped = 0;
         for (size_t bi = 0; bi < sizeof(BUILTIN_MAP) / sizeof(BUILTIN_MAP[0]); ++bi) {
             size_t ll = BUILTIN_MAP[bi].l_len;
-            if (!strncmp(abs_buf + i, BUILTIN_MAP[bi].lean_fn, ll) && !isalnum((unsigned char)abs_buf[i + ll]) && abs_buf[i + ll] != '_') {
-                memcpy(out + j, BUILTIN_MAP[bi].c_fn, BUILTIN_MAP[bi].c_len); j += BUILTIN_MAP[bi].c_len; i += ll; mapped = 1; break;
+            if (!strncmp(src + i, BUILTIN_MAP[bi].lean_fn, ll) && !isalnum((unsigned char)src[i + ll]) && src[i + ll] != '_') {
+                memcpy(dst + j, BUILTIN_MAP[bi].c_fn, BUILTIN_MAP[bi].c_len);
+                j += BUILTIN_MAP[bi].c_len;
+                i += ll;
+                mapped = 1;
+                break;
             }
         }
         if (mapped) continue;
-        if (abs_buf[i] == '.' && (i == 0 || (!isalnum((unsigned char)abs_buf[i - 1]) && abs_buf[i - 1] != '_' && abs_buf[i - 1] != ')')) && (isalpha((unsigned char)abs_buf[i + 1]) || abs_buf[i + 1] == '_')) i++;
-        else out[j++] = abs_buf[i++];
+        dst[j++] = src[i++];
+    }
+    dst[j] = '\0';
+}
+static void normalize_lean_body(const char *in, char *out, size_t max_len) {
+    char abs_buf[FLOW_LEAN_BODY_MAX] = {0};
+    char norm_buf[FLOW_LEAN_BODY_MAX] = {0};
+    rewrite_lean_abs_bars(in, abs_buf, sizeof(abs_buf));
+    flow_lean_normalize_expr(abs_buf, norm_buf, sizeof(norm_buf));
+    size_t j = 0;
+    for (size_t i = 0; norm_buf[i] && j + 1 < max_len; ) {
+        if (norm_buf[i] == '.' &&
+            (i == 0 || (!isalnum((unsigned char)norm_buf[i - 1]) && norm_buf[i - 1] != '_' && norm_buf[i - 1] != ')')) &&
+            (isalpha((unsigned char)norm_buf[i + 1]) || norm_buf[i + 1] == '_')) {
+            i++;
+        } else {
+            out[j++] = norm_buf[i++];
+        }
     }
     out[j] = '\0';
     for (size_t i = 1; out[i]; ++i)
@@ -260,10 +270,12 @@ static uint64_t estimate_lean_ast_wcet_ns(const FlowLeanFunction *fn) {
 }
 static int is_valid_scalar_lean_body_str(const FlowSpec *spec, const FlowLeanFunction *fn, const char *b) {
     static const char *const KW[] = {
-        "if", "then", "else", "let", "in", "match", "with", "true", "false", "decide", "flow_nat_min", "flow_nat_max", "flow_quantize", "flow_dequantize",
-        "flow_float_abs", "flow_float_floor", "flow_float_ceil", "flow_float_round", "flow_float_sqrt", "flow_float_exp", "flow_float_log", "flow_float_sin",
-        "flow_float_cos", "flow_float_atan2", "flow_float_pow", "flow_float_max", "flow_float_min", "flow_float_of_nat", "flow_float_of_int",
-        "some", "none", "interior", "boundary", "Option", "FlowResult", "SpaceWithException", "point", "collapse", "_", "_ret", NULL
+        "if", "then", "else", "let", "in", "match", "with", "true", "false", "decide", "flow_quantize", "flow_dequantize",
+        "Option", "FlowResult", "SpaceWithException", "point", "collapse", "_", "_ret",
+#define FLOW_KW_BUILTIN(l_fn, c_fn) c_fn,
+        FLOW_LEAN_BUILTIN_OPS_X(FLOW_KW_BUILTIN)
+#undef FLOW_KW_BUILTIN
+        NULL
     };
     char let_vars[32][FLOW_NAME]; size_t let_cnt = 0; if (!b || !b[0]) return 0;
     if (strstr(b, "->") || strstr(b, "<->") || strstr(b, "\xe2\x86\x92") || strstr(b, "\xe2\x86\x94")) return 0;
@@ -910,17 +922,34 @@ int parse_spec(FILE *input, FlowSpec *spec) {
 }
 const char *flow_lean_scalar_to_c_type(const char *t) {
     if (!t) return "uint64_t";
-    if (!strcmp(t, "Bool")) return "bool";
-    if (!strcmp(t, "Float") || !strcmp(t, "\xe2\x84\x9d") || !strcmp(t, "Real")) return "double";
-    if (!strcmp(t, "Float32")) return "float";
-    if (!strcmp(t, "UInt32")) return "uint32_t";
-    if (!strcmp(t, "Int32")) return "int32_t";
-    if (!strcmp(t, "UInt16")) return "uint16_t";
-    if (!strcmp(t, "Int16")) return "int16_t";
-    if (!strcmp(t, "UInt8")) return "uint8_t";
-    if (!strcmp(t, "Int8")) return "int8_t";
-    if (!strcmp(t, "Int") || !strcmp(t, "Int64")) return "int64_t";
+#define FLOW_MAP_SCALAR_C(lean_name, norm_lean, c_type, sz, mode) \
+    if (!strcmp(t, lean_name)) return c_type;
+    FLOW_LEAN_SCALAR_TYPES_X(FLOW_MAP_SCALAR_C)
+#undef FLOW_MAP_SCALAR_C
     return "uint64_t";
+}
+FlowLeanExprMode flow_c_type_expr_mode(const char *c_type, FlowLeanExprMode fallback) {
+    if (!c_type) return fallback;
+    if (!strcmp(c_type, "FlowJetScalar2")) return FLOW_EXPR_JET2;
+#define FLOW_MAP_CTYPE_MODE(lean_name, norm_lean, ct_str, sz, mode) \
+    if ((mode) != FLOW_EXPR_NAT && !strcmp(c_type, ct_str)) return (mode);
+    FLOW_LEAN_SCALAR_TYPES_X(FLOW_MAP_CTYPE_MODE)
+#undef FLOW_MAP_CTYPE_MODE
+    return fallback;
+}
+static FlowLeanExprMode compute_lean_fn_expr_mode(const FlowLeanFunction *fn) {
+    if (!fn) return FLOW_EXPR_NAT;
+    if (!strcmp(fn->return_type, "Float") || !strcmp(fn->return_type, "Float32")) return FLOW_EXPR_FLOAT;
+    for (size_t i = 0; i < fn->param_count; ++i)
+        if (!strcmp(fn->param_types[i], "Float") || !strcmp(fn->param_types[i], "Float32")) return FLOW_EXPR_FLOAT;
+    if (!strcmp(fn->return_type, "Int") || !strcmp(fn->return_type, "Int64") || !strcmp(fn->return_type, "Int32") ||
+        !strcmp(fn->return_type, "Int16") || !strcmp(fn->return_type, "Int8")) return FLOW_EXPR_INT;
+    for (size_t i = 0; i < fn->param_count; ++i)
+        if (!strcmp(fn->param_types[i], "Int") || !strcmp(fn->param_types[i], "Int64") || !strcmp(fn->param_types[i], "Int32") ||
+            !strcmp(fn->param_types[i], "Int16") || !strcmp(fn->param_types[i], "Int8")) return FLOW_EXPR_INT;
+    if (!strcmp(fn->return_type, "UInt64") || !strcmp(fn->return_type, "UInt32") || !strcmp(fn->return_type, "UInt16") ||
+        !strcmp(fn->return_type, "UInt8")) return FLOW_EXPR_UINT;
+    return FLOW_EXPR_NAT;
 }
 const FlowLeanStruct *flow_ir_find_struct(const SemanticIR *ir, const char *name) {
     if (!ir || !name || !name[0]) return NULL;
@@ -998,6 +1027,7 @@ void flow_ir_compute_fn_variants(SemanticIR *ir) {
                 }
             }
         }
+        fn->expr_mode = (uint8_t)compute_lean_fn_expr_mode(fn);
         fn->variant_mask = mask;
     }
 }

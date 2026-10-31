@@ -105,7 +105,14 @@ static void subst_lean_var(const char *src, size_t src_len, const char *var, con
     }
     out[j] = '\0';
 }
-typedef enum { LEAN_EXPR_NAT = 0, LEAN_EXPR_UINT = 1, LEAN_EXPR_INT = 2, LEAN_EXPR_FLOAT = 3, LEAN_EXPR_JET2 = 4 } LeanExprMode;
+typedef FlowLeanExprMode LeanExprMode;
+#define LEAN_EXPR_NAT   FLOW_EXPR_NAT
+#define LEAN_EXPR_UINT  FLOW_EXPR_UINT
+#define LEAN_EXPR_INT   FLOW_EXPR_INT
+#define LEAN_EXPR_FLOAT FLOW_EXPR_FLOAT
+#define LEAN_EXPR_JET2  FLOW_EXPR_JET2
+#define infer_c_type_expr_mode flow_c_type_expr_mode
+#define infer_fn_expr_mode(fn) ((fn) ? (FlowLeanExprMode)(fn)->expr_mode : FLOW_EXPR_NAT)
 static int body_has_ident_tok(const char *s, const char *ident) {
     if (!s || !ident || !ident[0]) return 0;
     size_t ilen = strlen(ident);
@@ -142,27 +149,6 @@ static size_t split_comma_slices(const char *s, size_t len, const char **out_s, 
         }
     }
     return cnt;
-}
-static LeanExprMode infer_c_type_expr_mode(const char *c_type, LeanExprMode fallback) {
-    if (!c_type) return fallback;
-    if (!strcmp(c_type, "double") || !strcmp(c_type, "float")) return LEAN_EXPR_FLOAT;
-    if (!strcmp(c_type, "int64_t") || !strcmp(c_type, "int32_t") || !strcmp(c_type, "int16_t") || !strcmp(c_type, "int8_t")) return LEAN_EXPR_INT;
-    if (!strcmp(c_type, "uint64_t") || !strcmp(c_type, "uint32_t") || !strcmp(c_type, "uint16_t") || !strcmp(c_type, "uint8_t") || !strcmp(c_type, "bool")) return LEAN_EXPR_UINT;
-    return fallback;
-}
-static LeanExprMode infer_fn_expr_mode(const FlowLeanFunction *fn) {
-    if (!fn) return LEAN_EXPR_NAT;
-    if (!strcmp(fn->return_type, "Float") || !strcmp(fn->return_type, "Float32")) return LEAN_EXPR_FLOAT;
-    for (size_t i = 0; i < fn->param_count; ++i)
-        if (!strcmp(fn->param_types[i], "Float") || !strcmp(fn->param_types[i], "Float32")) return LEAN_EXPR_FLOAT;
-    if (!strcmp(fn->return_type, "Int") || !strcmp(fn->return_type, "Int64") || !strcmp(fn->return_type, "Int32") ||
-        !strcmp(fn->return_type, "Int16") || !strcmp(fn->return_type, "Int8")) return LEAN_EXPR_INT;
-    for (size_t i = 0; i < fn->param_count; ++i)
-        if (!strcmp(fn->param_types[i], "Int") || !strcmp(fn->param_types[i], "Int64") || !strcmp(fn->param_types[i], "Int32") ||
-            !strcmp(fn->param_types[i], "Int16") || !strcmp(fn->param_types[i], "Int8")) return LEAN_EXPR_INT;
-    if (!strcmp(fn->return_type, "UInt64") || !strcmp(fn->return_type, "UInt32") || !strcmp(fn->return_type, "UInt16") ||
-        !strcmp(fn->return_type, "UInt8")) return LEAN_EXPR_UINT;
-    return LEAN_EXPR_NAT;
 }
 static const FlowLeanFunction *find_ir_lean_fn_len(const SemanticIR *ir, const char *name, size_t len) {
     if (!ir || !name || !len) return NULL;
@@ -586,46 +572,16 @@ static void emit_norm_lean_slice(FILE *out, const SemanticIR *ir, const char *s,
     fprintf(out, "%.*s", (int)len, s);
 }
 static void emit_lean_expr_as_c_ex(FILE *out, const SemanticIR *ir, const char *expr, LeanExprMode mode, int is_header_inline) {
-    static const struct { const char *lean_fn; size_t l_len; const char *c_fn; size_t c_len; } BUILTIN_MAP[] = {
-        {"Nat.min", 7, "flow_nat_min", 12}, {"Nat.max", 7, "flow_nat_max", 12}, {"Float.abs", 9, "flow_float_abs", 14}, {"Float.floor", 11, "flow_float_floor", 16},
-        {"Float.ceil", 10, "flow_float_ceil", 15}, {"Float.round", 11, "flow_float_round", 16}, {"Float.sqrt", 10, "flow_float_sqrt", 15}, {"Float.exp", 9, "flow_float_exp", 14},
-        {"Float.log", 9, "flow_float_log", 14}, {"Float.sin", 9, "flow_float_sin", 14}, {"Float.cos", 9, "flow_float_cos", 14}, {"Float.atan2", 11, "flow_float_atan2", 16},
-        {"Float.pow", 9, "flow_float_pow", 14}, {"Float.max", 9, "flow_float_max", 14}, {"Float.min", 9, "flow_float_min", 14}, {"Float.ofNat", 11, "flow_float_of_nat", 17},
-        {"Float.ofInt", 11, "flow_float_of_int", 17}, {"Real.abs", 8, "flow_float_abs", 14}, {"Real.floor", 10, "flow_float_floor", 16}, {"Real.ceil", 9, "flow_float_ceil", 15},
-        {"Real.round", 10, "flow_float_round", 16}, {"Real.sqrt", 9, "flow_float_sqrt", 15}, {"Real.exp", 8, "flow_float_exp", 14}, {"Real.log", 8, "flow_float_log", 14},
-        {"Real.sin", 8, "flow_float_sin", 14}, {"Real.cos", 8, "flow_float_cos", 14}, {"Real.atan2", 10, "flow_float_atan2", 16}, {"Real.pow", 8, "flow_float_pow", 14},
-        {"Real.max", 8, "flow_float_max", 14}, {"Real.min", 8, "flow_float_min", 14}, {"f_abs", 5, "flow_float_abs", 14}, {"f_max", 5, "flow_float_max", 14}, {"f_min", 5, "flow_float_min", 14},
-        {"Option.some", 11, "some", 4}, {"Option.none", 11, "none", 4},
-        {"FlowResult.interior", 19, "interior", 8}, {"FlowResult.boundary", 19, "boundary", 8}
-    };
-    char norm[4096]; size_t j = 0;
-    for (size_t i = 0; expr[i] && j + 20 < sizeof(norm); ) {
-        if (!strncmp(expr + i, "\xe2\x89\xa4", 3)) { norm[j++] = '<'; norm[j++] = '='; i += 3; continue; }
-        if (!strncmp(expr + i, "\xe2\x89\xa5", 3)) { norm[j++] = '>'; norm[j++] = '='; i += 3; continue; }
-        if (!strncmp(expr + i, "\xe2\x89\xa0", 3)) { norm[j++] = '!'; norm[j++] = '='; i += 3; continue; }
-        if (!strncmp(expr + i, "\xe2\x88\xa7", 3)) { norm[j++] = '&'; norm[j++] = '&'; i += 3; continue; }
-        if (!strncmp(expr + i, "\xe2\x88\xa8", 3)) { norm[j++] = '|'; norm[j++] = '|'; i += 3; continue; }
-        if (!strncmp(expr + i, "\xc2\xac", 2)) { norm[j++] = '!'; i += 2; continue; }
-        int mapped = 0;
-        for (size_t bi = 0; bi < sizeof(BUILTIN_MAP) / sizeof(BUILTIN_MAP[0]); ++bi) {
-            size_t ll = BUILTIN_MAP[bi].l_len;
-            if (!strncmp(expr + i, BUILTIN_MAP[bi].lean_fn, ll) && !isalnum((unsigned char)expr[i + ll]) && expr[i + ll] != '_') {
-                memcpy(norm + j, BUILTIN_MAP[bi].c_fn, BUILTIN_MAP[bi].c_len);
-                j += BUILTIN_MAP[bi].c_len;
-                i += ll;
-                mapped = 1;
-                break;
-            }
-        }
-        if (mapped) continue;
-        norm[j++] = expr[i++];
-    }
-    norm[j] = '\0'; emit_norm_lean_slice(out, ir, norm, j, mode, is_header_inline);
+    char norm[4096];
+    flow_lean_normalize_expr(expr, norm, sizeof(norm));
+    emit_norm_lean_slice(out, ir, norm, strlen(norm), mode, is_header_inline);
 }
 static void emit_lean_nat_and_float_ops(FILE *output) {
     fputs("#ifndef FLOW_EXACT_NUMERICS_DEFINED\n#define FLOW_EXACT_NUMERICS_DEFINED\n", output);
     fputs(FLOW_STR(FLOW_EXACT_CODEC_C17), output);
-    fputs("\n#endif /* FLOW_EXACT_NUMERICS_DEFINED */\n#ifndef FLOW_JET_SCALAR2_DEFINED\n#define FLOW_JET_SCALAR2_DEFINED\ntypedef struct { double v; double d1; double d2; } FlowJetScalar2;\n#endif\n#ifndef FLOW_LEAN_NAT_OPS_DEFINED\n#define FLOW_LEAN_NAT_OPS_DEFINED\n", output);
+    fputs("\n#endif /* FLOW_EXACT_NUMERICS_DEFINED */\n#ifndef FLOW_JET_SCALAR2_DEFINED\n#define FLOW_JET_SCALAR2_DEFINED\n", output);
+    fputs(FLOW_STR(FLOW_JET_SCALAR2_TYPEDEF_C17), output);
+    fputs("\n#endif\n#ifndef FLOW_LEAN_NAT_OPS_DEFINED\n#define FLOW_LEAN_NAT_OPS_DEFINED\n", output);
     fputs(FLOW_STR(FLOW_LEAN_NAT_OPS_C17), output);
     fputc('\n', output);
     fputs(FLOW_STR(FLOW_LEAN_FLOAT_OPS_C17), output);
@@ -1024,51 +980,16 @@ static void emit_lean_hott_witness_and_soa_types(FILE *output, const SemanticIR 
         "#define FLOW_BOUNDARY_QNAN_MAGIC        UINT64_C(0x7FF8400000000000)\n"
         "#define FLOW_BOUNDARY_QNAN_PREFIX_MASK  UINT64_C(0x7FFCF00000000000)\n"
         "#ifndef FLOW_BOUNDARY_VIOLATION_KIND_DEFINED\n"
-        "#define FLOW_BOUNDARY_VIOLATION_KIND_DEFINED\n"
-        "typedef enum {\n"
-        "    FLOW_BOUNDARY_OK                 = 0,\n"
-        "    FLOW_BOUNDARY_PRECOND            = 1,\n"
-        "    FLOW_BOUNDARY_POSTCOND           = 2,\n"
-        "    FLOW_BOUNDARY_THM_IMPLIES        = 3,\n"
-        "    FLOW_BOUNDARY_DOMAIN_SINGULARITY = 4,\n"
-        "    FLOW_BOUNDARY_HIT_COLLAPSE       = 5,\n"
-        "    FLOW_BOUNDARY_EXPLICIT_NONE      = 6\n"
-        "} FlowBoundaryViolationKind;\n"
-        "#endif\n",
+        "#define FLOW_BOUNDARY_VIOLATION_KIND_DEFINED\n",
         output);
-    fputs(FLOW_STR(FLOW_HOTT_BOUNDARY_HELPERS_C17), output);
+    fputs(FLOW_STR(FLOW_BOUNDARY_VIOLATION_KIND_C17), output);
     fputs("\n#endif\n", output);
-    fputs(
-        "#ifndef FLOW_LEAN_PRIMITIVE_WITNESS_TYPES_DEFINED\n"
-        "#define FLOW_LEAN_PRIMITIVE_WITNESS_TYPES_DEFINED\n"
-        "typedef struct { bool _verified; } lean_certified_bool;\n"
-        "typedef struct { double _verified; } lean_certified_double;\n"
-        "typedef struct { float _verified; } lean_certified_float;\n"
-        "typedef struct { uint64_t _verified; } lean_certified_uint64_t;\n"
-        "typedef struct { int64_t _verified; } lean_certified_int64_t;\n"
-        "typedef struct { uint32_t _verified; } lean_certified_uint32_t;\n"
-        "typedef struct { int32_t _verified; } lean_certified_int32_t;\n"
-        "typedef struct { uint16_t _verified; } lean_certified_uint16_t;\n"
-        "typedef struct { int16_t _verified; } lean_certified_int16_t;\n"
-        "typedef struct { uint8_t _verified; } lean_certified_uint8_t;\n"
-        "typedef struct { int8_t _verified; } lean_certified_int8_t;\n"
-        "typedef struct { size_t _verified; } lean_certified_size_t;\n"
-        "typedef struct { ptrdiff_t _verified; } lean_certified_ptrdiff_t;\n"
-        "typedef struct { bool value; uint64_t boundary_tag; } lean_result_bool;\n"
-        "typedef struct { double value; uint64_t boundary_tag; } lean_result_double;\n"
-        "typedef struct { float value; uint64_t boundary_tag; } lean_result_float;\n"
-        "typedef struct { uint64_t value; uint64_t boundary_tag; } lean_result_uint64_t;\n"
-        "typedef struct { int64_t value; uint64_t boundary_tag; } lean_result_int64_t;\n"
-        "typedef struct { uint32_t value; uint64_t boundary_tag; } lean_result_uint32_t;\n"
-        "typedef struct { int32_t value; uint64_t boundary_tag; } lean_result_int32_t;\n"
-        "typedef struct { uint16_t value; uint64_t boundary_tag; } lean_result_uint16_t;\n"
-        "typedef struct { int16_t value; uint64_t boundary_tag; } lean_result_int16_t;\n"
-        "typedef struct { uint8_t value; uint64_t boundary_tag; } lean_result_uint8_t;\n"
-        "typedef struct { int8_t value; uint64_t boundary_tag; } lean_result_int8_t;\n"
-        "typedef struct { size_t value; uint64_t boundary_tag; } lean_result_size_t;\n"
-        "typedef struct { ptrdiff_t value; uint64_t boundary_tag; } lean_result_ptrdiff_t;\n"
-        "#endif\n",
-        output);
+    fputs(FLOW_STR(FLOW_HOTT_BOUNDARY_HELPERS_C17), output);
+    fputs("\n#endif\n"
+          "#ifndef FLOW_LEAN_PRIMITIVE_WITNESS_TYPES_DEFINED\n"
+          "#define FLOW_LEAN_PRIMITIVE_WITNESS_TYPES_DEFINED\n", output);
+    fputs(FLOW_STR(FLOW_LEAN_PRIMITIVE_WITNESS_TYPES_C17), output);
+    fputs("\n#endif\n", output);
     if (!ir) return;
     for (size_t ei = 0; ei < ir->lean_enum_count; ++ei) {
         const FlowLeanEnum *en = &ir->lean_enums[ei];
@@ -1950,6 +1871,32 @@ void flow_emit_inline_lean_kernels(FILE *output, const SemanticIR *ir) {
     }
     fputs("#if defined(__clang__)\n#pragma clang diagnostic pop\n#elif defined(__GNUC__)\n#pragma GCC diagnostic pop\n#endif\n", output);
 }
+void flow_emit_ir_enums_and_structs(FILE *output, const SemanticIR *ir) {
+    if (!output || !ir) return;
+    for (size_t ei = 0; ei < ir->lean_enum_count; ++ei) {
+        const FlowLeanEnum *en = &ir->lean_enums[ei];
+        fprintf(output, "#ifndef FLOW_LEAN_ENUM_%s_DEFINED\n#define FLOW_LEAN_ENUM_%s_DEFINED\ntypedef enum {\n", en->name, en->name);
+        for (size_t vi = 0; vi < en->variant_count; ++vi)
+            fprintf(output, "    %s = %zu%s\n", en->variants[vi], vi, vi + 1 < en->variant_count ? "," : "");
+        fprintf(output, "} %s;\n#endif\n", en->name);
+    }
+    for (size_t si = 0; si < ir->lean_struct_count; ++si) {
+        const FlowLeanStruct *st = &ir->lean_structs[si];
+        fprintf(output, "#ifndef FLOW_LEAN_STRUCT_%s_DEFINED\n#define FLOW_LEAN_STRUCT_%s_DEFINED\ntypedef struct {\n", st->name, st->name);
+        for (size_t fi = 0; fi < st->field_count; ++fi)
+            fprintf(output, "    %s %s;\n", st->fields[fi].c_type, st->fields[fi].name);
+        fprintf(output, "} %s;\n#endif\n", st->name);
+    }
+    for (size_t fi = 0; fi < ir->lean_function_count; ++fi) {
+        const FlowLeanFunction *fn = &ir->lean_functions[fi];
+        if (!fn->is_private && fn->is_tuple_return && fn->tuple_arity >= 2) {
+            fprintf(output, "#ifndef FLOW_LEAN_TUPLE_%s_DEFINED\n#define FLOW_LEAN_TUPLE_%s_DEFINED\ntypedef struct {\n", fn->name, fn->name);
+            for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
+                fprintf(output, "    %s out_%zu;\n", flow_ir_type_to_c(ir, fn->tuple_types[ti]), ti);
+            fprintf(output, "} %s_tuple_t;\n#endif\n", fn->name);
+        }
+    }
+}
 void flow_emit_abi_exports(FILE *output, const SemanticIR *ir, const Component *c, size_t cap) {
     size_t stride = (ir && ir->input_stride_bytes > 0) ? ir->input_stride_bytes : 8;
     size_t align = (ir && ir->input_align_bytes > 0) ? ir->input_align_bytes : 8;
@@ -1961,14 +1908,10 @@ void flow_emit_abi_exports(FILE *output, const SemanticIR *ir, const Component *
         "#define FLOW_SLA_LATENCY_NS UINT64_C(%llu)\n#define FLOW_STATE_SCHEMA_VERSION %u\n",
         stride, align, (unsigned long long)sla, ver);
     emit_lean_nat_and_float_ops(output);
+    fputs("#ifndef FLOW_ABI_CORE_TYPES_DEFINED\n#define FLOW_ABI_CORE_TYPES_DEFINED\n", output);
+    fputs(FLOW_STR(FLOW_ABI_CORE_TYPES_C17), output);
+    fputs("\n_Static_assert(sizeof(FlowExtentDescriptor) == 64, \"FlowExtentDescriptor must be 64 bytes\");\n#endif\n", output);
     fputs(
-        "#ifndef FLOW_STATUS_CODE_DEFINED\n#define FLOW_STATUS_CODE_DEFINED\n"
-        "typedef enum { FLOW_OK = 0, FLOW_ERR_INVALID_ARG = -1, FLOW_ERR_QUOTA_OR_STRIDE = -2, FLOW_ERR_KERNEL_UNBOUND = -3, FLOW_ERR_WATCHDOG_ESTOP = -4 } FlowStatusCode;\n"
-        "#endif\n"
-        "#ifndef FLOW_EXTENT_DESCRIPTOR_DEFINED\n#define FLOW_EXTENT_DESCRIPTOR_DEFINED\n"
-        "typedef struct { uint64_t base_offset, byte_length, qsbr_epoch; uint32_t stride_bytes, align_bytes, schema_version, flags; uint64_t reserved[3]; } FlowExtentDescriptor;\n"
-        "_Static_assert(sizeof(FlowExtentDescriptor) == 64, \"FlowExtentDescriptor must be 64 bytes\");\n"
-        "#endif\n"
         "#ifndef FLOW_AB_SHADOW_TELEMETRY_DEFINED\n#define FLOW_AB_SHADOW_TELEMETRY_DEFINED\n"
         "__attribute__((weak)) void flow_ab_shadow_record(uint32_t kernel_id, double primary_val, double shadow_val, double tol);\n"
         "__attribute__((weak)) uint64_t flow_ab_shadow_get_calls(void);\n"
@@ -2013,22 +1956,7 @@ void flow_emit_abi_exports(FILE *output, const SemanticIR *ir, const Component *
         "}\n"
         "#endif\n",
         output);
-    if (ir) {
-        for (size_t ei = 0; ei < ir->lean_enum_count; ++ei) {
-            const FlowLeanEnum *en = &ir->lean_enums[ei];
-            fprintf(output, "#ifndef FLOW_LEAN_ENUM_%s_DEFINED\n#define FLOW_LEAN_ENUM_%s_DEFINED\ntypedef enum {\n", en->name, en->name);
-            for (size_t vi = 0; vi < en->variant_count; ++vi)
-                fprintf(output, "    %s = %zu%s\n", en->variants[vi], vi, vi + 1 < en->variant_count ? "," : "");
-            fprintf(output, "} %s;\n#endif\n", en->name);
-        }
-        for (size_t si = 0; si < ir->lean_struct_count; ++si) {
-            const FlowLeanStruct *st = &ir->lean_structs[si];
-            fprintf(output, "#ifndef FLOW_LEAN_STRUCT_%s_DEFINED\n#define FLOW_LEAN_STRUCT_%s_DEFINED\ntypedef struct {\n", st->name, st->name);
-            for (size_t fi = 0; fi < st->field_count; ++fi)
-                fprintf(output, "    %s %s;\n", st->fields[fi].c_type, st->fields[fi].name);
-            fprintf(output, "} %s;\n#endif\n", st->name);
-        }
-    }
+    flow_emit_ir_enums_and_structs(output, ir);
     fprintf(output,
         "typedef struct { _Atomic uint64_t active_epoch, qsbr_epoch; uint64_t sla_latency_ns, qsbr_timeout_ns; size_t capacity, stride, align, arena_limit_bytes; int context_bound; uint8_t *prefaulted_arena; size_t prefaulted_arena_bytes; _Atomic int emergency_stop_latched; _Atomic uint64_t wcet_breach_count; int emergency_stop_enabled; } flow_abi_qsbr_ctx;\n");
     size_t arena_lim = ir ? ir->arena_limit_bytes : 0;

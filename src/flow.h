@@ -1,5 +1,6 @@
 #ifndef FLOW_H
 #define FLOW_H
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -7,10 +8,10 @@
 #include <time.h>
 
 #define FLOW_VERSION_MAJOR 2
-#define FLOW_VERSION_MINOR 7
+#define FLOW_VERSION_MINOR 8
 #define FLOW_VERSION_PATCH 0
 #ifndef FLOW_VERSION_STRING
-#define FLOW_VERSION_STRING "2.7.0"
+#define FLOW_VERSION_STRING "2.8.0"
 #endif
 #ifndef FLOW_GIT_BRANCH
 #define FLOW_GIT_BRANCH "main"
@@ -51,14 +52,92 @@ typedef struct {
     char invariants[FLOW_LEAN_STRUCT_INV_MAX][128];
 } FlowLeanStruct;
 typedef struct { char name[FLOW_NAME]; char variants[16][FLOW_NAME]; size_t variant_count; } FlowLeanEnum;
+
 typedef enum {
-    FLOW_FN_VAR_PRIMARY   = (1u << 0), /* <fn> / flowc_<fn> */
-    FLOW_FN_VAR_JET2      = (1u << 1), /* jet2_<fn> / flowc_jet2_<fn> */
-    FLOW_FN_VAR_LEAN      = (1u << 2), /* lean_<fn> / flowc_lean_<fn> */
-    FLOW_FN_VAR_CERTIFIED = (1u << 3), /* lean_certified_<fn> / flowc_certified_<fn> */
-    FLOW_FN_VAR_TRY       = (1u << 4), /* lean_try_<fn> / flowc_try_<fn> */
-    FLOW_FN_VAR_BOUNDARY  = (1u << 5), /* lean_boundary_<fn> / flowc_boundary_<fn> */
-    FLOW_FN_VAR_SOA64     = (1u << 6)  /* soa_<fn> / flowc_soa_<fn> */
+    FLOW_EXPR_NAT = 0,
+    FLOW_EXPR_UINT,
+    FLOW_EXPR_INT,
+    FLOW_EXPR_FLOAT,
+    FLOW_EXPR_JET2
+} FlowLeanExprMode;
+
+/* ============================================================================
+ * LLVM TableGen-Style X-Macro Single Source of Truth (SSOT) Tables
+ * ============================================================================ */
+
+/* X(lean_name, norm_lean_name, c_type, size_bytes, expr_mode) */
+#define FLOW_LEAN_SCALAR_TYPES_X(X) \
+    X("Nat",          "Nat",     "uint64_t", 8U, FLOW_EXPR_NAT)   \
+    X("UInt64",       "UInt64",  "uint64_t", 8U, FLOW_EXPR_UINT)  \
+    X("USize",        "USize",   "uint64_t", 8U, FLOW_EXPR_UINT)  \
+    X("Int",          "Int",     "int64_t",  8U, FLOW_EXPR_INT)   \
+    X("Int64",        "Int64",   "int64_t",  8U, FLOW_EXPR_INT)   \
+    X("UInt32",       "UInt32",  "uint32_t", 4U, FLOW_EXPR_UINT)  \
+    X("Int32",        "Int32",   "int32_t",  4U, FLOW_EXPR_INT)   \
+    X("UInt16",       "UInt16",  "uint16_t", 2U, FLOW_EXPR_UINT)  \
+    X("Int16",        "Int16",   "int16_t",  2U, FLOW_EXPR_INT)   \
+    X("UInt8",        "UInt8",   "uint8_t",  1U, FLOW_EXPR_UINT)  \
+    X("Int8",         "Int8",    "int8_t",   1U, FLOW_EXPR_INT)   \
+    X("Bool",         "Bool",    "bool",     1U, FLOW_EXPR_UINT)  \
+    X("Float",        "Float",   "double",   8U, FLOW_EXPR_FLOAT) \
+    X("\xe2\x84\x9d", "Float",   "double",   8U, FLOW_EXPR_FLOAT) \
+    X("Real",         "Float",   "double",   8U, FLOW_EXPR_FLOAT) \
+    X("Float32",      "Float32", "float",    4U, FLOW_EXPR_FLOAT)
+
+/* X(lean_ident, c_ident) */
+#define FLOW_LEAN_BUILTIN_OPS_X(X) \
+    X("Nat.min",             "flow_nat_min")       \
+    X("Nat.max",             "flow_nat_max")       \
+    X("Float.abs",           "flow_float_abs")     \
+    X("Float.floor",         "flow_float_floor")   \
+    X("Float.ceil",          "flow_float_ceil")    \
+    X("Float.round",         "flow_float_round")   \
+    X("Float.sqrt",          "flow_float_sqrt")    \
+    X("Float.exp",           "flow_float_exp")     \
+    X("Float.log",           "flow_float_log")     \
+    X("Float.sin",           "flow_float_sin")     \
+    X("Float.cos",           "flow_float_cos")     \
+    X("Float.atan2",         "flow_float_atan2")   \
+    X("Float.pow",           "flow_float_pow")     \
+    X("Float.max",           "flow_float_max")     \
+    X("Float.min",           "flow_float_min")     \
+    X("Float.ofNat",         "flow_float_of_nat")  \
+    X("Float.ofInt",         "flow_float_of_int")  \
+    X("Real.abs",            "flow_float_abs")     \
+    X("Real.floor",          "flow_float_floor")   \
+    X("Real.ceil",           "flow_float_ceil")    \
+    X("Real.round",          "flow_float_round")   \
+    X("Real.sqrt",           "flow_float_sqrt")    \
+    X("Real.exp",            "flow_float_exp")     \
+    X("Real.log",            "flow_float_log")     \
+    X("Real.sin",            "flow_float_sin")     \
+    X("Real.cos",            "flow_float_cos")     \
+    X("Real.atan2",          "flow_float_atan2")   \
+    X("Real.pow",            "flow_float_pow")     \
+    X("Real.max",            "flow_float_max")     \
+    X("Real.min",            "flow_float_min")     \
+    X("f_abs",               "flow_float_abs")     \
+    X("f_max",               "flow_float_max")     \
+    X("f_min",               "flow_float_min")     \
+    X("Option.some",         "some")               \
+    X("Option.none",         "none")               \
+    X("FlowResult.interior", "interior")           \
+    X("FlowResult.boundary", "boundary")
+
+/* X(enum_suffix, bit_index, internal_prefix, abi_prefix) */
+#define FLOW_OPERATOR_VARIANTS_X(X) \
+    X(PRIMARY,   0, "",                "flowc_") \
+    X(JET2,      1, "jet2_",           "flowc_jet2_") \
+    X(LEAN,      2, "lean_",           "flowc_lean_") \
+    X(CERTIFIED, 3, "lean_certified_", "flowc_certified_") \
+    X(TRY,       4, "lean_try_",       "flowc_try_") \
+    X(BOUNDARY,  5, "lean_boundary_",  "flowc_boundary_") \
+    X(SOA64,     6, "soa_",            "flowc_soa_")
+
+typedef enum {
+#define FLOW_OP_VAR_ENUM(name, bit, c_pfx, abi_pfx) FLOW_FN_VAR_##name = (1u << (bit)),
+    FLOW_OPERATOR_VARIANTS_X(FLOW_OP_VAR_ENUM)
+#undef FLOW_OP_VAR_ENUM
 } FlowOperatorVariantBit;
 
 typedef struct {
@@ -86,6 +165,7 @@ typedef struct {
     int is_result_return;
     uint8_t param_is_result[FLOW_LEAN_PARAM_MAX];
     int is_private;
+    uint8_t expr_mode;
     uint32_t variant_mask;
     uint64_t estimated_wcet_ns;
 } FlowLeanFunction;
@@ -188,10 +268,13 @@ static inline uint32_t flow_crc32_ieee(const void *data, size_t length) {
 int parse_spec(FILE *input, FlowSpec *spec); void lower_to_ir(const FlowSpec *spec, SemanticIR *ir);
 int flow_verify_lean_theorems(const char *lean_source, char *err_msg, size_t err_size);
 const char *flow_lean_scalar_to_c_type(const char *lean_type);
+FlowLeanExprMode flow_c_type_expr_mode(const char *c_type, FlowLeanExprMode fallback);
+void flow_lean_normalize_expr(const char *src, char *dst, size_t dst_size);
 const FlowLeanStruct *flow_ir_find_struct(const SemanticIR *ir, const char *name);
 const FlowLeanEnum   *flow_ir_find_enum(const SemanticIR *ir, const char *name);
 const char *flow_ir_type_to_c(const SemanticIR *ir, const char *lean_type);
 void flow_ir_compute_fn_variants(SemanticIR *ir);
+void flow_emit_ir_enums_and_structs(FILE *output, const SemanticIR *ir);
 
 #ifndef FLOW_SMT_RESULT_DEFINED
 #define FLOW_SMT_RESULT_DEFINED
@@ -244,13 +327,57 @@ static inline int flow_smt_verify(const SemanticIR *ir, const struct FlowCompone
 }
 
 #ifndef FLOW_SMT_RULE
-#define FLOW_SMT_RULE(...) (0)
-#define FLOW_SMT_VERIFY_RULES(...) (FLOW_SMT_PROVEN_UNSAT)
-#define FLOW_BOX_THEOREM_DETERMINISM 0
-#define FLOW_BOX_THEOREM_BUFFER_BOUNDS 0
-#define FLOW_BOX_THEOREM_MEMORY_QUOTA 0
-#define FLOW_BOX_THEOREM_SHARD_ISOLATION 0
-typedef int FlowBoxConstraint;
+typedef struct {
+    const char *name;
+    int64_t lhs;
+    int64_t lower;
+    int64_t upper;
+    int theorem_id;
+    const char *violation_msg;
+} FlowBoxConstraint;
+
+#define FLOW_BOX_THEOREM_DETERMINISM     1
+#define FLOW_BOX_THEOREM_BUFFER_BOUNDS   2
+#define FLOW_BOX_THEOREM_MEMORY_QUOTA    3
+#define FLOW_BOX_THEOREM_SHARD_ISOLATION 4
+
+#define FLOW_SMT_RULE(rule_name, lhs_val, lo_val, hi_val, thm_id, msg) \
+    { (rule_name), (int64_t)(lhs_val), (int64_t)(lo_val), (int64_t)(hi_val), (thm_id), (msg) }
+
+static inline FlowSMTResult flow_smt_verify_rules_impl(const char *domain, FlowSMTProofAttestation *proof_out,
+                                                       const FlowBoxConstraint *rules, size_t count,
+                                                       const char *fmt, ...) {
+    if (proof_out) {
+        proof_out->buffer_bounds_safety = FLOW_SMT_PROVEN_UNSAT;
+        proof_out->memory_quota_bound = FLOW_SMT_PROVEN_UNSAT;
+        proof_out->shard_non_aliasing = FLOW_SMT_PROVEN_UNSAT;
+        proof_out->determinism_invariant = FLOW_SMT_PROVEN_UNSAT;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        if (rules[i].lhs < rules[i].lower || rules[i].lhs > rules[i].upper) {
+            if (proof_out) {
+                if (rules[i].theorem_id == FLOW_BOX_THEOREM_BUFFER_BOUNDS) proof_out->buffer_bounds_safety = FLOW_SMT_VIOLATION_SAT;
+                else if (rules[i].theorem_id == FLOW_BOX_THEOREM_MEMORY_QUOTA) proof_out->memory_quota_bound = FLOW_SMT_VIOLATION_SAT;
+                else if (rules[i].theorem_id == FLOW_BOX_THEOREM_SHARD_ISOLATION) proof_out->shard_non_aliasing = FLOW_SMT_VIOLATION_SAT;
+                else proof_out->determinism_invariant = FLOW_SMT_VIOLATION_SAT;
+                snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
+                         "SMT Counterexample in %s [%s]: %s", domain ? domain : "domain",
+                         rules[i].name ? rules[i].name : "rule", rules[i].violation_msg ? rules[i].violation_msg : "bound violated");
+            }
+            return FLOW_SMT_VIOLATION_SAT;
+        }
+    }
+    if (proof_out && fmt) {
+        va_list ap;
+        va_start(ap, fmt);
+        vsnprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary), fmt, ap);
+        va_end(ap);
+    }
+    return FLOW_SMT_PROVEN_UNSAT;
+}
+
+#define FLOW_SMT_VERIFY_RULES(domain, proof_out, rules_arr, ...) \
+    flow_smt_verify_rules_impl((domain), (proof_out), (rules_arr), sizeof(rules_arr) / sizeof((rules_arr)[0]), __VA_ARGS__)
 
 static inline uint64_t flow_security_get_safety_mask(const SemanticIR *ir, const void *comp, const void *dims) {
     (void)ir; (void)comp; (void)dims; return ~0ULL;

@@ -14,11 +14,7 @@ typedef struct FlowType FlowType;
 struct FlowType { FlowTypeKind kind; char name[64]; size_t size_bytes, align_bytes, fixed_count; const FlowType *element_type; };
 typedef enum { FLOW_OWN_BORROW, FLOW_OWN_MUT_BORROW, FLOW_OWN_MOVE, FLOW_OWN_RETURN_MOVE, FLOW_OWN_SHARED_REF } FlowOwnership;
 typedef enum { FLOW_MEM_RAW_VIEW = 0, FLOW_MEM_RELATIVE_ARCHIVE = 1, FLOW_MEM_ARENA_VIEW = 2, FLOW_MEM_COPIED_OBJECT = 3 } FlowMemoryMode;
-#ifndef FLOW_EXTENT_DESCRIPTOR_DEFINED
-#define FLOW_EXTENT_DESCRIPTOR_DEFINED
-typedef struct { uint64_t base_offset, byte_length, qsbr_epoch; uint32_t stride_bytes, align_bytes, schema_version, flags; uint64_t reserved[3]; } FlowExtentDescriptor;
-_Static_assert(sizeof(FlowExtentDescriptor) == 64, "FlowExtentDescriptor must be 64 bytes");
-#endif
+#include "bitspace.h"
 typedef enum { FLOW_ALIAS_DISJOINT, FLOW_ALIAS_INPLACE_EXACT, FLOW_ALIAS_READ_ONLY_SHARED, FLOW_ALIAS_ANY } FlowAliasingPolicy;
 typedef enum { FLOW_REENTRANCY_PURE, FLOW_REENTRANCY_RECURSIVE_SAFE, FLOW_REENTRANCY_NON_REENTRANT, FLOW_REENTRANCY_THREAD_SAFE } FlowReentrancyPolicy;
 typedef enum {
