@@ -22,8 +22,7 @@
 #endif
 typedef struct FlowReloadGeneration { const FlowUnit *unit; void *state; uint64_t generation, retire_epoch; _Atomic uint64_t pin_count; struct FlowReloadGeneration *next; } FlowReloadGeneration;
 struct FlowReloadContext { void *host_context; _Atomic(FlowReloadGeneration *) current; _Atomic uint64_t epoch, anon_pin_epoch; _Atomic int quiescence_waiters, stopping;
-    uint64_t next_generation; pthread_mutex_t lock; pthread_cond_t quiesced; FlowReloadReader *readers; FlowReloadGeneration *retired;
-    const FlowWavefrontRing *bound_wavefront_ring; FlowBumpQsbrArena *bound_arena; };
+    uint64_t next_generation; pthread_mutex_t lock; pthread_cond_t quiesced; FlowReloadReader *readers; FlowReloadGeneration *retired; };
 static uint64_t schema_mix(uint64_t h, const void *d, size_t sz) { const unsigned char *b = d; for (size_t i = 0; i < sz; ++i) h = (h ^ b[i]) * FLOW_FNV1A_64_PRIME; return h; }
 static uint64_t schema_str(uint64_t h, const char *v) { static const unsigned char sep = 0; return v ? schema_mix(schema_mix(h, v, strlen(v)), &sep, 1) : schema_mix(h, &sep, 1); }
 static uint64_t schema_u32(uint64_t h, uint32_t v) { unsigned char b[4] = {(unsigned char)v, (unsigned char)(v >> 8), (unsigned char)(v >> 16), (unsigned char)(v >> 24)}; return schema_mix(h, b, 4); }
@@ -55,7 +54,6 @@ static int generation_safe(FlowReloadContext *ctx, const FlowReloadGeneration *c
     uint64_t retire_epoch = cand->retire_epoch;
     if (atomic_load_explicit(&ctx->anon_pin_epoch, memory_order_seq_cst) > 0 ||
         atomic_load_explicit(&cand->pin_count, memory_order_seq_cst) > 0) return 0;
-    if (ctx->bound_wavefront_ring && retire_epoch > ctx->bound_wavefront_ring->quiescent_generation) return 0;
     for (const FlowReloadReader *r = ctx->readers; r; r = r->next) {
         if (!atomic_load_explicit(&r->registered, memory_order_acquire) ||
             atomic_load_explicit(&r->is_offline, memory_order_acquire) ||
@@ -150,25 +148,19 @@ int flow_reload_begin(FlowReloadContext *ctx, FlowReloadReader *r, FlowInvocatio
     atomic_store_explicit(&r->last_heartbeat_ns, flow_clock_monotonic_ns(), memory_order_relaxed);
     FlowReloadGeneration *gen = atomic_load_explicit(&ctx->current, memory_order_seq_cst);
     if (!gen) { atomic_store_explicit(&r->active_epoch, 0, memory_order_seq_cst); return FLOW_RELOAD_NO_CURRENT; }
-    if (ctx->bound_arena) __atomic_fetch_add(&ctx->bound_arena->active_readers, 1, __ATOMIC_ACQ_REL);
     *inv = (FlowInvocation){.context = ctx, .reader = r, .unit = gen->unit, .state = gen->state, .generation = gen->generation, .active = 1}; return FLOW_RELOAD_OK; }
 void flow_reload_end(FlowInvocation *inv) { if (!inv || !inv->active || !inv->reader) return;
-    if (inv->context && inv->context->bound_arena) __atomic_fetch_sub(&inv->context->bound_arena->active_readers, 1, __ATOMIC_ACQ_REL);
     atomic_store_explicit(&inv->reader->active_epoch, 0, memory_order_seq_cst);
     if (atomic_load_explicit(&inv->context->quiescence_waiters, memory_order_acquire) > 0) {
         pthread_mutex_lock(&inv->context->lock); pthread_cond_broadcast(&inv->context->quiesced); pthread_mutex_unlock(&inv->context->lock); } *inv = (FlowInvocation){0}; }
 int flow_reload_call(FlowReloadContext *ctx, FlowReloadReader *r, const void *in, void *out) { FlowInvocation inv = {0}; int res = flow_reload_begin(ctx, r, &inv);
     if (res != FLOW_RELOAD_OK) return res; res = inv.unit->run(ctx->host_context, inv.state, in, out); flow_reload_end(&inv); return res; }
 uint64_t flow_reload_generation(const FlowReloadContext *ctx) { const FlowReloadGeneration *curr = ctx ? atomic_load_explicit(&ctx->current, memory_order_acquire) : NULL; return curr ? curr->generation : 0; }
-size_t flow_reload_reclaim(FlowReloadContext *ctx) { if (!ctx) return 0; int any_active = 0;
+size_t flow_reload_reclaim(FlowReloadContext *ctx) { if (!ctx) return 0;
     pthread_mutex_lock(&ctx->lock);
     FlowReloadGeneration *ready = reclaim_safe_locked(ctx, NULL);
-    for (const FlowReloadReader *r = ctx->readers; r; r = r->next)
-        if (atomic_load_explicit(&r->active_epoch, memory_order_seq_cst) != 0) { any_active = 1; break; }
     pthread_mutex_unlock(&ctx->lock);
-    size_t reclaimed = free_generation_list(ctx, ready);
-    if (ctx->bound_arena && reclaimed > 0 && !any_active) flow_bump_qsbr_quiescent_fold(ctx->bound_arena);
-    return reclaimed; }
+    return free_generation_list(ctx, ready); }
 void flow_qsbr_checkpoint(FlowReloadReader *r) {
     if (!r) return;
     if (r->context) {
@@ -197,15 +189,6 @@ int flow_qsbr_call(FlowReloadContext *ctx, const void *in, void *out) {
 }
 int flow_qsbr_synchronize(FlowReloadContext *ctx, uint64_t timeout_ns) {
     if (!ctx) return FLOW_RELOAD_INVALID;
-    if (ctx->bound_wavefront_ring) {
-        FlowWavefrontRing *wr = (FlowWavefrontRing *)ctx->bound_wavefront_ring;
-        wr->state = FLOW_RING_CIRCULATING;
-        wr->wavefront_epoch++;
-        wr->wave_cycle_count++;
-        wr->quiescent_generation++;
-        if (wr->bound_arena) flow_bump_qsbr_quiescent_fold(wr->bound_arena);
-        return FLOW_RELOAD_OK;
-    }
     uint64_t start = flow_clock_monotonic_ns();
     uint64_t sync_epoch = atomic_load_explicit(&ctx->epoch, memory_order_seq_cst);
     FlowReloadReader *stack_tracked[64];
@@ -265,25 +248,18 @@ done:
     return status;
 }
 size_t flow_qsbr_reclaim(FlowReloadContext *ctx) { return ctx ? flow_reload_reclaim(ctx) : 0; }
-int flow_reload_bind_wavefront(FlowReloadContext *ctx, const FlowWavefrontRing *ring) { if (!ctx) return 0; pthread_mutex_lock(&ctx->lock); ctx->bound_wavefront_ring = ring; pthread_mutex_unlock(&ctx->lock); return 1; }
-int flow_reload_bind_arena(FlowReloadContext *ctx, FlowBumpQsbrArena *arena) { if (!ctx) return 0; pthread_mutex_lock(&ctx->lock); ctx->bound_arena = arena; pthread_mutex_unlock(&ctx->lock); return 1; }
-FlowSMTResult flow_reload_verify_topological_safety_smt(const FlowReloadContext *ctx, FlowSMTProofAttestation *proof_out) { if (!ctx) return FLOW_SMT_UNKNOWN;
-    uint64_t gen = flow_reload_generation(ctx), epoch = atomic_load_explicit(&ctx->epoch, memory_order_acquire);
+FlowSMTResult flow_reload_verify_topological_safety_smt(const FlowReloadContext *ctx, FlowSMTProofAttestation *proof_out) {
+    if (!ctx) return FLOW_SMT_UNKNOWN;
+    uint64_t gen = flow_reload_generation(ctx);
+    uint64_t epoch = atomic_load_explicit(&ctx->epoch, memory_order_acquire);
     int waiters = atomic_load_explicit(&ctx->quiescence_waiters, memory_order_acquire);
-    uint64_t av = (ctx->bound_arena && ctx->bound_arena->cursor > ctx->bound_arena->capacity) ? 1 : 0; const FlowBoxConstraint rules[] = {
+    const FlowBoxConstraint rules[] = {
         FLOW_SMT_RULE("wavefront_evacuation_bound", gen > 1000000000ULL, 0, 0, FLOW_BOX_THEOREM_BUFFER_BOUNDS, "Quiescent evacuation exceeded horizon"),
         FLOW_SMT_RULE("lockfree_waiters_soundness", waiters < 0, 0, 0, FLOW_BOX_THEOREM_MEMORY_QUOTA, "Quiescence waiter balance violated"),
-        FLOW_SMT_RULE("generational_folding_soundness", av, 0, 0, FLOW_BOX_THEOREM_SHARD_ISOLATION, "Generational arena exceeded capacity quota"),
-        FLOW_SMT_RULE("epoch_monotonicity", epoch == 0, 0, 0, FLOW_BOX_THEOREM_DETERMINISM, "Epoch counter is zero or non-monotonic") };
-    return FLOW_SMT_VERIFY_RULES("reload_topological_safety", proof_out, rules, "SMT RELOAD SOUND: Gen=%llu, Epoch=%llu, BoundRing=%s, BoundArena=%s",
-        (unsigned long long)gen, (unsigned long long)epoch, ctx->bound_wavefront_ring ? "YES" : "NO", ctx->bound_arena ? "YES" : "NO"); }
-int flow_bump_qsbr_init(FlowBumpQsbrArena *arena, void *backing_memory, size_t capacity) { if (!arena || !backing_memory || !capacity) return 0;
-    *arena = (FlowBumpQsbrArena){ .buffer = (uint8_t *)backing_memory, .capacity = capacity, .generation = 1 }; return 1; }
-void *flow_bump_qsbr_alloc(FlowBumpQsbrArena *arena, size_t size_bytes) { if (!arena || !size_bytes || size_bytes > SIZE_MAX - 7) return NULL; size_t aligned = (size_bytes + 7) & ~((size_t)7);
-    if (arena->cursor > arena->capacity || aligned > arena->capacity - arena->cursor) return NULL; void *ptr = arena->buffer + arena->cursor; arena->cursor += aligned; arena->total_allocs++; return ptr; }
-int flow_bump_qsbr_quiescent_fold(FlowBumpQsbrArena *arena) {
-    if (!arena || __atomic_load_n(&arena->active_readers, __ATOMIC_ACQUIRE) > 0) return 0;
-    arena->cursor = 0; arena->generation++; arena->total_folds++; return 1;
+        FLOW_SMT_RULE("epoch_monotonicity", epoch == 0, 0, 0, FLOW_BOX_THEOREM_DETERMINISM, "Epoch counter is zero or non-monotonic")
+    };
+    return FLOW_SMT_VERIFY_RULES("reload_topological_safety", proof_out, rules,
+        "SMT RELOAD SOUND: Gen=%llu, Epoch=%llu", (unsigned long long)gen, (unsigned long long)epoch);
 }
 struct FlowAdaptiveController { FlowReloadContext *context; void *host_context; FlowAdaptiveConfig config; FlowAdaptiveCandidate *candidates;
     size_t candidate_count, current_index, calls_since_switch; FlowAdaptiveProbe probe; FlowAdaptiveMetrics metrics; pthread_mutex_t lock; };

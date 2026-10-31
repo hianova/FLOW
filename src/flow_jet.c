@@ -179,26 +179,6 @@ int flow_jet_read_file(const char *filepath, FlowJet *jet_out) { if (!filepath |
         memcpy(payload.q, temp_buf, 16 * sizeof(double)); memcpy(payload.p, temp_buf + 16 * sizeof(double), 16 * sizeof(double)); memcpy(payload.a, temp_buf + 32 * sizeof(double), 16 * sizeof(double));
         flow_bmf_canvas_init(&payload.staged_canvas, 0, ~0ULL, ~0ULL, 0x1234567890ABCDEFULL); payload.pure_genome = 0x1234567890ABCDEFULL; payload.crc32 = file_crc; }
     memset(jet_out, 0, sizeof(*jet_out)); jet_out->header = hdr; jet_out->payload = payload; return 1; }
-int flow_jet_from_fvec(const FlowVecHeader *hdr, const FlowVecPayload *payload, FlowJet *jet_out) { if (!hdr || !payload || !jet_out) return 0;
-    flow_jet_init(jet_out, hdr->id, hdr->name); strncpy(jet_out->header.description, hdr->description, sizeof(jet_out->header.description) - 1);
-    strncpy(jet_out->header.trigger_intent, hdr->trigger_intent, sizeof(jet_out->header.trigger_intent) - 1);
-    strncpy(jet_out->header.component_id, hdr->component_id, sizeof(jet_out->header.component_id) - 1);
-    for (size_t i = 0; i < FLOW_JET_STANDARD_DIM; ++i) { jet_out->payload.q[i] = payload->features[i]; jet_out->payload.p[i] = 0.0; jet_out->payload.a[i] = -payload->features[i]; }
-    jet_out->payload.pure_genome = payload->pure_genome; jet_out->payload.hard_composite_mask = payload->hard_composite_mask;
-    jet_out->payload.soft_composite_bias = payload->soft_composite_bias; jet_out->payload.proof = payload->proof;
-    flow_bmf_canvas_init(&jet_out->payload.staged_canvas, 0, payload->hard_composite_mask, ~0ULL, payload->pure_genome);
-    jet_out->payload.staged_canvas.dynamic_bias = payload->soft_composite_bias; jet_out->header.hamiltonian_energy = flow_jet_hamiltonian(jet_out); return 1; }
-int flow_jet_to_fvec(const FlowJet *jet, FlowVecHeader *hdr_out, FlowVecPayload *payload_out) { if (!jet || !hdr_out || !payload_out) return 0;
-    memset(hdr_out, 0, sizeof(*hdr_out)); strncpy(hdr_out->magic, FLOW_FVEC_MAGIC, sizeof(hdr_out->magic) - 1); strncpy(hdr_out->id, jet->header.id, sizeof(hdr_out->id) - 1);
-    strncpy(hdr_out->name, jet->header.name, sizeof(hdr_out->name) - 1); strncpy(hdr_out->origin_hardware, jet->header.origin_hardware, sizeof(hdr_out->origin_hardware) - 1);
-    strncpy(hdr_out->trigger_intent, jet->header.trigger_intent, sizeof(hdr_out->trigger_intent) - 1);
-    strncpy(hdr_out->component_id, jet->header.component_id, sizeof(hdr_out->component_id) - 1);
-    strncpy(hdr_out->description, jet->header.description, sizeof(hdr_out->description) - 1);
-    hdr_out->vector_dim = FLOW_VAULT_DIM; hdr_out->payload_size = sizeof(FlowVecPayload); hdr_out->energy_score = jet->header.hamiltonian_energy;
-    memset(payload_out, 0, sizeof(*payload_out)); memcpy(payload_out->features, jet->payload.q, FLOW_VAULT_DIM * sizeof(double));
-    payload_out->pure_genome = jet->payload.pure_genome; payload_out->hard_composite_mask = jet->payload.hard_composite_mask;
-    payload_out->soft_composite_bias = jet->payload.soft_composite_bias; payload_out->proof = jet->payload.proof;
-    payload_out->crc32 = flow_crc32_ieee(payload_out, offsetof(FlowVecPayload, crc32)); return 1; }
 FlowSMTResult flow_jet_verify_symplectic_soundness_smt(const FlowJet *jet, FlowSMTProofAttestation *proof_out) { if (!jet) return FLOW_SMT_UNKNOWN;
     double H = flow_jet_hamiltonian(jet); bool energy_ok = !(H < 0.0 || H > 1.0e6 || isnan(H)), memory_ok = true;
     uint32_t eff_taps = jet->header.memory_taps ? jet->header.memory_taps : FLOW_JET_STANDARD_TAPS; if (eff_taps > FLOW_JET_MAX_TAPS) eff_taps = FLOW_JET_MAX_TAPS;

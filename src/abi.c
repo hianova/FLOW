@@ -115,40 +115,10 @@ int flow_abi_emit_c_header(FILE *output, const FlowComponentABI *abi) { if (!out
         "#define FLOW_LEAN_POST_GUARD(cond, fallback_status) do { if (__builtin_expect(!(cond), 0)) { return (fallback_status); } } while (0)\n"
         "#define FLOW_LEAN_IMPLIES_GUARD(hyp, conc, fallback_status) do { if (__builtin_expect((hyp) && !(conc), 0)) { return (fallback_status); } } while (0)\n#endif\n"
         "typedef struct { void *address; size_t length, alignment; int mutability, ownership; uint64_t lifetime_epoch; int is_relocatable, is_validated, mode; } %s_MemoryView;\n"
-        "#ifndef FLOW_STATUS_CODE_DEFINED\n#define FLOW_STATUS_CODE_DEFINED\n"
-        "typedef enum { FLOW_OK = 0, FLOW_ERR_INVALID_ARG = -1, FLOW_ERR_QUOTA_OR_STRIDE = -2, FLOW_ERR_KERNEL_UNBOUND = -3, FLOW_ERR_WATCHDOG_ESTOP = -4 } FlowStatusCode;\n"
-        "#endif\n"
-        "#ifndef FLOW_EXTENT_DESCRIPTOR_DEFINED\n#define FLOW_EXTENT_DESCRIPTOR_DEFINED\n"
-        "typedef struct { uint64_t base_offset, byte_length, qsbr_epoch; uint32_t stride_bytes, align_bytes, schema_version, flags; uint64_t reserved[3]; } FlowExtentDescriptor;\n"
-        "#endif\n",
+        "#ifndef FLOW_ABI_CORE_TYPES_DEFINED\n#define FLOW_ABI_CORE_TYPES_DEFINED\n"
+        FLOW_STR(FLOW_ABI_CORE_TYPES_C17) "\n#endif\n",
         id_safe, id_safe);
-    if (abi->ir) {
-        for (size_t ei = 0; ei < abi->ir->lean_enum_count; ++ei) {
-            const FlowLeanEnum *en = &abi->ir->lean_enums[ei];
-            fprintf(output, "#ifndef FLOW_LEAN_ENUM_%s_DEFINED\n#define FLOW_LEAN_ENUM_%s_DEFINED\ntypedef enum {\n", en->name, en->name);
-            for (size_t vi = 0; vi < en->variant_count; ++vi)
-                fprintf(output, "    %s = %zu%s\n", en->variants[vi], vi, vi + 1 < en->variant_count ? "," : "");
-            fprintf(output, "} %s;\n#endif\n", en->name);
-        }
-        for (size_t si = 0; si < abi->ir->lean_struct_count; ++si) {
-            const FlowLeanStruct *st = &abi->ir->lean_structs[si];
-            fprintf(output, "#ifndef FLOW_LEAN_STRUCT_%s_DEFINED\n#define FLOW_LEAN_STRUCT_%s_DEFINED\ntypedef struct {\n", st->name, st->name);
-            for (size_t fi = 0; fi < st->field_count; ++fi) {
-                char f_ident[96];
-                fprintf(output, "    %s %s;\n", st->fields[fi].c_type, abi_escape_c_ident(st->fields[fi].name, f_ident, sizeof(f_ident)));
-            }
-            fprintf(output, "} %s;\n#endif\n", st->name);
-        }
-        for (size_t fi = 0; fi < abi->ir->lean_function_count; ++fi) {
-            const FlowLeanFunction *fn = &abi->ir->lean_functions[fi];
-            if (!fn->is_private && fn->is_tuple_return && fn->tuple_arity >= 2) {
-                fprintf(output, "#ifndef FLOW_LEAN_TUPLE_%s_DEFINED\n#define FLOW_LEAN_TUPLE_%s_DEFINED\ntypedef struct {\n", fn->name, fn->name);
-                for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
-                    fprintf(output, "    %s out_%zu;\n", abi_lean_c_type_ir(abi->ir, fn->tuple_types[ti]), ti);
-                fprintf(output, "} %s_tuple_t;\n#endif\n", fn->name);
-            }
-        }
-    }
+    flow_emit_ir_enums_and_structs(output, abi->ir);
     fprintf(output,
         "/** %s @return [own_transfer] */\n%s_Handle %s(void);\n"
         "/** Binds initialized handle to active QSBR execution context. */\n%s_Handle %s_bind_context(%s_Handle handle);\n"

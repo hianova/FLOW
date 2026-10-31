@@ -386,17 +386,53 @@ int flow_hott_emit_lean_fiber_jet_spec(FILE *out, const FlowDiscreteJetBundle *b
 #define FLOW_BOUNDARY_QNAN_PREFIX_MASK  UINT64_C(0x7FFCF00000000000)
 #define FLOW_BOUNDARY_PAYLOAD_MASK      UINT64_C(0x00000FFFFFFFFFFF)
 
+#define FLOW_BOUNDARY_VIOLATION_KIND_C17 \
+typedef enum { \
+    FLOW_BOUNDARY_OK                 = 0, \
+    FLOW_BOUNDARY_PRECOND            = 1, \
+    FLOW_BOUNDARY_POSTCOND           = 2, \
+    FLOW_BOUNDARY_THM_IMPLIES        = 3, \
+    FLOW_BOUNDARY_DOMAIN_SINGULARITY = 4, \
+    FLOW_BOUNDARY_HIT_COLLAPSE       = 5, \
+    FLOW_BOUNDARY_EXPLICIT_NONE      = 6  \
+} FlowBoundaryViolationKind;
+
 #ifndef FLOW_BOUNDARY_VIOLATION_KIND_DEFINED
 #define FLOW_BOUNDARY_VIOLATION_KIND_DEFINED
-typedef enum {
-    FLOW_BOUNDARY_OK                 = 0, /* Interior point in M^\circ */
-    FLOW_BOUNDARY_PRECOND            = 1, /* Precondition guard failed */
-    FLOW_BOUNDARY_POSTCOND           = 2, /* Postcondition guard failed */
-    FLOW_BOUNDARY_THM_IMPLIES        = 3, /* Theorem implication hyp => conc ruptured */
-    FLOW_BOUNDARY_DOMAIN_SINGULARITY = 4, /* Non-finite / division-by-zero / NaN domain */
-    FLOW_BOUNDARY_HIT_COLLAPSE       = 5, /* SpaceWithException HIT point collapse */
-    FLOW_BOUNDARY_EXPLICIT_NONE      = 6  /* Explicit Option.none / FlowResult.boundary */
-} FlowBoundaryViolationKind;
+FLOW_BOUNDARY_VIOLATION_KIND_C17
+#endif
+
+#define FLOW_LEAN_PRIMITIVE_WITNESS_TYPES_C17 \
+typedef struct { bool _verified; } lean_certified_bool; \
+typedef struct { double _verified; } lean_certified_double; \
+typedef struct { float _verified; } lean_certified_float; \
+typedef struct { uint64_t _verified; } lean_certified_uint64_t; \
+typedef struct { int64_t _verified; } lean_certified_int64_t; \
+typedef struct { uint32_t _verified; } lean_certified_uint32_t; \
+typedef struct { int32_t _verified; } lean_certified_int32_t; \
+typedef struct { uint16_t _verified; } lean_certified_uint16_t; \
+typedef struct { int16_t _verified; } lean_certified_int16_t; \
+typedef struct { uint8_t _verified; } lean_certified_uint8_t; \
+typedef struct { int8_t _verified; } lean_certified_int8_t; \
+typedef struct { size_t _verified; } lean_certified_size_t; \
+typedef struct { ptrdiff_t _verified; } lean_certified_ptrdiff_t; \
+typedef struct { bool value; uint64_t boundary_tag; } lean_result_bool; \
+typedef struct { double value; uint64_t boundary_tag; } lean_result_double; \
+typedef struct { float value; uint64_t boundary_tag; } lean_result_float; \
+typedef struct { uint64_t value; uint64_t boundary_tag; } lean_result_uint64_t; \
+typedef struct { int64_t value; uint64_t boundary_tag; } lean_result_int64_t; \
+typedef struct { uint32_t value; uint64_t boundary_tag; } lean_result_uint32_t; \
+typedef struct { int32_t value; uint64_t boundary_tag; } lean_result_int32_t; \
+typedef struct { uint16_t value; uint64_t boundary_tag; } lean_result_uint16_t; \
+typedef struct { int16_t value; uint64_t boundary_tag; } lean_result_int16_t; \
+typedef struct { uint8_t value; uint64_t boundary_tag; } lean_result_uint8_t; \
+typedef struct { int8_t value; uint64_t boundary_tag; } lean_result_int8_t; \
+typedef struct { size_t value; uint64_t boundary_tag; } lean_result_size_t; \
+typedef struct { ptrdiff_t value; uint64_t boundary_tag; } lean_result_ptrdiff_t;
+
+#ifndef FLOW_LEAN_PRIMITIVE_WITNESS_TYPES_DEFINED
+#define FLOW_LEAN_PRIMITIVE_WITNESS_TYPES_DEFINED
+FLOW_LEAN_PRIMITIVE_WITNESS_TYPES_C17
 #endif
 
 typedef struct {

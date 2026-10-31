@@ -9,7 +9,7 @@ PROVENANCE_DEFS := -DFLOW_VERSION_STRING=\"$(FLOW_VERSION)\" \
                    -DFLOW_GIT_BRANCH=\"$(GIT_BRANCH)\" \
                    -DFLOW_GIT_COMMIT=\"$(GIT_COMMIT)\" \
                    -DFLOW_GIT_DIRTY=\"$(GIT_DIRTY)\"
-CFLAGS ?= -std=c17 -Wall -Wextra -Wpedantic -O2 -Isrc -Iplugins -Itests
+CFLAGS ?= -std=c17 -Wall -Wextra -Wpedantic -Werror -O2 -Isrc -Iplugins -Itests
 CFLAGS += $(PROVENANCE_DEFS)
 LDLIBS ?= -lm
 THREAD_FLAGS ?= -pthread

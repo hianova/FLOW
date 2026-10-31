@@ -165,17 +165,6 @@ static inline uint64_t flow_v512_horizontal_and(FlowVector512 v) { return v.u64[
 #define FLOW_BITSPACE_MAX_CANDIDATES 32
 typedef struct { uint64_t hard_safety_mask, hard_contract_mask, hard_resource_mask, hard_plugin_mask, hard_polytope_mask, hard_composite_mask;
     uint64_t domain_preference_mask, dynamic_telemetry_bias, soft_composite_bias; } FlowMaskCanvas;
-typedef enum { FLOW_BMF_SUBSPACE_GENERIC = 0, FLOW_BMF_SUBSPACE_SMOOTH_FETCH_LATTE = 1, FLOW_BMF_SUBSPACE_AGILE_SPRINT = 2,
-    FLOW_BMF_SUBSPACE_COLLABORATIVE_HOLD = 3, FLOW_BMF_SUBSPACE_EMERGENCY_PROTECT = 4, FLOW_BMF_SUBSPACE_HFT_LATENCY = 5,
-    FLOW_BMF_SUBSPACE_QUIESCENT_IOT = 6, FLOW_BMF_SUBSPACE_MAX = 16 } FlowBmfSubspaceId;
-#define FLOW_BMF_SUBSPACE_FEATURE_DIM 16
-typedef struct { uint32_t subspace_id; char name[48], description[96]; double centroid[FLOW_BMF_SUBSPACE_FEATURE_DIM]; uint64_t invariant_mask, malleable_mask, default_switches; } FlowBmfSubspace;
-typedef struct { FlowBmfSubspace subspaces[FLOW_BMF_SUBSPACE_MAX]; size_t subspace_count; int is_initialized; } FlowBmfSubspaceRegistry;
-void flow_bmf_subspace_init_registry(FlowBmfSubspaceRegistry *reg); const FlowBmfSubspace *flow_bmf_subspace_lookup(const FlowBmfSubspaceRegistry *reg, uint32_t subspace_id);
-uint32_t flow_bmf_subspace_index_from_features(const FlowBmfSubspaceRegistry *reg, const double *features, size_t dim);
-void flow_bmf_canvas_init_from_subspace(FlowBmf1BitCanvas *canvas, const FlowBmfSubspace *subspace); int flow_bmf_canvas_adjudicate_smt(FlowBmf1BitCanvas *canvas);
-void flow_bmf_canvas_to_mask_canvas(const FlowBmf1BitCanvas *canvas, FlowMaskCanvas *mask_canvas_out);
-void flow_bmf_canvas_from_mask_canvas(const FlowMaskCanvas *mask_canvas, uint32_t subspace_id, FlowBmf1BitCanvas *canvas_out);
 typedef struct { double energy, latency_score, throughput_score; size_t memory_bytes, capacity; uint64_t benchmark_ns; int hard_gate_passed; char message[128]; } FlowEvaluation;
 #define FLOW_GENOME_MAX_WORDS 16
 typedef struct { uint64_t words[FLOW_GENOME_MAX_WORDS]; uint32_t active_words, total_bits; } FlowGenome;
@@ -223,14 +212,6 @@ int flow_polyhedral_solve_plan(const SemanticIR *ir, const FlowBitSpace *space, 
 SearchResult search_best(const SemanticIR *ir, size_t iterations, uint32_t seed, int measured, const ProfileSeed *profile);
 void flow_plan_to_search_result(const FlowPlan *plan, const SemanticIR *ir, uint32_t seed, SearchResult *out);
 int flow_artifact_to_profile_seed(const FlowPlanArtifact *art, ProfileSeed *seed_out);
-#define FLOW_SWARM_MAX_PARTICLES 32
-typedef struct { uint32_t id; uint64_t current_genome, best_genome; FlowPlan best_plan; double current_energy, best_energy; uint64_t local_mask; uint32_t stagnation_steps; } FlowSwarmParticle;
-typedef struct { double bit_intensity[64]; uint64_t consensus_mask; double evaporation_rate, reinforcement_weight; } FlowSwarmPheromone;
-typedef struct { const FlowBitSpace *space; size_t particle_count; FlowSwarmParticle particles[FLOW_SWARM_MAX_PARTICLES]; FlowSwarmPheromone pheromone; FlowPlan global_best_plan;
-    double global_best_energy; size_t total_swarm_mutations, total_saddle_point_escapes; uint64_t rng_state; } FlowSwarmCluster;
-int flow_swarm_init(FlowSwarmCluster *cluster, const FlowBitSpace *space, size_t particle_count, uint32_t base_seed);
-int flow_swarm_step(FlowSwarmCluster *cluster, size_t steps_per_particle); int flow_swarm_diffuse_pheromone(FlowSwarmCluster *cluster);
-int flow_swarm_search(const FlowBitSpace *space, size_t particle_count, size_t cycles, uint32_t seed, int measured, FlowBitSearchResult *result_out);
 
 /* =========================================================================
  * FLOW Exact Numerics & IEEE-754 / 2-Jet / BigInt Engine
@@ -342,9 +323,31 @@ static inline __attribute__((unused)) double flow_dequantize(uint64_t code, doub
     return min_v + ((double)c / (double)max_q) * (max_v - min_v); \
 }
 
+#define FLOW_JET_SCALAR2_TYPEDEF_C17 \
+typedef struct { double v; double d1; double d2; } FlowJetScalar2;
+
 #ifndef FLOW_JET_SCALAR2_DEFINED
 #define FLOW_JET_SCALAR2_DEFINED
-typedef struct { double v; double d1; double d2; } FlowJetScalar2;
+FLOW_JET_SCALAR2_TYPEDEF_C17
+#endif
+
+#define FLOW_ABI_CORE_TYPES_C17 \
+typedef enum { \
+    FLOW_OK = 0, \
+    FLOW_ERR_INVALID_ARG = -1, \
+    FLOW_ERR_QUOTA_OR_STRIDE = -2, \
+    FLOW_ERR_KERNEL_UNBOUND = -3, \
+    FLOW_ERR_WATCHDOG_ESTOP = -4 \
+} FlowStatusCode; \
+typedef struct { \
+    uint64_t base_offset, byte_length, qsbr_epoch; \
+    uint32_t stride_bytes, align_bytes, schema_version, flags; \
+    uint64_t reserved[3]; \
+} FlowExtentDescriptor;
+
+#ifndef FLOW_ABI_CORE_TYPES_DEFINED
+#define FLOW_ABI_CORE_TYPES_DEFINED
+FLOW_ABI_CORE_TYPES_C17
 #endif
 
 #define FLOW_JET2_ALU_C17 \
@@ -479,176 +482,4 @@ void flow_gradient_descent_step(size_t N, size_t IN, size_t OUT,
                                 const double *predictions, const double *targets,
                                 double learning_rate);
 #endif /* FLOW_EXACT_NUMERICS_DEFINED */
-
-/* ============================================================================
- * Architectural Experience Memory (.fvec) (folded into bitspace.h)
- * ============================================================================ */
-#define FLOW_VAULT_DIM 16
-#define FLOW_FVEC_MAGIC "FVEC_V1"
-#define FLOW_FVEC_HEADER_SIZE 1024
-#define FLOW_FVEC_MAX_ENTRIES 128
-#define FLOW_FVEC_DEFAULT_DIR ".flow/vecs"
-#define FLOW_FVEC_RAM_CRITICAL_PCT (90.0)
-#define FLOW_FVEC_CACHE_MISS_CRITICAL (0.15)
-#define FLOW_FVEC_MAX_SWAP_NS (500ULL)
-typedef struct { char magic[16], id[64], name[128], origin_hardware[128], trigger_intent[64], category[32], component_id[32], description[256], smt_signature[64];
-    double energy_score; uint64_t created_at_unix; uint32_t vector_dim, payload_size, confidence_score; uint64_t last_reinforced_unix; uint8_t is_auto_promoted;
-    char content_hash[32], filepath[256]; } FlowVecHeader;
-typedef struct { double features[FLOW_VAULT_DIM]; uint64_t pure_genome, hard_composite_mask, soft_composite_bias; FlowSMTProofAttestation proof; uint32_t crc32; } FlowVecPayload;
-typedef struct { FlowVecHeader header; FlowVecPayload payload; } FlowVecRecord;
-typedef struct { FlowVecRecord records[FLOW_FVEC_MAX_ENTRIES]; size_t count; char root_dir[256]; uint64_t total_lookups; } FlowVecStore;
-uint32_t flow_fvec_crc32(const void *data, size_t length);
-int flow_fvec_header_serialize(const FlowVecHeader *hdr, char *out_buf, size_t buf_size);
-int flow_fvec_header_deserialize(const char *in_buf, size_t buf_size, FlowVecHeader *hdr_out);
-int flow_fvec_write_file(const char *filepath, const FlowVecHeader *hdr, const FlowVecPayload *payload);
-int flow_fvec_read_file(const char *filepath, FlowVecHeader *hdr_out, FlowVecPayload *payload_out);
-void flow_fvec_embed_prompt(const char *prompt, double *out_features);
-double flow_fvec_cosine_similarity(const double *a, const double *b, size_t dim);
-void flow_fvec_store_init(FlowVecStore *store, const char *dir_path);
-int flow_fvec_store_scan(FlowVecStore *store);
-const FlowVecRecord *flow_fvec_store_lookup_by_id(const FlowVecStore *store, const char *id);
-int flow_fvec_store_query(const FlowVecStore *store, const char *natural_query, size_t *best_idx_out, double *best_sim_out);
-int flow_fvec_remediate_check(const FlowVecStore *store, double ram_pressure_pct, double cache_miss_rate, const FlowVecRecord **recommended_record_out, double *confidence_out, char *diagnosis_out, size_t max_diag_len);
-void flow_fvec_inspect(const FlowVecHeader *hdr, const FlowVecPayload *payload, FILE *out);
-void flow_fvec_store_print_summary(const FlowVecStore *store, FILE *out);
-int flow_fvec_seed_canonical_files(const char *target_dir);
-int flow_fvec_verify_hardware_affinity(const FlowVecHeader *hdr, const FlowEnvironmentState *host_env, char *diag_msg, size_t max_len);
-uint64_t flow_fvec_compute_content_hash(uint64_t genome, uint64_t hard_mask, uint64_t soft_bias, const FlowSMTProofAttestation *proof);
-int flow_fvec_promote_or_strengthen(const char *target_dir, const FlowVecHeader *base_hdr, const FlowVecPayload *payload, uint64_t content_hash, char *out_filepath, size_t max_path_len, uint32_t *new_confidence_out);
-size_t flow_fvec_store_evict_senescent(FlowVecStore *store, uint64_t now_unix, uint64_t max_idle_seconds, char (*evicted_files_out)[256], size_t max_evictions);
-#define FLOW_FVEC_MAX_PRESTAGED 8
-typedef struct { char trigger_condition[64], fvec_path[256]; FlowVecHeader header; FlowVecPayload payload; FlowBmf1BitCanvas staged_canvas; int is_staged_sound; } FlowFvecPreStagingSlot;
-typedef struct { FlowFvecPreStagingSlot slots[FLOW_FVEC_MAX_PRESTAGED]; size_t slot_count; uint64_t total_speculative_swaps; double last_swap_latency_ns; } FlowFvecPreStagingVault;
-int flow_fvec_prestaging_init(FlowFvecPreStagingVault *vault);
-int flow_fvec_prestaging_register(FlowFvecPreStagingVault *vault, const char *fvec_file_path, const char *trigger_condition);
-int flow_fvec_prestaging_swap_atomic(FlowFvecPreStagingVault *vault, const char *trigger_condition, FlowBmf1BitCanvas *active_canvas_out, double *swap_latency_ns_out);
-FlowSMTResult flow_fvec_verify_prestaging_soundness_smt(const FlowFvecPreStagingVault *vault, const char *trigger_condition, double swap_latency_ns, FlowSMTProofAttestation *proof_out);
-
-/* ============================================================================
- * 5-Stage Token Ring, Wavefront Semilattice & Swarm Mesh (folded into bitspace.h)
- * ============================================================================ */
-#define FLOW_WIRE_FRAME9_SIZE 9
-#define FLOW_WIRE_OP_HASH_SYNC    0xAA
-#define FLOW_WIRE_OP_ANTIBODY     0xAA
-#define FLOW_WIRE_OP_HETERO_MESH  0xBB
-#define FLOW_WIRE_OP_FLEET_SYNC   0xCC
-#pragma pack(push, 1)
-typedef struct { uint8_t opcode; union { struct { uint8_t hash_bytes[8]; } antibody;
-    struct { uint8_t role, node_id, bp_hi, bp_lo, lat_hi, lat_lo, crc_hi, crc_lo; } hetero_mesh;
-    struct { uint8_t agent_id, role, x_hi, x_lo, y_hi, y_lo, crc_hi, crc_lo; } fleet; uint8_t raw[8]; } payload; } FlowWireFrame9;
-#pragma pack(pop)
-static inline uint16_t flow_wire_crc16(const uint8_t *data, size_t len) {
-    uint16_t crc = 0xFFFF;
-    if (!data) { return 0; }
-    for (size_t i = 0; i < len; ++i) {
-        crc ^= (uint16_t)data[i] << 8;
-        for (int b = 0; b < 8; ++b) {
-            crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) : (crc << 1);
-        }
-    }
-    return crc;
-}
-static inline int flow_wire_frame9_pack(const FlowWireFrame9 *frame, uint8_t out[FLOW_WIRE_FRAME9_SIZE]) {
-    return (frame && out) ? (memcpy(out, frame, FLOW_WIRE_FRAME9_SIZE), 1) : 0;
-}
-static inline int flow_wire_frame9_unpack(const uint8_t in[FLOW_WIRE_FRAME9_SIZE], FlowWireFrame9 *frame_out) {
-    return (in && frame_out) ? (memcpy(frame_out, in, FLOW_WIRE_FRAME9_SIZE), 1) : 0;
-}
-static inline int flow_wire_hash_encode(uint64_t content_hash, uint8_t out_packet[FLOW_WIRE_FRAME9_SIZE]) {
-    if (!out_packet) { return 0; }
-    FlowWireFrame9 f = { .opcode = FLOW_WIRE_OP_HASH_SYNC };
-    for (int i = 0; i < 8; ++i) {
-        f.payload.antibody.hash_bytes[i] = (uint8_t)((content_hash >> (56 - i * 8)) & 0xFF);
-    }
-    return flow_wire_frame9_pack(&f, out_packet);
-}
-static inline int flow_wire_hash_decode(const uint8_t in_packet[FLOW_WIRE_FRAME9_SIZE], uint64_t *out_content_hash) {
-    if (!in_packet || !out_content_hash) { return 0; }
-    FlowWireFrame9 f;
-    if (!flow_wire_frame9_unpack(in_packet, &f) || f.opcode != FLOW_WIRE_OP_HASH_SYNC) { return 0; }
-    uint64_t h = 0;
-    for (int i = 0; i < 8; ++i) {
-        h = (h << 8) | f.payload.antibody.hash_bytes[i];
-    }
-    *out_content_hash = h;
-    return 1;
-}
-#define FLOW_SWARM_MSG_ANTIBODY       FLOW_WIRE_OP_HASH_SYNC
-#define FLOW_SWARM_LYMPH_PKT_SIZE     FLOW_WIRE_FRAME9_SIZE
-#define flow_swarm_lymphatic_encode   flow_wire_hash_encode
-#define flow_swarm_lymphatic_decode   flow_wire_hash_decode
-#define FLOW_TOKEN_RING_MAX_TOKENS 16
-#define FLOW_TOKEN_RING_DEFAULT_MAX_CYCLES 32
-typedef enum { FLOW_TOKEN_STAGE_INGEST = 0, FLOW_TOKEN_STAGE_POLYTOPE = 1, FLOW_TOKEN_STAGE_ANNEAL = 2,
-    FLOW_TOKEN_STAGE_SMT_PROOF = 3, FLOW_TOKEN_STAGE_SYNTHESIS = 4, FLOW_TOKEN_STAGE_ATTRACTOR = 5, FLOW_TOKEN_STAGE_CUSTOM = 6 } FlowTokenStage;
-typedef enum { FLOW_RING_INIT = 0, FLOW_RING_CIRCULATING = 1, FLOW_RING_ATTRACTOR_REACHED = 2, FLOW_RING_UNSAT = 3, FLOW_RING_EXHAUSTED = 4 } FlowTokenRingState;
-struct FlowTokenRing; typedef struct FlowToken FlowToken;
-typedef int (*FlowTokenTransitionFn)(struct FlowTokenRing *ring, FlowToken *token, FlowMaskCanvas *canvas);
-struct FlowToken { uint32_t token_id; FlowTokenStage stage; char stage_name[32]; uint64_t attention_mask, dynamic_bias, execution_count;
-    double energy; FlowTokenTransitionFn transition_fn; void *user_data; };
-typedef struct FlowTokenRing { FlowToken tokens[FLOW_TOKEN_RING_MAX_TOKENS]; size_t token_count, current_token_idx, step_count, anneal_iterations;
-    FlowMaskCanvas active_canvas; FlowBmf1BitCanvas bmf_1bit_canvas; uint64_t active_genome, cycle_count, rng_state, wavefront_epoch, quiescent_generation;
-    double lyapunov_energy, prev_energy, lyapunov_delta_e; FlowTokenRingState state; int attractor_converged; SemanticIR *active_ir; FlowBitSpace active_space;
-    SearchResult best_search; FlowSMTProofAttestation smt_proof; FlowPlanEnsemble ensemble; uint32_t rng_seed; FlowBumpQsbrArena *bound_arena; char status_message[128]; } FlowTokenRing;
-int flow_token_ring_init(FlowTokenRing *ring, SemanticIR *ir);
-int flow_token_ring_setup_canonical(FlowTokenRing *ring, SemanticIR *ir, size_t anneal_iters, uint32_t seed);
-int flow_token_ring_add_token(FlowTokenRing *ring, FlowTokenStage stage, const char *name, FlowTokenTransitionFn fn, void *user_data);
-uint64_t flow_token_ring_attention_project(FlowMaskCanvas *canvas, uint64_t attention_mask, uint64_t dynamic_bias, uint64_t current_genome);
-uint64_t flow_token_ring_bmf_attention_project(FlowBmf1BitCanvas *canvas, uint64_t attention_mask, uint64_t dynamic_bias);
-int flow_token_ring_step(FlowTokenRing *ring);
-FlowTokenRingState flow_token_ring_run_to_attractor(FlowTokenRing *ring, size_t max_cycles);
-int flow_token_ring_converge_default(FlowTokenRing *ring, const SemanticIR *opt_ir, const char *flow_name);
-
-#define FLOW_SUBSPACE_MASK_CAPACITY     0x000000000000FFFFULL
-#define FLOW_SUBSPACE_MASK_CONCURRENCY  0x0000000000FF0000ULL
-#define FLOW_SUBSPACE_MASK_SHARDING     0x00000000FF000000ULL
-#define FLOW_SUBSPACE_MASK_BUFFER       0x0000FFFF00000000ULL
-#define FLOW_SUBSPACE_MASK_GROWTH       0xFFFF000000000000ULL
-#define FLOW_LYAPUNOV_CONVERGE_EPS      1e-5
-#define FLOW_LAGRANGIAN_DEFAULT_ETA     0.05
-#define FLOW_MESH_SATURATION_LIMIT_PERMILLE 949U
-
-#define FLOW_MAX_SUBSPACES 8
-#define FLOW_WAVEFRONT_MAX_SLOTS 8
-#define FLOW_WAVEFRONT_MAX_WORKERS 8
-typedef enum { FLOW_SUBSPACE_CAPACITY = 0, FLOW_SUBSPACE_CONCURRENCY = 1, FLOW_SUBSPACE_SHARDING = 2,
-    FLOW_SUBSPACE_BUFFER = 3, FLOW_SUBSPACE_GROWTH = 4, FLOW_SUBSPACE_CUSTOM = 5 } FlowSubspaceId;
-typedef struct { FlowSubspaceId id; char name[32]; uint64_t mask; uint8_t bit_offset, bit_width; uint64_t min_value, max_value;
-    double shadow_price_lambda, learning_rate_eta, current_demand, capacity_limit; uint64_t current_val, optimal_val; } FlowSubspace;
-typedef struct { FlowSubspace subspaces[FLOW_MAX_SUBSPACES]; size_t subspace_count; uint64_t composite_coverage_mask; bool is_strictly_orthogonal; } FlowSubspaceDecomposition;
-typedef struct __attribute__((aligned(64))) { uint32_t slot_id; FlowTokenStage current_stage; uint64_t slot_genome; FlowBmf1BitCanvas bmf_canvas; FlowMaskCanvas slot_canvas;
-    double energy; bool in_flight; } FlowWavefrontSlot;
-typedef struct FlowWavefrontRing { FlowSubspaceDecomposition decomp; FlowWavefrontSlot slots[FLOW_WAVEFRONT_MAX_SLOTS]; size_t slot_count, worker_count;
-    uint64_t global_lattice_genome, wave_cycle_count, total_cycles, wavefront_epoch, quiescent_generation; FlowMaskCanvas global_canvas;
-    double global_lyapunov_energy, prev_lyapunov_energy, lyapunov_delta_e, total_energy_uj; bool attractor_converged; FlowTokenRingState state; SemanticIR *active_ir;
-    FlowBitSpace active_space; SearchResult best_search; FlowSMTProofAttestation smt_proof; FlowPhysicalProbe last_probe; FlowBumpQsbrArena *bound_arena; char status_message[128]; } FlowWavefrontRing;
-int flow_subspace_decompose_canonical(FlowSubspaceDecomposition *decomp, const SemanticIR *ir);
-int flow_subspace_lagrangian_tune(FlowSubspace *sub, double current_demand, double capacity_limit);
-uint64_t flow_subspace_polyhedral_project(const FlowSubspace *sub, uint64_t raw_val);
-uint64_t flow_wavefront_semilattice_join(uint64_t base_genome, const uint64_t *thread_slices, const uint64_t *subspace_masks, size_t count);
-int flow_wavefront_ring_init(FlowWavefrontRing *ring, SemanticIR *ir, size_t num_slots, size_t num_workers);
-int flow_wavefront_ring_step_parallel(FlowWavefrontRing *ring);
-void flow_wavefront_ring_destroy(FlowWavefrontRing *ring);
-int flow_wavefront_ring_bind_arena(FlowWavefrontRing *ring, FlowBumpQsbrArena *arena);
-FlowSMTResult flow_wavefront_verify_temporal_safety_smt(const FlowWavefrontRing *ring, FlowSMTProofAttestation *proof_out);
-#define FLOW_SWARM_MSG_HETERO_PHEROMONE 0xBB
-#define FLOW_SWARM_HETERO_PKT_SIZE 9
-#define FLOW_HETERO_MESH_MAX_NODES 64
-typedef enum { FLOW_SWARM_ROLE_GENERIC = 0, FLOW_SWARM_ROLE_INGRESS_GATEWAY = 1, FLOW_SWARM_ROLE_COMPUTE_ROUTER = 2, FLOW_SWARM_ROLE_STORAGE_INDEX = 3,
-    FLOW_SWARM_ROLE_EMBODIED_ACTUATOR = 4 } FlowSwarmRole;
-typedef struct { uint8_t node_id; FlowSwarmRole role; char name[32]; uint64_t contract_hash; uint32_t capacity; uint16_t current_backpressure, current_latency_us;
-    uint64_t total_routed_requests; int is_active; } FlowHeteroMeshNode;
-typedef struct { size_t node_count; FlowHeteroMeshNode nodes[FLOW_HETERO_MESH_MAX_NODES]; uint64_t total_mesh_telemetry_packets, total_mesh_routed; } FlowHeteroMesh;
-void flow_hetero_mesh_init(FlowHeteroMesh *mesh);
-int flow_hetero_mesh_register_node(FlowHeteroMesh *mesh, uint8_t node_id, FlowSwarmRole role, const char *name, uint64_t contract_hash, uint32_t capacity);
-int flow_hetero_mesh_route_target(const FlowHeteroMesh *mesh, FlowSwarmRole target_role, uint8_t *selected_node_id_out);
-FlowSMTResult flow_hetero_mesh_verify_smt(const FlowHeteroMesh *mesh, uint32_t ingress_max_qps, FlowSMTProofAttestation *proof_out);
-#define FLOW_HETERO_RING_MAX_NODES 64
-typedef struct __attribute__((aligned(64))) { _Atomic uint64_t seq; uint8_t node_id, role; uint16_t backpressure_permille, latency_p99_us, contract_crc16;
-    uint32_t capacity_qps; uint64_t timestamp_ns; double q_snapshot[16]; uint8_t reserved[36]; } FlowSwarmRingSlot;
-typedef struct { FlowSwarmRingSlot slots[FLOW_HETERO_RING_MAX_NODES]; size_t active_node_count; uint64_t total_ring_updates, total_ring_samples; } FlowSwarmRingMesh;
-int flow_swarm_ring_mesh_init(FlowSwarmRingMesh *mesh);
-int flow_swarm_ring_publish(FlowSwarmRingMesh *mesh, uint8_t node_id, FlowSwarmRole role, uint16_t backpressure, uint16_t latency_p99_us, uint16_t contract_crc16, uint32_t capacity_qps, const double q[16]);
-int flow_swarm_ring_sample(const FlowSwarmRingMesh *mesh, uint8_t node_id, FlowSwarmRingSlot *slot_out);
-int flow_swarm_ring_route_lowest_energy(const FlowSwarmRingMesh *mesh, FlowSwarmRole target_role, uint8_t *selected_node_out);
-#endif
+#endif /* FLOW_BITSPACE_H */

@@ -65,8 +65,7 @@ double flow_jet_thermal_prune_factor(const FlowJet *jet, double horizon_sec); in
 int flow_jet_koopman_predict(const FlowJet *jet, double dt, double *observable_out); int flow_jet_mori_zwanzig_step(FlowJet *jet, double dt);
 double flow_jet_phase_distance(const FlowJet *a, const FlowJet *b); int flow_jet_clamp_to_safety_envelope(FlowJet *jet, double max_q, double max_p, double max_a);
 uint32_t flow_jet_crc32(const void *data, size_t length); int flow_jet_write_file(const FlowJet *jet, const char *filepath);
-int flow_jet_read_file(const char *filepath, FlowJet *jet_out); int flow_jet_from_fvec(const FlowVecHeader *hdr, const FlowVecPayload *payload, FlowJet *jet_out);
-int flow_jet_to_fvec(const FlowJet *jet, FlowVecHeader *hdr_out, FlowVecPayload *payload_out);
+int flow_jet_read_file(const char *filepath, FlowJet *jet_out);
 FlowSMTResult flow_jet_verify_symplectic_soundness_smt(const FlowJet *jet, FlowSMTProofAttestation *proof_out);
 #define FLOW_JET_DEFINE_NAMED_VIEW(ViewName, CoordStruct) \
     _Static_assert(sizeof(CoordStruct) <= sizeof(double) * FLOW_JET_MAX_DIM, \
