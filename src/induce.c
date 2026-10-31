@@ -14,8 +14,10 @@
  * ============================================================================ */
 
 static int64_t induce_gcd_i64(int64_t a, int64_t b) {
-    if (a < 0) a = -a;
-    if (b < 0) b = -b;
+    if (a < 0)
+        a = -a;
+    if (b < 0)
+        b = -b;
     while (b != 0) {
         int64_t t = a % b;
         a = b;
@@ -31,7 +33,8 @@ static int induce_cmp_double(const void *a, const void *b) {
 }
 
 static void induce_sanitize_ns(const char *raw, char *out, size_t max_len) {
-    if (!out || max_len == 0) return;
+    if (!out || max_len == 0)
+        return;
     if (!raw || !raw[0]) {
         snprintf(out, max_len, "InductiveDiscovery");
         return;
@@ -69,7 +72,8 @@ static double induce_uniform01(uint64_t *state) {
 static double induce_standard_normal(uint64_t *state) {
     double u1 = induce_uniform01(state);
     double u2 = induce_uniform01(state);
-    if (u1 < 1e-15) u1 = 1e-15;
+    if (u1 < 1e-15)
+        u1 = 1e-15;
     return sqrt(-2.0 * log(u1)) * cos(6.28318530717958647692 * u2);
 }
 
@@ -78,7 +82,8 @@ static double induce_standard_normal(uint64_t *state) {
  * ============================================================================ */
 
 int flow_induce_compute_moments(const double *samples, size_t count, FlowEmpiricalMoments *out) {
-    if (!samples || count == 0 || !out) return 0;
+    if (!samples || count == 0 || !out)
+        return 0;
     memset(out, 0, sizeof(*out));
     out->count = count;
 
@@ -88,15 +93,18 @@ int flow_induce_compute_moments(const double *samples, size_t count, FlowEmpiric
     for (size_t i = 0; i < count; ++i) {
         double x = samples[i];
         sum += x;
-        if (x < min_v) min_v = x;
-        if (x > max_v) max_v = x;
+        if (x < min_v)
+            min_v = x;
+        if (x > max_v)
+            max_v = x;
     }
     double mean = sum / (double)count;
     out->mean = mean;
     out->min_val = min_v;
     out->max_val = max_v;
 
-    if (count < 2) return 1;
+    if (count < 2)
+        return 1;
 
     double m2 = 0.0, m3 = 0.0, m4 = 0.0, cov1 = 0.0;
     for (size_t i = 0; i < count; ++i) {
@@ -138,7 +146,7 @@ double flow_induce_ipm_distance(const double *model_samples, size_t model_count,
             return DBL_MAX;
         }
         double d_mean = fabs(mm.mean - dm.mean);
-        double d_std  = fabs(mm.std_dev - dm.std_dev);
+        double d_std = fabs(mm.std_dev - dm.std_dev);
         double d_skew = fabs(mm.skewness - dm.skewness);
         double d_kurt = fabs(mm.excess_kurtosis - dm.excess_kurtosis);
         double d_acf1 = fabs(mm.acf1 - dm.acf1);
@@ -160,7 +168,8 @@ double flow_induce_ipm_distance(const double *model_samples, size_t model_count,
     qsort(ds, data_count, sizeof(double), induce_cmp_double);
 
     size_t grids = (model_count < data_count) ? model_count : data_count;
-    if (grids > 2048) grids = 2048;
+    if (grids > 2048)
+        grids = 2048;
 
     double dist = 0.0;
     if (ipm_class == FLOW_IPM_WASSERSTEIN_1) {
@@ -177,12 +186,15 @@ double flow_induce_ipm_distance(const double *model_samples, size_t model_count,
         double max_ks = 0.0;
         while (i < model_count && j < data_count) {
             double v = (ms[i] < ds[j]) ? ms[i] : ds[j];
-            while (i < model_count && ms[i] <= v) ++i;
-            while (j < data_count && ds[j] <= v) ++j;
+            while (i < model_count && ms[i] <= v)
+                ++i;
+            while (j < data_count && ds[j] <= v)
+                ++j;
             double cdf_m = (double)i / (double)model_count;
             double cdf_d = (double)j / (double)data_count;
             double diff = fabs(cdf_m - cdf_d);
-            if (diff > max_ks) max_ks = diff;
+            if (diff > max_ks)
+                max_ks = diff;
         }
         dist = max_ks;
     }
@@ -198,8 +210,10 @@ double flow_induce_ipm_distance(const double *model_samples, size_t model_count,
 
 FlowRational flow_induce_rationalize(double value, int64_t max_denominator) {
     FlowRational r = {0, 1, 0.0, 0.0};
-    if (max_denominator < 1) max_denominator = 1024;
-    if (!isfinite(value)) return r;
+    if (max_denominator < 1)
+        max_denominator = 1024;
+    if (!isfinite(value))
+        return r;
 
     int sign = (value < 0.0) ? -1 : 1;
     double x = fabs(value);
@@ -228,12 +242,16 @@ FlowRational flow_induce_rationalize(double value, int64_t max_denominator) {
             }
             break;
         }
-        p0 = p1; q0 = q1;
-        p1 = p2; q1 = q2;
+        p0 = p1;
+        q0 = q1;
+        p1 = p2;
+        q1 = q2;
         double frac = rem - (double)a;
-        if (frac < 1e-12) break;
+        if (frac < 1e-12)
+            break;
         rem = 1.0 / frac;
-        if (rem > 1e12) break;
+        if (rem > 1e12)
+            break;
     }
 
     if (q1 <= 0) {
@@ -248,12 +266,15 @@ FlowRational flow_induce_rationalize(double value, int64_t max_denominator) {
     return r;
 }
 
-int flow_induce_fit_rational_poly(const double *x_samples, const double *y_samples,
-                                  size_t count, size_t degree, int64_t max_denominator,
+int flow_induce_fit_rational_poly(const double *x_samples, const double *y_samples, size_t count,
+                                  size_t degree, int64_t max_denominator,
                                   FlowInducedPolyModel *out) {
-    if (!x_samples || !y_samples || count == 0 || !out) return 0;
-    if (degree > FLOW_INDUCE_MAX_POLY_DEGREE) degree = FLOW_INDUCE_MAX_POLY_DEGREE;
-    if (max_denominator < 1) max_denominator = 1024;
+    if (!x_samples || !y_samples || count == 0 || !out)
+        return 0;
+    if (degree > FLOW_INDUCE_MAX_POLY_DEGREE)
+        degree = FLOW_INDUCE_MAX_POLY_DEGREE;
+    if (max_denominator < 1)
+        max_denominator = 1024;
     memset(out, 0, sizeof(*out));
     out->degree = degree;
     out->sample_count = count;
@@ -269,10 +290,14 @@ int flow_induce_fit_rational_poly(const double *x_samples, const double *y_sampl
     for (size_t i = 0; i < count; ++i) {
         double x = x_samples[i];
         double y = y_samples[i];
-        if (x < x_min) x_min = x;
-        if (x > x_max) x_max = x;
-        if (y < y_min) y_min = y;
-        if (y > y_max) y_max = y;
+        if (x < x_min)
+            x_min = x;
+        if (x > x_max)
+            x_max = x;
+        if (y < y_min)
+            y_min = y;
+        if (y > y_max)
+            y_max = y;
         y_sum += y;
 
         double xp[2 * FLOW_INDUCE_MAX_POLY_DEGREE + 1];
@@ -311,12 +336,14 @@ int flow_induce_fit_rational_poly(const double *x_samples, const double *y_sampl
             }
         }
         double diag = ata[col][col];
-        if (fabs(diag) < 1e-18) continue;
+        if (fabs(diag) < 1e-18)
+            continue;
         for (size_t c = col; c <= n; ++c) {
             ata[col][c] /= diag;
         }
         for (size_t row = 0; row < n; ++row) {
-            if (row == col) continue;
+            if (row == col)
+                continue;
             double factor = ata[row][col];
             for (size_t c = col; c <= n; ++c) {
                 ata[row][c] -= factor * ata[col][c];
@@ -343,10 +370,13 @@ int flow_induce_fit_rational_poly(const double *x_samples, const double *y_sampl
             f_hat += out->coeffs[k].approx_val * x_pow;
             x_pow *= x;
         }
-        if (f_hat < f_min) f_min = f_hat;
-        if (f_hat > f_max) f_max = f_hat;
+        if (f_hat < f_min)
+            f_min = f_hat;
+        if (f_hat > f_max)
+            f_max = f_hat;
         double res = fabs(y - f_hat);
-        if (res > max_res) max_res = res;
+        if (res > max_res)
+            max_res = res;
         ss_res += (y - f_hat) * (y - f_hat);
         ss_tot += (y - y_mean) * (y - y_mean);
     }
@@ -362,11 +392,14 @@ int flow_induce_fit_rational_poly(const double *x_samples, const double *y_sampl
     out->epsilon_bound = eps;
     out->domain_min = flow_induce_rationalize(x_min, max_denominator);
     out->domain_max = flow_induce_rationalize(x_max, max_denominator);
-    out->codomain_min = flow_induce_rationalize((f_min < y_min ? f_min : y_min) - eps.approx_val, max_denominator);
-    out->codomain_max = flow_induce_rationalize((f_max > y_max ? f_max : y_max) + eps.approx_val, max_denominator);
+    out->codomain_min =
+        flow_induce_rationalize((f_min < y_min ? f_min : y_min) - eps.approx_val, max_denominator);
+    out->codomain_max =
+        flow_induce_rationalize((f_max > y_max ? f_max : y_max) + eps.approx_val, max_denominator);
     if (out->codomain_max.approx_val < f_max + eps.approx_val) {
         out->codomain_max.num += 1;
-        out->codomain_max.approx_val = (double)out->codomain_max.num / (double)out->codomain_max.den;
+        out->codomain_max.approx_val =
+            (double)out->codomain_max.num / (double)out->codomain_max.den;
     }
     return 1;
 }
@@ -375,13 +408,17 @@ int flow_induce_fit_rational_poly(const double *x_samples, const double *y_sampl
  * 3. Interval Arithmetic & Finite Grid Envelope Reflection (via decide)
  * ============================================================================ */
 
-int flow_induce_build_grid_envelope(const double *x_samples, const double *y_samples,
-                                    size_t count, size_t bucket_count, int64_t scale_factor,
+int flow_induce_build_grid_envelope(const double *x_samples, const double *y_samples, size_t count,
+                                    size_t bucket_count, int64_t scale_factor,
                                     FlowGridEnvelope *out) {
-    if (!x_samples || !y_samples || count == 0 || !out) return 0;
-    if (bucket_count == 0) bucket_count = 4;
-    if (bucket_count > FLOW_INDUCE_MAX_GRID_BUCKETS) bucket_count = FLOW_INDUCE_MAX_GRID_BUCKETS;
-    if (scale_factor <= 0) scale_factor = 100;
+    if (!x_samples || !y_samples || count == 0 || !out)
+        return 0;
+    if (bucket_count == 0)
+        bucket_count = 4;
+    if (bucket_count > FLOW_INDUCE_MAX_GRID_BUCKETS)
+        bucket_count = FLOW_INDUCE_MAX_GRID_BUCKETS;
+    if (scale_factor <= 0)
+        scale_factor = 100;
 
     memset(out, 0, sizeof(*out));
     out->bucket_count = bucket_count;
@@ -391,15 +428,20 @@ int flow_induce_build_grid_envelope(const double *x_samples, const double *y_sam
     double xmin = x_samples[0], xmax = x_samples[0];
     double ymin = y_samples[0], ymax = y_samples[0];
     for (size_t i = 0; i < count; ++i) {
-        if (x_samples[i] < xmin) xmin = x_samples[i];
-        if (x_samples[i] > xmax) xmax = x_samples[i];
-        if (y_samples[i] < ymin) ymin = y_samples[i];
-        if (y_samples[i] > ymax) ymax = y_samples[i];
+        if (x_samples[i] < xmin)
+            xmin = x_samples[i];
+        if (x_samples[i] > xmax)
+            xmax = x_samples[i];
+        if (y_samples[i] < ymin)
+            ymin = y_samples[i];
+        if (y_samples[i] > ymax)
+            ymax = y_samples[i];
     }
 
     int64_t gx_min = (int64_t)floor(xmin * (double)scale_factor);
     int64_t gx_max = (int64_t)ceil(xmax * (double)scale_factor);
-    if (gx_max <= gx_min) gx_max = gx_min + (int64_t)bucket_count;
+    if (gx_max <= gx_min)
+        gx_max = gx_min + (int64_t)bucket_count;
 
     int64_t gy_min = (int64_t)floor(ymin * (double)scale_factor);
     int64_t gy_max = (int64_t)ceil(ymax * (double)scale_factor);
@@ -415,10 +457,10 @@ int flow_induce_build_grid_envelope(const double *x_samples, const double *y_sam
 
     int64_t span = gx_max - gx_min;
     for (size_t b = 0; b < bucket_count; ++b) {
-        out->buckets[b].x_left  = gx_min + ((int64_t)b * span) / (int64_t)bucket_count;
-        out->buckets[b].x_right = (b + 1 == bucket_count)
-                                  ? gx_max
-                                  : (gx_min + ((int64_t)(b + 1) * span) / (int64_t)bucket_count);
+        out->buckets[b].x_left = gx_min + ((int64_t)b * span) / (int64_t)bucket_count;
+        out->buckets[b].x_right =
+            (b + 1 == bucket_count) ? gx_max
+                                    : (gx_min + ((int64_t)(b + 1) * span) / (int64_t)bucket_count);
         out->buckets[b].y_min = gy_max;
         out->buckets[b].y_max = gy_min;
         out->buckets[b].sample_hits = 0;
@@ -431,15 +473,18 @@ int flow_induce_build_grid_envelope(const double *x_samples, const double *y_sam
         if (span > 0 && sx > gx_min) {
             int64_t rel = sx - gx_min;
             b = (size_t)((rel * (int64_t)bucket_count) / span);
-            if (b >= bucket_count) b = bucket_count - 1;
+            if (b >= bucket_count)
+                b = bucket_count - 1;
         }
         FlowGridBucket *bk = &out->buckets[b];
         if (bk->sample_hits == 0) {
             bk->y_min = sy;
             bk->y_max = sy;
         } else {
-            if (sy < bk->y_min) bk->y_min = sy;
-            if (sy > bk->y_max) bk->y_max = sy;
+            if (sy < bk->y_min)
+                bk->y_min = sy;
+            if (sy > bk->y_max)
+                bk->y_max = sy;
         }
         bk->sample_hits++;
     }
@@ -457,20 +502,25 @@ int flow_induce_build_grid_envelope(const double *x_samples, const double *y_sam
  * 4. Simulated Method of Moments (SMM) Monte Carlo Inverse Solver
  * ============================================================================ */
 
-int flow_induce_simulate_merton_jump(double mu, double sigma, double lambda,
-                                     double mu_j, double sigma_j, double dt,
-                                     uint64_t seed, double *out_returns, size_t count) {
-    if (!out_returns || count == 0 || dt <= 0.0) return 0;
-    if (sigma < 1e-6) sigma = 1e-6;
-    if (lambda < 0.0) lambda = 0.0;
-    if (sigma_j < 0.0) sigma_j = 0.0;
+int flow_induce_simulate_merton_jump(double mu, double sigma, double lambda, double mu_j,
+                                     double sigma_j, double dt, uint64_t seed, double *out_returns,
+                                     size_t count) {
+    if (!out_returns || count == 0 || dt <= 0.0)
+        return 0;
+    if (sigma < 1e-6)
+        sigma = 1e-6;
+    if (lambda < 0.0)
+        lambda = 0.0;
+    if (sigma_j < 0.0)
+        sigma_j = 0.0;
 
     uint64_t rng = seed ? seed : 0xCAFEBABE12345678ULL;
     double sqrt_dt = sqrt(dt);
     double k_comp = exp(mu_j + 0.5 * sigma_j * sigma_j) - 1.0;
     double drift = (mu - 0.5 * sigma * sigma - lambda * k_comp) * dt;
     double jump_prob = lambda * dt;
-    if (jump_prob > 0.95) jump_prob = 0.95;
+    if (jump_prob > 0.95)
+        jump_prob = 0.95;
 
     for (size_t i = 0; i < count; ++i) {
         double z_diff = induce_standard_normal(&rng);
@@ -485,12 +535,16 @@ int flow_induce_simulate_merton_jump(double mu, double sigma, double lambda,
     return 1;
 }
 
-int flow_induce_simulate_cir(double a, double b, double sigma, double x0, double dt,
-                             uint64_t seed, double *out_states, size_t count) {
-    if (!out_states || count == 0 || dt <= 0.0) return 0;
-    if (a < 1e-4) a = 1e-4;
-    if (b < 1e-4) b = 1e-4;
-    if (sigma < 1e-5) sigma = 1e-5;
+int flow_induce_simulate_cir(double a, double b, double sigma, double x0, double dt, uint64_t seed,
+                             double *out_states, size_t count) {
+    if (!out_states || count == 0 || dt <= 0.0)
+        return 0;
+    if (a < 1e-4)
+        a = 1e-4;
+    if (b < 1e-4)
+        b = 1e-4;
+    if (sigma < 1e-5)
+        sigma = 1e-5;
 
     uint64_t rng = seed ? seed : 0x9E3779B97F4A7C15ULL;
     double sqrt_dt = sqrt(dt);
@@ -502,18 +556,21 @@ int flow_induce_simulate_cir(double a, double b, double sigma, double x0, double
         double dx = a * (b - x) * dt + sigma * sx * sqrt_dt * z;
         x += dx;
         /* Reflecting barrier at 0 for discrete time step */
-        if (x < 0.0) x = -x;
+        if (x < 0.0)
+            x = -x;
         out_states[i] = x;
     }
     return 1;
 }
 
-int flow_induce_solve_smm(const double *target_samples, size_t count,
-                          FlowSMMModelKind kind, double dt, uint64_t crn_seed,
-                          FlowSMMResult *out) {
-    if (!target_samples || count < 16 || !out) return 0;
-    if (dt <= 0.0) dt = 1.0;
-    if (crn_seed == 0) crn_seed = 42ULL;
+int flow_induce_solve_smm(const double *target_samples, size_t count, FlowSMMModelKind kind,
+                          double dt, uint64_t crn_seed, FlowSMMResult *out) {
+    if (!target_samples || count < 16 || !out)
+        return 0;
+    if (dt <= 0.0)
+        dt = 1.0;
+    if (crn_seed == 0)
+        crn_seed = 42ULL;
 
     memset(out, 0, sizeof(*out));
     out->kind = kind;
@@ -523,7 +580,8 @@ int flow_induce_solve_smm(const double *target_samples, size_t count,
 
     size_t sim_len = (count > 32768) ? 32768 : count;
     double *sim_buf = (double *)malloc(sim_len * sizeof(double));
-    if (!sim_buf) return 0;
+    if (!sim_buf)
+        return 0;
 
     const FlowEmpiricalMoments *tm = &out->target_moments;
 
@@ -536,7 +594,8 @@ int flow_induce_solve_smm(const double *target_samples, size_t count,
         double b_init = (tm->mean > 1e-3) ? tm->mean : 1.0;
         double rho = (tm->acf1 > 0.05 && tm->acf1 < 0.999) ? tm->acf1 : 0.90;
         double a_init = -log(rho) / dt;
-        if (a_init < 0.05) a_init = 0.05;
+        if (a_init < 0.05)
+            a_init = 0.05;
         double sig_init = sqrt(2.0 * a_init * (tm->variance > 1e-6 ? tm->variance : 0.01) / b_init);
 
         double best_a = a_init, best_b = b_init, best_sig = sig_init;
@@ -553,17 +612,18 @@ int flow_induce_solve_smm(const double *target_samples, size_t count,
                         double ca = best_a * (1.0 + (double)da * step_scale);
                         double cb = best_b * (1.0 + (double)db * step_scale * 0.5);
                         double cs = best_sig * (1.0 + (double)ds * step_scale);
-                        if (ca <= 1e-4 || cb <= 1e-4 || cs <= 1e-5) continue;
+                        if (ca <= 1e-4 || cb <= 1e-4 || cs <= 1e-5)
+                            continue;
 
                         flow_induce_simulate_cir(ca, cb, cs, cb, dt, crn_seed, sim_buf, sim_len);
                         FlowEmpiricalMoments sm;
                         flow_induce_compute_moments(sim_buf, sim_len, &sm);
                         iters++;
 
-                        double loss = 4.0 * fabs(sm.mean - tm->mean) / (fabs(tm->mean) + 1e-3)
-                                    + 1.5 * fabs(sm.std_dev - tm->std_dev) / (tm->std_dev + 1e-3)
-                                    + 0.3 * fabs(sm.skewness - tm->skewness)
-                                    + 1.2 * fabs(sm.acf1 - tm->acf1);
+                        double loss = 4.0 * fabs(sm.mean - tm->mean) / (fabs(tm->mean) + 1e-3) +
+                                      1.5 * fabs(sm.std_dev - tm->std_dev) / (tm->std_dev + 1e-3) +
+                                      0.3 * fabs(sm.skewness - tm->skewness) +
+                                      1.2 * fabs(sm.acf1 - tm->acf1);
                         if (loss < best_loss) {
                             best_loss = loss;
                             best_a = ca;
@@ -574,8 +634,10 @@ int flow_induce_solve_smm(const double *target_samples, size_t count,
                     }
                 }
             }
-            if (!improved) step_scale *= 0.55;
-            if (step_scale < 0.005) break;
+            if (!improved)
+                step_scale *= 0.55;
+            if (step_scale < 0.005)
+                break;
         }
 
         flow_induce_simulate_cir(best_a, best_b, best_sig, best_b, dt, crn_seed, sim_buf, sim_len);
@@ -607,8 +669,8 @@ int flow_induce_solve_smm(const double *target_samples, size_t count,
         double lam_init = 0.08 / dt;
         double jump_var_share = (ex_kurt > 1.0) ? 0.45 : 0.25;
         double sig_init = sqrt((1.0 - jump_var_share) * total_var / dt);
-        double muj_init = (skew < -0.05) ? -sqrt(jump_var_share * total_var) :
-                          ((skew > 0.05) ? sqrt(jump_var_share * total_var) : 0.0);
+        double muj_init = (skew < -0.05) ? -sqrt(jump_var_share * total_var)
+                                         : ((skew > 0.05) ? sqrt(jump_var_share * total_var) : 0.0);
         double sigj_init = sqrt(jump_var_share * total_var / (lam_init * dt + 0.05));
         double mu_init = tm->mean / dt + 0.5 * sig_init * sig_init;
 
@@ -624,20 +686,24 @@ int flow_induce_solve_smm(const double *target_samples, size_t count,
                 for (int d_lam = -1; d_lam <= 1; ++d_lam) {
                     for (int d_mj = -1; d_mj <= 1; ++d_mj) {
                         for (int d_sj = -1; d_sj <= 1; ++d_sj) {
-                            double cs  = best_sig  * (1.0 + (double)d_sig * step_scale);
-                            double cl  = best_lam  * (1.0 + (double)d_lam * step_scale);
-                            double cmj = best_muj  + (double)d_mj * step_scale * (tm->std_dev + 1e-3);
+                            double cs = best_sig * (1.0 + (double)d_sig * step_scale);
+                            double cl = best_lam * (1.0 + (double)d_lam * step_scale);
+                            double cmj =
+                                best_muj + (double)d_mj * step_scale * (tm->std_dev + 1e-3);
                             double csj = best_sigj * (1.0 + (double)d_sj * step_scale);
-                            if (cs <= 1e-6 || cl < 0.0 || csj < 1e-6) continue;
+                            if (cs <= 1e-6 || cl < 0.0 || csj < 1e-6)
+                                continue;
 
-                            flow_induce_simulate_merton_jump(best_mu, cs, cl, cmj, csj, dt, crn_seed, sim_buf, sim_len);
+                            flow_induce_simulate_merton_jump(best_mu, cs, cl, cmj, csj, dt,
+                                                             crn_seed, sim_buf, sim_len);
                             FlowEmpiricalMoments sm;
                             flow_induce_compute_moments(sim_buf, sim_len, &sm);
                             iters++;
 
-                            double loss = 2.0 * fabs(sm.std_dev - tm->std_dev) / (tm->std_dev + 1e-5)
-                                        + 0.8 * fabs(sm.skewness - tm->skewness)
-                                        + 0.35 * fabs(sm.excess_kurtosis - tm->excess_kurtosis);
+                            double loss =
+                                2.0 * fabs(sm.std_dev - tm->std_dev) / (tm->std_dev + 1e-5) +
+                                0.8 * fabs(sm.skewness - tm->skewness) +
+                                0.35 * fabs(sm.excess_kurtosis - tm->excess_kurtosis);
                             if (loss < best_loss) {
                                 best_loss = loss;
                                 best_sig = cs;
@@ -651,11 +717,14 @@ int flow_induce_solve_smm(const double *target_samples, size_t count,
                     }
                 }
             }
-            if (!improved) step_scale *= 0.55;
-            if (step_scale < 0.01) break;
+            if (!improved)
+                step_scale *= 0.55;
+            if (step_scale < 0.01)
+                break;
         }
 
-        flow_induce_simulate_merton_jump(best_mu, best_sig, best_lam, best_muj, best_sigj, dt, crn_seed, sim_buf, sim_len);
+        flow_induce_simulate_merton_jump(best_mu, best_sig, best_lam, best_muj, best_sigj, dt,
+                                         crn_seed, sim_buf, sim_len);
         flow_induce_compute_moments(sim_buf, sim_len, &out->simulated_moments);
 
         out->param_a_or_mu = best_mu;
@@ -720,7 +789,8 @@ uint64_t flow_induce_invert_splitmix64_stateless(uint64_t z) {
 
 int flow_induce_audit_prng_u64(const uint64_t *observed_words, size_t count,
                                uint64_t max_backtrack_steps, FlowPRNGAuditResult *out) {
-    if (!observed_words || count < 2 || !out) return 0;
+    if (!observed_words || count < 2 || !out)
+        return 0;
     memset(out, 0, sizeof(*out));
     out->first_observed_word = observed_words[0];
     out->second_observed_word = observed_words[1];
@@ -733,7 +803,8 @@ int flow_induce_audit_prng_u64(const uint64_t *observed_words, size_t count,
         size_t matched = 1;
         for (size_t i = 1; i < count; ++i) {
             uint64_t next = flow_prng_next(&st);
-            if (next != observed_words[i]) break;
+            if (next != observed_words[i])
+                break;
             matched++;
         }
         if (matched == count) {
@@ -741,7 +812,8 @@ int flow_induce_audit_prng_u64(const uint64_t *observed_words, size_t count,
             out->family = FLOW_PRNG_XORSHIFT64;
             out->matched_trajectory_len = count;
 
-            /* Backtrack via exact F_2 inverse to find canonical small integer seed (e.g., seed=42) */
+            /* Backtrack via exact F_2 inverse to find canonical small integer seed (e.g., seed=42)
+             */
             uint64_t cur = flow_induce_invert_xorshift64_step(observed_words[0]);
             uint64_t best_seed = cur;
             uint64_t best_step = 0;
@@ -756,14 +828,16 @@ int flow_induce_audit_prng_u64(const uint64_t *observed_words, size_t count,
             }
             out->recovered_initial_seed = best_seed;
             out->recovered_step_offset = best_step;
-            snprintf(out->evidence_summary, sizeof(out->evidence_summary),
-                     "F_2 Algebraic Inversion: %zu/%zu words strictly match Xorshift64(13,7,17) from seed=%llu at step=%llu",
-                     count, count, (unsigned long long)best_seed, (unsigned long long)best_step);
+            snprintf(
+                out->evidence_summary, sizeof(out->evidence_summary),
+                "F_2 Algebraic Inversion: %zu/%zu words strictly match Xorshift64(13,7,17) from seed=%llu at step=%llu",
+                count, count, (unsigned long long)best_seed, (unsigned long long)best_step);
             return 1;
         }
     }
 
-    /* 2. Test 64-bit Knuth/PCG LCG: s_{t+1} = s_t * 6364136223846793005ULL + 1442695040888963407ULL */
+    /* 2. Test 64-bit Knuth/PCG LCG: s_{t+1} = s_t * 6364136223846793005ULL + 1442695040888963407ULL
+     */
     {
         const uint64_t mul = 6364136223846793005ULL;
         const uint64_t inc = 1442695040888963407ULL;
@@ -773,7 +847,8 @@ int flow_induce_audit_prng_u64(const uint64_t *observed_words, size_t count,
         size_t matched = 1;
         for (size_t i = 1; i < count; ++i) {
             st = st * mul + inc;
-            if (st != observed_words[i]) break;
+            if (st != observed_words[i])
+                break;
             matched++;
         }
         if (matched == count) {
@@ -794,9 +869,10 @@ int flow_induce_audit_prng_u64(const uint64_t *observed_words, size_t count,
             }
             out->recovered_initial_seed = best_seed;
             out->recovered_step_offset = best_step;
-            snprintf(out->evidence_summary, sizeof(out->evidence_summary),
-                     "Modular Ring Z_{2^64} Inversion: %zu/%zu words strictly match LCG64 from seed=%llu at step=%llu",
-                     count, count, (unsigned long long)best_seed, (unsigned long long)best_step);
+            snprintf(
+                out->evidence_summary, sizeof(out->evidence_summary),
+                "Modular Ring Z_{2^64} Inversion: %zu/%zu words strictly match LCG64 from seed=%llu at step=%llu",
+                count, count, (unsigned long long)best_seed, (unsigned long long)best_step);
             return 1;
         }
     }
@@ -810,7 +886,8 @@ int flow_induce_audit_prng_u64(const uint64_t *observed_words, size_t count,
             uint64_t test_st = st;
             size_t matched = 0;
             for (size_t i = 0; i < count; ++i) {
-                if (induce_splitmix64_next(&test_st) != observed_words[i]) break;
+                if (induce_splitmix64_next(&test_st) != observed_words[i])
+                    break;
                 matched++;
             }
             if (matched == count) {
@@ -830,9 +907,10 @@ int flow_induce_audit_prng_u64(const uint64_t *observed_words, size_t count,
                 }
                 out->recovered_initial_seed = best_seed;
                 out->recovered_step_offset = best_step;
-                snprintf(out->evidence_summary, sizeof(out->evidence_summary),
-                         "SplitMix64 Bijective Inversion: %zu/%zu words strictly match from seed=%llu at step=%llu",
-                         count, count, (unsigned long long)best_seed, (unsigned long long)best_step);
+                snprintf(
+                    out->evidence_summary, sizeof(out->evidence_summary),
+                    "SplitMix64 Bijective Inversion: %zu/%zu words strictly match from seed=%llu at step=%llu",
+                    count, count, (unsigned long long)best_seed, (unsigned long long)best_step);
                 return 1;
             }
         }
@@ -845,25 +923,29 @@ int flow_induce_audit_prng_u64(const uint64_t *observed_words, size_t count,
 
 int flow_induce_audit_prng_floats(const double *observed_floats, size_t count,
                                   uint64_t max_seed_search, FlowPRNGAuditResult *out) {
-    if (!observed_floats || count < 4 || !out) return 0;
+    if (!observed_floats || count < 4 || !out)
+        return 0;
     memset(out, 0, sizeof(*out));
-    if (max_seed_search == 0) max_seed_search = 10000;
+    if (max_seed_search == 0)
+        max_seed_search = 10000;
 
     /* Search affine-scaled Xorshift64: y_t = alpha * (u_t / 2^64) + beta */
     for (uint64_t s = 1; s <= max_seed_search; ++s) {
         uint64_t st = s;
         double u0 = (double)flow_prng_next(&st) / 18446744073709551616.0;
         double u1 = (double)flow_prng_next(&st) / 18446744073709551616.0;
-        if (fabs(u1 - u0) < 1e-12) continue;
+        if (fabs(u1 - u0) < 1e-12)
+            continue;
 
         double alpha = (observed_floats[1] - observed_floats[0]) / (u1 - u0);
-        double beta  = observed_floats[0] - alpha * u0;
+        double beta = observed_floats[0] - alpha * u0;
 
         size_t matched = 2;
         for (size_t i = 2; i < count; ++i) {
             double ui = (double)flow_prng_next(&st) / 18446744073709551616.0;
             double pred = alpha * ui + beta;
-            if (fabs(pred - observed_floats[i]) > 1e-7 * (fabs(alpha) + 1.0)) break;
+            if (fabs(pred - observed_floats[i]) > 1e-7 * (fabs(alpha) + 1.0))
+                break;
             matched++;
         }
         if (matched == count) {
@@ -879,9 +961,10 @@ int flow_induce_audit_prng_floats(const double *observed_floats, size_t count,
             out->matched_trajectory_len = count;
             out->scale_alpha = alpha;
             out->offset_beta = beta;
-            snprintf(out->evidence_summary, sizeof(out->evidence_summary),
-                     "Affine Float PRNG Audit: %zu/%zu points strictly generated by Xorshift64(seed=%llu, alpha=%.6g, beta=%.6g)",
-                     count, count, (unsigned long long)s, alpha, beta);
+            snprintf(
+                out->evidence_summary, sizeof(out->evidence_summary),
+                "Affine Float PRNG Audit: %zu/%zu points strictly generated by Xorshift64(seed=%llu, alpha=%.6g, beta=%.6g)",
+                count, count, (unsigned long long)s, alpha, beta);
             return 1;
         }
     }
@@ -893,19 +976,21 @@ int flow_induce_audit_prng_floats(const double *observed_floats, size_t count,
  * ============================================================================ */
 
 static void emit_lean_poly_defs(FILE *out, const FlowInducedPolyModel *model) {
-    if (!out || !model) return;
+    if (!out || !model)
+        return;
 
     fprintf(out,
-        "-- [Track 1] Parametric Rational Polynomial Approximation (Exact Q Projection)\n"
-        "-- Sample Count: %zu | R^2: %.6f | Max Empirical Residual: %.6g <= %lld/%lld\n"
-        "def fitted_poly (x : Float) : Float :=\n  ",
-        model->sample_count, model->r_squared, model->max_empirical_residual,
-        (long long)model->epsilon_bound.num, (long long)model->epsilon_bound.den);
+            "-- [Track 1] Parametric Rational Polynomial Approximation (Exact Q Projection)\n"
+            "-- Sample Count: %zu | R^2: %.6f | Max Empirical Residual: %.6g <= %lld/%lld\n"
+            "def fitted_poly (x : Float) : Float :=\n  ",
+            model->sample_count, model->r_squared, model->max_empirical_residual,
+            (long long)model->epsilon_bound.num, (long long)model->epsilon_bound.den);
 
     for (size_t k = 0; k <= model->degree; ++k) {
         int64_t num = model->coeffs[k].num;
         int64_t den = model->coeffs[k].den > 0 ? model->coeffs[k].den : 1;
-        if (k > 0) fprintf(out, " + ");
+        if (k > 0)
+            fprintf(out, " + ");
         fprintf(out, "((%.1f / %.1f)", (double)num, (double)den);
         for (size_t p = 0; p < k; ++p) {
             fprintf(out, " * x");
@@ -918,9 +1003,11 @@ static void emit_lean_poly_defs(FILE *out, const FlowInducedPolyModel *model) {
     double dmax = model->domain_max.approx_val;
     double cmin = model->codomain_min.approx_val;
     double cmax = model->codomain_max.approx_val;
-    if (dmax <= dmin) dmax = dmin + 1.0;
+    if (dmax <= dmin)
+        dmax = dmin + 1.0;
 
-    fprintf(out,
+    fprintf(
+        out,
         "def poly_residual_cert (eps_num : Int64) (eps_den : Int64) : Bool :=\n"
         "  eps_den > 0 && eps_num >= 0\n\n"
         "theorem fitted_poly_upper_bound (x : Float) (h_low : x >= %.6f) (h_high : x <= %.6f) :\n"
@@ -929,64 +1016,63 @@ static void emit_lean_poly_defs(FILE *out, const FlowInducedPolyModel *model) {
         "    fitted_poly x >= %.6f := by decide\n\n"
         "theorem fitted_poly_residual_sound :\n"
         "    poly_residual_cert %lld %lld = true := by decide\n\n",
-        dmin, dmax, cmax,
-        dmin, dmax, cmin,
-        (long long)model->epsilon_bound.num, (long long)model->epsilon_bound.den);
+        dmin, dmax, cmax, dmin, dmax, cmin, (long long)model->epsilon_bound.num,
+        (long long)model->epsilon_bound.den);
 }
 
 static void emit_lean_grid_defs(FILE *out, const FlowGridEnvelope *env) {
-    if (!out || !env || env->bucket_count == 0) return;
+    if (!out || !env || env->bucket_count == 0)
+        return;
 
     fprintf(out,
-        "-- [Track 2] Computational Reflection via Finite Grid Envelope (Scale = %lldx)\n"
-        "-- Total Trajectory Samples: %zu | Buckets: %zu | Global Envelope: [%lld, %lld]\n"
-        "def grid_upper_envelope (x_scaled : Int64) : Int64 :=\n  ",
-        (long long)env->scale_factor, env->total_samples, env->bucket_count,
-        (long long)env->global_y_min, (long long)env->global_y_max);
+            "-- [Track 2] Computational Reflection via Finite Grid Envelope (Scale = %lldx)\n"
+            "-- Total Trajectory Samples: %zu | Buckets: %zu | Global Envelope: [%lld, %lld]\n"
+            "def grid_upper_envelope (x_scaled : Int64) : Int64 :=\n  ",
+            (long long)env->scale_factor, env->total_samples, env->bucket_count,
+            (long long)env->global_y_min, (long long)env->global_y_max);
 
     for (size_t b = 0; b + 1 < env->bucket_count; ++b) {
-        fprintf(out, "if x_scaled <= %lld then %lld else ",
-                (long long)env->buckets[b].x_right,
+        fprintf(out, "if x_scaled <= %lld then %lld else ", (long long)env->buckets[b].x_right,
                 (long long)env->buckets[b].y_max);
     }
     fprintf(out, "%lld\n\n", (long long)env->buckets[env->bucket_count - 1].y_max);
 
     fprintf(out,
-        "def check_grid_safety (x_scaled : Int64) (y_scaled : Int64) : Bool :=\n"
-        "  y_scaled >= %lld && y_scaled <= grid_upper_envelope x_scaled && y_scaled <= %lld\n\n"
-        "def verify_all_grid_buckets (bound_low : Int64) (bound_high : Int64) : Bool :=\n  ",
-        (long long)env->certified_lower_bound,
-        (long long)env->certified_upper_bound);
+            "def check_grid_safety (x_scaled : Int64) (y_scaled : Int64) : Bool :=\n"
+            "  y_scaled >= %lld && y_scaled <= grid_upper_envelope x_scaled && y_scaled <= %lld\n\n"
+            "def verify_all_grid_buckets (bound_low : Int64) (bound_high : Int64) : Bool :=\n  ",
+            (long long)env->certified_lower_bound, (long long)env->certified_upper_bound);
 
     for (size_t b = 0; b < env->bucket_count; ++b) {
-        if (b > 0) fprintf(out, " && ");
-        fprintf(out, "(%lld >= bound_low && %lld <= bound_high)",
-                (long long)env->buckets[b].y_min,
+        if (b > 0)
+            fprintf(out, " && ");
+        fprintf(out, "(%lld >= bound_low && %lld <= bound_high)", (long long)env->buckets[b].y_min,
                 (long long)env->buckets[b].y_max);
     }
     fprintf(out, "\n\n");
 
-    fprintf(out,
+    fprintf(
+        out,
         "theorem system_grid_envelope_within_bounds :\n"
         "    verify_all_grid_buckets %lld %lld = true := by decide\n\n"
         "theorem grid_upper_envelope_bounded (x_scaled : Int64) (h_min : x_scaled >= %lld) (h_max : x_scaled <= %lld) :\n"
         "    grid_upper_envelope x_scaled <= %lld := by omega\n\n",
-        (long long)env->certified_lower_bound,
-        (long long)env->certified_upper_bound,
-        (long long)env->global_x_min,
-        (long long)env->global_x_max,
+        (long long)env->certified_lower_bound, (long long)env->certified_upper_bound,
+        (long long)env->global_x_min, (long long)env->global_x_max,
         (long long)env->certified_upper_bound);
 }
 
 static void emit_lean_smm_defs(FILE *out, const FlowSMMResult *smm) {
-    if (!out || !smm) return;
+    if (!out || !smm)
+        return;
 
     if (smm->kind == FLOW_SMM_CIR_REFLECTING) {
         int64_t a_n = smm->rat_a_or_mu.num, a_d = smm->rat_a_or_mu.den;
         int64_t b_n = smm->rat_b_or_sigma.num, b_d = smm->rat_b_or_sigma.den;
         int64_t s_n = smm->rat_sigma_or_lambda.num, s_d = smm->rat_sigma_or_lambda.den;
 
-        fprintf(out,
+        fprintf(
+            out,
             "-- [Track 3] SMM Inverse Stochastic Discovery: Cox-Ingersoll-Ross (CIR) Process\n"
             "-- Recovered: a = %lld/%lld (%.4f), b = %lld/%lld (%.4f), sigma = %lld/%lld (%.4f)\n"
             "def cir_drift_step (x : Float) (dt : Float) : Float :=\n"
@@ -997,19 +1083,17 @@ static void emit_lean_smm_defs(FILE *out, const FlowSMMResult *smm) {
             "  2 * a_num * b_num * sig_den * sig_den >= sig_num * sig_num * a_den * b_den\n\n"
             "theorem cir_step_nonnegative (x : Float) (dt : Float) (h_x : x >= 0.0) (h_dt : dt >= 0.0) (h_dt_max : dt <= 0.5) :\n"
             "    cir_drift_step x dt >= 0.0 := by decide\n\n",
-            (long long)a_n, (long long)a_d, smm->param_a_or_mu,
-            (long long)b_n, (long long)b_d, smm->param_b_or_sigma,
-            (long long)s_n, (long long)s_d, smm->param_sigma_or_lambda,
-            (double)a_n, (double)a_d,
-            (double)b_n, (double)b_d);
+            (long long)a_n, (long long)a_d, smm->param_a_or_mu, (long long)b_n, (long long)b_d,
+            smm->param_b_or_sigma, (long long)s_n, (long long)s_d, smm->param_sigma_or_lambda,
+            (double)a_n, (double)a_d, (double)b_n, (double)b_d);
 
         if (smm->feller_condition_holds) {
-            fprintf(out,
+            fprintf(
+                out,
                 "theorem cir_feller_boundary_certified :\n"
                 "    check_feller_condition %lld %lld %lld %lld %lld %lld = true := by decide\n\n",
-                (long long)a_n, (long long)a_d,
-                (long long)b_n, (long long)b_d,
-                (long long)s_n, (long long)s_d);
+                (long long)a_n, (long long)a_d, (long long)b_n, (long long)b_d, (long long)s_n,
+                (long long)s_d);
         }
     } else {
         int64_t mu_n = smm->rat_a_or_mu.num, mu_d = smm->rat_a_or_mu.den;
@@ -1018,64 +1102,62 @@ static void emit_lean_smm_defs(FILE *out, const FlowSMMResult *smm) {
         int64_t mj_n = smm->rat_jump_mean.num, mj_d = smm->rat_jump_mean.den;
 
         fprintf(out,
-            "-- [Track 3] SMM Inverse Stochastic Discovery: Merton Jump-Diffusion Process\n"
-            "-- Empirical Skewness: %.4f | Excess Kurtosis: %.4f | IPM Loss: %.6f\n"
-            "def merton_expected_step (dt : Float) (jump_active : Float) : Float :=\n"
-            "  let mu := (%.1f / %.1f)\n"
-            "  let sigma := (%.1f / %.1f)\n"
-            "  let lam := (%.1f / %.1f)\n"
-            "  let mu_j := (%.1f / %.1f)\n"
-            "  (mu - 0.5 * sigma * sigma) * dt + jump_active * lam * mu_j * dt\n\n"
-            "def check_merton_volatility_pos (sig_num : Int64) (sig_den : Int64) : Bool :=\n"
-            "  sig_num > 0 && sig_den > 0\n\n"
-            "theorem merton_volatility_certified :\n"
-            "    check_merton_volatility_pos %lld %lld = true := by decide\n\n",
-            smm->target_moments.skewness, smm->target_moments.excess_kurtosis, smm->ipm_objective_loss,
-            (double)mu_n, (double)mu_d,
-            (double)sig_n, (double)sig_d,
-            (double)lam_n, (double)lam_d,
-            (double)mj_n, (double)mj_d,
-            (long long)(sig_n > 0 ? sig_n : 1), (long long)sig_d);
+                "-- [Track 3] SMM Inverse Stochastic Discovery: Merton Jump-Diffusion Process\n"
+                "-- Empirical Skewness: %.4f | Excess Kurtosis: %.4f | IPM Loss: %.6f\n"
+                "def merton_expected_step (dt : Float) (jump_active : Float) : Float :=\n"
+                "  let mu := (%.1f / %.1f)\n"
+                "  let sigma := (%.1f / %.1f)\n"
+                "  let lam := (%.1f / %.1f)\n"
+                "  let mu_j := (%.1f / %.1f)\n"
+                "  (mu - 0.5 * sigma * sigma) * dt + jump_active * lam * mu_j * dt\n\n"
+                "def check_merton_volatility_pos (sig_num : Int64) (sig_den : Int64) : Bool :=\n"
+                "  sig_num > 0 && sig_den > 0\n\n"
+                "theorem merton_volatility_certified :\n"
+                "    check_merton_volatility_pos %lld %lld = true := by decide\n\n",
+                smm->target_moments.skewness, smm->target_moments.excess_kurtosis,
+                smm->ipm_objective_loss, (double)mu_n, (double)mu_d, (double)sig_n, (double)sig_d,
+                (double)lam_n, (double)lam_d, (double)mj_n, (double)mj_d,
+                (long long)(sig_n > 0 ? sig_n : 1), (long long)sig_d);
     }
 }
 
 static void emit_lean_prng_defs(FILE *out, const FlowPRNGAuditResult *audit) {
-    if (!out || !audit || !audit->detected) return;
+    if (!out || !audit || !audit->detected)
+        return;
 
     if (audit->family == FLOW_PRNG_XORSHIFT64) {
         fprintf(out,
-            "-- [Track 4] Algebraic Cryptanalysis & PRNG Seed Recovery Certificate\n"
-            "-- %s\n"
-            "def xorshift64_step (s : UInt64) : UInt64 :=\n"
-            "  let x1 := s ^^^ (s <<< 13)\n"
-            "  let x2 := x1 ^^^ (x1 >>> 7)\n"
-            "  x2 ^^^ (x2 <<< 17)\n\n"
-            "theorem prng_seed_step1_witness :\n"
-            "    xorshift64_step %llu = %llu := by decide\n\n"
-            "theorem prng_seed_step2_witness :\n"
-            "    xorshift64_step %llu = %llu := by decide\n\n",
-            audit->evidence_summary,
-            (unsigned long long)audit->recovered_initial_seed,
-            (unsigned long long)audit->first_observed_word,
-            (unsigned long long)audit->first_observed_word,
-            (unsigned long long)audit->second_observed_word);
+                "-- [Track 4] Algebraic Cryptanalysis & PRNG Seed Recovery Certificate\n"
+                "-- %s\n"
+                "def xorshift64_step (s : UInt64) : UInt64 :=\n"
+                "  let x1 := s ^^^ (s <<< 13)\n"
+                "  let x2 := x1 ^^^ (x1 >>> 7)\n"
+                "  x2 ^^^ (x2 <<< 17)\n\n"
+                "theorem prng_seed_step1_witness :\n"
+                "    xorshift64_step %llu = %llu := by decide\n\n"
+                "theorem prng_seed_step2_witness :\n"
+                "    xorshift64_step %llu = %llu := by decide\n\n",
+                audit->evidence_summary, (unsigned long long)audit->recovered_initial_seed,
+                (unsigned long long)audit->first_observed_word,
+                (unsigned long long)audit->first_observed_word,
+                (unsigned long long)audit->second_observed_word);
     } else if (audit->family == FLOW_PRNG_LCG64) {
         fprintf(out,
-            "-- [Track 4] Algebraic Cryptanalysis & LCG64 Seed Recovery Certificate\n"
-            "-- %s\n"
-            "def lcg64_step (s : UInt64) : UInt64 :=\n"
-            "  s * 6364136223846793005 + 1442695040888963407\n\n"
-            "theorem prng_lcg_step1_witness :\n"
-            "    lcg64_step %llu = %llu := by decide\n\n",
-            audit->evidence_summary,
-            (unsigned long long)audit->recovered_initial_seed,
-            (unsigned long long)audit->first_observed_word);
+                "-- [Track 4] Algebraic Cryptanalysis & LCG64 Seed Recovery Certificate\n"
+                "-- %s\n"
+                "def lcg64_step (s : UInt64) : UInt64 :=\n"
+                "  s * 6364136223846793005 + 1442695040888963407\n\n"
+                "theorem prng_lcg_step1_witness :\n"
+                "    lcg64_step %llu = %llu := by decide\n\n",
+                audit->evidence_summary, (unsigned long long)audit->recovered_initial_seed,
+                (unsigned long long)audit->first_observed_word);
     }
 }
 
 int flow_induce_emit_lean_poly(FILE *out, const char *namespace_name,
                                const FlowInducedPolyModel *model) {
-    if (!out || !model) return 0;
+    if (!out || !model)
+        return 0;
     char ns[128];
     induce_sanitize_ns(namespace_name, ns, sizeof(ns));
     fprintf(out, "namespace %s\n\n", ns);
@@ -1084,9 +1166,9 @@ int flow_induce_emit_lean_poly(FILE *out, const char *namespace_name,
     return ferror(out) == 0;
 }
 
-int flow_induce_emit_lean_grid(FILE *out, const char *namespace_name,
-                               const FlowGridEnvelope *env) {
-    if (!out || !env) return 0;
+int flow_induce_emit_lean_grid(FILE *out, const char *namespace_name, const FlowGridEnvelope *env) {
+    if (!out || !env)
+        return 0;
     char ns[128];
     induce_sanitize_ns(namespace_name, ns, sizeof(ns));
     fprintf(out, "namespace %s\n\n", ns);
@@ -1095,9 +1177,9 @@ int flow_induce_emit_lean_grid(FILE *out, const char *namespace_name,
     return ferror(out) == 0;
 }
 
-int flow_induce_emit_lean_smm(FILE *out, const char *namespace_name,
-                              const FlowSMMResult *smm) {
-    if (!out || !smm) return 0;
+int flow_induce_emit_lean_smm(FILE *out, const char *namespace_name, const FlowSMMResult *smm) {
+    if (!out || !smm)
+        return 0;
     char ns[128];
     induce_sanitize_ns(namespace_name, ns, sizeof(ns));
     fprintf(out, "namespace %s\n\n", ns);
@@ -1108,7 +1190,8 @@ int flow_induce_emit_lean_smm(FILE *out, const char *namespace_name,
 
 int flow_induce_emit_lean_prng_audit(FILE *out, const char *namespace_name,
                                      const FlowPRNGAuditResult *audit) {
-    if (!out || !audit || !audit->detected) return 0;
+    if (!out || !audit || !audit->detected)
+        return 0;
     char ns[128];
     induce_sanitize_ns(namespace_name, ns, sizeof(ns));
     fprintf(out, "namespace %s\n\n", ns);
@@ -1118,40 +1201,46 @@ int flow_induce_emit_lean_prng_audit(FILE *out, const char *namespace_name,
 }
 
 int flow_induce_emit_lean_composite(FILE *out, const char *namespace_name,
-                                    const FlowInducedPolyModel *poly,
-                                    const FlowGridEnvelope *grid,
-                                    const FlowSMMResult *smm,
-                                    const FlowPRNGAuditResult *audit) {
-    if (!out) return 0;
+                                    const FlowInducedPolyModel *poly, const FlowGridEnvelope *grid,
+                                    const FlowSMMResult *smm, const FlowPRNGAuditResult *audit) {
+    if (!out)
+        return 0;
     char ns[128];
     induce_sanitize_ns(namespace_name, ns, sizeof(ns));
     fprintf(out,
-        "-- =============================================================================\n"
-        "-- Synthesized by FLOW Inductive Knowledge Engine (Data -> Solver -> Lean 4)\n"
-        "-- Zero-GC Compliant Formal Certificate & Guarded C17 Specification\n"
-        "-- =============================================================================\n\n"
-        "namespace %s\n\n", ns);
+            "-- =============================================================================\n"
+            "-- Synthesized by FLOW Inductive Knowledge Engine (Data -> Solver -> Lean 4)\n"
+            "-- Zero-GC Compliant Formal Certificate & Guarded C17 Specification\n"
+            "-- =============================================================================\n\n"
+            "namespace %s\n\n",
+            ns);
 
-    if (poly) emit_lean_poly_defs(out, poly);
-    if (grid) emit_lean_grid_defs(out, grid);
-    if (smm)  emit_lean_smm_defs(out, smm);
-    if (audit && audit->detected) emit_lean_prng_defs(out, audit);
+    if (poly)
+        emit_lean_poly_defs(out, poly);
+    if (grid)
+        emit_lean_grid_defs(out, grid);
+    if (smm)
+        emit_lean_smm_defs(out, smm);
+    if (audit && audit->detected)
+        emit_lean_prng_defs(out, audit);
 
     fprintf(out, "end %s\n", ns);
     return ferror(out) == 0;
 }
 
-int flow_induce_load_csv_samples(const char *csv_path,
-                                 double **x_out, double **y_out,
+int flow_induce_load_csv_samples(const char *csv_path, double **x_out, double **y_out,
                                  size_t *count_out, int *is_bivariate_out) {
-    if (!csv_path || !x_out || !y_out || !count_out) return 0;
+    if (!csv_path || !x_out || !y_out || !count_out)
+        return 0;
     *x_out = NULL;
     *y_out = NULL;
     *count_out = 0;
-    if (is_bivariate_out) *is_bivariate_out = 0;
+    if (is_bivariate_out)
+        *is_bivariate_out = 0;
 
     FILE *fp = fopen(csv_path, "r");
-    if (!fp) return 0;
+    if (!fp)
+        return 0;
 
     size_t cap = 1024, cnt = 0;
     int biv = 0;
@@ -1167,14 +1256,18 @@ int flow_induce_load_csv_samples(const char *csv_path,
     char line[512];
     while (fgets(line, sizeof(line), fp)) {
         char *p = line;
-        while (*p && isspace((unsigned char)*p)) ++p;
-        if (!*p || *p == '#' || isalpha((unsigned char)*p)) continue;
+        while (*p && isspace((unsigned char)*p))
+            ++p;
+        if (!*p || *p == '#' || isalpha((unsigned char)*p))
+            continue;
 
         char *end1 = NULL;
         double v1 = strtod(p, &end1);
-        if (end1 == p) continue;
+        if (end1 == p)
+            continue;
 
-        while (*end1 && (isspace((unsigned char)*end1) || *end1 == ',' || *end1 == ';')) ++end1;
+        while (*end1 && (isspace((unsigned char)*end1) || *end1 == ',' || *end1 == ';'))
+            ++end1;
         char *end2 = NULL;
         double v2 = strtod(end1, &end2);
 
@@ -1214,7 +1307,8 @@ int flow_induce_load_csv_samples(const char *csv_path,
     *x_out = xs;
     *y_out = ys;
     *count_out = cnt;
-    if (is_bivariate_out) *is_bivariate_out = biv;
+    if (is_bivariate_out)
+        *is_bivariate_out = biv;
     return 1;
 }
 
@@ -1222,12 +1316,9 @@ int flow_induce_load_csv_samples(const char *csv_path,
  * 7. White-Box .lean Direct Patching & Formal Verification Gate (flowy patch)
  * ============================================================================ */
 
-int flow_induce_patch_lean_spec(const char *base_lean_path,
-                                const char *out_patched_lean_path,
-                                uint64_t trigger_boundary_tag,
-                                const double *x_samples,
-                                const double *y_samples,
-                                size_t sample_count,
+int flow_induce_patch_lean_spec(const char *base_lean_path, const char *out_patched_lean_path,
+                                uint64_t trigger_boundary_tag, const double *x_samples,
+                                const double *y_samples, size_t sample_count,
                                 FlowLeanPatchReport *report_out) {
     if (!base_lean_path || !out_patched_lean_path || !x_samples || !y_samples || sample_count < 4) {
         return 0;
@@ -1236,12 +1327,14 @@ int flow_induce_patch_lean_spec(const char *base_lean_path,
     FlowLeanPatchReport local_rep;
     memset(&local_rep, 0, sizeof(local_rep));
     snprintf(local_rep.base_spec_path, sizeof(local_rep.base_spec_path), "%s", base_lean_path);
-    snprintf(local_rep.patched_spec_path, sizeof(local_rep.patched_spec_path), "%s", out_patched_lean_path);
+    snprintf(local_rep.patched_spec_path, sizeof(local_rep.patched_spec_path), "%s",
+             out_patched_lean_path);
     local_rep.trigger_boundary_tag = trigger_boundary_tag;
 
     /* 1. Parse base .lean specification and decode dM boundary trigger against base SemanticIR */
     FILE *base_fp = fopen(base_lean_path, "r");
-    if (!base_fp) return 0;
+    if (!base_fp)
+        return 0;
 
     FlowSpec *base_spec = (FlowSpec *)calloc(1, sizeof(FlowSpec));
     SemanticIR *base_ir = (SemanticIR *)calloc(1, sizeof(SemanticIR));
@@ -1274,26 +1367,32 @@ int flow_induce_patch_lean_spec(const char *base_lean_path,
         size_t j = 0;
         for (size_t i = 0; local_rep.boundary_cert.fn_name[i] && j + 1 < sizeof(fn_prefix); ++i) {
             unsigned char ch = (unsigned char)local_rep.boundary_cert.fn_name[i];
-            if (isalnum(ch) || ch == '_') fn_prefix[j++] = (char)ch;
+            if (isalnum(ch) || ch == '_')
+                fn_prefix[j++] = (char)ch;
         }
         fn_prefix[j] = '\0';
     } else if (base_ir->lean_function_count > 0 && base_ir->lean_functions[0].name[0]) {
         snprintf(fn_prefix, sizeof(fn_prefix), "%s", base_ir->lean_functions[0].name);
     }
-    snprintf(local_rep.patched_fn_name, sizeof(local_rep.patched_fn_name), "%s_patched_boundary", fn_prefix);
+    snprintf(local_rep.patched_fn_name, sizeof(local_rep.patched_fn_name), "%s_patched_boundary",
+             fn_prefix);
 
     flow_ir_cleanup(base_ir);
     free(base_spec);
     free(base_ir);
 
     /* 2. Run inductive discovery on empirical trajectory samples */
-    flow_induce_fit_rational_poly(x_samples, y_samples, sample_count, 2, 1024, &local_rep.induced_poly);
-    flow_induce_build_grid_envelope(x_samples, y_samples, sample_count, 4, 100, &local_rep.induced_grid);
-    flow_induce_solve_smm(y_samples, sample_count, FLOW_SMM_CIR_REFLECTING, 0.02, 42ULL, &local_rep.induced_smm);
+    flow_induce_fit_rational_poly(x_samples, y_samples, sample_count, 2, 1024,
+                                  &local_rep.induced_poly);
+    flow_induce_build_grid_envelope(x_samples, y_samples, sample_count, 4, 100,
+                                    &local_rep.induced_grid);
+    flow_induce_solve_smm(y_samples, sample_count, FLOW_SMM_CIR_REFLECTING, 0.02, 42ULL,
+                          &local_rep.induced_smm);
 
     /* 3. Read base .lean lines and locate any trailing 'end <Namespace>' line */
     base_fp = fopen(base_lean_path, "r");
-    if (!base_fp) return 0;
+    if (!base_fp)
+        return 0;
     fseek(base_fp, 0, SEEK_END);
     long fsz = ftell(base_fp);
     fseek(base_fp, 0, SEEK_SET);
@@ -1301,7 +1400,7 @@ int flow_induce_patch_lean_spec(const char *base_lean_path,
         fclose(base_fp);
         return 0;
     }
-    char *raw_src = (char *) calloc((size_t)fsz + 2, 1);
+    char *raw_src = (char *)calloc((size_t)fsz + 2, 1);
     if (!raw_src) {
         fclose(base_fp);
         return 0;
@@ -1315,13 +1414,16 @@ int flow_induce_patch_lean_spec(const char *base_lean_path,
     char *cursor = raw_src;
     while (*cursor) {
         char *line_start = cursor;
-        while (*cursor && *cursor != '\n') ++cursor;
+        while (*cursor && *cursor != '\n')
+            ++cursor;
         const char *p = line_start;
-        while (p < cursor && (*p == ' ' || *p == '\t')) ++p;
+        while (p < cursor && (*p == ' ' || *p == '\t'))
+            ++p;
         if ((size_t)(cursor - p) >= 4 && !strncmp(p, "end ", 4)) {
             last_end_line = line_start;
         }
-        if (*cursor == '\n') ++cursor;
+        if (*cursor == '\n')
+            ++cursor;
     }
 
     FILE *out_fp = fopen(out_patched_lean_path, "w");
@@ -1337,14 +1439,18 @@ int flow_induce_patch_lean_spec(const char *base_lean_path,
         fputc('\n', out_fp);
     }
 
-    int64_t c0_n = local_rep.induced_poly.coeffs[0].num, c0_d = local_rep.induced_poly.coeffs[0].den;
-    int64_t c1_n = local_rep.induced_poly.coeffs[1].num, c1_d = local_rep.induced_poly.coeffs[1].den;
-    int64_t c2_n = local_rep.induced_poly.coeffs[2].num, c2_d = local_rep.induced_poly.coeffs[2].den;
+    int64_t c0_n = local_rep.induced_poly.coeffs[0].num,
+            c0_d = local_rep.induced_poly.coeffs[0].den;
+    int64_t c1_n = local_rep.induced_poly.coeffs[1].num,
+            c1_d = local_rep.induced_poly.coeffs[1].den;
+    int64_t c2_n = local_rep.induced_poly.coeffs[2].num,
+            c2_d = local_rep.induced_poly.coeffs[2].den;
     int64_t lo_b = local_rep.induced_grid.certified_lower_bound;
     int64_t hi_b = local_rep.induced_grid.certified_upper_bound;
     int64_t mid_witness = (lo_b + hi_b) / 2;
 
-    fprintf(out_fp,
+    fprintf(
+        out_fp,
         "\n-- =============================================================================\n"
         "-- [FLOW White-Box .lean Direct Patch] Synthesized via flowy patch\n"
         "-- Provenance           : flowy v" FLOW_VERSION_STRING " (git: " FLOW_GIT_PROVENANCE ")\n"
@@ -1365,26 +1471,15 @@ int flow_induce_patch_lean_spec(const char *base_lean_path,
         "theorem %s_patch_poly_bounded (x : Float) :\n"
         "    x >= %.4f → %s_patched_poly_q x >= -1000000.0 := by decide\n\n",
         (unsigned long long)trigger_boundary_tag,
-        local_rep.boundary_cert.violation_kind_name ? local_rep.boundary_cert.violation_kind_name : "INDUCED_UPGRADE",
-        local_rep.boundary_cert.fn_name,
-        local_rep.boundary_cert.theorem_name,
-        local_rep.boundary_cert.guard_expr,
-        (long long)c0_n, (long long)c0_d,
-        (long long)c1_n, (long long)c1_d,
-        (long long)c2_n, (long long)c2_d,
-        local_rep.induced_poly.r_squared,
-        (long long)lo_b, (long long)hi_b,
-        (long long)local_rep.induced_grid.scale_factor,
-        sample_count,
-        fn_prefix,
-        (double)c0_n, (double)c0_d,
-        (double)c1_n, (double)c1_d,
-        (double)c2_n, (double)c2_d,
-        fn_prefix,
-        (long long)lo_b, (long long)hi_b,
-        fn_prefix, fn_prefix,
-        (double)lo_b, (double)hi_b,
-        fn_prefix, fn_prefix, (long long)mid_witness,
+        local_rep.boundary_cert.violation_kind_name ? local_rep.boundary_cert.violation_kind_name
+                                                    : "INDUCED_UPGRADE",
+        local_rep.boundary_cert.fn_name, local_rep.boundary_cert.theorem_name,
+        local_rep.boundary_cert.guard_expr, (long long)c0_n, (long long)c0_d, (long long)c1_n,
+        (long long)c1_d, (long long)c2_n, (long long)c2_d, local_rep.induced_poly.r_squared,
+        (long long)lo_b, (long long)hi_b, (long long)local_rep.induced_grid.scale_factor,
+        sample_count, fn_prefix, (double)c0_n, (double)c0_d, (double)c1_n, (double)c1_d,
+        (double)c2_n, (double)c2_d, fn_prefix, (long long)lo_b, (long long)hi_b, fn_prefix,
+        fn_prefix, (double)lo_b, (double)hi_b, fn_prefix, fn_prefix, (long long)mid_witness,
         fn_prefix, local_rep.induced_poly.domain_min.approx_val, fn_prefix);
 
     if (last_end_line) {
@@ -1395,7 +1490,8 @@ int flow_induce_patch_lean_spec(const char *base_lean_path,
 
     /* 4. Formal Verification Gate: re-parse & lower the patched .lean specification */
     FILE *ver_fp = fopen(out_patched_lean_path, "r");
-    if (!ver_fp) return 0;
+    if (!ver_fp)
+        return 0;
 
     FlowSpec *patched_spec = (FlowSpec *)calloc(1, sizeof(FlowSpec));
     SemanticIR *patched_ir = (SemanticIR *)calloc(1, sizeof(SemanticIR));
@@ -1417,24 +1513,25 @@ int flow_induce_patch_lean_spec(const char *base_lean_path,
     lower_to_ir(patched_spec, patched_ir);
     local_rep.patched_fn_count = patched_ir->lean_function_count;
     local_rep.patched_thm_count = patched_spec->lean_theorem_count;
-    local_rep.post_sieve_mask = flow_cubical_sieve_from_ir(patched_ir).mask | (1ULL << FLOW_SIEVE_BIT_LEAN_CERTIFIED);
+    local_rep.post_sieve_mask =
+        flow_cubical_sieve_from_ir(patched_ir).mask | (1ULL << FLOW_SIEVE_BIT_LEAN_CERTIFIED);
     local_rep.patch_verified = (local_rep.patched_fn_count >= local_rep.base_fn_count + 3 &&
-                                local_rep.patched_thm_count >= local_rep.base_thm_count + 2) ? 1 : 0;
+                                local_rep.patched_thm_count >= local_rep.base_thm_count + 2)
+                                   ? 1
+                                   : 0;
 
     snprintf(local_rep.diff_summary, sizeof(local_rep.diff_summary),
              "[White-Box .lean Patch Verified] %s -> %s | Trigger: %s (%s: %s) | "
              "+3 defs (%s_patched_poly_q, %s_patched_envelope_ok, %s_patched_boundary), "
              "+2 theorems (%zu -> %zu) | Q[x]: %lld/%lld + (%lld/%lld)x + (%lld/%lld)x^2 | "
              "Certified Envelope: [%lld, %lld]",
-             base_lean_path, out_patched_lean_path,
-             local_rep.boundary_cert.fn_name,
-             local_rep.boundary_cert.violation_kind_name ? local_rep.boundary_cert.violation_kind_name : "OK",
-             local_rep.boundary_cert.guard_expr,
-             fn_prefix, fn_prefix, fn_prefix,
-             local_rep.base_thm_count, local_rep.patched_thm_count,
-             (long long)c0_n, (long long)c0_d,
-             (long long)c1_n, (long long)c1_d,
-             (long long)c2_n, (long long)c2_d,
+             base_lean_path, out_patched_lean_path, local_rep.boundary_cert.fn_name,
+             local_rep.boundary_cert.violation_kind_name
+                 ? local_rep.boundary_cert.violation_kind_name
+                 : "OK",
+             local_rep.boundary_cert.guard_expr, fn_prefix, fn_prefix, fn_prefix,
+             local_rep.base_thm_count, local_rep.patched_thm_count, (long long)c0_n,
+             (long long)c0_d, (long long)c1_n, (long long)c1_d, (long long)c2_n, (long long)c2_d,
              (long long)lo_b, (long long)hi_b);
 
     /* Record white-box .lean patch decision event into FlowDecisionLogger */
@@ -1463,6 +1560,7 @@ int flow_induce_patch_lean_spec(const char *base_lean_path,
     free(patched_spec);
     free(patched_ir);
 
-    if (report_out) *report_out = local_rep;
+    if (report_out)
+        *report_out = local_rep;
     return local_rep.patch_verified;
 }

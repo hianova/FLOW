@@ -1,4 +1,4 @@
-export PATH := /opt/homebrew/bin:/usr/local/bin:$(PATH)
+export PATH := /opt/homebrew/opt/llvm/bin:/opt/homebrew/bin:/usr/local/bin:$(PATH)
 
 CC ?= clang
 FLOW_VERSION := $(shell tr -d '[:space:]' < VERSION 2>/dev/null || echo "2.6.0")
@@ -13,6 +13,14 @@ CFLAGS ?= -std=c17 -Wall -Wextra -Wpedantic -Werror -O2 -Isrc -Iplugins -Itests
 CFLAGS += $(PROVENANCE_DEFS)
 LDLIBS ?= -lm
 THREAD_FLAGS ?= -pthread
+UNAME_S := $(shell uname -s 2>/dev/null || echo "Unknown")
+ifeq ($(UNAME_S),Darwin)
+SO_LDFLAGS := -shared -fPIC -DFLOW_PLUGIN_DSO -undefined dynamic_lookup
+EXEC_LDFLAGS :=
+else
+SO_LDFLAGS := -shared -fPIC -DFLOW_PLUGIN_DSO
+EXEC_LDFLAGS := -rdynamic -ldl
+endif
 
 BUILD_DIR := build
 FLOWC := $(BUILD_DIR)/flowc
@@ -36,7 +44,16 @@ PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 INCLUDEDIR ?= $(PREFIX)/include/flow
 
-.PHONY: all clean test test-cli install uninstall plugins flowy libflow libflow_rt
+.PHONY: all clean test test-cli install uninstall plugins flowy libflow libflow_rt fmt fmt-check
+
+CLANG_FORMAT ?= clang-format
+FMT_FILES := $(wildcard src/*.c src/*.h plugins/*.c plugins/*.h tests/*.c tests/*.h)
+
+fmt:
+	$(CLANG_FORMAT) -i $(FMT_FILES)
+
+fmt-check:
+	$(CLANG_FORMAT) --dry-run --Werror $(FMT_FILES)
 
 all: $(LIBFLOW_A) $(LIBFLOW_RT_A) $(FLOWC) $(FLOWY) plugins
 
@@ -76,20 +93,20 @@ libflow: $(LIBFLOW_A)
 libflow_rt: $(LIBFLOW_RT_A)
 
 $(FLOWC): src/flowc.c $(LIBFLOW_A) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS) $(THREAD_FLAGS)
+	$(CC) $(CFLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS) $(THREAD_FLAGS) $(EXEC_LDFLAGS)
 
 $(FLOWY): src/flowy_main.c src/flowy.c $(LIBFLOW_A) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -Isrc src/flowy_main.c src/flowy.c $(LIBFLOW_A) -o $@ $(LDLIBS) $(THREAD_FLAGS)
+	$(CC) $(CFLAGS) -Isrc src/flowy_main.c src/flowy.c $(LIBFLOW_A) -o $@ $(LDLIBS) $(THREAD_FLAGS) $(EXEC_LDFLAGS)
 
 flowy: $(FLOWY)
 
 plugins: $(PLUGINS_SO)
 
 $(BUILD_DIR)/libflow_embodied.so: plugins/embodied.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -shared -fPIC -DFLOW_PLUGIN_DSO -undefined dynamic_lookup $(THREAD_FLAGS) -Isrc -Iplugins $< -o $@ $(LDLIBS)
+	$(CC) $(CFLAGS) $(SO_LDFLAGS) $(THREAD_FLAGS) -Isrc -Iplugins $< -o $@ $(LDLIBS)
 
 $(BUILD_DIR)/libflow_cryptanalysis.so: plugins/cryptanalysis.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -shared -fPIC -DFLOW_PLUGIN_DSO -undefined dynamic_lookup $(THREAD_FLAGS) -Isrc -Iplugins $< -o $@ $(LDLIBS)
+	$(CC) $(CFLAGS) $(SO_LDFLAGS) $(THREAD_FLAGS) -Isrc -Iplugins $< -o $@ $(LDLIBS)
 
 # ==============================================================================
 # Domain Test Pipeline
@@ -104,16 +121,16 @@ TEST_BINARIES := \
 	$(BUILD_DIR)/fuzz-test
 
 $(BUILD_DIR)/test-cubical-hott: tests/test_cubical_hott.c $(TEST_DEPS) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(TEST_DEFS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
+	$(CC) $(CFLAGS) $(TEST_DEFS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS) $(EXEC_LDFLAGS)
 
 $(BUILD_DIR)/test-concurrency: tests/test_concurrency.c $(TEST_DEPS) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(TEST_DEFS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
+	$(CC) $(CFLAGS) $(TEST_DEFS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS) $(EXEC_LDFLAGS)
 
 $(BUILD_DIR)/test-system: tests/test_system.c $(TEST_DEPS) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(TEST_DEFS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
+	$(CC) $(CFLAGS) $(TEST_DEFS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS) $(EXEC_LDFLAGS)
 
 $(BUILD_DIR)/fuzz-test: tests/fuzz-test.c $(TEST_DEPS) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(TEST_DEFS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS)
+	$(CC) $(CFLAGS) $(TEST_DEFS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_A) -o $@ $(LDLIBS) $(EXEC_LDFLAGS)
 
 test-cli: $(FLOWC) $(FLOWY)
 	@echo "=== [CLI] Testing flowc and flowy CLI Interfaces ==="

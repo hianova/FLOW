@@ -16,3 +16,4 @@
 - [第五章：極致低延遲執行期 (`libflow_rt.a`)：無鎖 SPSC、2-Jet 自動微分與 QSBR 熱重載](ch05_runtime_spsc_and_qsbr.md)
 - [第六章：模組化擴展與工具鏈：動態插件、MATLAB/Simulink MEX 與系統自省 (`flowy`)](ch06_plugins_mex_and_toolchain.md)
 - [第七章：歸納式知識創造與密碼分析：SMM 反演、網格反射、PRNG 逆向審計與 PUF/QMC 認證](ch07_inductive_synthesis_and_cryptanalysis.md)
+- [第八章：Architecture & X-Macro Hacking Guide（核心架構與外部開發者擴充速查表）](ch08_architecture_and_xmacro_hacking_guide.md)

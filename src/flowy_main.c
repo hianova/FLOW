@@ -13,14 +13,19 @@
 
 static int run_argv_sync(const char *const argv[]) {
     pid_t pid = fork();
-    if (pid < 0) return EXIT_FAILURE;
+    if (pid < 0)
+        return EXIT_FAILURE;
     if (pid == 0) {
-        union { const char *const *c; char *const *m; } u = { argv };
+        union {
+            const char *const *c;
+            char *const *m;
+        } u = {argv};
         execvp(argv[0], u.m);
         _exit(127);
     }
     int st = 0;
-    if (waitpid(pid, &st, 0) < 0) return EXIT_FAILURE;
+    if (waitpid(pid, &st, 0) < 0)
+        return EXIT_FAILURE;
     return WIFEXITED(st) ? WEXITSTATUS(st) : EXIT_FAILURE;
 }
 
@@ -30,7 +35,8 @@ static int is_help_flag(const char *s) {
 
 static int match_any(const char *cmd, const char *const *list) {
     for (; *list; ++list) {
-        if (!strcmp(cmd, *list)) return 1;
+        if (!strcmp(cmd, *list))
+            return 1;
     }
     return 0;
 }
@@ -89,16 +95,19 @@ static int flowy_build_cmd(int argc, char **argv, int and_run) {
     if (tmp_fd >= 0) {
         close(tmp_fd);
     } else {
-        snprintf(temp_c, sizeof(temp_c), "/tmp/flow_%d_%lu.c", (int)getpid(), (unsigned long)time(NULL));
+        snprintf(temp_c, sizeof(temp_c), "/tmp/flow_%d_%lu.c", (int)getpid(),
+                 (unsigned long)time(NULL));
     }
 
     char sibling_flowc[512] = {0};
-    const char *flowc_bin = flowy_resolve_flowc_bin(argc > 0 ? argv[0] : NULL, sibling_flowc, sizeof(sibling_flowc));
+    const char *flowc_bin =
+        flowy_resolve_flowc_bin(argc > 0 ? argv[0] : NULL, sibling_flowc, sizeof(sibling_flowc));
     char h_path[256] = {0};
 
     if (is_shared) {
         snprintf(h_path, sizeof(h_path), "build/%s.h", stem);
-        const char *fc_sh_argv[] = {flowc_bin, spec_file, "-o", temp_c, "--target-c-header", h_path, NULL};
+        const char *fc_sh_argv[] = {flowc_bin,           spec_file, "-o", temp_c,
+                                    "--target-c-header", h_path,    NULL};
         if (run_argv_sync(fc_sh_argv) != 0) {
             fprintf(stderr, "flowy build --shared: failed to compile %s\n", spec_file);
             remove(temp_c);
@@ -107,18 +116,22 @@ static int flowy_build_cmd(int argc, char **argv, int and_run) {
     } else {
         const char *fc_argv[] = {flowc_bin, spec_file, "-o", temp_c, NULL};
         if (run_argv_sync(fc_argv) != 0) {
-            fprintf(stderr, "flowy %s: failed to compile %s\n", and_run ? "run" : "build", spec_file);
+            fprintf(stderr, "flowy %s: failed to compile %s\n", and_run ? "run" : "build",
+                    spec_file);
             remove(temp_c);
             return EXIT_FAILURE;
         }
     }
 
     const char *cc = getenv("CC");
-    if (!cc || !cc[0]) cc = "clang";
+    if (!cc || !cc[0])
+        cc = "clang";
     int ret = 0;
 
     if (is_shared) {
-        const char *cc_sh1[] = {cc, "-std=c17", "-O3", "-shared", "-fPIC", "-DFLOW_SHARED_LIB", "-pthread", temp_c, "-o", out_bin, "-lm", NULL};
+        const char *cc_sh1[] = {
+            cc,         "-std=c17", "-O3", "-shared", "-fPIC", "-DFLOW_SHARED_LIB",
+            "-pthread", temp_c,     "-o",  out_bin,   "-lm",   NULL};
         ret = run_argv_sync(cc_sh1);
         remove(temp_c);
         if (ret != 0) {
@@ -137,7 +150,8 @@ static int flowy_build_cmd(int argc, char **argv, int and_run) {
     }
     remove(temp_c);
     if (ret != 0) {
-        fprintf(stderr, "flowy %s: failed to generate binary %s\n", and_run ? "run" : "build", out_bin);
+        fprintf(stderr, "flowy %s: failed to generate binary %s\n", and_run ? "run" : "build",
+                out_bin);
         return EXIT_FAILURE;
     }
     printf("  ✓ Built %s (standalone native binary)\n", out_bin);
@@ -185,13 +199,15 @@ static int flowy_run_jit_direct(const char *spec_file) {
         for (size_t m = 0; m < ir.imported_module_count; ++m) {
             flow_registry_resolve_plugin(ir.imported_modules[m]);
             const FlowPlugin *mod = flow_registry_lookup(ir.imported_modules[m]);
-            if (mod) flow_plugin_lower_semantics(&spec, &ir, mod);
+            if (mod)
+                flow_plugin_lower_semantics(&spec, &ir, mod);
         }
     } else {
         const char *mname = spec.plugin_name[0] ? spec.plugin_name : "builtin";
         flow_registry_resolve_plugin(mname);
         const FlowPlugin *mod = flow_registry_lookup(mname);
-        if (mod) flow_plugin_lower_semantics(&spec, &ir, mod);
+        if (mod)
+            flow_plugin_lower_semantics(&spec, &ir, mod);
     }
 
     const Component *component = select_component(&ir);
@@ -205,7 +221,8 @@ static int flowy_run_jit_direct(const char *spec_file) {
         flow_ir_cleanup(&ir);
         return EXIT_FAILURE;
     }
-    printf("[JIT Direct Track] Executing %s in-memory...\n", ir.flow_name[0] ? ir.flow_name : spec_file);
+    printf("[JIT Direct Track] Executing %s in-memory...\n",
+           ir.flow_name[0] ? ir.flow_name : spec_file);
     int ok = flow_backend_run_in_memory(&ir, component, NULL, &verification, stdout);
     flow_ir_cleanup(&ir);
     return ok ? EXIT_SUCCESS : -1;
@@ -251,8 +268,10 @@ static int flowy_run_cmd(int argc, char **argv) {
 }
 
 static void flowy_print_usage(FILE *out) {
-    fprintf(out,
-        "FLOW 2.0 Living System & C17 Toolchain (flowy) v" FLOW_VERSION_STRING " (git: " FLOW_GIT_PROVENANCE ")\n"
+    fprintf(
+        out,
+        "FLOW 2.0 Living System & C17 Toolchain (flowy) v" FLOW_VERSION_STRING
+        " (git: " FLOW_GIT_PROVENANCE ")\n"
         "Usage: flowy <command> [options...]\n\n"
         "Primary Commands:\n"
         "  induce / discover [--benchmark|<file.csv>]  Induce Lean 4 invariants, SMM params & PRNG seed audit\n"
@@ -319,7 +338,8 @@ int main(int argc, char **argv) {
     }
 
     if (!strcmp(argv[1], "-v") || !strcmp(argv[1], "--version") || !strcmp(argv[1], "version")) {
-        printf("FLOW System Framework (flowy) v" FLOW_VERSION_STRING " (git: " FLOW_GIT_PROVENANCE ") | Cubical HoTT & Topos U_0\n");
+        printf("FLOW System Framework (flowy) v" FLOW_VERSION_STRING " (git: " FLOW_GIT_PROVENANCE
+               ") | Cubical HoTT & Topos U_0\n");
         return EXIT_SUCCESS;
     }
 
@@ -335,27 +355,24 @@ int main(int argc, char **argv) {
         }
     }
 
-    static const char *const run_names[]     = { "run", NULL };
-    static const char *const build_names[]   = { "build", "compile", NULL };
-    static const char *const induce_names[]  = { "induce", "--induce", "discover", "--discover", NULL };
-    static const char *const patch_names[]   = { "patch", "--patch", NULL };
-    static const char *const inspect_names[] = { "inspect", NULL };
-    static const char *const alias_names[]   = {
-        "why", "--why", "boundary", "--boundary", "timeline", "--timeline",
-        "explain-decisions", "audit", "--audit", "topos", "--topos",
-        "hott", "--hott", "cubical", "--cubical", NULL
-    };
-    static const char *const lang_names[]    = { "lang", "language", NULL };
+    static const char *const run_names[] = {"run", NULL};
+    static const char *const build_names[] = {"build", "compile", NULL};
+    static const char *const induce_names[] = {"induce", "--induce", "discover", "--discover",
+                                               NULL};
+    static const char *const patch_names[] = {"patch", "--patch", NULL};
+    static const char *const inspect_names[] = {"inspect", NULL};
+    static const char *const alias_names[] = {
+        "why",      "--why",      "boundary",          "--boundary",
+        "timeline", "--timeline", "explain-decisions", "audit",
+        "--audit",  "topos",      "--topos",           "hott",
+        "--hott",   "cubical",    "--cubical",         NULL};
+    static const char *const lang_names[] = {"lang", "language", NULL};
 
     static const FlowCliCommand FLOW_CLI_COMMANDS[] = {
-        { run_names,     flowy_run_cmd             },
-        { build_names,   flowy_build_entry         },
-        { induce_names,  flowy_induce_entry        },
-        { patch_names,   flowy_patch_entry         },
-        { inspect_names, flowy_inspect_entry       },
-        { alias_names,   flowy_inspect_alias_entry },
-        { lang_names,    flowy_lang_entry          }
-    };
+        {run_names, flowy_run_cmd},           {build_names, flowy_build_entry},
+        {induce_names, flowy_induce_entry},   {patch_names, flowy_patch_entry},
+        {inspect_names, flowy_inspect_entry}, {alias_names, flowy_inspect_alias_entry},
+        {lang_names, flowy_lang_entry}};
 
     for (size_t ci = 0; ci < sizeof(FLOW_CLI_COMMANDS) / sizeof(FLOW_CLI_COMMANDS[0]); ++ci) {
         if (match_any(argv[1], FLOW_CLI_COMMANDS[ci].names)) {

@@ -35,24 +35,23 @@ const char *flowy_resolve_flowc_bin(const char *argv0, char *buf, size_t buf_siz
 }
 
 void flowy_explain_decision(const FlowDecisionEvent *ev, char *buf_out, size_t max_len) {
-    if (!ev || !buf_out || !max_len) return;
+    if (!ev || !buf_out || !max_len)
+        return;
 
     FlowCubicalTransitionReport rep = {0};
-    flow_cubical_decode_transition(ev->pre_state_mask, ev->post_state_mask, ev->flipped_genome_bit, &rep);
+    flow_cubical_decode_transition(ev->pre_state_mask, ev->post_state_mask, ev->flipped_genome_bit,
+                                   &rep);
 
     snprintf(buf_out, max_len,
              "[FLOW Token-Ring & Lean4 Decision Audit]\n"
              "Trigger: %s (t=%.2fms) | Metric: %.1f/%.1f %s | Invariant: %s\n"
              "Cubical 1-Cell: Bit#%u [%s] | Kan Homotopy: %s | Morph: %s -> %s (%lluns QSBR)\n"
              "Rationale: %s\n",
-             ev->trigger_source, (double)ev->timestamp_ns / 1e6,
-             ev->observed_metric_value, ev->threshold_limit_value,
-             ev->metric_unit, ev->violated_constraint,
-             rep.flipped_axis,
+             ev->trigger_source, (double)ev->timestamp_ns / 1e6, ev->observed_metric_value,
+             ev->threshold_limit_value, ev->metric_unit, ev->violated_constraint, rep.flipped_axis,
              (rep.axis_info && rep.axis_info->axis_name) ? rep.axis_info->axis_name : "axis",
-             rep.is_kan_homotopic ? "KAN_FILLED (p ~ q)" : "OBSTRUCTED",
-             ev->pre_topology, ev->post_topology,
-             (unsigned long long)ev->hot_swap_grace_ns,
+             rep.is_kan_homotopic ? "KAN_FILLED (p ~ q)" : "OBSTRUCTED", ev->pre_topology,
+             ev->post_topology, (unsigned long long)ev->hot_swap_grace_ns,
              ev->causal_rationale[0] ? ev->causal_rationale : rep.explanation);
 }
 
@@ -80,27 +79,30 @@ const char *flowy_language_name(FlowLanguage l) {
 }
 
 void flowy_print_decision_explanation(const FlowDecisionEvent *ev, FILE *out) {
-    if (!ev || !out) return;
+    if (!ev || !out)
+        return;
     char buf[1024] = {0};
     flowy_explain_decision(ev, buf, sizeof(buf));
     fprintf(out, "\n%s\n", buf);
 }
 
 void flowy_print_decision_timeline(const FlowDecisionLogger *logger, FILE *out) {
-    if (!out) return;
-    const FlowDecisionLogger *l = (logger && logger->total_recorded) ? logger : flow_decision_logger_default();
+    if (!out)
+        return;
+    const FlowDecisionLogger *l =
+        (logger && logger->total_recorded) ? logger : flow_decision_logger_default();
     for (size_t i = 0; i < l->total_recorded && i < FLOW_MAX_DECISION_LOGS; ++i) {
         const FlowDecisionEvent *ev = &l->events[i];
         fprintf(out, "%.2fms | %s | %.1f/%.1f %s | Bit#%u->%s | %lluns\n",
-                (double)ev->timestamp_ns / 1e6, ev->trigger_source,
-                ev->observed_metric_value, ev->threshold_limit_value,
-                ev->metric_unit, ev->flipped_genome_bit,
+                (double)ev->timestamp_ns / 1e6, ev->trigger_source, ev->observed_metric_value,
+                ev->threshold_limit_value, ev->metric_unit, ev->flipped_genome_bit,
                 ev->post_topology, (unsigned long long)ev->hot_swap_grace_ns);
     }
 }
 
 void flowy_print_cubical_topos_report(FILE *out) {
-    if (!out) return;
+    if (!out)
+        return;
     FlowCubicalTransitionReport rep = {0};
     flow_cubical_decode_transition(0x10ULL, 0x14ULL, 2, &rep);
 
@@ -108,17 +110,18 @@ void flowy_print_cubical_topos_report(FILE *out) {
     int univalent = 1;
     for (size_t i = 0; i < u0->count; ++i) {
         uint64_t ph = 0ULL;
-        if (flow_hott_verify_univalence(u0, u0->entries[i].name, &ph) != FLOW_KAN_FILLED_HOMOTOPIC) {
+        if (flow_hott_verify_univalence(u0, u0->entries[i].name, &ph) !=
+            FLOW_KAN_FILLED_HOMOTOPIC) {
             univalent = 0;
         }
     }
 
-    fprintf(out, "[Cubical HoTT & Topos Sieve] I^64 | chi=0x%02x | Bit#%u: %s | Universe-U0: %zu types (%zu entries, Univalence=%s)\n",
-            (unsigned)flow_topos_classify_subobject(0x14ULL, 0xFFULL),
-            rep.flipped_axis,
-            rep.is_kan_homotopic ? "KAN_FILLED" : "OBSTRUCTED",
-            u0->distinct_type_count, u0->count,
-            univalent ? "UNIVALENT" : "BROKEN");
+    fprintf(
+        out,
+        "[Cubical HoTT & Topos Sieve] I^64 | chi=0x%02x | Bit#%u: %s | Universe-U0: %zu types (%zu entries, Univalence=%s)\n",
+        (unsigned)flow_topos_classify_subobject(0x14ULL, 0xFFULL), rep.flipped_axis,
+        rep.is_kan_homotopic ? "KAN_FILLED" : "OBSTRUCTED", u0->distinct_type_count, u0->count,
+        univalent ? "UNIVALENT" : "BROKEN");
 
     for (size_t i = 0; i < u0->count; ++i) {
         int seen = 0;
@@ -128,29 +131,32 @@ void flowy_print_cubical_topos_report(FILE *out) {
                 break;
             }
         }
-        if (seen) continue;
+        if (seen)
+            continue;
 
         uint64_t path_hash = 0ULL;
         FlowKanStatus st = flow_hott_verify_univalence(u0, u0->entries[i].name, &path_hash);
-        fprintf(out, "  * [U_0] %-22s | fields=%-2zu size=%-3zuB align=%zuB fx=%u | Path=0x%016llx (%s)\n",
-                u0->entries[i].name, u0->entries[i].field_count,
-                u0->entries[i].byte_size, u0->entries[i].align_bytes,
-                u0->entries[i].fx_scale_bits,
-                (unsigned long long)path_hash,
-                st == FLOW_KAN_FILLED_HOMOTOPIC ? "A ~= B => A = B" : "OBSTRUCTED");
+        fprintf(
+            out,
+            "  * [U_0] %-22s | fields=%-2zu size=%-3zuB align=%zuB fx=%u | Path=0x%016llx (%s)\n",
+            u0->entries[i].name, u0->entries[i].field_count, u0->entries[i].byte_size,
+            u0->entries[i].align_bytes, u0->entries[i].fx_scale_bits, (unsigned long long)path_hash,
+            st == FLOW_KAN_FILLED_HOMOTOPIC ? "A ~= B => A = B" : "OBSTRUCTED");
     }
 
     FlowHITExceptionQuotient hit_q = {0};
     if (flow_hott_quotient_exception_zone(0xFFFFULL, 0x0F00ULL, 0U, &hit_q)) {
-        fprintf(out, "  * [HIT Quotient] SpaceWithException(M, ExcZone) | M^o=%u DOF | dM=%u collapsed -> 1 pt (Tag=0x%016llx)\n",
-                hit_q.quotient_interior_dof,
-                hit_q.exception_zone_dof,
-                (unsigned long long)hit_q.canonical_boundary_tag);
+        fprintf(
+            out,
+            "  * [HIT Quotient] SpaceWithException(M, ExcZone) | M^o=%u DOF | dM=%u collapsed -> 1 pt (Tag=0x%016llx)\n",
+            hit_q.quotient_interior_dof, hit_q.exception_zone_dof,
+            (unsigned long long)hit_q.canonical_boundary_tag);
     }
 }
 
 int flowy_print_boundary_certificate(uint64_t raw_bits, const char *opt_lean_spec, FILE *out) {
-    if (!out) return 0;
+    if (!out)
+        return 0;
     FlowBoundaryCertificateReport rep = {0};
     int decoded = 0;
 
@@ -172,10 +178,12 @@ int flowy_print_boundary_certificate(uint64_t raw_bits, const char *opt_lean_spe
     if (!decoded) {
         decoded = flow_hott_decode_boundary_exception(raw_bits, NULL, &rep);
     }
-    if (!decoded) return 0;
+    if (!decoded)
+        return 0;
 
     fprintf(out,
-            "[FLOW HoTT Boundary Pullback & Topos Certificate | v" FLOW_VERSION_STRING " (git: " FLOW_GIT_PROVENANCE ")]\n"
+            "[FLOW HoTT Boundary Pullback & Topos Certificate | v" FLOW_VERSION_STRING
+            " (git: " FLOW_GIT_PROVENANCE ")]\n"
             "%s\n"
             "  * Bit-Pattern  : 0x%016llx (%s)\n"
             "  * Operator     : %s (fn_id=%u, guard_idx=%u)\n"
@@ -183,22 +191,21 @@ int flowy_print_boundary_certificate(uint64_t raw_bits, const char *opt_lean_spe
             "  * Theorem      : %s\n"
             "  * Guard        : %s\n"
             "  * Cubical Axis : Bit#%u [%s] (%s)\n",
-            rep.diagnostic,
-            (unsigned long long)rep.raw_bits,
+            rep.diagnostic, (unsigned long long)rep.raw_bits,
             rep.is_on_boundary ? "dM Boundary Singularity" : "M^o Contractible Interior",
             rep.fn_name, (unsigned)rep.fn_id, (unsigned)rep.guard_idx,
-            rep.violation_kind_name ? rep.violation_kind_name : "OK",
-            (unsigned)rep.user_code,
-            rep.theorem_name,
-            rep.guard_expr,
-            (unsigned)rep.cubical_axis,
+            rep.violation_kind_name ? rep.violation_kind_name : "OK", (unsigned)rep.user_code,
+            rep.theorem_name, rep.guard_expr, (unsigned)rep.cubical_axis,
             (rep.axis_info && rep.axis_info->axis_name) ? rep.axis_info->axis_name : "axis",
-            (rep.axis_info && rep.axis_info->policy_contract) ? rep.axis_info->policy_contract : "True");
+            (rep.axis_info && rep.axis_info->policy_contract) ? rep.axis_info->policy_contract
+                                                              : "True");
     return 1;
 }
 
 void cmd_inspect_print_usage(FILE *out) {
-    fprintf(out, "Usage: flowy inspect <why [0x<nan_tag> [spec.lean]]|boundary <0x<nan_tag>> [spec.lean]|timeline|audit|topos>\n");
+    fprintf(
+        out,
+        "Usage: flowy inspect <why [0x<nan_tag> [spec.lean]]|boundary <0x<nan_tag>> [spec.lean]|timeline|audit|topos>\n");
 }
 
 int cmd_inspect_run(int argc, char **argv) {
@@ -219,7 +226,8 @@ int cmd_inspect_run(int argc, char **argv) {
             uint64_t raw_bits = strtoull(argv[1], &endp, 0);
             if (endp && endp != argv[1]) {
                 const char *spec_path = (argc >= 3 && argv[2][0] != '-') ? argv[2] : NULL;
-                return flowy_print_boundary_certificate(raw_bits, spec_path, stdout) ? EXIT_SUCCESS : EXIT_FAILURE;
+                return flowy_print_boundary_certificate(raw_bits, spec_path, stdout) ? EXIT_SUCCESS
+                                                                                     : EXIT_FAILURE;
             }
         }
         flowy_print_decision_explanation(flow_decision_logger_latest(NULL), stdout);
@@ -236,12 +244,14 @@ int cmd_inspect_run(int argc, char **argv) {
         int univalent = 1;
         for (size_t i = 0; i < u0->count; ++i) {
             uint64_t ph = 0ULL;
-            if (flow_hott_verify_univalence(u0, u0->entries[i].name, &ph) != FLOW_KAN_FILLED_HOMOTOPIC) {
+            if (flow_hott_verify_univalence(u0, u0->entries[i].name, &ph) !=
+                FLOW_KAN_FILLED_HOMOTOPIC) {
                 univalent = 0;
             }
         }
-        printf("[FLOW Formal Audit] Leaks:0 | SMT: QF_LIA SOUND | Pure-C17-ABI:ISOMORPHIC | HoTT-U0:%s(%zu) | Exact-Numerics:SOUND\n",
-               univalent ? "UNIVALENT" : "BROKEN", u0->distinct_type_count);
+        printf(
+            "[FLOW Formal Audit] Leaks:0 | SMT: QF_LIA SOUND | Pure-C17-ABI:ISOMORPHIC | HoTT-U0:%s(%zu) | Exact-Numerics:SOUND\n",
+            univalent ? "UNIVALENT" : "BROKEN", u0->distinct_type_count);
         return univalent ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
@@ -255,7 +265,8 @@ int cmd_inspect_run(int argc, char **argv) {
 }
 
 void cmd_induce_print_usage(FILE *out) {
-    fprintf(out,
+    fprintf(
+        out,
         "Usage: flowy induce [--benchmark | <samples.csv>] [-o <discovered.lean>]\n"
         "Options:\n"
         "  --benchmark          Run 10,000-sample Inductive Knowledge Discovery & Seed=42 Audit suite\n"
@@ -331,24 +342,27 @@ int cmd_induce_run(int argc, char **argv) {
     flow_induce_audit_prng_u64(prng_seq, 16, 1024, &prng_audit);
 
     printf("[FLOW Inductive Knowledge Discovery Engine]\n");
-    printf("  1. Empirical IPM Moments (N=%zu): mean=%.4f std=%.4f skew=%.4f ex_kurt=%.4f acf1=%.4f\n",
-           mom.count, mom.mean, mom.std_dev, mom.skewness, mom.excess_kurtosis, mom.acf1);
-    printf("  2. Exact Rational Poly (Q): c0=%lld/%lld c1=%lld/%lld c2=%lld/%lld | eps=%lld/%lld (max_res=%.5f)\n",
-           (long long)poly.coeffs[0].num, (long long)poly.coeffs[0].den,
-           (long long)poly.coeffs[1].num, (long long)poly.coeffs[1].den,
-           (long long)poly.coeffs[2].num, (long long)poly.coeffs[2].den,
-           (long long)poly.epsilon_bound.num, (long long)poly.epsilon_bound.den,
-           poly.max_empirical_residual);
-    printf("  3. Grid Envelope Reflection: %zu buckets | certified bounds=[%lld, %lld] (by decide)\n",
-           grid.bucket_count,
-           (long long)grid.certified_lower_bound,
-           (long long)grid.certified_upper_bound);
-    printf("  4. SMM Inverse CIR Discovery: a=%.4f (%lld/%lld) b=%.4f (%lld/%lld) sigma=%.4f (%lld/%lld) | Feller 2ab>=sigma^2: %s (margin=%.4f)\n",
-           smm_cir.param_a_or_mu, (long long)smm_cir.rat_a_or_mu.num, (long long)smm_cir.rat_a_or_mu.den,
-           smm_cir.param_b_or_sigma, (long long)smm_cir.rat_b_or_sigma.num, (long long)smm_cir.rat_b_or_sigma.den,
-           smm_cir.param_sigma_or_lambda, (long long)smm_cir.rat_sigma_or_lambda.num, (long long)smm_cir.rat_sigma_or_lambda.den,
-           smm_cir.feller_condition_holds ? "PROVEN" : "VIOLATED",
-           smm_cir.feller_margin);
+    printf(
+        "  1. Empirical IPM Moments (N=%zu): mean=%.4f std=%.4f skew=%.4f ex_kurt=%.4f acf1=%.4f\n",
+        mom.count, mom.mean, mom.std_dev, mom.skewness, mom.excess_kurtosis, mom.acf1);
+    printf(
+        "  2. Exact Rational Poly (Q): c0=%lld/%lld c1=%lld/%lld c2=%lld/%lld | eps=%lld/%lld (max_res=%.5f)\n",
+        (long long)poly.coeffs[0].num, (long long)poly.coeffs[0].den, (long long)poly.coeffs[1].num,
+        (long long)poly.coeffs[1].den, (long long)poly.coeffs[2].num, (long long)poly.coeffs[2].den,
+        (long long)poly.epsilon_bound.num, (long long)poly.epsilon_bound.den,
+        poly.max_empirical_residual);
+    printf(
+        "  3. Grid Envelope Reflection: %zu buckets | certified bounds=[%lld, %lld] (by decide)\n",
+        grid.bucket_count, (long long)grid.certified_lower_bound,
+        (long long)grid.certified_upper_bound);
+    printf(
+        "  4. SMM Inverse CIR Discovery: a=%.4f (%lld/%lld) b=%.4f (%lld/%lld) sigma=%.4f (%lld/%lld) | Feller 2ab>=sigma^2: %s (margin=%.4f)\n",
+        smm_cir.param_a_or_mu, (long long)smm_cir.rat_a_or_mu.num,
+        (long long)smm_cir.rat_a_or_mu.den, smm_cir.param_b_or_sigma,
+        (long long)smm_cir.rat_b_or_sigma.num, (long long)smm_cir.rat_b_or_sigma.den,
+        smm_cir.param_sigma_or_lambda, (long long)smm_cir.rat_sigma_or_lambda.num,
+        (long long)smm_cir.rat_sigma_or_lambda.den,
+        smm_cir.feller_condition_holds ? "PROVEN" : "VIOLATED", smm_cir.feller_margin);
     printf("  5. Algebraic Cryptanalysis Audit: %s\n", prng_audit.evidence_summary);
 
     if (out_lean_path) {
@@ -359,7 +373,8 @@ int cmd_induce_run(int argc, char **argv) {
             free(ys);
             return EXIT_FAILURE;
         }
-        flow_induce_emit_lean_composite(fp, "Flow.InducedKnowledge", &poly, &grid, &smm_cir, &prng_audit);
+        flow_induce_emit_lean_composite(fp, "Flow.InducedKnowledge", &poly, &grid, &smm_cir,
+                                        &prng_audit);
         fclose(fp);
         printf("  ✓ Synthesized Zero-GC Lean 4 Formal Certificate -> %s\n", out_lean_path);
     }
@@ -370,7 +385,8 @@ int cmd_induce_run(int argc, char **argv) {
 }
 
 void cmd_patch_print_usage(FILE *out) {
-    fprintf(out,
+    fprintf(
+        out,
         "Usage: flowy patch <base.lean> [<samples.csv>] [-b 0x<boundary_nan_tag>] -o <patched.lean>\n"
         "Options:\n"
         "  <base.lean>             Original Lean 4 specification to patch\n"
@@ -394,8 +410,10 @@ int cmd_patch_run(int argc, char **argv) {
         } else if (!strcmp(argv[i], "-o") && i + 1 < argc) {
             out_lean = argv[++i];
         } else if (argv[i][0] != '-') {
-            if (!base_lean) base_lean = argv[i];
-            else if (!csv_path) csv_path = argv[i];
+            if (!base_lean)
+                base_lean = argv[i];
+            else if (!csv_path)
+                csv_path = argv[i];
         }
     }
 
@@ -424,7 +442,8 @@ int cmd_patch_run(int argc, char **argv) {
             return EXIT_FAILURE;
         }
         flow_induce_simulate_cir(1.6, 2.5, 0.85, 2.5, 0.02, 42ULL, ys, n);
-        for (size_t i = 0; i < n; ++i) xs[i] = (double)i / (double)n;
+        for (size_t i = 0; i < n; ++i)
+            xs[i] = (double)i / (double)n;
     }
 
     FlowLeanPatchReport rep;
@@ -437,20 +456,20 @@ int cmd_patch_run(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    printf("[FLOW White-Box .lean Direct Patching Engine | v" FLOW_VERSION_STRING " (git: " FLOW_GIT_PROVENANCE ")]\n");
-    printf("  1. Base Specification : %s (%zu defs, %zu theorems)\n",
-           rep.base_spec_path, rep.base_fn_count, rep.base_thm_count);
+    printf("[FLOW White-Box .lean Direct Patching Engine | v" FLOW_VERSION_STRING
+           " (git: " FLOW_GIT_PROVENANCE ")]\n");
+    printf("  1. Base Specification : %s (%zu defs, %zu theorems)\n", rep.base_spec_path,
+           rep.base_fn_count, rep.base_thm_count);
     printf("  2. Boundary Trigger   : 0x%016llx -> Fn: %s | Theorem: %s | Guard: %s\n",
-           (unsigned long long)rep.trigger_boundary_tag,
-           rep.boundary_cert.fn_name,
-           rep.boundary_cert.theorem_name,
-           rep.boundary_cert.guard_expr);
-    printf("  3. Induced Q[x] Patch : (%lld/%lld) + (%lld/%lld)*x + (%lld/%lld)*x^2 | Envelope=[%lld, %lld]\n",
-           (long long)rep.induced_poly.coeffs[0].num, (long long)rep.induced_poly.coeffs[0].den,
-           (long long)rep.induced_poly.coeffs[1].num, (long long)rep.induced_poly.coeffs[1].den,
-           (long long)rep.induced_poly.coeffs[2].num, (long long)rep.induced_poly.coeffs[2].den,
-           (long long)rep.induced_grid.certified_lower_bound,
-           (long long)rep.induced_grid.certified_upper_bound);
+           (unsigned long long)rep.trigger_boundary_tag, rep.boundary_cert.fn_name,
+           rep.boundary_cert.theorem_name, rep.boundary_cert.guard_expr);
+    printf(
+        "  3. Induced Q[x] Patch : (%lld/%lld) + (%lld/%lld)*x + (%lld/%lld)*x^2 | Envelope=[%lld, %lld]\n",
+        (long long)rep.induced_poly.coeffs[0].num, (long long)rep.induced_poly.coeffs[0].den,
+        (long long)rep.induced_poly.coeffs[1].num, (long long)rep.induced_poly.coeffs[1].den,
+        (long long)rep.induced_poly.coeffs[2].num, (long long)rep.induced_poly.coeffs[2].den,
+        (long long)rep.induced_grid.certified_lower_bound,
+        (long long)rep.induced_grid.certified_upper_bound);
     printf("  4. Patched Output     : %s (%zu defs, %zu theorems | Verified=%s)\n",
            rep.patched_spec_path, rep.patched_fn_count, rep.patched_thm_count,
            rep.patch_verified ? "YES (Zero-Sorry, Zero-GC, Univalent)" : "NO");

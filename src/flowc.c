@@ -12,8 +12,10 @@
 #include <math.h>
 
 static void flowc_print_usage(FILE *out) {
-    fprintf(out,
-        "FLOW Lean 4 -> C17 Formal Synthesizer (flowc) v" FLOW_VERSION_STRING " (git: " FLOW_GIT_PROVENANCE ") | Lean-RT & Cubical HoTT\n"
+    fprintf(
+        out,
+        "FLOW Lean 4 -> C17 Formal Synthesizer (flowc) v" FLOW_VERSION_STRING
+        " (git: " FLOW_GIT_PROVENANCE ") | Lean-RT & Cubical HoTT\n"
         "Usage: flowc <input.lean | --induce data.csv> [-o <output.c>] [options]\n"
         "Options:\n"
         "  -o <output.c>                 Target C17 source path (default: <input>.c)\n"
@@ -41,8 +43,8 @@ static int validate_and_lower_module(const char *mod_name, const FlowSpec *spec,
     }
     flow_plugin_lower_semantics(spec, ir, module);
     if (!flow_component_validate_contract(ir, module, err_msg, sizeof(err_msg))) {
-        fprintf(stderr, "flowc: module '%s' contract validation failed: %s\n",
-                mod_name, err_msg[0] ? err_msg : "invalid domain contract");
+        fprintf(stderr, "flowc: module '%s' contract validation failed: %s\n", mod_name,
+                err_msg[0] ? err_msg : "invalid domain contract");
         return 0;
     }
     return 1;
@@ -90,7 +92,8 @@ int flowc_main(int argc, char **argv) {
     }
 
     if (!strcmp(argv[1], "-v") || !strcmp(argv[1], "--version") || !strcmp(argv[1], "version")) {
-        printf("FLOW Modern Declarative Compiler (flowc) v" FLOW_VERSION_STRING " (git: " FLOW_GIT_PROVENANCE ") | Lean-RT & Cubical HoTT\n");
+        printf("FLOW Modern Declarative Compiler (flowc) v" FLOW_VERSION_STRING
+               " (git: " FLOW_GIT_PROVENANCE ") | Lean-RT & Cubical HoTT\n");
         return EXIT_SUCCESS;
     }
 
@@ -133,7 +136,8 @@ int flowc_main(int argc, char **argv) {
 
     const char *primary_path = input_path ? input_path : induce_csv_path;
     const char *dot = strrchr(primary_path, '.');
-    size_t base_len = (dot && (!strcmp(dot, ".lean") || !strcmp(dot, ".csv"))) ? (size_t)(dot - primary_path) : 0;
+    size_t base_len =
+        (dot && (!strcmp(dot, ".lean") || !strcmp(dot, ".csv"))) ? (size_t)(dot - primary_path) : 0;
     if (!output_path) {
         if (base_len > 0 && base_len + 3 < sizeof(auto_output_buf)) {
             memcpy(auto_output_buf, primary_path, base_len);
@@ -160,15 +164,20 @@ int flowc_main(int argc, char **argv) {
 
         int want_poly = (!strcmp(induce_mode, "composite") || !strcmp(induce_mode, "poly"));
         int want_grid = (!strcmp(induce_mode, "composite") || !strcmp(induce_mode, "grid"));
-        int want_cir  = (!strcmp(induce_mode, "composite") || !strcmp(induce_mode, "smm-cir"));
+        int want_cir = (!strcmp(induce_mode, "composite") || !strcmp(induce_mode, "smm-cir"));
         int want_mert = (!strcmp(induce_mode, "smm-merton"));
         int want_prng = (!strcmp(induce_mode, "composite") || !strcmp(induce_mode, "prng"));
 
-        if (want_poly) flow_induce_fit_rational_poly(xs, ys, sample_cnt, 2, 1024, &poly);
-        if (want_grid) flow_induce_build_grid_envelope(xs, ys, sample_cnt, 4, 100, &grid);
-        if (want_cir)  flow_induce_solve_smm(ys, sample_cnt, FLOW_SMM_CIR_REFLECTING, 0.05, 42ULL, &smm);
-        if (want_mert) flow_induce_solve_smm(ys, sample_cnt, FLOW_SMM_MERTON_JUMP, 0.01, 42ULL, &smm);
-        if (want_prng) flow_induce_audit_prng_floats(ys, sample_cnt < 64 ? sample_cnt : 64, 5000, &prng);
+        if (want_poly)
+            flow_induce_fit_rational_poly(xs, ys, sample_cnt, 2, 1024, &poly);
+        if (want_grid)
+            flow_induce_build_grid_envelope(xs, ys, sample_cnt, 4, 100, &grid);
+        if (want_cir)
+            flow_induce_solve_smm(ys, sample_cnt, FLOW_SMM_CIR_REFLECTING, 0.05, 42ULL, &smm);
+        if (want_mert)
+            flow_induce_solve_smm(ys, sample_cnt, FLOW_SMM_MERTON_JUMP, 0.01, 42ULL, &smm);
+        if (want_prng)
+            flow_induce_audit_prng_floats(ys, sample_cnt < 64 ? sample_cnt : 64, 5000, &prng);
 
         free(xs);
         free(ys);
@@ -179,21 +188,16 @@ int flowc_main(int argc, char **argv) {
             return EXIT_FAILURE;
         }
         flow_induce_emit_lean_composite(
-            input, "Flow.InducedKnowledge",
-            want_poly ? &poly : NULL,
-            want_grid ? &grid : NULL,
-            (want_cir || want_mert) ? &smm : NULL,
-            (want_prng && prng.detected) ? &prng : NULL);
+            input, "Flow.InducedKnowledge", want_poly ? &poly : NULL, want_grid ? &grid : NULL,
+            (want_cir || want_mert) ? &smm : NULL, (want_prng && prng.detected) ? &prng : NULL);
 
         if (emit_induced_lean) {
             FILE *lout = fopen(emit_induced_lean, "w");
             if (lout) {
-                flow_induce_emit_lean_composite(
-                    lout, "Flow.InducedKnowledge",
-                    want_poly ? &poly : NULL,
-                    want_grid ? &grid : NULL,
-                    (want_cir || want_mert) ? &smm : NULL,
-                    (want_prng && prng.detected) ? &prng : NULL);
+                flow_induce_emit_lean_composite(lout, "Flow.InducedKnowledge",
+                                                want_poly ? &poly : NULL, want_grid ? &grid : NULL,
+                                                (want_cir || want_mert) ? &smm : NULL,
+                                                (want_prng && prng.detected) ? &prng : NULL);
                 fclose(lout);
                 printf("  induce: synthesized Lean 4 spec -> %s\n", emit_induced_lean);
             }
@@ -249,7 +253,8 @@ int flowc_main(int argc, char **argv) {
     }
 
     if (use_reload_adapter && !flow_component_supports_reload(component)) {
-        fprintf(stderr, "flowc: --reload-adapter is not supported by component '%s'\n", component->id);
+        fprintf(stderr, "flowc: --reload-adapter is not supported by component '%s'\n",
+                component->id);
         flow_ir_cleanup(&ir);
         return EXIT_FAILURE;
     }
@@ -262,27 +267,29 @@ int flowc_main(int argc, char **argv) {
 
     FlowSMTProofAttestation proof = {0};
     FlowPlanMetrics smt_m = {0};
-    smt_m.capacity = verification.capacity > 0 ? verification.capacity : (size_t)(ir.input_max_count > 0 ? ir.input_max_count : 4096);
+    smt_m.capacity = verification.capacity > 0
+                         ? verification.capacity
+                         : (size_t)(ir.input_max_count > 0 ? ir.input_max_count : 4096);
     smt_m.shards = 1;
     smt_m.threads = 1;
     smt_m.memory_bytes = verification.estimated_bytes;
 
     int smt_ok = flow_smt_verify(&ir, component, NULL, &smt_m, &proof);
-    FlowSMTResult status = (!smt_ok ||
-                            proof.buffer_bounds_safety == FLOW_SMT_VIOLATION_SAT ||
+    FlowSMTResult status = (!smt_ok || proof.buffer_bounds_safety == FLOW_SMT_VIOLATION_SAT ||
                             proof.memory_quota_bound == FLOW_SMT_VIOLATION_SAT ||
                             proof.shard_non_aliasing == FLOW_SMT_VIOLATION_SAT ||
                             proof.determinism_invariant == FLOW_SMT_VIOLATION_SAT)
-                           ? FLOW_SMT_VIOLATION_SAT
-                           : ((proof.buffer_bounds_safety != FLOW_SMT_PROVEN_UNSAT ||
-                               proof.memory_quota_bound != FLOW_SMT_PROVEN_UNSAT ||
-                               proof.shard_non_aliasing != FLOW_SMT_PROVEN_UNSAT ||
-                               proof.determinism_invariant != FLOW_SMT_PROVEN_UNSAT)
-                              ? FLOW_SMT_UNKNOWN : FLOW_SMT_PROVEN_UNSAT);
+                               ? FLOW_SMT_VIOLATION_SAT
+                               : ((proof.buffer_bounds_safety != FLOW_SMT_PROVEN_UNSAT ||
+                                   proof.memory_quota_bound != FLOW_SMT_PROVEN_UNSAT ||
+                                   proof.shard_non_aliasing != FLOW_SMT_PROVEN_UNSAT ||
+                                   proof.determinism_invariant != FLOW_SMT_PROVEN_UNSAT)
+                                      ? FLOW_SMT_UNKNOWN
+                                      : FLOW_SMT_PROVEN_UNSAT);
 
     if (status != FLOW_SMT_PROVEN_UNSAT) {
-        fprintf(stderr, "flowc: SMT proof failed: status=%s (%s)\n",
-                flow_smt_result_name(status), proof.proof_summary);
+        fprintf(stderr, "flowc: SMT proof failed: status=%s (%s)\n", flow_smt_result_name(status),
+                proof.proof_summary);
         flow_ir_cleanup(&ir);
         return EXIT_FAILURE;
     }
@@ -312,28 +319,30 @@ int flowc_main(int argc, char **argv) {
         printf("  project: %s\n", ir.project_name);
     }
 
-    printf("  IR: output=%s shared=%d read_heavy=%d bounded=%d parallelizable=%d ordered=%d unordered=%d "
-           "deterministic=%d range=%d size_preserved=%d mutability_read_only=%d ensures=%d "
-           "declared_constraints=%zu resource=%s capability=%s domain=%s contract=%s fallback=%s "
-           "graph_nodes=%zu facts=%zu constraints=%zu holes=%zu\n"
-           "  selected: %s (%s)\n  candidates:",
-           ir.output_name, ir.state_shared, ir.state_read_heavy, ir.state_bounded,
-           ir.flow_parallelizable, ir.fact_ordered, ir.fact_unordered, ir.fact_deterministic,
-           ir.fact_range_proven, ir.fact_size_preserved, ir.fact_mutability_read_only,
-           ir.ensure_count, ir.declared_constraint_count, ir.resource_name, ir.capability_name,
-           ir.domain_name, ir.contract_name, ir.fallback_policy, ir.flow_node_count,
-           ir.fact_count, ir.constraint_count, ir.hole_count,
-           component->id, component->kind);
+    printf(
+        "  IR: output=%s shared=%d read_heavy=%d bounded=%d parallelizable=%d ordered=%d unordered=%d "
+        "deterministic=%d range=%d size_preserved=%d mutability_read_only=%d ensures=%d "
+        "declared_constraints=%zu resource=%s capability=%s domain=%s contract=%s fallback=%s "
+        "graph_nodes=%zu facts=%zu constraints=%zu holes=%zu\n"
+        "  selected: %s (%s)\n  candidates:",
+        ir.output_name, ir.state_shared, ir.state_read_heavy, ir.state_bounded,
+        ir.flow_parallelizable, ir.fact_ordered, ir.fact_unordered, ir.fact_deterministic,
+        ir.fact_range_proven, ir.fact_size_preserved, ir.fact_mutability_read_only, ir.ensure_count,
+        ir.declared_constraint_count, ir.resource_name, ir.capability_name, ir.domain_name,
+        ir.contract_name, ir.fallback_policy, ir.flow_node_count, ir.fact_count,
+        ir.constraint_count, ir.hole_count, component->id, component->kind);
 
     for (size_t ci = 0; ci < compatible_component_count(&ir); ++ci) {
         const Component *cand = compatible_component_at(&ir, ci);
-        if (cand) printf(" %s", cand->id);
+        if (cand)
+            printf(" %s", cand->id);
     }
     printf("\n  verifier: status=%s capacity=%zu estimated_bytes=%zu (%s)\n",
-           verification_status_name(verification.status),
-           verification.capacity, verification.estimated_bytes, verification.message);
+           verification_status_name(verification.status), verification.capacity,
+           verification.estimated_bytes, verification.message);
 
-    size_t cap = ir.input_max_count > 0 ? (size_t)ir.input_max_count : (verification.capacity > 0 ? verification.capacity : 64);
+    size_t cap = ir.input_max_count > 0 ? (size_t)ir.input_max_count
+                                        : (verification.capacity > 0 ? verification.capacity : 64);
     printf("  symplectic: omega=%.3f mu=%.6f q_sat=%.1f (polyhedral shaped)\n",
            fmax(0.1, sqrt((double)cap) / 16.0), 1.0 / (double)cap, 1.25 * (double)cap);
 
@@ -374,15 +383,17 @@ int flowc_main(int argc, char **argv) {
         }
         flow_jet_bundle_prolong_bmf(sample_sec, 16, NULL, NULL, &jbundle);
         uint64_t req_mask = FLOW_SIEVE_SECURITY_CANONICAL_MASK;
-        uint64_t comp_mask = FLOW_SIEVE_SECURITY_CANONICAL_MASK | (ir.lean_struct_count > 0 ? (1ULL << FLOW_SIEVE_BIT_COLUMNAR_MORPH) : 0ULL);
+        uint64_t comp_mask =
+            FLOW_SIEVE_SECURITY_CANONICAL_MASK |
+            (ir.lean_struct_count > 0 ? (1ULL << FLOW_SIEVE_BIT_COLUMNAR_MORPH) : 0ULL);
         flow_hott_analyze_homotopy_fiber(req_mask, comp_mask, comp_mask, 0ULL, &hfiber);
         FILE *dfp = fopen(fiber_diagram_path, "w");
         if (dfp) {
-            flow_hott_emit_commutative_diagram(dfp, &jbundle, &hfiber,
-                                               ir.project_name[0] ? ir.project_name : component->id);
+            flow_hott_emit_commutative_diagram(
+                dfp, &jbundle, &hfiber, ir.project_name[0] ? ir.project_name : component->id);
             fclose(dfp);
-            printf("  fiber-diagram: wrote %s (h_level=%d, |pi_0|=%u)\n",
-                   fiber_diagram_path, (int)hfiber.h_level, hfiber.pi0_components);
+            printf("  fiber-diagram: wrote %s (h_level=%d, |pi_0|=%u)\n", fiber_diagram_path,
+                   (int)hfiber.h_level, hfiber.pi0_components);
         }
     }
 

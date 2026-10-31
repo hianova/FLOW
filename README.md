@@ -4,11 +4,16 @@
 
 # FLOW: 64-Bit Discrete Cubical HoTT Engine
 
+[![CI](https://github.com/hianova/FLOW/actions/workflows/ci.yml/badge.svg)](https://github.com/hianova/FLOW/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/badge/version-v2.9.0-blue.svg)](VERSION)
+[![Standard](https://img.shields.io/badge/C17-Zero%20Warnings%20(-Werror)-success.svg)](Makefile)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 > **64-Bit Discrete Cubical Homotopy Type Theory (HoTT) Engine, De Morgan Parallel Interval Algebra & Intensional Univalence Universe $U_0$**
 
-FLOW 是一個專注於**離散同倫類型論（Discrete Cubical Homotopy Type Theory）**與**單價型別宇宙（Univalence Universe $U_0$）**的極簡高效率 C17 形式化驗證引擎。
+FLOW 是一個專注於**離散同倫類型論（Discrete Cubical Homotopy Type Theory）**與**單價型別宇宙（Univalence Universe $U_0$）**的極簡高效率 C17 形式化驗證基礎庫。
 
-專案徹底揚棄傳統冗贅的配置 DSL 與過度包裝的學術空殼，直接將同倫幾何約束、Kan 復形開盒條件與單價公理（$A \simeq B \implies A =_{U_0} B$）映射至現代 64 位元暫存器與純粹 C17 資料流中。
+專案徹底揚棄傳統冗贅的配置 DSL 與過度包裝的學術空殼，直接將同倫幾何約束、Kan 復形開盒條件與單價公理（$A \simeq B \implies A =_{U_0} B$）映射至現代 64 位元暫存器與純粹 C17 資料流中。全庫採用 **LLVM TableGen 風格 X-Macro 單一真相表（SSOT）**、**Linux Single-Header 宏統合** 與 **[`.clang-format`](.clang-format) 多行可讀排版**，不依賴 AI Agent、任何外部開發者與審計者閱讀原始碼即可直接修改與驗證（詳見 **[《FLOW Book》第八章：Architecture & X-Macro Hacking Guide](flow-book/src/ch08_architecture_and_xmacro_hacking_guide.md)**）。
 
 ---
 
