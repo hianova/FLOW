@@ -11,6 +11,7 @@
 
 int flow_abi_emit_c_header(FILE *output, const SemanticIR *ir);
 int flow_abi_emit_mex_dispatcher(FILE *output, const SemanticIR *ir);
+int flow_abi_emit_metal_shader(FILE *output, const SemanticIR *ir);
 int flow_abi_emit_lean_adapter(FILE *output, const SemanticIR *ir);
 int flow_abi_audit_lean_certificate(const char *lean_source, char *err_msg, size_t err_size);
 int flow_abi_verify_lean_certificate(const char *lean_path, char *err_msg, size_t err_size);

@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 #include <errno.h>
 #include <sys/types.h>
@@ -2135,7 +2136,12 @@ int flow_verify_lean_theorems(const char *lean_source, char *err_msg, size_t err
         }
     }
     if (plen > 0) {
-        (void)write(fd, prelude, plen);
+        ssize_t pw = write(fd, prelude, plen);
+        if (pw < 0 || (size_t)pw != plen) {
+            close(fd);
+            unlink(tmp_path);
+            return 0;
+        }
     }
     size_t wlen = strlen(lean_source);
     ssize_t written = write(fd, lean_source, wlen);

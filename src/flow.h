@@ -1,5 +1,8 @@
 #ifndef FLOW_H
 #define FLOW_H
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif
 #ifndef _DARWIN_C_SOURCE
 #define _DARWIN_C_SOURCE 1
 #endif

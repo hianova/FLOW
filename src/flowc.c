@@ -21,6 +21,7 @@ static void flowc_print_usage(FILE *out) {
         "Options:\n"
         "  -o <output.c>                 Target C17 source path (default: <input>.c)\n"
         "  --target-c-header <file.h>    Emit static inline IEEE-754 C17 header & FlowStatusCode\n"
+        "  --target-metal <file.metal>   Emit Apple Silicon Metal Shading Language (MSL) BMF kernel\n"
         "  --target-mex                  Append MATLAB MEX C17 mexFunction dispatcher to <output.c>\n"
         "  --target-lean <file.lean>     Emit & verify Lean 4 formal soundness certificate\n"
         "  --lift-llvm <source.c|.ll>    Reverse lift C/LLVM IR SSA into Lean 4 model & boundary proof\n"
@@ -32,9 +33,10 @@ static void flowc_print_usage(FILE *out) {
 }
 
 static int flowc_run_lift_llvm_pipeline(const char *in_path, const char *out_path, int quiet) {
-    FlowLLVMLiftedFunction fns[16];
+    static FlowLLVMLiftedFunction fns[16];
     size_t fn_count = 0;
     int rc = 0;
+    memset(fns, 0, sizeof(fns));
 
     const char *dot = strrchr(in_path, '.');
     if (dot && (!strcmp(dot, ".c") || !strcmp(dot, ".h"))) {
@@ -117,6 +119,7 @@ int flowc_main(int argc, char **argv) {
     const char *input_path = NULL;
     const char *output_path = NULL;
     const char *target_c_header = NULL;
+    const char *target_metal = NULL;
     const char *target_lean = NULL;
     char auto_output_buf[512] = {0};
 
@@ -154,6 +157,8 @@ int flowc_main(int argc, char **argv) {
             /* retained for CLI flag compatibility */
         } else if (!strcmp(argv[arg], "--target-c-header") && arg + 1 < argc) {
             target_c_header = argv[++arg];
+        } else if (!strcmp(argv[arg], "--target-metal") && arg + 1 < argc) {
+            target_metal = argv[++arg];
         } else if (!strcmp(argv[arg], "--target-mex")) {
             target_mex = 1;
         } else if (!strcmp(argv[arg], "--target-lean") && arg + 1 < argc) {
@@ -324,7 +329,7 @@ int flowc_main(int argc, char **argv) {
                (unsigned long long)wcet_min, (unsigned long long)wcet_max);
     }
 
-    if (target_c_header || target_lean) {
+    if (target_c_header || target_metal || target_lean) {
         if (target_c_header) {
             FILE *fp = fopen(target_c_header, "w");
             if (fp) {
@@ -332,6 +337,15 @@ int flowc_main(int argc, char **argv) {
                 fclose(fp);
                 if (!quiet_mode)
                     printf("  target-c-header: wrote %s\n", target_c_header);
+            }
+        }
+        if (target_metal) {
+            FILE *fp = fopen(target_metal, "w");
+            if (fp) {
+                flow_abi_emit_metal_shader(fp, &ir);
+                fclose(fp);
+                if (!quiet_mode)
+                    printf("  target-metal: wrote %s\n", target_metal);
             }
         }
         if (target_lean) {

@@ -12,8 +12,10 @@
 #if defined(__APPLE__)
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
-#elif defined(__linux__)
+#else
 #include <fcntl.h>
+#include <stdio.h>
+#include <sys/stat.h>
 #endif
 /* 1. Dual-Mapped Memory Pool for HoTT Univalence Substrate */
 struct FlowJITEngine {
@@ -49,10 +51,14 @@ FlowJITEngine *flow_jit_create(const FlowJITConfig *cfg) {
             vm_deallocate(mach_task_self(), w, sz);
         }
     }
-#elif defined(__linux__) && defined(MFD_CLOEXEC)
-    int fd = memfd_create("flow_jit_pool", MFD_CLOEXEC);
+#else
+    int fd = -1;
+#if defined(__linux__) && defined(MFD_CLOEXEC)
+    fd = memfd_create("flow_jit_pool", MFD_CLOEXEC | 0x0010U /* MFD_EXEC */);
+    if (fd < 0)
+        fd = memfd_create("flow_jit_pool", MFD_CLOEXEC);
     if (fd >= 0) {
-        if (ftruncate(fd, sz) == 0) {
+        if (ftruncate(fd, (off_t)sz) == 0) {
             void *w = mmap(NULL, sz, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0),
                  *x = mmap(NULL, sz, PROT_READ | PROT_EXEC, MAP_SHARED, fd, 0);
             if (w != MAP_FAILED && x != MAP_FAILED) {
@@ -68,6 +74,51 @@ FlowJITEngine *flow_jit_create(const FlowJITConfig *cfg) {
             }
         }
         close(fd);
+        fd = -1;
+    }
+#endif
+    if (!e->write_heap || !e->exec_heap) {
+        char shm_name[64];
+        static _Atomic uint32_t shm_seq = 0U;
+        uint32_t seq = atomic_fetch_add_explicit(&shm_seq, 1U, memory_order_relaxed);
+        snprintf(shm_name, sizeof(shm_name), "/flow_jit_%d_%u", (int)getpid(), (unsigned)seq);
+        fd = shm_open(shm_name, O_CREAT | O_EXCL | O_RDWR, 0600);
+        if (fd >= 0) {
+            (void)shm_unlink(shm_name);
+            if (ftruncate(fd, (off_t)sz) == 0) {
+                void *w = mmap(NULL, sz, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0),
+                     *x = mmap(NULL, sz, PROT_READ | PROT_EXEC, MAP_SHARED, fd, 0);
+                if (w != MAP_FAILED && x != MAP_FAILED) {
+                    e->write_heap = w;
+                    e->exec_heap = x;
+                    e->pool_size = sz;
+                    e->is_dual_mapped = 1;
+                } else {
+                    if (w != MAP_FAILED)
+                        munmap(w, sz);
+                    if (x != MAP_FAILED)
+                        munmap(x, sz);
+                }
+            }
+            close(fd);
+        }
+    }
+    if (!e->write_heap || !e->exec_heap) {
+        void *w = mmap(NULL, sz, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        void *x = mmap(NULL, sz, PROT_READ | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (x == MAP_FAILED)
+            x = mmap(NULL, sz, PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (w != MAP_FAILED && x != MAP_FAILED) {
+            e->write_heap = w;
+            e->exec_heap = x;
+            e->pool_size = sz;
+            e->is_dual_mapped = 1;
+        } else {
+            if (w != MAP_FAILED)
+                munmap(w, sz);
+            if (x != MAP_FAILED)
+                munmap(x, sz);
+        }
     }
 #endif
     if (!e->write_heap || !e->exec_heap) {
@@ -368,4 +419,37 @@ int flow_qsbr_synchronize(FlowReloadContext *c, uint64_t timeout_ns) {
         sched_yield();
     }
     return FLOW_RELOAD_BUSY;
+}
+
+void flow_schmitt_trigger_init(FlowSchmittTrigger *st, double base_min, uint64_t dwell_ns) {
+    if (st)
+        *st = (FlowSchmittTrigger){.drop_threshold = base_min * 0.8,
+                                   .recovery_threshold = base_min * 1.5,
+                                   .dwell_time_required_ns = dwell_ns ? dwell_ns : 500000000ULL};
+}
+
+int flow_schmitt_trigger_update(FlowSchmittTrigger *st, double val, uint64_t now_ns, int *changed) {
+    if (!st)
+        return 0;
+    if (changed)
+        *changed = 0;
+    if (!st->current_state) {
+        if (val < st->drop_threshold) {
+            st->current_state = 1;
+            st->stable_since_ns = 0;
+            if (changed)
+                *changed = 1;
+        }
+    } else if (val >= st->recovery_threshold) {
+        if (!st->stable_since_ns)
+            st->stable_since_ns = now_ns;
+        else if (now_ns - st->stable_since_ns >= st->dwell_time_required_ns) {
+            st->current_state = 0;
+            st->stable_since_ns = 0;
+            if (changed)
+                *changed = 1;
+        }
+    } else
+        st->stable_since_ns = 0;
+    return st->current_state;
 }

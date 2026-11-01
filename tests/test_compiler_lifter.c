@@ -14,7 +14,7 @@ static int compile_lean_in_memory(const char *lean_src, SemanticIR *ir_out, char
     FILE *in = fmemopen((void *)lean_src, strlen(lean_src), "r");
     if (!in)
         return 0;
-    FlowSpec spec;
+    static FlowSpec spec;
     memset(&spec, 0, sizeof(spec));
     int ok = parse_spec(in, &spec);
     fclose(in);
@@ -89,17 +89,19 @@ int main(void) {
      * ===================================================================== */
     FLOW_STAGE_BEGIN(2, "Forward Synthesis: Pure Lean 4 -> Zero-GC C17, Guards & 2-Jet AD");
     {
-        /* 2a. Synthesize plugins/embodied.lean and plugins/cryptanalysis.lean */
-        const char *spec_files[] = {"plugins/embodied.lean", "plugins/cryptanalysis.lean"};
-        for (size_t fi = 0; fi < 2; ++fi) {
+        /* 2a. Synthesize plugins/embodied.lean, plugins/cryptanalysis.lean &
+         * plugins/gpu_meshlet.lean */
+        const char *spec_files[] = {"plugins/embodied.lean", "plugins/cryptanalysis.lean",
+                                    "plugins/gpu_meshlet.lean"};
+        for (size_t fi = 0; fi < 3; ++fi) {
             FILE *fp = fopen(spec_files[fi], "r");
             FLOW_ASSERT_TRUE(fp != NULL);
-            FlowSpec spec;
+            static FlowSpec spec;
             memset(&spec, 0, sizeof(spec));
             FLOW_ASSERT_EQ(parse_spec(fp, &spec), 1);
             fclose(fp);
 
-            SemanticIR ir;
+            static SemanticIR ir;
             memset(&ir, 0, sizeof(ir));
             lower_to_ir(&spec, &ir);
             FLOW_ASSERT_TRUE(ir.lean_function_count > 0);
@@ -107,7 +109,8 @@ int main(void) {
 
             char *c_buf = (char *)calloc(262144, 1);
             char *h_buf = (char *)calloc(131072, 1);
-            FLOW_ASSERT_TRUE(c_buf != NULL && h_buf != NULL);
+            char *msl_buf = (char *)calloc(131072, 1);
+            FLOW_ASSERT_TRUE(c_buf != NULL && h_buf != NULL && msl_buf != NULL);
 
             FILE *c_mem = fmemopen(c_buf, 262143, "w");
             FLOW_ASSERT_EQ(emit_c(c_mem, &ir), 1);
@@ -118,12 +121,19 @@ int main(void) {
             FLOW_ASSERT_EQ(flow_abi_emit_c_header(h_mem, &ir), 1);
             fclose(h_mem);
 
+            FILE *msl_mem = fmemopen(msl_buf, 131071, "w");
+            FLOW_ASSERT_EQ(flow_abi_emit_metal_shader(msl_mem, &ir), 1);
+            fclose(msl_mem);
+
             FLOW_ASSERT_TRUE(strstr(c_buf, "lean_certified_") != NULL);
             FLOW_ASSERT_TRUE(strstr(c_buf, "mexFunction") != NULL);
             FLOW_ASSERT_TRUE(strstr(h_buf, "FlowJetScalar2") != NULL);
+            FLOW_ASSERT_TRUE(strstr(msl_buf, "flow_bmf_meshlet_cull_compact_kernel") != NULL);
+            FLOW_ASSERT_TRUE(strstr(msl_buf, "simd_ballot") != NULL);
 
             free(c_buf);
             free(h_buf);
+            free(msl_buf);
             flow_ir_cleanup(&ir);
         }
 
@@ -146,7 +156,7 @@ int main(void) {
             "  omega\n"
             "end Flow.RelationalTest\n";
 
-        SemanticIR rel_ir;
+        static SemanticIR rel_ir;
         char *rel_c = (char *)calloc(262144, 1);
         char *rel_h = (char *)calloc(131072, 1);
         FLOW_ASSERT_EQ(compile_lean_in_memory(rel_lean, &rel_ir, rel_c, 262144, rel_h, 131072), 1);
@@ -168,7 +178,7 @@ int main(void) {
             "def loop (n : UInt64) : UInt64 := if n == 0 then 0 else loop (n - 1)\n",
             "@embodied { frequency: 1000hz }\ndef f (x : UInt64) : UInt64 := x\n"};
         for (size_t k = 0; k < sizeof(invalid_specs) / sizeof(invalid_specs[0]); ++k) {
-            SemanticIR bad_ir;
+            static SemanticIR bad_ir;
             FLOW_ASSERT_EQ(compile_lean_in_memory(invalid_specs[k], &bad_ir, NULL, 0, NULL, 0), 0);
         }
     }
@@ -189,7 +199,7 @@ int main(void) {
                                   "  ret i64 %clamped\n"
                                   "}\n";
 
-        FlowLLVMLiftedFunction fns[4];
+        static FlowLLVMLiftedFunction fns[4];
         size_t fn_count = 0;
         memset(fns, 0, sizeof(fns));
         FLOW_ASSERT_EQ(flow_llvm_lift_ir_text(llvm_ir_src, fns, 4, &fn_count), 0);

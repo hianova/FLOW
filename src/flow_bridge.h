@@ -1,15 +1,16 @@
 #ifndef FLOW_BRIDGE_H
 #define FLOW_BRIDGE_H
 
-#include <stddef.h>
-#include <stdint.h>
-#include <stdbool.h>
-
+#include "flow.h"
 #include "bitspace.h"
 #include "cubical_hott.h"
 #include "flow_jet.h"
 #include "reload.h"
 #include "flow_hw_probe.h"
+
+#include <stddef.h>
+#include <stdint.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {

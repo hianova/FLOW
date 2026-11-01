@@ -6,6 +6,7 @@
 #include "cubical_hott.h"
 #include "flow_jet.h"
 #include "flow_bridge.h"
+#include "flow_gpu.h"
 #include "flow_spsc.h"
 #include "reload.h"
 #include <pthread.h>
@@ -190,6 +191,37 @@ int main(void) {
         FLOW_ASSERT_EQ(flow_jet_verify_symplectic_soundness_smt(&jet, &jet_proof),
                        FLOW_SMT_PROVEN_UNSAT);
         FLOW_ASSERT_SMT_SOUND(jet_proof);
+
+        /* Moreau envelope hysteresis & non-Zeno SMT verification */
+        FlowMoreauHysteresis moreau;
+        FLOW_ASSERT_EQ(flow_moreau_init(&moreau, -0.5, 0.5, 0), 1);
+        FLOW_ASSERT_EQ(flow_moreau_step(&moreau, 0.0), 0);  /* dead-zone -> stays 0 */
+        FLOW_ASSERT_EQ(flow_moreau_step(&moreau, 0.8), 1);  /* >= 0.5 -> flips to 1 */
+        FLOW_ASSERT_EQ(flow_moreau_step(&moreau, 0.0), 1);  /* dead-zone -> retains state 1 */
+        FLOW_ASSERT_EQ(flow_moreau_step(&moreau, -0.8), 0); /* <= -0.5 -> flips to 0 */
+        FLOW_ASSERT_EQ(moreau.flutters_suppressed, 2ULL);
+        FlowSMTProofAttestation moreau_proof = {0};
+        FLOW_ASSERT_EQ(flow_moreau_verify_smt(&moreau, &moreau_proof), FLOW_SMT_PROVEN_UNSAT);
+        FLOW_ASSERT_SMT_SOUND(moreau_proof);
+
+        /* Phase-space hyperplane attention router */
+        FlowPhaseAttentionRouter router;
+        FLOW_ASSERT_EQ(flow_phase_attention_init(&router, 4U, 0U), 1);
+        const double coeffs[4] = {1.0, 0.0, 0.0, 0.0};
+        FLOW_ASSERT_EQ(flow_phase_attention_set_plane(&router, 0U, coeffs, 1.0, true, 0.8, 1.2), 1);
+        FlowPhaseAttentionHead h0 = {.name = "nominal_regime",
+                                     .key_mask = 1ULL,
+                                     .key_polarity = 1ULL,
+                                     .state_sieve = FLOW_SIEVE_SECURITY_CANONICAL_MASK,
+                                     .kan_boundary_filter = 0ULL,
+                                     .priority = 10U,
+                                     .kernel = NULL,
+                                     .user_unit = NULL};
+        uint32_t h0_idx = 99U;
+        FLOW_ASSERT_EQ(flow_phase_attention_register_head(&router, &h0, &h0_idx), 1);
+        FLOW_ASSERT_EQ(h0_idx, 0U);
+        const double q_vec[FLOW_PHASE_ATTENTION_DIM] = {0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+        FLOW_ASSERT_EQ(flow_phase_attention_project_query(&router, q_vec), 1ULL);
     }
 
     /* =====================================================================
@@ -253,6 +285,17 @@ int main(void) {
             flow_hott_decode_boundary_exception(hit_q.canonical_boundary_tag, NULL, &b_rep), 1);
         FLOW_ASSERT_EQ(b_rep.is_on_boundary, 1);
         FLOW_ASSERT_EQ(b_rep.fn_id, 7U);
+
+        /* IEEE-754 Quiet NaN double round-trip & stamping helpers */
+        double b_nan = flow_hott_make_boundary_nan(0x0FFFU, 0U, FLOW_BOUNDARY_PRECOND, 2U, 42U);
+        FLOW_ASSERT_EQ(flow_hott_is_boundary_nan(b_nan), 1);
+        FLOW_ASSERT_EQ(flow_hott_is_boundary_nan(3.14159), 0);
+        uint64_t extracted_tag = flow_hott_extract_boundary_tag(b_nan);
+        FLOW_ASSERT_TRUE(flow_hott_is_boundary_tag(extracted_tag));
+        FLOW_ASSERT_EQ(flowc_boundary_code(b_nan), 42U);
+        double stamped_nan = flowc_stamp_boundary_fn_id(b_nan, 99U);
+        uint64_t stamped_tag = flow_hott_extract_boundary_tag(stamped_nan);
+        FLOW_ASSERT_EQ((uint32_t)((stamped_tag >> 32U) & 0x0FFFULL), 99U);
     }
 
     /* =====================================================================
@@ -405,6 +448,187 @@ int main(void) {
 
         FLOW_ASSERT_EQ(flow_reload_reader_unregister(&reader), FLOW_RELOAD_OK);
         FLOW_ASSERT_EQ(flow_reload_destroy(ctx), FLOW_RELOAD_OK);
+
+        /* Discrete Schmitt trigger hysteresis debounce */
+        FlowSchmittTrigger st;
+        int st_changed = 0;
+        flow_schmitt_trigger_init(&st, 100.0, 1000ULL);
+        /* drop_threshold = 80.0, recovery_threshold = 150.0, dwell = 1000ns */
+        FLOW_ASSERT_EQ(flow_schmitt_trigger_update(&st, 90.0, 100ULL, &st_changed), 0);
+        FLOW_ASSERT_EQ(st_changed, 0);
+        FLOW_ASSERT_EQ(flow_schmitt_trigger_update(&st, 70.0, 200ULL, &st_changed), 1);
+        FLOW_ASSERT_EQ(st_changed, 1);
+        FLOW_ASSERT_EQ(flow_schmitt_trigger_update(&st, 160.0, 500ULL, &st_changed), 1);
+        FLOW_ASSERT_EQ(st_changed, 0); /* dwell start at 500ns */
+        FLOW_ASSERT_EQ(flow_schmitt_trigger_update(&st, 160.0, 1600ULL, &st_changed), 0);
+        FLOW_ASSERT_EQ(st_changed, 1); /* dwell >= 1000ns -> recovers to 0 */
+    }
+
+    /* =====================================================================
+     * Stage 5: GPU-Native BMF Meshlet, 1.58-Bit/2-Bit Codec, 2-Jet Cone & Ballot
+     * ===================================================================== */
+    FLOW_STAGE_BEGIN(5, "GPU-Native BMF Meshlet, 1.58-Bit/2-Bit Codec, 2-Jet Cone & Ballot");
+    {
+        /* 5a. 1.58-Bit Ternary Bit-Manifold ({-1, 0, +1}) & POPCNT Dot Product */
+        int8_t vec_a[64], vec_b[64], decoded_a[64];
+        int32_t expected_dot = 0;
+        for (uint32_t i = 0; i < 64U; ++i) {
+            vec_a[i] = (i % 3U == 0U) ? 1 : ((i % 3U == 1U) ? -1 : 0);
+            vec_b[i] = (i % 2U == 0U) ? 1 : -1;
+            expected_dot += (int32_t)vec_a[i] * (int32_t)vec_b[i];
+        }
+        FlowBmfTernary64 ta = flow_bmf_ternary64_encode(vec_a);
+        FlowBmfTernary64 tb = flow_bmf_ternary64_encode(vec_b);
+        FLOW_ASSERT_TRUE(flow_bmf_ternary64_is_canonical(ta));
+        FLOW_ASSERT_TRUE(flow_bmf_ternary64_is_canonical(tb));
+        flow_bmf_ternary64_decode_all(ta, decoded_a);
+        for (uint32_t i = 0; i < 64U; ++i) {
+            FLOW_ASSERT_EQ(decoded_a[i], vec_a[i]);
+        }
+        FLOW_ASSERT_EQ(flow_bmf_ternary64_dot(ta, tb), expected_dot);
+
+        /* 5b. 2-Bit Block Interpolation (BC1 / DXT1 Isomorphic LUT) */
+        int16_t tile_in[16] = {300, 260, 220, 180, 300, 260, 220, 180,
+                               300, 260, 220, 180, 300, 260, 220, 180};
+        int16_t tile_out[16] = {0};
+        FlowBmfBlock2Bit blk = flow_bmf_block2bit_encode(tile_in);
+        FLOW_ASSERT_EQ(blk.c0, 300);
+        FLOW_ASSERT_EQ(blk.c1, 180);
+        flow_bmf_block2bit_decode_all(blk, tile_out);
+        for (uint32_t i = 0; i < 16U; ++i) {
+            FLOW_ASSERT_EQ(tile_out[i], tile_in[i]);
+        }
+
+        /* 5c. Pointerless Flat Index-Based Scene Hierarchy (0-Pointer Chasing) */
+        FlowBmfFlatNode flat_nodes[3];
+        memset(flat_nodes, 0, sizeof(flat_nodes));
+        flat_nodes[0].parent_idx = FLOW_BMF_INVALID_HANDLE;
+        flat_nodes[0].local_pos[0] = 10.0f;
+        flat_nodes[0].local_pos[1] = 20.0f;
+        flat_nodes[0].local_pos[2] = 30.0f;
+        flat_nodes[0].local_scale = 2.0f;
+
+        flat_nodes[1].parent_idx = 0U; /* child of root 0 */
+        flat_nodes[1].local_pos[0] = 1.5f;
+        flat_nodes[1].local_pos[1] = -2.0f;
+        flat_nodes[1].local_pos[2] = 0.5f;
+        flat_nodes[1].local_scale = 0.5f;
+
+        flat_nodes[2].parent_idx = 1U; /* child of node 1 */
+        flat_nodes[2].local_pos[0] = 4.0f;
+        flat_nodes[2].local_pos[1] = 0.0f;
+        flat_nodes[2].local_pos[2] = 0.0f;
+        flat_nodes[2].local_scale = 1.0f;
+
+        FLOW_ASSERT_EQ(flow_gpu_propagate_flat_nodes(flat_nodes, 3U), 0);
+        FLOW_ASSERT_FLOAT_EQ(flat_nodes[1].world_pos[0], 13.0, 1e-6); /* 10 + 2 * 1.5 */
+        FLOW_ASSERT_FLOAT_EQ(flat_nodes[1].world_scale, 1.0, 1e-6);   /* 2 * 0.5 */
+        FLOW_ASSERT_FLOAT_EQ(flat_nodes[2].world_pos[0], 17.0, 1e-6); /* 13 + 1.0 * 4 */
+        FLOW_ASSERT_TRUE((flat_nodes[2].node_sieve_mask & FLOW_GPU_SIEVE_FLAT_DAG_VALID) != 0ULL);
+
+        /* Reject cyclic / forward parent reference */
+        flat_nodes[0].parent_idx = 2U;
+        FLOW_ASSERT_EQ(flow_gpu_propagate_flat_nodes(flat_nodes, 3U), -1);
+
+        /* 5d. GPU-Native BMF Meshlets (10-bit XYZ + 6-bit Micro-Indices) & Watertight Seam */
+        const float left_verts[4][3] = {
+            {0.0f, 0.0f, 0.0f},
+            {1.0f, 0.0f, 0.0f}, /* Shared seam vertex 0 */
+            {1.0f, 1.0f, 0.0f}, /* Shared seam vertex 1 */
+            {0.0f, 1.0f, 0.0f},
+        };
+        const uint8_t left_flags[4] = {FLOW_BMF_VERT_INTERIOR, FLOW_BMF_VERT_SEAM_LOCKED,
+                                       FLOW_BMF_VERT_SEAM_LOCKED, FLOW_BMF_VERT_INTERIOR};
+        const uint8_t left_tris[2][3] = {{0, 1, 2}, {0, 2, 3}};
+
+        const float right_verts[4][3] = {
+            {1.0f, 0.0f, 0.0f}, /* Shared seam vertex 0 */
+            {2.0f, 0.0f, 0.0f},
+            {2.0f, 1.0f, 0.0f},
+            {1.0f, 1.0f, 0.0f}, /* Shared seam vertex 1 */
+        };
+        const uint8_t right_flags[4] = {FLOW_BMF_VERT_SEAM_LOCKED, FLOW_BMF_VERT_INTERIOR,
+                                        FLOW_BMF_VERT_INTERIOR, FLOW_BMF_VERT_SEAM_LOCKED};
+        const uint8_t right_tris[2][3] = {{0, 1, 2}, {0, 2, 3}};
+
+        FlowBmfMeshlet meshlet_l, meshlet_r;
+        FLOW_ASSERT_EQ(flow_gpu_meshlet_encode(&meshlet_l, left_verts, left_flags, 4U, left_tris,
+                                               2U, 0.001f, 0U),
+                       0);
+        FLOW_ASSERT_EQ(flow_gpu_meshlet_encode(&meshlet_r, right_verts, right_flags, 4U, right_tris,
+                                               2U, 0.001f, 0U),
+                       0);
+
+        FlowSMTProofAttestation mesh_proof = {0};
+        FLOW_ASSERT_EQ(flow_gpu_meshlet_verify_smt(&meshlet_l, &mesh_proof), FLOW_SMT_PROVEN_UNSAT);
+        FLOW_ASSERT_EQ(flow_gpu_meshlet_verify_smt(&meshlet_r, &mesh_proof), FLOW_SMT_PROVEN_UNSAT);
+
+        /* Prove Watertight Topological Fidelity (Zero T-Junctions / Cracks across seam) */
+        size_t shared_seam_verts = 0;
+        FLOW_ASSERT_EQ(flow_gpu_verify_watertight_seam(&meshlet_l, &meshlet_r, &shared_seam_verts),
+                       0);
+        FLOW_ASSERT_EQ(shared_seam_verts, 2U);
+
+        /* Verify 54-bit 3-triangle packing in a single 64-bit register word */
+        uint32_t t0 = flow_bmf_pack_tri_6bit(0, 1, 2);
+        uint32_t t1 = flow_bmf_pack_tri_6bit(2, 3, 0);
+        uint32_t t2 = flow_bmf_pack_tri_6bit(1, 4, 5);
+        uint64_t w54 = flow_bmf_pack_3tris_54bit(t0, t1, t2);
+        uint32_t u0 = 0, u1 = 0, u2 = 0;
+        flow_bmf_unpack_3tris_54bit(w54, &u0, &u1, &u2);
+        FLOW_ASSERT_EQ(u0, t0);
+        FLOW_ASSERT_EQ(u1, t1);
+        FLOW_ASSERT_EQ(u2, t2);
+
+        /* 5e. 2-Jet Contact Geometry Cone Derivation + 64-Lane Subgroup Ballot Compaction */
+        FlowJetScalar2 patch_u[3] = {flow_jet2_make(0.5, 1.0, 0.05), flow_jet2_make(0.5, 0.0, 0.0),
+                                     flow_jet2_make(0.0, 0.0, -0.1)};
+        FlowJetScalar2 patch_v[3] = {flow_jet2_make(0.5, 0.0, 0.0), flow_jet2_make(0.5, 1.0, 0.05),
+                                     flow_jet2_make(0.0, 0.0, -0.1)};
+        FLOW_ASSERT_EQ(flow_gpu_meshlet_derive_jet2_cone(&meshlet_l, patch_u, patch_v, 0.1, 0.1),
+                       0);
+        FLOW_ASSERT_FLOAT_EQ(meshlet_l.cone_axis[2], 1.0, 1e-6);
+        FLOW_ASSERT_TRUE(meshlet_l.cone_cutoff < 0.0f);
+
+        /* Construct a 4-meshlet wave:
+         *   lane 0: front-facing, inside frustum -> VISIBLE
+         *   lane 1: back-facing (cone axis points away from camera along view ray) -> CULLED
+         *   lane 2: front-facing, outside frustum -> CULLED
+         *   lane 3: front-facing, inside frustum -> VISIBLE
+         */
+        FlowBmfMeshlet wave[4];
+        wave[0] = meshlet_l;
+        wave[1] = meshlet_l;
+        wave[1].cone_axis[0] = 0.0f;
+        wave[1].cone_axis[1] = 0.0f;
+        wave[1].cone_axis[2] = -1.0f; /* points away from camera at +Z -> back-facing */
+        wave[1].cone_cutoff = -0.25f;
+
+        wave[2] = meshlet_r;
+        wave[2].aabb_min[0] = 500.0f;
+        wave[2].aabb_max[0] = 501.0f; /* outside frustum [-10, 10] */
+
+        wave[3] = meshlet_r;
+
+        FlowGpuCullCamera cam = {.view_pos = {0.5f, 0.5f, 5.0f},
+                                 .view_dir = {0.0f, 0.0f, -1.0f},
+                                 .frustum_min = {-10.0f, -10.0f, -10.0f},
+                                 .frustum_max = {10.0f, 10.0f, 10.0f},
+                                 .required_sieve_mask = 0ULL};
+
+        uint64_t lane_sieves[FLOW_BMF_WAVE_SIZE] = {0};
+        uint64_t ballot = flow_gpu_ballot_cull_wave64(wave, 4U, &cam, lane_sieves);
+        /* Only lanes 0 and 3 are visible -> ballot == (1 << 0) | (1 << 3) == 0x9 */
+        FLOW_ASSERT_EQ(ballot, 0x9ULL);
+        FLOW_ASSERT_EQ(flow_gpu_ballot_visible_count(ballot), 2U);
+        FLOW_ASSERT_EQ(flow_gpu_ballot_lane_offset(ballot, 0U), 0U);
+        FLOW_ASSERT_EQ(flow_gpu_ballot_lane_offset(ballot, 3U), 1U);
+
+        uint32_t visible_handles[FLOW_BMF_WAVE_SIZE] = {0};
+        uint32_t written = flow_gpu_ballot_compact_wave64(ballot, 100U, visible_handles);
+        FLOW_ASSERT_EQ(written, 2U);
+        FLOW_ASSERT_EQ(visible_handles[0], 100U); /* base 100 + lane 0 */
+        FLOW_ASSERT_EQ(visible_handles[1], 103U); /* base 100 + lane 3 */
     }
 
     FLOW_TEST_SUITE_END();

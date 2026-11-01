@@ -731,27 +731,68 @@ typedef struct {
     char diagnostic[512];
 } FlowBoundaryCertificateReport;
 
-#define FLOW_HOTT_BOUNDARY_HELPERS_C17                                                        \
-    static inline __attribute__((unused)) uint64_t flowc_make_boundary_tag(                   \
-        uint16_t fn_id, uint8_t guard_idx, uint8_t kind, uint8_t axis, uint16_t code) {       \
-        uint64_t k4 = (uint64_t)((kind == 0U ? 1U : kind) & 0x0FU);                           \
-        return FLOW_BOUNDARY_QNAN_MAGIC | (((uint64_t)(fn_id & 0x0FFFU)) << 32U) |            \
-               (((uint64_t)guard_idx) << 24U) | (k4 << 20U) |                                 \
-               (((uint64_t)(axis & 0x3FU)) << 12U) | ((uint64_t)(code & 0x0FFFU));            \
-    }                                                                                         \
-    static inline __attribute__((unused)) bool flowc_is_boundary_tag(uint64_t raw_bits) {     \
-        return (raw_bits & FLOW_BOUNDARY_QNAN_PREFIX_MASK) == FLOW_BOUNDARY_QNAN_MAGIC;       \
-    }                                                                                         \
-    static inline __attribute__((unused)) uint64_t flowc_stamp_boundary_tag_fn_id(            \
-        uint64_t bits, uint16_t fn_id) {                                                      \
-        if (flowc_is_boundary_tag(bits)) {                                                    \
-            if (((bits >> 32U) & 0x0FFFULL) == 0x0FFFULL)                                     \
-                bits = (bits & ~(0x0FFFULL << 32U)) | (((uint64_t)(fn_id & 0x0FFFU)) << 32U); \
-        }                                                                                     \
-        return bits;                                                                          \
-    }                                                                                         \
-    static inline __attribute__((unused)) uint16_t flowc_boundary_tag_code(uint64_t bits) {   \
-        return flowc_is_boundary_tag(bits) ? (uint16_t)(bits & 0x0FFFULL) : 0U;               \
+#define FLOW_HOTT_BOUNDARY_HELPERS_C17                                                             \
+    static inline __attribute__((unused)) uint64_t flowc_make_boundary_tag(                        \
+        uint16_t fn_id, uint8_t guard_idx, uint8_t kind, uint8_t axis, uint16_t code) {            \
+        uint64_t k4 = (uint64_t)((kind == 0U ? 1U : kind) & 0x0FU);                                \
+        return FLOW_BOUNDARY_QNAN_MAGIC | (((uint64_t)(fn_id & 0x0FFFU)) << 32U) |                 \
+               (((uint64_t)guard_idx) << 24U) | (k4 << 20U) |                                      \
+               (((uint64_t)(axis & 0x3FU)) << 12U) | ((uint64_t)(code & 0x0FFFU));                 \
+    }                                                                                              \
+    static inline __attribute__((unused)) bool flowc_is_boundary_tag(uint64_t raw_bits) {          \
+        return (raw_bits & FLOW_BOUNDARY_QNAN_PREFIX_MASK) == FLOW_BOUNDARY_QNAN_MAGIC;            \
+    }                                                                                              \
+    static inline __attribute__((unused)) uint64_t flowc_stamp_boundary_tag_fn_id(                 \
+        uint64_t bits, uint16_t fn_id) {                                                           \
+        if (flowc_is_boundary_tag(bits)) {                                                         \
+            if (((bits >> 32U) & 0x0FFFULL) == 0x0FFFULL)                                          \
+                bits = (bits & ~(0x0FFFULL << 32U)) | (((uint64_t)(fn_id & 0x0FFFU)) << 32U);      \
+        }                                                                                          \
+        return bits;                                                                               \
+    }                                                                                              \
+    static inline __attribute__((unused)) uint16_t flowc_boundary_tag_code(uint64_t bits) {        \
+        return flowc_is_boundary_tag(bits) ? (uint16_t)(bits & 0x0FFFULL) : 0U;                    \
+    }                                                                                              \
+    static inline __attribute__((unused)) double flowc_make_boundary_nan(                          \
+        uint16_t fn_id, uint8_t guard_idx, uint8_t kind, uint8_t axis, uint16_t code) {            \
+        uint64_t bits = flowc_make_boundary_tag(fn_id, guard_idx, kind, axis, code);               \
+        double out = 0.0;                                                                          \
+        __builtin_memcpy(&out, &bits, sizeof(out));                                                \
+        return out;                                                                                \
+    }                                                                                              \
+    static inline __attribute__((unused)) bool flowc_is_boundary_nan(double val) {                 \
+        uint64_t bits = 0ULL;                                                                      \
+        __builtin_memcpy(&bits, &val, sizeof(bits));                                               \
+        if (flowc_is_boundary_tag(bits))                                                           \
+            return true;                                                                           \
+        return !__builtin_isfinite(val);                                                           \
+    }                                                                                              \
+    static inline __attribute__((unused)) uint64_t flowc_extract_boundary_tag(double val) {        \
+        uint64_t bits = 0ULL;                                                                      \
+        __builtin_memcpy(&bits, &val, sizeof(bits));                                               \
+        if (flowc_is_boundary_tag(bits))                                                           \
+            return bits;                                                                           \
+        if (!__builtin_isfinite(val))                                                              \
+            return flowc_make_boundary_tag(0U, 0U, (uint8_t)FLOW_BOUNDARY_DOMAIN_SINGULARITY, 49U, \
+                                           0U);                                                    \
+        return 0ULL;                                                                               \
+    }                                                                                              \
+    static inline __attribute__((unused)) double flowc_stamp_boundary_fn_id(double val,            \
+                                                                            uint16_t fn_id) {      \
+        uint64_t bits = 0ULL;                                                                      \
+        __builtin_memcpy(&bits, &val, sizeof(bits));                                               \
+        if (flowc_is_boundary_tag(bits)) {                                                         \
+            bits = flowc_stamp_boundary_tag_fn_id(bits, fn_id);                                    \
+        } else if (!__builtin_isfinite(val)) {                                                     \
+            bits = flowc_make_boundary_tag(fn_id, 0U, (uint8_t)FLOW_BOUNDARY_DOMAIN_SINGULARITY,   \
+                                           49U, 0U);                                               \
+        }                                                                                          \
+        double out = 0.0;                                                                          \
+        __builtin_memcpy(&out, &bits, sizeof(out));                                                \
+        return out;                                                                                \
+    }                                                                                              \
+    static inline __attribute__((unused)) uint16_t flowc_boundary_code(double val) {               \
+        return (uint16_t)(flowc_extract_boundary_tag(val) & 0x0FFFULL);                            \
     }
 
 #ifndef FLOW_LEAN_BOUNDARY_HELPERS_DEFINED
@@ -767,6 +808,20 @@ static inline uint64_t flow_hott_make_boundary_tag(uint16_t fn_id, uint8_t guard
 
 static inline bool flow_hott_is_boundary_tag(uint64_t raw_bits) {
     return flowc_is_boundary_tag(raw_bits);
+}
+
+static inline double flow_hott_make_boundary_nan(uint16_t fn_id, uint8_t guard_idx,
+                                                 uint8_t violation_kind, uint8_t cubical_axis,
+                                                 uint16_t user_code) {
+    return flowc_make_boundary_nan(fn_id, guard_idx, violation_kind, cubical_axis, user_code);
+}
+
+static inline bool flow_hott_is_boundary_nan(double val) {
+    return flowc_is_boundary_nan(val);
+}
+
+static inline uint64_t flow_hott_extract_boundary_tag(double val) {
+    return flowc_extract_boundary_tag(val);
 }
 
 static inline FlowResultU64 flow_result_u64_interior(uint64_t val) {

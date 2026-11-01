@@ -1,6 +1,7 @@
 #ifndef FLOW_RELOAD_H
 #define FLOW_RELOAD_H
 
+#include "flow.h"
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -130,5 +131,16 @@ typedef struct {
 FlowJITEngine *flow_jit_create(const FlowJITConfig *config);
 void flow_jit_destroy(FlowJITEngine *engine);
 int flow_jit_get_pool_stats(const FlowJITEngine *engine, FlowJITPoolStats *stats_out);
+
+/* Discrete Dwell-Time & Threshold Debounce Primitive (Schmitt Trigger) */
+typedef struct {
+    double drop_threshold, recovery_threshold;
+    uint64_t dwell_time_required_ns, stable_since_ns;
+    int current_state;
+} FlowSchmittTrigger;
+
+void flow_schmitt_trigger_init(FlowSchmittTrigger *st, double base_min, uint64_t dwell_ns);
+int flow_schmitt_trigger_update(FlowSchmittTrigger *st, double current_val,
+                                uint64_t current_time_ns, int *state_changed_out);
 
 #endif /* FLOW_RELOAD_H */
