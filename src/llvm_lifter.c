@@ -1926,6 +1926,10 @@ int flow_llvm_emit_lean_boundary_proof(FILE *out, const SemanticIR *constraint_i
             int64_t max_v = ret_inst ? ret_inst->inferred_max : smax;
 
             /* Guard bounds consistency */
+            if (!fn->overflow_free_proven) {
+                min_v = smin;
+                max_v = smax;
+            }
             if (min_v < smin || min_v > smax)
                 min_v = smin;
             if (max_v > smax || max_v < smin)
