@@ -1,13 +1,13 @@
 #ifndef HOTT_TEST_KIT_H
 #define HOTT_TEST_KIT_H
 
+#include "flow.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
 #include <math.h>
-#include "flow.h"
 
 typedef struct {
     const char *suite_name;

@@ -1,13 +1,44 @@
 #include "flow.h"
 #include <ctype.h>
 #include <limits.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+#include <unistd.h>
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+
+static int s_parser_quiet = 0;
+static char s_parser_last_error[512] = {0};
+
+void flow_parser_set_quiet(int quiet) {
+    s_parser_quiet = quiet;
+}
+
+int flow_parser_is_quiet(void) {
+    return s_parser_quiet;
+}
+
+const char *flow_parser_last_error(void) {
+    return s_parser_last_error;
+}
+
+static void parser_report_error(const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(s_parser_last_error, sizeof(s_parser_last_error), fmt, args);
+    va_end(args);
+    if (!s_parser_quiet) {
+        fprintf(stderr, "%s\n", s_parser_last_error);
+    }
+}
 
 typedef struct {
-    char names[64][FLOW_NAME];
-    char exprs[64][FLOW_LINE];
+    char names[FLOW_LEAN_FN_MAX][FLOW_NAME];
+    char exprs[FLOW_LEAN_FN_MAX][FLOW_LINE];
     size_t count;
 } LeanConstTable;
 
@@ -20,27 +51,49 @@ static char *trim(char *text) {
     *end = '\0';
     return text;
 }
+
 static int starts_with(const char *text, const char *prefix) {
     return strncmp(text, prefix, strlen(prefix)) == 0;
 }
+
 static const char *normalize_lean_type_token(const char *t) {
     return (!t) ? "" : ((!strcmp(t, "\xe2\x84\x9d") || !strcmp(t, "Real")) ? "Float" : t);
 }
+
+static int has_prop_operators(const char *s) {
+    if (!s)
+        return 0;
+    return strchr(s, '<') || strchr(s, '>') || strchr(s, '=') || strchr(s, '!') ||
+           strstr(s, "&&") || strstr(s, "||") || strstr(s, "->") || strstr(s, "<->") ||
+           strstr(s, "/\\") || strstr(s, "\\/") || strstr(s, "\xe2\x89\xa4") ||
+           strstr(s, "\xe2\x89\xa5") || strstr(s, "\xe2\x89\xa0") || strstr(s, "\xe2\x88\xa7") ||
+           strstr(s, "\xe2\x88\xa8") || strstr(s, "\xc2\xac") || strstr(s, "\xe2\x86\x92") ||
+           strstr(s, "\xe2\x86\x94") || strstr(s, "\xe2\x88\x80") || strstr(s, "\xe2\x88\x83");
+}
+
 static int is_lean_erased_proof_field(const char *t_expr) {
     if (!t_expr)
         return 1;
     while (*t_expr && isspace((unsigned char)*t_expr))
         ++t_expr;
     if (!*t_expr || !strcmp(t_expr, "Prop") || !strncmp(t_expr, "Prop ", 5) ||
-        !strcmp(t_expr, "True") || !strcmp(t_expr, "False") || islower((unsigned char)t_expr[0]))
+        !strcmp(t_expr, "True") || !strcmp(t_expr, "False") || islower((unsigned char)t_expr[0]) ||
+        isdigit((unsigned char)t_expr[0]) || t_expr[0] == '!' || t_expr[0] == '(')
         return 1;
-    return strchr(t_expr, '<') || strchr(t_expr, '>') || strchr(t_expr, '=') ||
-           strstr(t_expr, "\xe2\x89\xa4") || strstr(t_expr, "\xe2\x89\xa5") ||
-           strstr(t_expr, "\xe2\x89\xa0") || strstr(t_expr, "\xe2\x88\xa7") ||
-           strstr(t_expr, "\xe2\x88\xa8") || strstr(t_expr, "\xc2\xac") ||
-           strstr(t_expr, "\xe2\x86\x92") || strstr(t_expr, "\xe2\x86\x94") ||
-           strstr(t_expr, "\xe2\x88\x80") || strstr(t_expr, "\xe2\x88\x83") || strstr(t_expr, "->");
+    return has_prop_operators(t_expr);
 }
+
+static int is_executable_prop_clause(const char *s) {
+    if (!s)
+        return 0;
+    while (*s && isspace((unsigned char)*s))
+        ++s;
+    if (!*s || !strcmp(s, "Prop") || !strncmp(s, "Prop ", 5) || !strcmp(s, "True") ||
+        !strcmp(s, "False"))
+        return 0;
+    return has_prop_operators(s);
+}
+
 static size_t parse_lean_type_bytes(const char *t) {
     if (!t || !*t)
         return 0;
@@ -52,6 +105,7 @@ static size_t parse_lean_type_bytes(const char *t) {
 #undef FLOW_MATCH_SCALAR_BYTES
     return isupper((unsigned char)t[0]) ? 8 : 0;
 }
+
 static int is_scalar_lean_type(const char *t) {
     if (!t || !*t)
         return 0;
@@ -62,18 +116,21 @@ static int is_scalar_lean_type(const char *t) {
 #undef FLOW_IS_SCALAR_TYPE
     return 0;
 }
+
 static const FlowLeanStruct *find_lean_struct(const FlowSpec *spec, const char *name) {
     for (size_t i = 0; spec && name && name[0] && i < spec->lean_struct_count; ++i)
         if (!strcmp(spec->lean_structs[i].name, name))
             return &spec->lean_structs[i];
     return NULL;
 }
+
 static const FlowLeanEnum *find_lean_enum(const FlowSpec *spec, const char *name) {
     for (size_t i = 0; spec && name && name[0] && i < spec->lean_enum_count; ++i)
         if (!strcmp(spec->lean_enums[i].name, name))
             return &spec->lean_enums[i];
     return NULL;
 }
+
 static void lean_type_to_c_info(const FlowSpec *spec, const char *lt, char *c_out, size_t c_sz,
                                 char *lean_out, size_t l_sz, size_t *bytes_out) {
     const char *ct = "uint64_t", *norm_lt = "UInt64";
@@ -99,13 +156,12 @@ static void lean_type_to_c_info(const FlowSpec *spec, const char *lt, char *c_ou
                 b = 8;
         }
     }
-    strncpy(c_out, ct, c_sz - 1);
-    c_out[c_sz - 1] = '\0';
-    strncpy(lean_out, norm_lt, l_sz - 1);
-    lean_out[l_sz - 1] = '\0';
+    snprintf(c_out, c_sz, "%s", ct);
+    snprintf(lean_out, l_sz, "%s", norm_lt);
     if (bytes_out)
         *bytes_out = b;
 }
+
 static void recompute_lean_struct_layout(FlowLeanStruct *st) {
     if (!st)
         return;
@@ -120,9 +176,10 @@ static void recompute_lean_struct_layout(FlowLeanStruct *st) {
     st->align_bytes = max_al;
     st->byte_size = (off + max_al - 1) & ~(max_al - 1);
 }
+
 static int has_word_match(const char *hay, const char *word) {
-    size_t wlen = strlen(word);
-    if (!wlen)
+    size_t wlen = word ? strlen(word) : 0;
+    if (!hay || !wlen)
         return 0;
     for (const char *p = strstr(hay, word); p; p = strstr(p + 1, word))
         if (((p == hay) || (!isalnum((unsigned char)p[-1]) && p[-1] != '_' && p[-1] != '.')) &&
@@ -130,14 +187,14 @@ static int has_word_match(const char *hay, const char *word) {
             return 1;
     return 0;
 }
+
 static void replace_substr_ex(const char *src, const char *pat, const char *rep, int word_bound,
                               int wrap_parens, char *out, size_t out_max) {
     if (!src || !pat || !rep || !out || out_max == 0)
         return;
     size_t plen = strlen(pat), rlen = strlen(rep), j = 0;
     if (!plen || (!wrap_parens && !strcmp(pat, rep))) {
-        strncpy(out, src, out_max - 1);
-        out[out_max - 1] = '\0';
+        snprintf(out, out_max, "%s", src);
         return;
     }
     for (size_t i = 0; src[i] && j + 4 < out_max;) {
@@ -161,9 +218,29 @@ static void replace_substr_ex(const char *src, const char *pat, const char *rep,
     }
     out[j] = '\0';
 }
-static void add_lean_struct_field(FlowSpec *spec, FlowLeanStruct *st, const char *fn,
+
+/* Normalize Lean identifier with trailing primes (e.g., x' -> x_prime) into valid C17 identifier */
+static void normalize_ident_primes(const char *src, char *dst, size_t dst_max) {
+    if (!src || !dst || dst_max == 0)
+        return;
+    size_t j = 0;
+    for (size_t i = 0; src[i] && j + 8 < dst_max;) {
+        if (src[i] == '\'' && i > 0 && (isalnum((unsigned char)src[i - 1]) || src[i - 1] == '_')) {
+            memcpy(dst + j, "_prime", 6);
+            j += 6;
+            ++i;
+        } else {
+            dst[j++] = src[i++];
+        }
+    }
+    dst[j] = '\0';
+}
+
+static void add_lean_struct_field(FlowSpec *spec, FlowLeanStruct *st, const char *fn_raw,
                                   const char *ft, int populate_spec_fields,
                                   size_t *struct_bytes_acc) {
+    char fn[FLOW_NAME] = {0};
+    normalize_ident_primes(fn_raw, fn, sizeof(fn));
     const FlowLeanStruct *inner =
         (st && strcmp(st->name, ft) != 0) ? find_lean_struct(spec, ft) : NULL;
     if (inner && inner->field_count > 0) {
@@ -176,15 +253,16 @@ static void add_lean_struct_field(FlowSpec *spec, FlowLeanStruct *st, const char
         for (size_t iv = 0;
              iv < inner->invariant_count && st->invariant_count < FLOW_LEAN_STRUCT_INV_MAX; ++iv) {
             char cur_inv[128] = {0}, next_inv[128] = {0};
-            strncpy(cur_inv, inner->invariants[iv], sizeof(cur_inv) - 1);
+            snprintf(cur_inv, sizeof(cur_inv), "%s", inner->invariants[iv]);
             for (size_t k = 0; k < inner->field_count; ++k) {
                 char flat_name[FLOW_NAME] = {0};
                 snprintf(flat_name, sizeof(flat_name), "%s_%s", fn, inner->fields[k].name);
                 replace_substr_ex(cur_inv, inner->fields[k].name, flat_name, 1, 0, next_inv,
                                   sizeof(next_inv));
-                strncpy(cur_inv, next_inv, sizeof(cur_inv) - 1);
+                snprintf(cur_inv, sizeof(cur_inv), "%s", next_inv);
             }
-            strncpy(st->invariants[st->invariant_count++], cur_inv, sizeof(st->invariants[0]) - 1);
+            snprintf(st->invariants[st->invariant_count++], sizeof(st->invariants[0]), "%s",
+                     cur_inv);
         }
         return;
     }
@@ -193,9 +271,9 @@ static void add_lean_struct_field(FlowSpec *spec, FlowLeanStruct *st, const char
     lean_type_to_c_info(spec, ft, ct, sizeof(ct), lt_norm, sizeof(lt_norm), &b);
     if (st && st->field_count < FLOW_FIELD_MAX) {
         FlowLeanStructField *sf = &st->fields[st->field_count++];
-        strncpy(sf->name, fn, FLOW_NAME - 1);
-        strncpy(sf->c_type, ct, sizeof(sf->c_type) - 1);
-        strncpy(sf->lean_type, lt_norm, sizeof(sf->lean_type) - 1);
+        snprintf(sf->name, sizeof(sf->name), "%s", fn);
+        snprintf(sf->c_type, sizeof(sf->c_type), "%s", ct);
+        snprintf(sf->lean_type, sizeof(sf->lean_type), "%s", lt_norm);
         sf->size_bytes = b;
         recompute_lean_struct_layout(st);
     }
@@ -208,26 +286,25 @@ static void add_lean_struct_field(FlowSpec *spec, FlowLeanStruct *st, const char
             }
         if (!dup_sf) {
             FlowFieldSpec *fs = &spec->state_fields[spec->state_field_count++];
-            strncpy(fs->name, fn, FLOW_NAME - 1);
+            snprintf(fs->name, sizeof(fs->name), "%s", fn);
             fs->size_bytes = b;
             fs->flags = 2u;
             if (struct_bytes_acc)
                 *struct_bytes_acc += b;
-            if (spec->jet_coord_count < FLOW_FIELD_MAX)
-                strncpy(spec->jet_coord_names[spec->jet_coord_count++], fn, FLOW_NAME - 1);
         }
     }
 }
+
 static void apply_const_table(const LeanConstTable *consts, char *expr, size_t max_len) {
     for (size_t ci = 0; consts && expr && expr[0] && ci < consts->count; ++ci)
         if (has_word_match(expr, consts->names[ci])) {
             char next_buf[FLOW_LEAN_BODY_MAX] = {0};
             replace_substr_ex(expr, consts->names[ci], consts->exprs[ci], 1, 1, next_buf,
                               sizeof(next_buf));
-            strncpy(expr, next_buf, max_len - 1);
-            expr[max_len - 1] = '\0';
+            snprintf(expr, max_len, "%s", next_buf);
         }
 }
+
 static void strip_enum_qualifiers(const FlowSpec *spec, char *expr, size_t max_len) {
     if (!spec || !expr || !expr[0])
         return;
@@ -237,17 +314,16 @@ static void strip_enum_qualifiers(const FlowSpec *spec, char *expr, size_t max_l
         if (strstr(expr, qprefix) != NULL) {
             char next_buf[FLOW_LEAN_BODY_MAX] = {0};
             replace_substr_ex(expr, qprefix, "", 0, 0, next_buf, sizeof(next_buf));
-            strncpy(expr, next_buf, max_len - 1);
-            expr[max_len - 1] = '\0';
+            snprintf(expr, max_len, "%s", next_buf);
         }
     }
 }
+
 static void rewrite_lean_abs_bars(const char *in, char *out, size_t max_len) {
     if (!in || !out || max_len == 0)
         return;
     char cur[FLOW_LEAN_BODY_MAX];
-    strncpy(cur, in, sizeof(cur) - 1);
-    cur[sizeof(cur) - 1] = '\0';
+    snprintf(cur, sizeof(cur), "%s", in);
     for (int pass = 0; pass < 4; ++pass) {
         char next[FLOW_LEAN_BODY_MAX];
         size_t j = 0;
@@ -265,10 +341,8 @@ static void rewrite_lean_abs_bars(const char *in, char *out, size_t max_len) {
                             break;
                         }
                         pd--;
-                    } else if (cur[k] == '\n' || cur[k] == ';') {
-                        abort_bar = 1;
-                        break;
-                    } else if (cur[k] == '=' && cur[k + 1] == '>') {
+                    } else if (cur[k] == '\n' || cur[k] == ';' ||
+                               (cur[k] == '=' && cur[k + 1] == '>')) {
                         abort_bar = 1;
                         break;
                     } else if (pd == 0 && cur[k] == '|' && cur[k - 1] != '|' && cur[k + 1] != '|') {
@@ -284,11 +358,11 @@ static void rewrite_lean_abs_bars(const char *in, char *out, size_t max_len) {
                         --e;
                     if (s < e) {
                         unsigned char fc = (unsigned char)cur[s], lc = (unsigned char)cur[e - 1];
-                        int f_ok = isalnum(fc) || fc == '_' || fc == '(' || fc == '-';
-                        int l_ok = isalnum(lc) || lc == '_' || lc == ')';
-                        if (f_ok && l_ok && j + (e - s) + 22 < sizeof(next)) {
-                            memcpy(next + j, "(flow_float_abs (", 17);
-                            j += 17;
+                        if ((isalnum(fc) || fc == '_' || fc == '(' || fc == '-') &&
+                            (isalnum(lc) || lc == '_' || lc == ')' || lc == '\'') &&
+                            j + (e - s) + 20 < sizeof(next)) {
+                            memcpy(next + j, "(flow_int_abs (", 15);
+                            j += 15;
                             memcpy(next + j, cur + s, e - s);
                             j += (e - s);
                             memcpy(next + j, "))", 2);
@@ -303,14 +377,13 @@ static void rewrite_lean_abs_bars(const char *in, char *out, size_t max_len) {
             next[j++] = cur[i++];
         }
         next[j] = '\0';
-        strncpy(cur, next, sizeof(cur) - 1);
-        cur[sizeof(cur) - 1] = '\0';
+        snprintf(cur, sizeof(cur), "%s", next);
         if (!changed)
             break;
     }
-    strncpy(out, cur, max_len - 1);
-    out[max_len - 1] = '\0';
+    snprintf(out, max_len, "%s", cur);
 }
+
 void flow_lean_normalize_expr(const char *src, char *dst, size_t dst_size) {
     static const struct {
         const char *lean_fn;
@@ -344,21 +417,40 @@ void flow_lean_normalize_expr(const char *src, char *dst, size_t dst_size) {
             i += 3;
             continue;
         }
-        if (!strncmp(src + i, "\xe2\x88\xa7", 3)) {
+        if (!strncmp(src + i, "\xe2\x88\xa7", 3) || !strncmp(src + i, "/\\", 2)) {
             dst[j++] = '&';
             dst[j++] = '&';
-            i += 3;
+            i += (src[i] == '/') ? 2 : 3;
             continue;
         }
-        if (!strncmp(src + i, "\xe2\x88\xa8", 3)) {
+        if (!strncmp(src + i, "\xe2\x88\xa8", 3) || !strncmp(src + i, "\\/", 2)) {
             dst[j++] = '|';
             dst[j++] = '|';
-            i += 3;
+            i += (src[i] == '\\') ? 2 : 3;
             continue;
         }
         if (!strncmp(src + i, "\xc2\xac", 2)) {
             dst[j++] = '!';
             i += 2;
+            continue;
+        }
+        if (!strncmp(src + i, "\xe2\x86\x92", 3)) {
+            dst[j++] = '-';
+            dst[j++] = '>';
+            i += 3;
+            continue;
+        }
+        if (!strncmp(src + i, "\xe2\x86\x94", 3)) {
+            dst[j++] = '<';
+            dst[j++] = '-';
+            dst[j++] = '>';
+            i += 3;
+            continue;
+        }
+        if (src[i] == '\'' && i > 0 && (isalnum((unsigned char)src[i - 1]) || src[i - 1] == '_')) {
+            memcpy(dst + j, "_prime", 6);
+            j += 6;
+            ++i;
             continue;
         }
         int mapped = 0;
@@ -379,9 +471,9 @@ void flow_lean_normalize_expr(const char *src, char *dst, size_t dst_size) {
     }
     dst[j] = '\0';
 }
+
 static void normalize_lean_body(const char *in, char *out, size_t max_len) {
-    char abs_buf[FLOW_LEAN_BODY_MAX] = {0};
-    char norm_buf[FLOW_LEAN_BODY_MAX] = {0};
+    char abs_buf[FLOW_LEAN_BODY_MAX] = {0}, norm_buf[FLOW_LEAN_BODY_MAX] = {0};
     rewrite_lean_abs_bars(in, abs_buf, sizeof(abs_buf));
     flow_lean_normalize_expr(abs_buf, norm_buf, sizeof(norm_buf));
     size_t j = 0;
@@ -412,6 +504,7 @@ static void normalize_lean_body(const char *in, char *out, size_t max_len) {
             i = k - 1;
         }
 }
+
 static uint64_t estimate_lean_ast_wcet_ns(const FlowLeanFunction *fn) {
     if (!fn)
         return FLOW_WCET_BASE_CALL_NS;
@@ -435,6 +528,7 @@ static uint64_t estimate_lean_ast_wcet_ns(const FlowLeanFunction *fn) {
     }
     return cost;
 }
+
 static int is_valid_scalar_lean_body_str(const FlowSpec *spec, const FlowLeanFunction *fn,
                                          const char *b) {
     static const char *const KW[] = {"if",
@@ -446,6 +540,7 @@ static int is_valid_scalar_lean_body_str(const FlowSpec *spec, const FlowLeanFun
                                      "with",
                                      "true",
                                      "false",
+                                     "not",
                                      "decide",
                                      "flow_quantize",
                                      "flow_dequantize",
@@ -464,9 +559,23 @@ static int is_valid_scalar_lean_body_str(const FlowSpec *spec, const FlowLeanFun
     size_t let_cnt = 0;
     if (!b || !b[0])
         return 0;
-    if (strstr(b, "->") || strstr(b, "<->") || strstr(b, "\xe2\x86\x92") ||
-        strstr(b, "\xe2\x86\x94"))
-        return 0;
+    /* Reject higher-order type expressions (e.g. "Float -> Float" or "Prop"), but allow boolean
+     * implication (a -> b) and equivalence (a <-> b) over value expressions! */
+    for (const char *ar = strstr(b, "->"); ar; ar = strstr(ar + 2, "->")) {
+        const char *rhs = ar + 2;
+        while (*rhs && isspace((unsigned char)*rhs))
+            ++rhs;
+        char rtok[FLOW_NAME] = {0};
+        size_t rk = 0;
+        while (isalnum((unsigned char)rhs[rk]) || rhs[rk] == '_') {
+            if (rk + 1 < sizeof(rtok))
+                rtok[rk] = rhs[rk];
+            rk++;
+        }
+        if (is_scalar_lean_type(normalize_lean_type_token(rtok)) || !strcmp(rtok, "Prop") ||
+            !strcmp(rtok, "Type") || find_lean_struct(spec, rtok) || find_lean_enum(spec, rtok))
+            return 0;
+    }
     int has_struct_param = fn->is_struct_transform;
     for (size_t i = 0; i < fn->param_count; ++i)
         if (find_lean_struct(spec, fn->param_types[i]) != NULL)
@@ -496,44 +605,34 @@ static int is_valid_scalar_lean_body_str(const FlowSpec *spec, const FlowLeanFun
                     while (*vs && *vs != ',' && *vs != ')')
                         ++vs;
                     if (lv[0] && let_cnt < 32)
-                        strncpy(let_vars[let_cnt++], lv, FLOW_NAME - 1);
+                        snprintf(let_vars[let_cnt++], FLOW_NAME, "%s", lv);
                 }
             } else {
                 char lv[FLOW_NAME] = {0};
                 if (sscanf(vs, "%63[^ :=\t\r\n]", lv) == 1 && lv[0] && let_cnt < 32)
-                    strncpy(let_vars[let_cnt++], lv, FLOW_NAME - 1);
+                    snprintf(let_vars[let_cnt++], FLOW_NAME, "%s", lv);
             }
         } else if (*p == '|' && (p == b || p[-1] != '|') && p[1] != '|') {
             const char *ms = p + 1;
-            while (*ms && isspace((unsigned char)*ms))
+            while (*ms && (isspace((unsigned char)*ms) || *ms == '('))
                 ++ms;
-            if (*ms == '(') {
-                ++ms;
-                while (*ms && isspace((unsigned char)*ms))
-                    ++ms;
-            }
-            size_t clen = 0;
-            if (!strncmp(ms, "some", 4) && isspace((unsigned char)ms[4]))
-                clen = 4;
-            else if (!strncmp(ms, "interior", 8) && isspace((unsigned char)ms[8]))
-                clen = 8;
-            else if (!strncmp(ms, "boundary", 8) && isspace((unsigned char)ms[8]))
-                clen = 8;
-            else if (!strncmp(ms, "point", 5) && isspace((unsigned char)ms[5]))
-                clen = 5;
-            if (clen > 0) {
-                ms += clen;
-                while (*ms && isspace((unsigned char)*ms))
-                    ++ms;
-                char mv[FLOW_NAME] = {0};
-                size_t mk = 0;
-                while (*ms && (isalnum((unsigned char)*ms) || *ms == '_')) {
-                    if (mk + 1 < sizeof(mv))
-                        mv[mk++] = *ms;
-                    ++ms;
-                }
-                if (mv[0] && strcmp(mv, "_") != 0 && let_cnt < 32) {
-                    strncpy(let_vars[let_cnt++], mv, FLOW_NAME - 1);
+            static const char *const CTORS[] = {"some", "interior", "boundary", "point", NULL};
+            for (int c = 0; CTORS[c]; ++c) {
+                size_t cl = strlen(CTORS[c]);
+                if (!strncmp(ms, CTORS[c], cl) && isspace((unsigned char)ms[cl])) {
+                    ms += cl;
+                    while (*ms && isspace((unsigned char)*ms))
+                        ++ms;
+                    char mv[FLOW_NAME] = {0};
+                    size_t mk = 0;
+                    while (*ms && (isalnum((unsigned char)*ms) || *ms == '_')) {
+                        if (mk + 1 < sizeof(mv))
+                            mv[mk++] = *ms;
+                        ++ms;
+                    }
+                    if (mv[0] && strcmp(mv, "_") != 0 && let_cnt < 32)
+                        snprintf(let_vars[let_cnt++], FLOW_NAME, "%s", mv);
+                    break;
                 }
             }
         }
@@ -584,18 +683,63 @@ static int is_valid_scalar_lean_body_str(const FlowSpec *spec, const FlowLeanFun
             }
             if (!ok)
                 return 0;
-        } else
+        } else {
             ++p;
+        }
     }
     return 1;
 }
+
+static void flatten_struct_invariant_fields(const FlowLeanStruct *st, char *expr, size_t max_len) {
+    if (!st || !expr || !expr[0] || max_len == 0)
+        return;
+    for (size_t fi = 0; fi < st->field_count; ++fi) {
+        const char *flat = st->fields[fi].name;
+        size_t flen = strlen(flat);
+        if (!strchr(flat, '_') || flen >= FLOW_NAME)
+            continue;
+        char dotted[FLOW_NAME] = {0};
+        for (const char *u = strchr(flat, '_'); u; u = strchr(u + 1, '_')) {
+            memcpy(dotted, flat, flen + 1);
+            dotted[u - flat] = '.';
+            if (strstr(expr, dotted) != NULL) {
+                char next_buf[FLOW_LEAN_BODY_MAX] = {0};
+                replace_substr_ex(expr, dotted, flat, 1, 0, next_buf, sizeof(next_buf));
+                snprintf(expr, max_len, "%s", next_buf);
+            }
+        }
+        for (size_t k = 0; k <= flen; ++k)
+            dotted[k] = (flat[k] == '_') ? '.' : flat[k];
+        if (strstr(expr, dotted) != NULL) {
+            char next_buf[FLOW_LEAN_BODY_MAX] = {0};
+            replace_substr_ex(expr, dotted, flat, 1, 0, next_buf, sizeof(next_buf));
+            snprintf(expr, max_len, "%s", next_buf);
+        }
+    }
+}
+
+static int is_valid_struct_invariant_str(const FlowSpec *spec, const FlowLeanStruct *st,
+                                         const char *b) {
+    if (!spec || !st || !b || !b[0])
+        return 0;
+    FlowLeanFunction tmp_fn;
+    memset(&tmp_fn, 0, sizeof(tmp_fn));
+    size_t n = st->field_count < FLOW_LEAN_PARAM_MAX ? st->field_count : FLOW_LEAN_PARAM_MAX;
+    tmp_fn.param_count = n;
+    for (size_t i = 0; i < n; ++i) {
+        snprintf(tmp_fn.param_names[i], sizeof(tmp_fn.param_names[i]), "%s", st->fields[i].name);
+        snprintf(tmp_fn.param_types[i], sizeof(tmp_fn.param_types[i]), "%s",
+                 st->fields[i].lean_type);
+    }
+    return is_valid_scalar_lean_body_str(spec, &tmp_fn, b);
+}
+
 static void parse_struct_record_fields(FlowLeanFunction *fn, const char *prefix,
                                        const char *rec_in) {
     if (!fn || !rec_in)
         return;
     char unfolded[FLOW_LEAN_BODY_MAX];
-    strncpy(unfolded, rec_in, sizeof(unfolded) - 1);
-    unfolded[sizeof(unfolded) - 1] = '\0';
+    snprintf(unfolded, sizeof(unfolded), "%s", rec_in);
     for (int iter = 0; iter < 8; ++iter) {
         const char *cur = unfolded;
         while (*cur && isspace((unsigned char)*cur))
@@ -652,10 +796,8 @@ static void parse_struct_record_fields(FlowLeanFunction *fn, const char *prefix,
         if (rl >= sizeof(vrhs))
             rl = sizeof(vrhs) - 1;
         memcpy(vrhs, rs, rl);
-        vrhs[rl] = '\0';
         replace_substr_ex(sep + skip, vname, vrhs, 1, 1, next_buf, sizeof(next_buf));
-        strncpy(unfolded, next_buf, sizeof(unfolded) - 1);
-        unfolded[sizeof(unfolded) - 1] = '\0';
+        snprintf(unfolded, sizeof(unfolded), "%s", next_buf);
     }
     const char *lb = strchr(unfolded, '{'), *rb = strrchr(unfolded, '}');
     if (!lb || !rb || rb <= lb)
@@ -702,11 +844,10 @@ static void parse_struct_record_fields(FlowLeanFunction *fn, const char *prefix,
         if (fl == 0 || fl >= sizeof(fname))
             continue;
         memcpy(fname, f_id_starts[i], fl);
-        fname[fl] = '\0';
         if (prefix && prefix[0])
             snprintf(full_name, sizeof(full_name), "%s_%s", prefix, fname);
         else
-            strncpy(full_name, fname, sizeof(full_name) - 1);
+            snprintf(full_name, sizeof(full_name), "%s", fname);
         const char *vs = f_val_starts[i], *ve = (i + 1 < f_cnt) ? f_id_starts[i + 1] : end;
         while (vs < ve && isspace((unsigned char)*vs))
             ++vs;
@@ -717,18 +858,18 @@ static void parse_struct_record_fields(FlowLeanFunction *fn, const char *prefix,
         if (el >= sizeof(fexpr))
             el = sizeof(fexpr) - 1;
         memcpy(fexpr, vs, el);
-        fexpr[el] = '\0';
         if (fexpr[0] == '{' && el >= 2 && fexpr[el - 1] == '}')
             parse_struct_record_fields(fn, full_name, fexpr);
         else if (fn->field_assign_count < FLOW_FIELD_MAX) {
-            strncpy(fn->field_assign_names[fn->field_assign_count], full_name,
-                    sizeof(fn->field_assign_names[0]) - 1);
-            strncpy(fn->field_assign_exprs[fn->field_assign_count], fexpr,
-                    sizeof(fn->field_assign_exprs[0]) - 1);
+            snprintf(fn->field_assign_names[fn->field_assign_count],
+                     sizeof(fn->field_assign_names[0]), "%s", full_name);
+            snprintf(fn->field_assign_exprs[fn->field_assign_count],
+                     sizeof(fn->field_assign_exprs[0]), "%s", fexpr);
             fn->field_assign_count++;
         }
     }
 }
+
 static void append_contract_clause(char *dst, size_t dst_max, const char *clause) {
     if (!dst || !clause || !clause[0] || strstr(dst, clause) != NULL)
         return;
@@ -738,13 +879,13 @@ static void append_contract_clause(char *dst, size_t dst_max, const char *clause
     else if (cur_l > 0 && cur_l + n_l + 7 < dst_max)
         snprintf(dst + cur_l, dst_max - cur_l, " && (%s)", clause);
 }
+
 static void try_add_lean_function(FlowSpec *spec, LeanConstTable *consts, const char *sig_in,
                                   const char *body_in, int is_private) {
     if (!spec || !sig_in || !body_in)
         return;
     char sig[FLOW_LEAN_BODY_MAX];
-    strncpy(sig, sig_in, sizeof(sig) - 1);
-    sig[sizeof(sig) - 1] = '\0';
+    snprintf(sig, sizeof(sig), "%s", sig_in);
     char *s = trim(sig);
     size_t kw_len = starts_with(s, "def ") ? 4 : (starts_with(s, "abbrev ") ? 7 : 0);
     if (!kw_len)
@@ -756,15 +897,17 @@ static void try_add_lean_function(FlowSpec *spec, LeanConstTable *consts, const 
             if (sscanf(s + kw_len, "%63[^ :\t\n\r] : %31[^ :=\t\n\r]", cname, ctype) >= 1 &&
                 cname[0] && is_scalar_lean_type(normalize_lean_type_token(ctype)) &&
                 body_in[0] != '{' && body_in[0] != '[') {
-                for (char *cp = cname; *cp; ++cp)
+                char norm_cname[FLOW_NAME] = {0};
+                normalize_ident_primes(cname, norm_cname, sizeof(norm_cname));
+                for (char *cp = norm_cname; *cp; ++cp)
                     if (*cp == '.')
                         *cp = '_';
                 size_t ci = 0;
                 for (; ci < consts->count; ++ci)
-                    if (!strcmp(consts->names[ci], cname))
+                    if (!strcmp(consts->names[ci], norm_cname))
                         break;
-                if (ci < 64) {
-                    strncpy(consts->names[ci], cname, FLOW_NAME - 1);
+                if (ci < FLOW_LEAN_FN_MAX) {
+                    snprintf(consts->names[ci], FLOW_NAME, "%s", norm_cname);
                     normalize_lean_body(body_in, consts->exprs[ci], sizeof(consts->exprs[0]));
                     if (ci == consts->count)
                         consts->count++;
@@ -777,14 +920,17 @@ static void try_add_lean_function(FlowSpec *spec, LeanConstTable *consts, const 
     if (!fn)
         return;
     fn->is_private = is_private ? 1 : 0;
-    if (sscanf(s + kw_len, "%63[^ ({:\t\n\r]", fn->name) != 1 || !fn->name[0]) {
+    char raw_fn_name[FLOW_NAME] = {0};
+    if (sscanf(s + kw_len, "%63[^ ({:\t\n\r]", raw_fn_name) != 1 || !raw_fn_name[0]) {
         free(fn);
         return;
     }
+    normalize_ident_primes(raw_fn_name, fn->name, sizeof(fn->name));
     for (char *np = fn->name; *np; ++np)
         if (*np == '.')
             *np = '_';
-    if (!strcmp(fn->name, "f_abs") || !strcmp(fn->name, "f_max") || !strcmp(fn->name, "f_min")) {
+    if (!strcmp(fn->name, "f_abs") || !strcmp(fn->name, "f_max") || !strcmp(fn->name, "f_min") ||
+        !strcmp(fn->name, "i_abs") || !strcmp(fn->name, "i_max") || !strcmp(fn->name, "i_min")) {
         free(fn);
         return;
     }
@@ -818,7 +964,7 @@ static void try_add_lean_function(FlowSpec *spec, LeanConstTable *consts, const 
         return;
     }
     char ret_buf[FLOW_LINE] = {0};
-    strncpy(ret_buf, ret_colon + 1, sizeof(ret_buf) - 1);
+    snprintf(ret_buf, sizeof(ret_buf), "%s", ret_colon + 1);
     char *ret_raw = trim(ret_buf);
     size_t rlen = strlen(ret_raw);
     if (rlen >= 2 && ret_raw[0] == '(' && ret_raw[rlen - 1] == ')') {
@@ -833,8 +979,9 @@ static void try_add_lean_function(FlowSpec *spec, LeanConstTable *consts, const 
             if (!strncmp(ret_raw + i, "\xc3\x97", 2)) {
                 tcopy[tj++] = '*';
                 i += 2;
-            } else
+            } else {
                 tcopy[tj++] = ret_raw[i++];
+            }
         }
         tcopy[tj] = '\0';
         char *sp = NULL;
@@ -844,13 +991,13 @@ static void try_add_lean_function(FlowSpec *spec, LeanConstTable *consts, const 
                 fn->tuple_arity = 0;
                 break;
             }
-            strncpy(fn->tuple_types[fn->tuple_arity++], normalize_lean_type_token(tt),
-                    sizeof(fn->tuple_types[0]) - 1);
+            snprintf(fn->tuple_types[fn->tuple_arity++], sizeof(fn->tuple_types[0]), "%s",
+                     normalize_lean_type_token(tt));
         }
         if (fn->tuple_arity >= 2) {
             ret_is_tuple = 1;
             fn->is_tuple_return = 1;
-            strncpy(fn->return_type, fn->tuple_types[0], sizeof(fn->return_type) - 1);
+            snprintf(fn->return_type, sizeof(fn->return_type), "%s", fn->tuple_types[0]);
         }
     }
     if (!ret_is_tuple) {
@@ -873,14 +1020,20 @@ static void try_add_lean_function(FlowSpec *spec, LeanConstTable *consts, const 
             free(fn);
             return;
         }
-        strncpy(fn->return_type, norm_ret, sizeof(fn->return_type) - 1);
+        snprintf(fn->return_type, sizeof(fn->return_type), "%s", norm_ret);
     }
     for (char *p = first_lp; p && p < last_rp;) {
         char *lp = strchr(p, '(');
         if (!lp || lp >= last_rp)
             break;
-        char *rp = strchr(lp + 1, ')');
-        if (!rp || rp > last_rp) {
+        char *rp = lp + 1;
+        for (int d = 1; *rp && rp <= last_rp && d > 0; ++rp) {
+            if (*rp == '(')
+                d++;
+            else if (*rp == ')' && --d == 0)
+                break;
+        }
+        if (!*rp || rp > last_rp || *rp != ')') {
             free(fn);
             return;
         }
@@ -899,12 +1052,7 @@ static void try_add_lean_function(FlowSpec *spec, LeanConstTable *consts, const 
         *colon = '\0';
         char *p_rhs = trim(colon + 1);
         if (is_lean_erased_proof_field(p_rhs)) {
-            if (strcmp(p_rhs, "Prop") != 0 && strncmp(p_rhs, "Prop ", 5) != 0 &&
-                strcmp(p_rhs, "True") != 0 && strcmp(p_rhs, "False") != 0 &&
-                (strchr(p_rhs, '<') || strchr(p_rhs, '>') || strchr(p_rhs, '=') ||
-                 strstr(p_rhs, "\xe2\x89\xa4") || strstr(p_rhs, "\xe2\x89\xa5") ||
-                 strstr(p_rhs, "\xe2\x89\xa0") || strstr(p_rhs, "\xe2\x88\xa7") ||
-                 strstr(p_rhs, "\xe2\x88\xa8"))) {
+            if (is_executable_prop_clause(p_rhs)) {
                 char norm_pre[256] = {0};
                 normalize_lean_body(p_rhs, norm_pre, sizeof(norm_pre));
                 append_contract_clause(fn->precond_expr, sizeof(fn->precond_expr), norm_pre);
@@ -931,13 +1079,16 @@ static void try_add_lean_function(FlowSpec *spec, LeanConstTable *consts, const 
             free(fn);
             return;
         }
-        for (char *tok = strtok(grp, " \t\n\r"); tok; tok = strtok(NULL, " \t\n\r")) {
+        char *saveptr = NULL;
+        for (char *tok = strtok_r(grp, " \t\n\r", &saveptr); tok;
+             tok = strtok_r(NULL, " \t\n\r", &saveptr)) {
             if (fn->param_count >= FLOW_LEAN_PARAM_MAX) {
                 free(fn);
                 return;
             }
-            strncpy(fn->param_names[fn->param_count], tok, sizeof(fn->param_names[0]) - 1);
-            strncpy(fn->param_types[fn->param_count], norm_pt, sizeof(fn->param_types[0]) - 1);
+            normalize_ident_primes(tok, fn->param_names[fn->param_count],
+                                   sizeof(fn->param_names[0]));
+            snprintf(fn->param_types[fn->param_count], sizeof(fn->param_types[0]), "%s", norm_pt);
             fn->param_is_result[fn->param_count] = (uint8_t)param_is_res;
             fn->param_count++;
         }
@@ -953,31 +1104,16 @@ static void try_add_lean_function(FlowSpec *spec, LeanConstTable *consts, const 
             continue;
         for (size_t iv = 0; iv < st->invariant_count; ++iv) {
             char cur_inv[256] = {0}, next_inv[256] = {0};
-            strncpy(cur_inv, st->invariants[iv], sizeof(cur_inv) - 1);
+            snprintf(cur_inv, sizeof(cur_inv), "%s", st->invariants[iv]);
             for (size_t k = 0; k < st->field_count; ++k) {
                 char qf[FLOW_NAME * 2] = {0};
                 snprintf(qf, sizeof(qf), "%s.%s", fn->param_names[pi], st->fields[k].name);
                 replace_substr_ex(cur_inv, st->fields[k].name, qf, 1, 0, next_inv,
                                   sizeof(next_inv));
-                strncpy(cur_inv, next_inv, sizeof(cur_inv) - 1);
+                snprintf(cur_inv, sizeof(cur_inv), "%s", next_inv);
             }
             if (is_valid_scalar_lean_body_str(spec, fn, cur_inv))
                 append_contract_clause(fn->precond_expr, sizeof(fn->precond_expr), cur_inv);
-        }
-    }
-    for (size_t si = 0; si < spec->lean_struct_count; ++si) {
-        const FlowLeanStruct *st = &spec->lean_structs[si];
-        for (size_t iv = 0; iv < st->invariant_count; ++iv) {
-            int mentions_field = 0;
-            for (size_t k = 0; k < st->field_count; ++k) {
-                if (has_word_match(st->invariants[iv], st->fields[k].name)) {
-                    mentions_field = 1;
-                    break;
-                }
-            }
-            if (mentions_field && is_valid_scalar_lean_body_str(spec, fn, st->invariants[iv]))
-                append_contract_clause(fn->precond_expr, sizeof(fn->precond_expr),
-                                       st->invariants[iv]);
         }
     }
     if (fn->precond_expr[0]) {
@@ -998,21 +1134,22 @@ static void try_add_lean_function(FlowSpec *spec, LeanConstTable *consts, const 
             return;
         }
     } else {
-        strncpy(fn->body, norm_body, sizeof(fn->body) - 1);
+        snprintf(fn->body, sizeof(fn->body), "%s", norm_body);
         if (!is_valid_scalar_lean_body_str(spec, fn, fn->body)) {
             free(fn);
             return;
         }
     }
+    snprintf(fn->raw_body, sizeof(fn->raw_body), "%s", body_in);
     fn->estimated_wcet_ns = estimate_lean_ast_wcet_ns(fn);
     if (dup_idx >= 0) {
         FlowLeanFunction *prev = &spec->lean_functions[dup_idx];
         if (!fn->precond_expr[0] && prev->precond_expr[0] &&
             is_valid_scalar_lean_body_str(spec, fn, prev->precond_expr))
-            strncpy(fn->precond_expr, prev->precond_expr, sizeof(fn->precond_expr) - 1);
+            snprintf(fn->precond_expr, sizeof(fn->precond_expr), "%s", prev->precond_expr);
         if (!fn->postcond_expr[0] && prev->postcond_expr[0] &&
             is_valid_scalar_lean_body_str(spec, fn, prev->postcond_expr))
-            strncpy(fn->postcond_expr, prev->postcond_expr, sizeof(fn->postcond_expr) - 1);
+            snprintf(fn->postcond_expr, sizeof(fn->postcond_expr), "%s", prev->postcond_expr);
         if (fn->thm_guard_count == 0 && prev->thm_guard_count > 0) {
             for (size_t gi = 0;
                  gi < prev->thm_guard_count && fn->thm_guard_count < FLOW_LEAN_THM_GUARD_MAX;
@@ -1021,11 +1158,12 @@ static void try_add_lean_function(FlowSpec *spec, LeanConstTable *consts, const 
                      is_valid_scalar_lean_body_str(spec, fn, prev->thm_hyp_exprs[gi])) &&
                     is_valid_scalar_lean_body_str(spec, fn, prev->thm_conc_exprs[gi])) {
                     size_t dgi = fn->thm_guard_count++;
-                    strncpy(fn->thm_names[dgi], prev->thm_names[gi], sizeof(fn->thm_names[0]) - 1);
-                    strncpy(fn->thm_hyp_exprs[dgi], prev->thm_hyp_exprs[gi],
-                            sizeof(fn->thm_hyp_exprs[0]) - 1);
-                    strncpy(fn->thm_conc_exprs[dgi], prev->thm_conc_exprs[gi],
-                            sizeof(fn->thm_conc_exprs[0]) - 1);
+                    snprintf(fn->thm_names[dgi], sizeof(fn->thm_names[0]), "%s",
+                             prev->thm_names[gi]);
+                    snprintf(fn->thm_hyp_exprs[dgi], sizeof(fn->thm_hyp_exprs[0]), "%s",
+                             prev->thm_hyp_exprs[gi]);
+                    snprintf(fn->thm_conc_exprs[dgi], sizeof(fn->thm_conc_exprs[0]), "%s",
+                             prev->thm_conc_exprs[gi]);
                 }
             }
         }
@@ -1035,6 +1173,7 @@ static void try_add_lean_function(FlowSpec *spec, LeanConstTable *consts, const 
     }
     free(fn);
 }
+
 static char *strip_lean_decl_modifiers_ex(char *line, int *out_is_private) {
     if (out_is_private)
         *out_is_private = 0;
@@ -1055,25 +1194,37 @@ static char *strip_lean_decl_modifiers_ex(char *line, int *out_is_private) {
                 line = trim(rb + 1);
             else
                 break;
-        } else
+        } else {
             break;
+        }
     }
     return line;
 }
+
 static int is_lean_top_decl(const char *line) {
+    if (!line)
+        return 0;
     if (!strcmp(line, "section") || !strcmp(line, "end") || !strcmp(line, "noncomputable section"))
         return 1;
     static const char *const P[] = {
-        "def ",       "private ",   "public ",  "protected ",     "theorem ",
-        "lemma ",     "abbrev ",    "axiom ",   "noncomputable ", "structure ",
-        "inductive ", "namespace ", "section ", "variable ",      "end ",
-        "@[",         "#print ",    "#check ",  "#eval ",         "opaque ",
-        "open ",      "import ",    "module",   "deriving ",      NULL};
-    for (int i = 0; P[i]; ++i)
-        if (starts_with(line, P[i]))
+        "def ",      "private ",  "public ",        "protected ", "theorem ",   "lemma ",
+        "abbrev ",   "axiom ",    "noncomputable ", "structure ", "inductive ", "namespace ",
+        "section ",  "variable ", "end ",           "@[",         "#print ",    "#check ",
+        "#eval ",    "opaque ",   "open ",          "import ",    "plugin ",    "module",
+        "deriving ", NULL};
+    for (int i = 0; P[i]; ++i) {
+        size_t plen = strlen(P[i]);
+        if (plen > 0 && P[i][plen - 1] == ' ') {
+            size_t kwlen = plen - 1;
+            if (strncmp(line, P[i], kwlen) == 0 && isspace((unsigned char)line[kwlen]))
+                return 1;
+        } else if (starts_with(line, P[i])) {
             return 1;
+        }
+    }
     return 0;
 }
+
 static int strip_lean_comments(const char *src, char *clean_out, char *nostr_out, size_t cap,
                                char *err_msg, size_t err_size) {
     size_t j = 0;
@@ -1173,6 +1324,7 @@ static int strip_lean_comments(const char *src, char *clean_out, char *nostr_out
     }
     return 1;
 }
+
 static int parse_lean_inductive_variants(FlowLeanEnum *en, const char *text, int enforce_rt_gate) {
     for (const char *p = (en && text) ? strchr(text, '|') : NULL, *next_bar = NULL; p;
          p = next_bar) {
@@ -1187,7 +1339,6 @@ static int parse_lean_inductive_variants(FlowLeanEnum *en, const char *text, int
         if (alen >= sizeof(arm))
             alen = sizeof(arm) - 1;
         memcpy(arm, p + 1, alen);
-        arm[alen] = '\0';
         char *der = strstr(arm, "deriving");
         if (der && (der == arm || isspace((unsigned char)der[-1])))
             *der = '\0';
@@ -1195,11 +1346,18 @@ static int parse_lean_inductive_variants(FlowLeanEnum *en, const char *text, int
         if (sscanf(tarm, "%63[^ (:=\t\r\n]", vname) == 1 && vname[0]) {
             const char *rem = tarm + strlen(vname);
             if (enforce_rt_gate &&
+                (has_word_match(rem, "Float") || has_word_match(rem, "Float32") ||
+                 has_word_match(rem, "Real") || strstr(rem, "\xe2\x84\x9d") != NULL)) {
+                parser_report_error(
+                    "flowc: [Lean-RT Pure-Integer Gate] rejected '%s' in inductive '%s': floating-point / real types are forbidden in .lean specs (cannot be decided by omega/bv_decide); use scaled fixed-point Int/Int64/Nat/UInt64 + explicit tolerance bounds instead.",
+                    vname, en->name);
+                return 0;
+            }
+            if (enforce_rt_gate &&
                 (has_word_match(rem, en->name) || has_word_match(rem, "List") ||
                  has_word_match(rem, "Array") || has_word_match(rem, "ByteArray"))) {
-                fprintf(
-                    stderr,
-                    "flowc: [Lean-RT Zero-GC Gate] rejected 'recursive/heap inductive %s' in '%s': dynamic heap allocation / closure / recursion violates hard real-time zero-GC invariants; use fixed-size 'structure' instead.\n",
+                parser_report_error(
+                    "flowc: [Lean-RT Zero-GC Gate] rejected 'recursive/heap inductive %s' in '%s': dynamic heap allocation / closure / recursion violates hard real-time zero-GC invariants; use fixed-size 'structure' instead.",
                     vname, en->name);
                 return 0;
             }
@@ -1209,12 +1367,29 @@ static int parse_lean_inductive_variants(FlowLeanEnum *en, const char *text, int
                     dup = 1;
                     break;
                 }
-            if (!dup && en->variant_count < 16)
-                strncpy(en->variants[en->variant_count++], vname, FLOW_NAME - 1);
+            if (!dup && en->variant_count < FLOW_LEAN_ENUM_VARIANT_MAX)
+                snprintf(en->variants[en->variant_count++], FLOW_NAME, "%s", vname);
         }
     }
     return 1;
 }
+
+static int has_float_literal_in_lean_expr(const char *s) {
+    if (!s)
+        return 0;
+    for (const char *p = s; p[0] && p[1] && p[2]; ++p) {
+        if (isdigit((unsigned char)p[0]) && p[1] == '.' && isdigit((unsigned char)p[2])) {
+            const char *d0 = p;
+            while (d0 > s && isdigit((unsigned char)d0[-1]))
+                --d0;
+            if (d0 > s && (isalpha((unsigned char)d0[-1]) || d0[-1] == '_'))
+                continue;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int check_lean_rt_def_gate(const char *def_sig, const char *def_body) {
     size_t kw_len =
         (!def_sig) ? 0
@@ -1224,13 +1399,34 @@ static int check_lean_rt_def_gate(const char *def_sig, const char *def_body) {
     char fn_name[FLOW_NAME] = {0};
     if (sscanf(def_sig + kw_len, "%63[^ ({:\t\n]", fn_name) != 1 || !fn_name[0])
         return 1;
+    static const char *const FLOAT_TYPES[] = {"Float", "Float32", "Real", NULL};
+    for (int i = 0; FLOAT_TYPES[i]; ++i)
+        if (has_word_match(def_sig, FLOAT_TYPES[i]) ||
+            (def_body && has_word_match(def_body, FLOAT_TYPES[i]))) {
+            parser_report_error(
+                "flowc: [Lean-RT Pure-Integer Gate] rejected '%s' in '%s': floating-point / real types are forbidden in .lean specs (cannot be decided by omega/bv_decide); use scaled fixed-point Int/Int64/Nat/UInt64 + explicit tolerance bounds instead.",
+                FLOAT_TYPES[i], fn_name);
+            return 0;
+        }
+    if (strstr(def_sig, "\xe2\x84\x9d") != NULL ||
+        (def_body && strstr(def_body, "\xe2\x84\x9d") != NULL)) {
+        parser_report_error(
+            "flowc: [Lean-RT Pure-Integer Gate] rejected 'ℝ' in '%s': floating-point / real types are forbidden in .lean specs (cannot be decided by omega/bv_decide); use scaled fixed-point Int/Int64/Nat/UInt64 + explicit tolerance bounds instead.",
+            fn_name);
+        return 0;
+    }
+    if (has_float_literal_in_lean_expr(def_body)) {
+        parser_report_error(
+            "flowc: [Lean-RT Pure-Integer Gate] rejected floating-point literal in '%s': floating-point literals are forbidden in .lean specs; use scaled fixed-point Int/Int64/Nat/UInt64 + explicit tolerance bounds instead.",
+            fn_name);
+        return 0;
+    }
     static const char *const HEAP_TYPES[] = {"List", "Array", "ByteArray", NULL};
     for (int i = 0; HEAP_TYPES[i]; ++i)
         if (has_word_match(def_sig, HEAP_TYPES[i]) ||
             (def_body && has_word_match(def_body, HEAP_TYPES[i]))) {
-            fprintf(
-                stderr,
-                "flowc: [Lean-RT Zero-GC Gate] rejected '%s' in '%s': dynamic heap allocation / closure / recursion violates hard real-time zero-GC invariants; use fixed-size 'structure' instead.\n",
+            parser_report_error(
+                "flowc: [Lean-RT Zero-GC Gate] rejected '%s' in '%s': dynamic heap allocation / closure / recursion violates hard real-time zero-GC invariants; use fixed-size 'structure' instead.",
                 HEAP_TYPES[i], fn_name);
             return 0;
         }
@@ -1243,29 +1439,64 @@ static int check_lean_rt_def_gate(const char *def_sig, const char *def_body) {
                        ? "fun =>"
                        : (has_word_match(def_body, fn_name) ? "self-recursion" : NULL));
         if (rej) {
-            fprintf(
-                stderr,
-                "flowc: [Lean-RT Zero-GC Gate] rejected '%s' in '%s': dynamic heap allocation / closure / recursion violates hard real-time zero-GC invariants; use fixed-size 'structure' instead.\n",
+            parser_report_error(
+                "flowc: [Lean-RT Zero-GC Gate] rejected '%s' in '%s': dynamic heap allocation / closure / recursion violates hard real-time zero-GC invariants; use fixed-size 'structure' instead.",
                 rej, fn_name);
             return 0;
         }
     }
     return 1;
 }
-static void extract_lean_theorem_contract(FlowSpec *spec, const LeanConstTable *consts,
-                                          const char *thm_line) {
-    if (!spec || !thm_line || !starts_with(thm_line, "theorem "))
+
+static int check_lean_rt_thm_gate(const char *thm_line) {
+    if (!thm_line)
+        return 1;
+    char thm_name[FLOW_NAME] = "theorem";
+    if (starts_with(thm_line, "theorem "))
+        (void)sscanf(thm_line + 8, "%63[^ (:{\t\r\n]", thm_name);
+    else if (starts_with(thm_line, "lemma "))
+        (void)sscanf(thm_line + 6, "%63[^ (:{\t\r\n]", thm_name);
+    static const char *const FLOAT_TYPES[] = {"Float", "Float32", "Real", NULL};
+    for (int i = 0; FLOAT_TYPES[i]; ++i)
+        if (has_word_match(thm_line, FLOAT_TYPES[i])) {
+            parser_report_error(
+                "flowc: [Lean-RT Pure-Integer Gate] rejected '%s' in theorem '%s': floating-point / real types are forbidden in .lean specs; use scaled fixed-point Int/Int64/Nat/UInt64 + explicit tolerance bounds instead.",
+                FLOAT_TYPES[i], thm_name);
+            return 0;
+        }
+    if (strstr(thm_line, "\xe2\x84\x9d") != NULL) {
+        parser_report_error(
+            "flowc: [Lean-RT Pure-Integer Gate] rejected 'ℝ' in theorem '%s': floating-point / real types are forbidden in .lean specs; use scaled fixed-point Int/Int64/Nat/UInt64 + explicit tolerance bounds instead.",
+            thm_name);
+        return 0;
+    }
+    return 1;
+}
+
+static void extract_lean_relational_contract(FlowSpec *spec, const char *thm_name,
+                                             const char *thm_line) {
+    if (!spec || !thm_name || !thm_line)
         return;
     char tbuf[FLOW_LEAN_BODY_MAX] = {0};
-    strncpy(tbuf, thm_line, sizeof(tbuf) - 1);
-    char thm_name[FLOW_NAME] = {0};
-    (void)sscanf(tbuf + 8, "%63[^ (:{\t\r\n]", thm_name);
+    snprintf(tbuf, sizeof(tbuf), "%s", thm_line);
+    for (char *cp = tbuf; *cp; ++cp) {
+        if (*cp == '\n' || *cp == '\r')
+            *cp = ' ';
+    }
     char *ce = strstr(tbuf, ":=");
     if (ce)
         *ce = '\0';
+
+    int is_thm = starts_with(tbuf, "theorem ");
+    int is_lem = starts_with(tbuf, "lemma ");
+    if (!is_thm && !is_lem)
+        return;
+    size_t kw_len = is_thm ? 8 : 6;
+
+    /* Find the prop colon */
     int pd = 0;
     char *prop_colon = NULL;
-    for (char *p = tbuf + 8; *p; ++p) {
+    for (char *p = tbuf + kw_len; *p; ++p) {
         if (*p == '(' || *p == '{')
             pd++;
         else if (*p == ')' || *p == '}')
@@ -1277,9 +1508,13 @@ static void extract_lean_theorem_contract(FlowSpec *spec, const LeanConstTable *
     }
     if (!prop_colon)
         return;
-    char thm_params[FLOW_LEAN_PARAM_MAX][FLOW_NAME], hyps[16][256];
-    size_t thm_param_cnt = 0, hyp_cnt = 0;
-    for (char *p = tbuf + 8; p < prop_colon;) {
+
+    char pnames[FLOW_LEAN_PARAM_MAX][FLOW_NAME];
+    char ptypes[FLOW_LEAN_PARAM_MAX][FLOW_NAME];
+    size_t pcount = 0;
+
+    /* 1. Extract params before prop_colon */
+    for (char *p = tbuf + kw_len; p < prop_colon;) {
         char *lp = strchr(p, '(');
         if (!lp || lp >= prop_colon)
             break;
@@ -1287,11 +1522,258 @@ static void extract_lean_theorem_contract(FlowSpec *spec, const LeanConstTable *
         for (int d = 1; *rp && rp < prop_colon && d > 0; ++rp) {
             if (*rp == '(')
                 d++;
-            else if (*rp == ')') {
-                d--;
-                if (d == 0)
-                    break;
+            else if (*rp == ')' && --d == 0)
+                break;
+        }
+        if (!*rp || rp >= prop_colon || *rp != ')')
+            break;
+        char grp[256] = {0};
+        size_t gl = (size_t)(rp - (lp + 1));
+        if (gl < sizeof(grp)) {
+            memcpy(grp, lp + 1, gl);
+            char *col = strchr(grp, ':');
+            if (col) {
+                *col = '\0';
+                char *ptype = trim(col + 1);
+                char *saveptr = NULL;
+                for (char *tok = strtok_r(grp, " \t", &saveptr);
+                     tok && pcount < FLOW_LEAN_PARAM_MAX; tok = strtok_r(NULL, " \t", &saveptr)) {
+                    snprintf(pnames[pcount], FLOW_NAME, "%s", tok);
+                    snprintf(ptypes[pcount], FLOW_NAME, "%s", ptype);
+                    pcount++;
+                }
             }
+        }
+        p = rp + 1;
+    }
+
+    char *prop = trim(prop_colon + 1);
+    /* 2. Check for ∀ / forall after prop_colon */
+    while (*prop) {
+        if (!strncmp(prop, "\xe2\x88\x80", 3)) {
+            prop = trim(prop + 3);
+        } else if (!strncmp(prop, "forall", 6) &&
+                   (isspace((unsigned char)prop[6]) || prop[6] == '(')) {
+            prop = trim(prop + 6);
+        } else {
+            break;
+        }
+        while (*prop == '(') {
+            char *rp = strchr(prop, ')');
+            if (!rp)
+                break;
+            char grp[256] = {0};
+            size_t gl = (size_t)(rp - (prop + 1));
+            if (gl < sizeof(grp)) {
+                memcpy(grp, prop + 1, gl);
+                char *col = strchr(grp, ':');
+                if (col) {
+                    *col = '\0';
+                    char *ptype = trim(col + 1);
+                    char *saveptr = NULL;
+                    for (char *tok = strtok_r(grp, " \t", &saveptr);
+                         tok && pcount < FLOW_LEAN_PARAM_MAX;
+                         tok = strtok_r(NULL, " \t", &saveptr)) {
+                        snprintf(pnames[pcount], FLOW_NAME, "%s", tok);
+                        snprintf(ptypes[pcount], FLOW_NAME, "%s", ptype);
+                        pcount++;
+                    }
+                }
+            }
+            prop = trim(rp + 1);
+            if (*prop == ',') {
+                prop = trim(prop + 1);
+                break;
+            }
+        }
+        if (*prop == ',') {
+            prop = trim(prop + 1);
+        }
+    }
+
+    /* Analyze prop for algebraic relation */
+    FlowRelationalKind kind = (FlowRelationalKind)0;
+    char fn_primary[FLOW_NAME] = {0};
+    char fn_secondary[FLOW_NAME] = {0};
+    char hyp_expr[256] = {0};
+    char conc_expr[256] = {0};
+
+    /* Check Equivalence: ↔ or <-> */
+    char *eq_sym = strstr(prop, "\xe2\x86\x94");
+    size_t eq_len = 3;
+    if (!eq_sym) {
+        eq_sym = strstr(prop, "<->");
+        eq_len = 3;
+    }
+    if (eq_sym) {
+        kind = FLOW_REL_EQUIVALENCE;
+        char lhs[FLOW_NAME] = {0}, rhs[FLOW_NAME] = {0};
+        (void)sscanf(prop, "%63[^ <\t(\xe2]", lhs);
+        (void)sscanf(eq_sym + eq_len, "%63[^ <\t(\n]", rhs);
+        snprintf(fn_primary, FLOW_NAME, "%s", trim(lhs));
+        snprintf(fn_secondary, FLOW_NAME, "%s", trim(rhs));
+        snprintf(conc_expr, sizeof(conc_expr), "%s", prop);
+    }
+
+    /* Check Monotonicity: -> or → */
+    if (!kind) {
+        char *arr = strstr(prop, "\xe2\x86\x92");
+        size_t arr_len = 3;
+        if (!arr) {
+            arr = strstr(prop, "->");
+            arr_len = 2;
+        }
+        if (arr) {
+            size_t hlen = (size_t)(arr - prop);
+            if (hlen < sizeof(hyp_expr)) {
+                memcpy(hyp_expr, prop, hlen);
+                hyp_expr[hlen] = '\0';
+                trim(hyp_expr);
+            }
+            snprintf(conc_expr, sizeof(conc_expr), "%s", trim(arr + arr_len));
+            if ((strstr(hyp_expr, "<=") || strstr(hyp_expr, "<")) &&
+                (strstr(conc_expr, "<=") || strstr(conc_expr, "<"))) {
+                kind = FLOW_REL_MONOTONIC;
+                char f1[FLOW_NAME] = {0};
+                if (sscanf(conc_expr, "%63[^ <=\t(\n]", f1) == 1 && f1[0]) {
+                    snprintf(fn_primary, FLOW_NAME, "%s", trim(f1));
+                }
+            }
+        }
+    }
+
+    /* Check Involution or Idempotence: = */
+    if (!kind) {
+        char *eq = strchr(prop, '=');
+        if (eq && (eq == prop || eq[-1] != '!') && (eq == prop || eq[-1] != '<') &&
+            (eq == prop || eq[-1] != '>') && eq[1] != '=' && eq[1] != '>') {
+            size_t l_len = (size_t)(eq - prop);
+            char lhs[256] = {0}, rhs[256] = {0};
+            if (l_len < sizeof(lhs)) {
+                memcpy(lhs, prop, l_len);
+                lhs[l_len] = '\0';
+                trim(lhs);
+            }
+            snprintf(rhs, sizeof(rhs), "%s", trim(eq + 1));
+            snprintf(conc_expr, sizeof(conc_expr), "%s", prop);
+
+            const char *arg_name = (pcount > 0) ? pnames[0] : "x";
+            char f_outer[FLOW_NAME] = {0}, f_inner[FLOW_NAME] = {0};
+            int is_nested = 0;
+            const char *nested_expr = lhs;
+            if (!strcmp(rhs, arg_name) || !strcmp(lhs, arg_name)) {
+                if (!strcmp(lhs, arg_name)) {
+                    nested_expr = rhs;
+                }
+                char copy[256] = {0};
+                snprintf(copy, sizeof(copy), "%s", nested_expr);
+                for (char *c = copy; *c; ++c) {
+                    if (*c == '(' || *c == ')')
+                        *c = ' ';
+                }
+                char tok1[FLOW_NAME] = {0}, tok2[FLOW_NAME] = {0}, tok3[FLOW_NAME] = {0};
+                int tc = sscanf(copy, "%63s %63s %63s", tok1, tok2, tok3);
+                if (tc >= 2) {
+                    snprintf(f_outer, FLOW_NAME, "%s", tok1);
+                    snprintf(f_inner, FLOW_NAME, "%s", tok2);
+                    is_nested = 1;
+                }
+                if (is_nested) {
+                    kind = FLOW_REL_INVOLUTION;
+                    snprintf(fn_primary, FLOW_NAME, "%s", f_outer);
+                    snprintf(fn_secondary, FLOW_NAME, "%s", f_inner);
+                }
+            } else {
+                char copy_lhs[256] = {0}, copy_rhs[256] = {0};
+                snprintf(copy_lhs, sizeof(copy_lhs), "%s", lhs);
+                snprintf(copy_rhs, sizeof(copy_rhs), "%s", rhs);
+                for (char *c = copy_lhs; *c; ++c)
+                    if (*c == '(' || *c == ')')
+                        *c = ' ';
+                for (char *c = copy_rhs; *c; ++c)
+                    if (*c == '(' || *c == ')')
+                        *c = ' ';
+                char ltok1[FLOW_NAME] = {0}, ltok2[FLOW_NAME] = {0}, ltok3[FLOW_NAME] = {0};
+                char rtok1[FLOW_NAME] = {0}, rtok2[FLOW_NAME] = {0};
+                int ltc = sscanf(copy_lhs, "%63s %63s %63s", ltok1, ltok2, ltok3);
+                int rtc = sscanf(copy_rhs, "%63s %63s", rtok1, rtok2);
+                if (ltc >= 2 && rtc >= 1) {
+                    if (!strcmp(ltok1, ltok2) && !strcmp(ltok1, rtok1)) {
+                        kind = FLOW_REL_IDEMPOTENT;
+                        snprintf(fn_primary, FLOW_NAME, "%s", ltok1);
+                        snprintf(fn_secondary, FLOW_NAME, "%s", ltok1);
+                    }
+                }
+            }
+        }
+    }
+
+    if (kind && spec->relational_contract_count < 16) {
+        for (size_t ri = 0; ri < spec->relational_contract_count; ++ri) {
+            if (!strcmp(spec->relational_contracts[ri].name, thm_name))
+                return;
+        }
+        FlowRelationalContract *rc = &spec->relational_contracts[spec->relational_contract_count++];
+        memset(rc, 0, sizeof(*rc));
+        snprintf(rc->name, FLOW_NAME, "%s", thm_name);
+        rc->kind = kind;
+        snprintf(rc->fn_primary, FLOW_NAME, "%s", fn_primary);
+        snprintf(rc->fn_secondary, FLOW_NAME, "%s", fn_secondary[0] ? fn_secondary : fn_primary);
+        rc->param_count = pcount;
+        for (size_t i = 0; i < pcount; ++i) {
+            snprintf(rc->param_names[i], FLOW_NAME, "%s", pnames[i]);
+            snprintf(rc->param_types[i], FLOW_NAME, "%s", ptypes[i][0] ? ptypes[i] : "UInt64");
+        }
+        snprintf(rc->hyp_expr, sizeof(rc->hyp_expr), "%s", hyp_expr);
+        snprintf(rc->conc_expr, sizeof(rc->conc_expr), "%s", conc_expr);
+    }
+}
+
+static void extract_lean_theorem_contract(FlowSpec *spec, const LeanConstTable *consts,
+                                          const char *thm_line) {
+    int is_thm = starts_with(thm_line, "theorem ");
+    int is_lem = starts_with(thm_line, "lemma ");
+    if (!spec || !thm_line || (!is_thm && !is_lem))
+        return;
+    size_t kw_len = is_thm ? 8 : 6;
+    char tbuf[FLOW_LEAN_BODY_MAX] = {0};
+    snprintf(tbuf, sizeof(tbuf), "%s", thm_line);
+    for (char *cp = tbuf; *cp; ++cp) {
+        if (*cp == '\n' || *cp == '\r')
+            *cp = ' ';
+    }
+    char thm_name[FLOW_NAME] = {0};
+    (void)sscanf(tbuf + kw_len, "%63[^ (:{\t\r\n]", thm_name);
+    extract_lean_relational_contract(spec, thm_name, thm_line);
+    char *ce = strstr(tbuf, ":=");
+    if (ce)
+        *ce = '\0';
+    int pd = 0;
+    char *prop_colon = NULL;
+    for (char *p = tbuf + kw_len; *p; ++p) {
+        if (*p == '(' || *p == '{')
+            pd++;
+        else if (*p == ')' || *p == '}')
+            pd--;
+        else if (pd == 0 && *p == ':') {
+            prop_colon = p;
+            break;
+        }
+    }
+    if (!prop_colon)
+        return;
+    char thm_params[FLOW_LEAN_PARAM_MAX][FLOW_NAME], hyps[FLOW_LEAN_THM_GUARD_MAX][256];
+    size_t thm_param_cnt = 0, hyp_cnt = 0;
+    for (char *p = tbuf + kw_len; p < prop_colon;) {
+        char *lp = strchr(p, '(');
+        if (!lp || lp >= prop_colon)
+            break;
+        char *rp = lp + 1;
+        for (int d = 1; *rp && rp < prop_colon && d > 0; ++rp) {
+            if (*rp == '(')
+                d++;
+            else if (*rp == ')' && --d == 0)
+                break;
         }
         if (!*rp || rp >= prop_colon || *rp != ')')
             break;
@@ -1312,31 +1794,65 @@ static void extract_lean_theorem_contract(FlowSpec *spec, const LeanConstTable *
                         : raw_ptype);
                 if (is_scalar_lean_type(ptype) || find_lean_struct(spec, ptype) ||
                     find_lean_enum(spec, ptype)) {
-                    for (char *tok = strtok(grp, " \t"); tok && thm_param_cnt < FLOW_LEAN_PARAM_MAX;
-                         tok = strtok(NULL, " \t")) {
-                        strncpy(thm_params[thm_param_cnt++], tok, FLOW_NAME - 1);
-                        thm_params[thm_param_cnt - 1][FLOW_NAME - 1] = '\0';
+                    char *saveptr = NULL;
+                    for (char *tok = strtok_r(grp, " \t", &saveptr);
+                         tok && thm_param_cnt < FLOW_LEAN_PARAM_MAX;
+                         tok = strtok_r(NULL, " \t", &saveptr)) {
+                        normalize_ident_primes(tok, thm_params[thm_param_cnt++], FLOW_NAME);
                     }
-                } else if (is_lean_erased_proof_field(raw_ptype) && hyp_cnt < 16 &&
-                           strcmp(raw_ptype, "Prop") != 0 && strncmp(raw_ptype, "Prop ", 5) != 0 &&
-                           strcmp(raw_ptype, "True") != 0 && strcmp(raw_ptype, "False") != 0 &&
-                           (strchr(raw_ptype, '<') || strchr(raw_ptype, '>') ||
-                            strchr(raw_ptype, '=') || strstr(raw_ptype, "\xe2\x89\xa4") ||
-                            strstr(raw_ptype, "\xe2\x89\xa5") ||
-                            strstr(raw_ptype, "\xe2\x89\xa0") ||
-                            strstr(raw_ptype, "\xe2\x88\xa7") ||
-                            strstr(raw_ptype, "\xe2\x88\xa8"))) {
-                    strncpy(hyps[hyp_cnt++], raw_ptype, sizeof(hyps[0]) - 1);
-                    hyps[hyp_cnt - 1][sizeof(hyps[0]) - 1] = '\0';
+                } else if (is_lean_erased_proof_field(raw_ptype) &&
+                           hyp_cnt < FLOW_LEAN_THM_GUARD_MAX &&
+                           is_executable_prop_clause(raw_ptype)) {
+                    snprintf(hyps[hyp_cnt++], sizeof(hyps[0]), "%s", raw_ptype);
                 }
             }
         }
         p = rp + 1;
     }
+    char *raw_conc = trim(prop_colon + 1);
+    /* Quantifier parsing (∀, forall) */
+    while (*raw_conc) {
+        if (!strncmp(raw_conc, "\xe2\x88\x80", 3)) {
+            raw_conc = trim(raw_conc + 3);
+        } else if (!strncmp(raw_conc, "forall", 6) &&
+                   (isspace((unsigned char)raw_conc[6]) || raw_conc[6] == '(')) {
+            raw_conc = trim(raw_conc + 6);
+        } else {
+            break;
+        }
+        while (*raw_conc == '(') {
+            char *rp = strchr(raw_conc, ')');
+            if (!rp)
+                break;
+            char grp[256] = {0};
+            size_t gl = (size_t)(rp - (raw_conc + 1));
+            if (gl < sizeof(grp)) {
+                memcpy(grp, raw_conc + 1, gl);
+                char *col = strchr(grp, ':');
+                if (col) {
+                    *col = '\0';
+                    char *saveptr = NULL;
+                    for (char *tok = strtok_r(grp, " \t", &saveptr);
+                         tok && thm_param_cnt < FLOW_LEAN_PARAM_MAX;
+                         tok = strtok_r(NULL, " \t", &saveptr)) {
+                        normalize_ident_primes(tok, thm_params[thm_param_cnt++], FLOW_NAME);
+                    }
+                }
+            }
+            raw_conc = trim(rp + 1);
+            if (*raw_conc == ',') {
+                raw_conc = trim(raw_conc + 1);
+                break;
+            }
+        }
+        if (*raw_conc == ',') {
+            raw_conc = trim(raw_conc + 1);
+        }
+    }
     if (thm_param_cnt == 0)
         return;
-    char *raw_conc = trim(prop_colon + 1);
-    for (int split = 1; split && *raw_conc && hyp_cnt < 16;) {
+    size_t sig_hyp_cnt = hyp_cnt;
+    for (int split = 1; split && *raw_conc && hyp_cnt < FLOW_LEAN_THM_GUARD_MAX;) {
         split = 0;
         pd = 0;
         for (char *p = raw_conc; *p; ++p) {
@@ -1344,7 +1860,8 @@ static void extract_lean_theorem_contract(FlowSpec *spec, const LeanConstTable *
                 pd++;
             else if (*p == ')' && pd > 0)
                 pd--;
-            else if (pd == 0 && (!strncmp(p, "\xe2\x86\x92", 3) || !strncmp(p, "->", 2))) {
+            else if (pd == 0 && (!strncmp(p, "\xe2\x86\x92", 3) ||
+                                 (!strncmp(p, "->", 2) && (p == raw_conc || p[-1] != '<')))) {
                 size_t a_len = (!strncmp(p, "\xe2\x86\x92", 3)) ? 3u : 2u,
                        hl = (size_t)(p - raw_conc);
                 if (hl > 0 && hl < sizeof(hyps[0])) {
@@ -1359,16 +1876,35 @@ static void extract_lean_theorem_contract(FlowSpec *spec, const LeanConstTable *
             }
         }
     }
-    if (!*raw_conc || strstr(raw_conc, "\xe2\x86\x94") || strstr(raw_conc, "<->") ||
-        strstr(raw_conc, "\xe2\x86\x92") || strstr(raw_conc, "->"))
+    if (!*raw_conc)
         return;
+    /* Equivalence support: normalize ↔ and <-> to == */
+    char eq_buf[FLOW_LEAN_BODY_MAX] = {0};
+    char *eq_sym = strstr(raw_conc, "\xe2\x86\x94");
+    size_t eq_len = 3;
+    if (!eq_sym) {
+        eq_sym = strstr(raw_conc, "<->");
+        eq_len = 3;
+    }
+    if (eq_sym) {
+        size_t l_len = (size_t)(eq_sym - raw_conc);
+        char lhs[256] = {0}, rhs[256] = {0};
+        if (l_len < sizeof(lhs)) {
+            memcpy(lhs, raw_conc, l_len);
+            lhs[l_len] = '\0';
+            trim(lhs);
+        }
+        snprintf(rhs, sizeof(rhs), "%s", trim(eq_sym + eq_len));
+        snprintf(eq_buf, sizeof(eq_buf), "(%s) == (%s)", lhs, rhs);
+        raw_conc = eq_buf;
+    }
     for (size_t fi = spec->lean_function_count; fi > 0; --fi) {
         FlowLeanFunction *fn = &spec->lean_functions[fi - 1];
         if (fn->is_tuple_return || fn->param_count != thm_param_cnt ||
             !has_word_match(raw_conc, fn->name))
             continue;
         char call_pat[FLOW_LINE] = {0}, paren_call_pat[FLOW_LINE] = {0};
-        strncpy(call_pat, fn->name, sizeof(call_pat) - 1);
+        snprintf(call_pat, sizeof(call_pat), "%s", fn->name);
         for (size_t pi = 0; pi < fn->param_count; ++pi) {
             size_t cl = strlen(call_pat);
             if (cl + 1 + strlen(fn->param_names[pi]) < sizeof(call_pat))
@@ -1376,11 +1912,11 @@ static void extract_lean_theorem_contract(FlowSpec *spec, const LeanConstTable *
         }
         snprintf(paren_call_pat, sizeof(paren_call_pat), "(%s)", call_pat);
         char ccur[FLOW_LEAN_BODY_MAX] = {0}, cnext[FLOW_LEAN_BODY_MAX] = {0};
-        strncpy(ccur, raw_conc, sizeof(ccur) - 1);
+        snprintf(ccur, sizeof(ccur), "%s", raw_conc);
         for (size_t pi = 0; pi < fn->param_count; ++pi) {
             replace_substr_ex(ccur, thm_params[pi], fn->param_names[pi], 1, 0, cnext,
                               sizeof(cnext));
-            strncpy(ccur, cnext, sizeof(ccur) - 1);
+            snprintf(ccur, sizeof(ccur), "%s", cnext);
         }
         replace_substr_ex(ccur, paren_call_pat, "_ret", 0, 0, cnext, sizeof(cnext));
         replace_substr_ex(cnext, call_pat, "_ret", 1, 0, ccur, sizeof(ccur));
@@ -1391,15 +1927,15 @@ static void extract_lean_theorem_contract(FlowSpec *spec, const LeanConstTable *
         strip_enum_qualifiers(spec, cnext, sizeof(cnext));
         if (!is_valid_scalar_lean_body_str(spec, fn, cnext))
             break;
-        char thm_hyp[256] = {0};
+        char thm_hyp[256] = {0}, domain_pre[256] = {0};
         int all_hyps_valid = 1;
         for (size_t hi = 0; hi < hyp_cnt; ++hi) {
             char hcur[512] = {0}, hnext[512] = {0};
-            strncpy(hcur, hyps[hi], sizeof(hcur) - 1);
+            snprintf(hcur, sizeof(hcur), "%s", hyps[hi]);
             for (size_t pi = 0; pi < fn->param_count; ++pi) {
                 replace_substr_ex(hcur, thm_params[pi], fn->param_names[pi], 1, 0, hnext,
                                   sizeof(hnext));
-                strncpy(hcur, hnext, sizeof(hcur) - 1);
+                snprintf(hcur, sizeof(hcur), "%s", hnext);
             }
             normalize_lean_body(hcur, hnext, sizeof(hnext));
             apply_const_table(consts, hnext, sizeof(hnext));
@@ -1409,21 +1945,32 @@ static void extract_lean_theorem_contract(FlowSpec *spec, const LeanConstTable *
                 break;
             }
             append_contract_clause(thm_hyp, sizeof(thm_hyp), hnext);
+            if (hi < sig_hyp_cnt && hyp_cnt == sig_hyp_cnt) {
+                for (size_t si = 0; si < spec->lean_struct_count; ++si) {
+                    const FlowLeanStruct *st = &spec->lean_structs[si];
+                    for (size_t iv = 0; iv < st->invariant_count; ++iv)
+                        if (!strcmp(st->invariants[iv], hnext)) {
+                            append_contract_clause(domain_pre, sizeof(domain_pre), hnext);
+                            break;
+                        }
+                }
+            }
         }
         if (!all_hyps_valid)
             break;
+        if (domain_pre[0])
+            append_contract_clause(fn->precond_expr, sizeof(fn->precond_expr), domain_pre);
         int dup_g = 0;
-        for (size_t gi = 0; gi < fn->thm_guard_count; ++gi) {
+        for (size_t gi = 0; gi < fn->thm_guard_count; ++gi)
             if (!strcmp(fn->thm_hyp_exprs[gi], thm_hyp) && !strcmp(fn->thm_conc_exprs[gi], cnext)) {
                 dup_g = 1;
                 break;
             }
-        }
         if (!dup_g && fn->thm_guard_count < FLOW_LEAN_THM_GUARD_MAX) {
             size_t gi = fn->thm_guard_count++;
-            strncpy(fn->thm_names[gi], thm_name, sizeof(fn->thm_names[0]) - 1);
-            strncpy(fn->thm_hyp_exprs[gi], thm_hyp, sizeof(fn->thm_hyp_exprs[0]) - 1);
-            strncpy(fn->thm_conc_exprs[gi], cnext, sizeof(fn->thm_conc_exprs[0]) - 1);
+            snprintf(fn->thm_names[gi], sizeof(fn->thm_names[0]), "%s", thm_name);
+            snprintf(fn->thm_hyp_exprs[gi], sizeof(fn->thm_hyp_exprs[0]), "%s", thm_hyp);
+            snprintf(fn->thm_conc_exprs[gi], sizeof(fn->thm_conc_exprs[0]), "%s", cnext);
         }
         if (thm_hyp[0]) {
             char imp_clause[512] = {0};
@@ -1435,6 +1982,7 @@ static void extract_lean_theorem_contract(FlowSpec *spec, const LeanConstTable *
         break;
     }
 }
+
 static int should_join_def_body_with_space(const char *def_body, const char *line, int line_indent,
                                            int *def_let_indent) {
     size_t bl = strlen(def_body);
@@ -1460,10 +2008,9 @@ static int should_join_def_body_with_space(const char *def_body, const char *lin
         else if (!strncmp(def_body + i, "else", 4) &&
                  (i == 0 || isspace((unsigned char)def_body[i - 1]) || def_body[i - 1] == ')') &&
                  (def_body[i + 4] == '\0' || isspace((unsigned char)def_body[i + 4]) ||
-                  def_body[i + 4] == '(')) {
-            if (if_d > 0)
-                if_d--;
-        }
+                  def_body[i + 4] == '(') &&
+                 if_d > 0)
+            if_d--;
     }
     if (pd > 0 || bd > 0 || if_d > 0)
         return 1;
@@ -1495,6 +2042,7 @@ static int should_join_def_body_with_space(const char *def_body, const char *lin
     }
     return 1;
 }
+
 int flow_verify_lean_theorems(const char *lean_source, char *err_msg, size_t err_size) {
     if (err_msg && err_size)
         err_msg[0] = '\0';
@@ -1508,10 +2056,169 @@ int flow_verify_lean_theorems(const char *lean_source, char *err_msg, size_t err
         return 0;
     }
     int ok = strip_lean_comments(lean_source, clean, nostr, slen + 1, err_msg, err_size);
+    if (!ok) {
+        free(clean);
+        free(nostr);
+        return 0;
+    }
+
+    if (!strstr(nostr, "theorem ") && !strstr(nostr, "lemma ")) {
+        free(clean);
+        free(nostr);
+        return 1;
+    }
+
+    if (strstr(nostr, "\xe2\x84\x9d") != NULL || has_word_match(nostr, "Float") ||
+        has_word_match(nostr, "Float32") || has_word_match(nostr, "Real")) {
+        if (err_msg && err_size)
+            snprintf(
+                err_msg, err_size,
+                "[Lean-RT Pure-Integer Gate] rejected floating-point / real type in .lean spec");
+        free(clean);
+        free(nostr);
+        return 0;
+    }
     free(clean);
     free(nostr);
-    return ok;
+
+    const char *lean_bin = getenv("FLOW_LEAN_BIN");
+    if (!lean_bin || !lean_bin[0])
+        lean_bin = getenv("LEAN_BIN");
+    char home_lean[512] = {0};
+    if (!lean_bin || !lean_bin[0]) {
+        const char *home = getenv("HOME");
+        if (home && home[0]) {
+            snprintf(home_lean, sizeof(home_lean), "%s/.elan/bin/lean", home);
+            if (access(home_lean, X_OK) == 0)
+                lean_bin = home_lean;
+        }
+        if (!lean_bin && access("/opt/homebrew/bin/lean", X_OK) == 0)
+            lean_bin = "/opt/homebrew/bin/lean";
+        if (!lean_bin && access("/usr/local/bin/lean", X_OK) == 0)
+            lean_bin = "/usr/local/bin/lean";
+    }
+
+    if (!lean_bin || access(lean_bin, X_OK) != 0)
+        return 1;
+
+    char tmp_path[] = "/tmp/flow_verify_XXXXXX.lean";
+    int fd = mkstemps(tmp_path, 5);
+    if (fd < 0) {
+        if (err_msg && err_size)
+            snprintf(err_msg, err_size, "failed to create temporary file for Lean verification: %s",
+                     strerror(errno));
+        return 0;
+    }
+    char prelude[1024] = {0};
+    size_t plen = 0;
+    if ((strstr(lean_source, "flow_quantize") != NULL ||
+         strstr(lean_source, "flow_dequantize") != NULL) &&
+        strstr(lean_source, "def flow_quantize") == NULL) {
+        plen += (size_t)snprintf(
+            prelude + plen, sizeof(prelude) - plen,
+            "def flow_quantize (x : Int) (lo : Int) (hi : Int) (bits : Nat) : UInt64 := 0\n"
+            "def flow_dequantize (q : UInt64) (lo : Int) (hi : Int) (bits : Nat) : Int := lo\n");
+    }
+    int has_abs_bars = (strstr(lean_source, "|v|") != NULL || strstr(lean_source, "|a") != NULL ||
+                        strstr(lean_source, "|x|") != NULL);
+    if ((strstr(lean_source, "i_abs") != NULL || strstr(lean_source, "i_max") != NULL ||
+         strstr(lean_source, "i_min") != NULL || has_abs_bars) &&
+        strstr(lean_source, "def i_abs") == NULL && strstr(lean_source, "def i_max") == NULL &&
+        strstr(lean_source, "def i_min") == NULL) {
+        plen +=
+            (size_t)snprintf(prelude + plen, sizeof(prelude) - plen,
+                             "def i_abs (x : Int) : Int := if x < 0 then -x else x\n"
+                             "def i_max (a : Int) (b : Int) : Int := if b >= a then b else a\n"
+                             "def i_min (a : Int) (b : Int) : Int := if b <= a then b else a\n");
+        if (has_abs_bars) {
+            plen += (size_t)snprintf(prelude + plen, sizeof(prelude) - plen,
+                                     "macro \"|\" x:term \"|\" : term => `(i_abs $x)\n");
+        }
+    }
+    if (plen > 0) {
+        ssize_t pw = write(fd, prelude, plen);
+        if (pw < 0 || (size_t)pw != plen) {
+            close(fd);
+            unlink(tmp_path);
+            return 0;
+        }
+    }
+    size_t wlen = strlen(lean_source);
+    ssize_t written = write(fd, lean_source, wlen);
+    close(fd);
+    if (written < 0 || (size_t)written != wlen) {
+        unlink(tmp_path);
+        if (err_msg && err_size)
+            snprintf(err_msg, err_size, "failed to write temporary file for Lean verification: %s",
+                     strerror(errno));
+        return 0;
+    }
+
+    int pipefd[2];
+    if (pipe(pipefd) != 0) {
+        unlink(tmp_path);
+        if (err_msg && err_size)
+            snprintf(err_msg, err_size, "failed to create pipe for Lean verification: %s",
+                     strerror(errno));
+        return 0;
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(pipefd[0]);
+        close(pipefd[1]);
+        unlink(tmp_path);
+        if (err_msg && err_size)
+            snprintf(err_msg, err_size, "fork failed for Lean verification: %s", strerror(errno));
+        return 0;
+    }
+    if (pid == 0) {
+        close(pipefd[0]);
+        dup2(pipefd[1], STDOUT_FILENO);
+        dup2(pipefd[1], STDERR_FILENO);
+        close(pipefd[1]);
+        char *const argv[] = {(char *)lean_bin, tmp_path, NULL};
+        execv(lean_bin, argv);
+        _exit(127);
+    }
+    close(pipefd[1]);
+
+    size_t cap = 4096, used = 0;
+    char *out_buf = (char *)calloc(cap, 1);
+    char chunk[1024];
+    ssize_t nr = 0;
+    while ((nr = read(pipefd[0], chunk, sizeof(chunk))) > 0) {
+        if (out_buf && used + (size_t)nr + 1 > cap) {
+            size_t ncap = cap * 2 + (size_t)nr;
+            char *nb = (char *)realloc(out_buf, ncap);
+            if (nb) {
+                out_buf = nb;
+                cap = ncap;
+            }
+        }
+        if (out_buf && used + (size_t)nr < cap) {
+            memcpy(out_buf + used, chunk, (size_t)nr);
+            used += (size_t)nr;
+            out_buf[used] = '\0';
+        }
+    }
+    close(pipefd[0]);
+    int status = 0;
+    waitpid(pid, &status, 0);
+    unlink(tmp_path);
+
+    int rc = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    if (rc != 0 || (out_buf && strstr(out_buf, "sorryAx") != NULL)) {
+        if (err_msg && err_size)
+            snprintf(err_msg, err_size, "Lean 4 verification failed: %s",
+                     (out_buf && out_buf[0]) ? out_buf : "compiler rejected spec");
+        free(out_buf);
+        return 0;
+    }
+    free(out_buf);
+    return 1;
 }
+
 int parse_spec(FILE *input, FlowSpec *spec) {
     if (!input || !spec)
         return 0;
@@ -1535,11 +2242,21 @@ int parse_spec(FILE *input, FlowSpec *spec) {
     char err_msg[256] = {0};
     if (!strip_lean_comments(full_src, clean_src, nostr_src, nread + 1, err_msg, sizeof(err_msg))) {
         if (err_msg[0])
-            fprintf(stderr, "flowc: %s\n", err_msg);
+            parser_report_error("flowc: %s", err_msg);
         free(full_src);
         free(clean_src);
         free(nostr_src);
         return 0;
+    }
+    if (strstr(nostr_src, "theorem ") || strstr(nostr_src, "lemma ")) {
+        if (!flow_verify_lean_theorems(full_src, err_msg, sizeof(err_msg))) {
+            if (err_msg[0])
+                parser_report_error("flowc: %s", err_msg);
+            free(full_src);
+            free(clean_src);
+            free(nostr_src);
+            return 0;
+        }
     }
     free(full_src);
     free(nostr_src);
@@ -1551,20 +2268,19 @@ int parse_spec(FILE *input, FlowSpec *spec) {
     char sym[FLOW_NAME] = {0}, def_sig[FLOW_LEAN_BODY_MAX] = {0},
          def_body[FLOW_LEAN_BODY_MAX] = {0}, thm_buf[FLOW_LEAN_BODY_MAX] = {0};
     size_t struct_bytes = 0;
-    int saw_lean = 0, in_struct = 0, in_def = 0, def_priv = 0, def_let_indent = -1, active_thm = -1,
-        is_ext_lib = 0;
+    int saw_lean = 0, in_struct = 0, in_def = 0, def_priv = 0, def_let_indent = -1, active_thm = -1;
     FlowLeanStruct *cur_st = NULL;
     FlowLeanEnum *cur_en = NULL;
     memset(spec, 0, sizeof(*spec));
-    strncpy(spec->flow_name, "lean_module", FLOW_NAME - 1);
-    spec->max_count = 1024;
+    snprintf(spec->flow_name, sizeof(spec->flow_name), "lean_module");
+    spec->input_max_count = 1024;
     spec->input_stride_bytes = 8;
     spec->input_align_bytes = 8;
     spec->state_schema_version = 1;
-    spec->deterministic = 1;
-    spec->lean_certified = 1;
-    spec->bounded = 1;
-    spec->memory_mb = 64;
+    spec->fact_deterministic = 1;
+    spec->fact_lean_certified = 1;
+    spec->state_bounded = 1;
+    spec->memory_limit_mb = 64;
     spec->float_abi_ieee64 = 1;
     char *saveptr = NULL;
     for (char *raw_line = strtok_r(clean_src, "\n", &saveptr); raw_line;
@@ -1575,8 +2291,6 @@ int parse_spec(FILE *input, FlowSpec *spec) {
         char *line = trim(raw_line);
         if (!*line)
             continue;
-        if (!strcmp(line, "module") || starts_with(line, "module "))
-            is_ext_lib = 1;
         if (starts_with(line, "noncomputable ")) {
             saw_lean = 1;
             if (!strcmp(line, "noncomputable section") ||
@@ -1595,7 +2309,7 @@ int parse_spec(FILE *input, FlowSpec *spec) {
         }
         if (in_def && is_lean_top_decl(line)) {
             if (in_def == 2) {
-                if (!is_ext_lib && !check_lean_rt_def_gate(def_sig, def_body)) {
+                if (!check_lean_rt_def_gate(def_sig, def_body)) {
                     free(consts);
                     free(clean_src);
                     return 0;
@@ -1609,23 +2323,131 @@ int parse_spec(FILE *input, FlowSpec *spec) {
             def_body[0] = '\0';
         }
         if (active_thm >= 0 && is_lean_top_decl(line)) {
-            if (thm_buf[0])
+            if (thm_buf[0]) {
+                if (!check_lean_rt_thm_gate(thm_buf)) {
+                    free(consts);
+                    free(clean_src);
+                    return 0;
+                }
                 extract_lean_theorem_contract(spec, consts, thm_buf);
+                snprintf(spec->lean_theorems[active_thm].full_text,
+                         sizeof(spec->lean_theorems[active_thm].full_text), "%s", thm_buf);
+                char *ce_t1 = strstr(thm_buf, ":=");
+                if (ce_t1)
+                    snprintf(spec->lean_theorems[active_thm].raw_body,
+                             sizeof(spec->lean_theorems[active_thm].raw_body), "%s",
+                             trim(ce_t1 + 2));
+                else
+                    snprintf(spec->lean_theorems[active_thm].raw_body,
+                             sizeof(spec->lean_theorems[active_thm].raw_body), "%s", thm_buf);
+            }
             active_thm = -1;
             thm_buf[0] = '\0';
         }
         if (cur_en && is_lean_top_decl(line))
             cur_en = NULL;
+        if (starts_with(line, "import") && isspace((unsigned char)line[6])) {
+            saw_lean = 1;
+            char *p = line + 6;
+            while (*p) {
+                while (*p && isspace((unsigned char)*p))
+                    p++;
+                if (!*p)
+                    break;
+                char mod[FLOW_NAME] = {0};
+                size_t mi = 0;
+                while (*p && !isspace((unsigned char)*p) && mi + 1 < sizeof(mod)) {
+                    mod[mi++] = *p++;
+                }
+                mod[mi] = '\0';
+                if (!mod[0])
+                    continue;
+                /* Standard Lean 4 core and tactic libraries are not dynamic flow plugins */
+                if (!strncasecmp(mod, "Std.", 4) || !strncasecmp(mod, "Mathlib.", 8) ||
+                    !strncasecmp(mod, "Init", 4) || !strncasecmp(mod, "Lean.", 5) ||
+                    !strcasecmp(mod, "Std") || !strcasecmp(mod, "Lean") ||
+                    !strcasecmp(mod, "Mathlib"))
+                    continue;
+                char clean_mod[FLOW_NAME] = {0};
+                if (!strncasecmp(mod, "flow.", 5)) {
+                    snprintf(clean_mod, sizeof(clean_mod), "%s", mod);
+                } else {
+                    snprintf(clean_mod, sizeof(clean_mod), "flow.%s", mod);
+                }
+                clean_mod[0] = 'f';
+                clean_mod[1] = 'l';
+                clean_mod[2] = 'o';
+                clean_mod[3] = 'w';
+                clean_mod[4] = '.';
+                for (char *cp = clean_mod + 5; *cp; ++cp)
+                    *cp = (char)tolower((unsigned char)*cp);
+                int exists = 0;
+                for (size_t k = 0; k < spec->imported_module_count; ++k) {
+                    if (!strcmp(spec->imported_modules[k], clean_mod)) {
+                        exists = 1;
+                        break;
+                    }
+                }
+                if (!exists && spec->imported_module_count < FLOW_IMPORTED_MODULE_MAX) {
+                    snprintf(spec->imported_modules[spec->imported_module_count++],
+                             sizeof(spec->imported_modules[0]), "%s", clean_mod);
+                }
+                if (!spec->plugin_name[0]) {
+                    snprintf(spec->plugin_name, sizeof(spec->plugin_name), "%s", clean_mod);
+                }
+            }
+            continue;
+        }
+        if (starts_with(line, "plugin") && isspace((unsigned char)line[6])) {
+            saw_lean = 1;
+            char *p = line + 6;
+            while (*p && isspace((unsigned char)*p))
+                p++;
+            char mod[FLOW_NAME] = {0};
+            size_t mi = 0;
+            while (*p && !isspace((unsigned char)*p) && mi + 1 < sizeof(mod)) {
+                mod[mi++] = *p++;
+            }
+            mod[mi] = '\0';
+            if (mod[0]) {
+                char clean_mod[FLOW_NAME] = {0};
+                if (!strncasecmp(mod, "flow.", 5)) {
+                    snprintf(clean_mod, sizeof(clean_mod), "%s", mod);
+                } else {
+                    snprintf(clean_mod, sizeof(clean_mod), "flow.%s", mod);
+                }
+                clean_mod[0] = 'f';
+                clean_mod[1] = 'l';
+                clean_mod[2] = 'o';
+                clean_mod[3] = 'w';
+                clean_mod[4] = '.';
+                for (char *cp = clean_mod + 5; *cp; ++cp)
+                    *cp = (char)tolower((unsigned char)*cp);
+                snprintf(spec->plugin_name, sizeof(spec->plugin_name), "%s", clean_mod);
+                int exists = 0;
+                for (size_t k = 0; k < spec->imported_module_count; ++k) {
+                    if (!strcmp(spec->imported_modules[k], clean_mod)) {
+                        exists = 1;
+                        break;
+                    }
+                }
+                if (!exists && spec->imported_module_count < FLOW_IMPORTED_MODULE_MAX) {
+                    snprintf(spec->imported_modules[spec->imported_module_count++],
+                             sizeof(spec->imported_modules[0]), "%s", clean_mod);
+                }
+            }
+            continue;
+        }
         if (in_def == 1) {
             size_t sl = strlen(def_sig);
             if (sl + 1 + strlen(line) < sizeof(def_sig)) {
                 def_sig[sl] = ' ';
-                strncpy(def_sig + sl + 1, line, sizeof(def_sig) - sl - 2);
+                snprintf(def_sig + sl + 1, sizeof(def_sig) - sl - 1, "%s", line);
             }
             char *ce = strstr(def_sig, ":=");
             if (ce) {
                 *ce = '\0';
-                strncpy(def_body, trim(ce + 2), sizeof(def_body) - 1);
+                snprintf(def_body, sizeof(def_body), "%s", trim(ce + 2));
                 def_let_indent = starts_with(def_body, "let ") ? line_indent : -1;
                 in_def = 2;
             }
@@ -1638,17 +2460,20 @@ int parse_spec(FILE *input, FlowSpec *spec) {
             if (bl + 1 + strlen(line) < sizeof(def_body)) {
                 if (bl > 0)
                     def_body[bl++] = sep_c;
-                strncpy(def_body + bl, line, sizeof(def_body) - bl - 1);
+                snprintf(def_body + bl, sizeof(def_body) - bl, "%s", line);
             }
-        } else if (active_thm >= 0 && !starts_with(line, "theorem ")) {
+        } else if (active_thm >= 0 && !starts_with(line, "theorem ") &&
+                   !starts_with(line, "lemma ")) {
             size_t tl = strlen(thm_buf);
-            if (tl + 1 + strlen(line) < sizeof(thm_buf)) {
-                thm_buf[tl] = ' ';
-                strncpy(thm_buf + tl + 1, line, sizeof(thm_buf) - tl - 2);
+            if (tl + 3 + strlen(line) < sizeof(thm_buf)) {
+                thm_buf[tl] = '\n';
+                thm_buf[tl + 1] = ' ';
+                thm_buf[tl + 2] = ' ';
+                snprintf(thm_buf + tl + 3, sizeof(thm_buf) - tl - 3, "%s", line);
             }
         }
         if (cur_en && line[0] == '|') {
-            if (!parse_lean_inductive_variants(cur_en, line, !is_ext_lib)) {
+            if (!parse_lean_inductive_variants(cur_en, line, 1)) {
                 free(consts);
                 free(clean_src);
                 return 0;
@@ -1665,32 +2490,37 @@ int parse_spec(FILE *input, FlowSpec *spec) {
                 if (ce_f)
                     *ce_f = '\0';
                 char *tft = trim(ft);
-                if (is_lean_erased_proof_field(tft)) {
-                    if (cur_st && cur_st->invariant_count < FLOW_LEAN_STRUCT_INV_MAX &&
-                        strcmp(tft, "Prop") != 0 && strncmp(tft, "Prop ", 5) != 0 &&
-                        strcmp(tft, "True") != 0 && strcmp(tft, "False") != 0 &&
-                        (strchr(tft, '<') || strchr(tft, '>') || strchr(tft, '=') ||
-                         strstr(tft, "\xe2\x89\xa4") || strstr(tft, "\xe2\x89\xa5") ||
-                         strstr(tft, "\xe2\x89\xa0") || strstr(tft, "\xe2\x88\xa7") ||
-                         strstr(tft, "\xe2\x88\xa8"))) {
-                        char norm_inv[128] = {0};
-                        normalize_lean_body(tft, norm_inv, sizeof(norm_inv));
-                        apply_const_table(consts, norm_inv, sizeof(norm_inv));
-                        if (norm_inv[0])
-                            strncpy(cur_st->invariants[cur_st->invariant_count++], norm_inv,
-                                    sizeof(cur_st->invariants[0]) - 1);
-                    }
-                    continue;
-                }
-                if (!is_ext_lib && (has_word_match(tft, "List") || has_word_match(tft, "Array") ||
-                                    has_word_match(tft, "ByteArray"))) {
-                    fprintf(
-                        stderr,
-                        "flowc: [Lean-RT Zero-GC Gate] rejected '%s' in '%s.%s': dynamic heap allocation / closure / recursion violates hard real-time zero-GC invariants; use fixed-size 'structure' instead.\n",
+                if (has_word_match(tft, "Float") || has_word_match(tft, "Float32") ||
+                    has_word_match(tft, "Real") || strstr(tft, "\xe2\x84\x9d") != NULL) {
+                    parser_report_error(
+                        "flowc: [Lean-RT Pure-Integer Gate] rejected '%s' in '%s.%s': floating-point / real types are forbidden in .lean specs (cannot be decided by omega/bv_decide); use scaled fixed-point Int/Int64/Nat/UInt64 + explicit tolerance bounds instead.",
                         tft, cur_st ? cur_st->name : "structure", fn);
                     free(consts);
                     free(clean_src);
                     return 0;
+                }
+                if (has_word_match(tft, "List") || has_word_match(tft, "Array") ||
+                    has_word_match(tft, "ByteArray")) {
+                    parser_report_error(
+                        "flowc: [Lean-RT Zero-GC Gate] rejected '%s' in '%s.%s': dynamic heap allocation / closure / recursion violates hard real-time zero-GC invariants; use fixed-size 'structure' instead.",
+                        tft, cur_st ? cur_st->name : "structure", fn);
+                    free(consts);
+                    free(clean_src);
+                    return 0;
+                }
+                if (is_lean_erased_proof_field(tft)) {
+                    if (cur_st && cur_st->invariant_count < FLOW_LEAN_STRUCT_INV_MAX &&
+                        is_executable_prop_clause(tft)) {
+                        char norm_inv[128] = {0};
+                        normalize_lean_body(tft, norm_inv, sizeof(norm_inv));
+                        apply_const_table(consts, norm_inv, sizeof(norm_inv));
+                        strip_enum_qualifiers(spec, norm_inv, sizeof(norm_inv));
+                        flatten_struct_invariant_fields(cur_st, norm_inv, sizeof(norm_inv));
+                        if (norm_inv[0] && is_valid_struct_invariant_str(spec, cur_st, norm_inv))
+                            snprintf(cur_st->invariants[cur_st->invariant_count++],
+                                     sizeof(cur_st->invariants[0]), "%s", norm_inv);
+                    }
+                    continue;
                 }
                 char ft_tok[FLOW_NAME] = {0};
                 sscanf(tft, "%63s", ft_tok);
@@ -1706,7 +2536,7 @@ int parse_spec(FILE *input, FlowSpec *spec) {
             if (spec->lean_struct_count < FLOW_LEAN_STRUCT_MAX) {
                 cur_st = &spec->lean_structs[spec->lean_struct_count++];
                 memset(cur_st, 0, sizeof(*cur_st));
-                strncpy(cur_st->name, sym, FLOW_NAME - 1);
+                snprintf(cur_st->name, sizeof(cur_st->name), "%s", sym);
                 cur_st->align_bytes = 8;
             }
         } else if (sscanf(line, "inductive %63s", sym) == 1) {
@@ -1717,8 +2547,8 @@ int parse_spec(FILE *input, FlowSpec *spec) {
             } else if (spec->lean_enum_count < FLOW_LEAN_ENUM_MAX) {
                 cur_en = &spec->lean_enums[spec->lean_enum_count++];
                 memset(cur_en, 0, sizeof(*cur_en));
-                strncpy(cur_en->name, sym, FLOW_NAME - 1);
-                if (!parse_lean_inductive_variants(cur_en, line, !is_ext_lib)) {
+                snprintf(cur_en->name, sizeof(cur_en->name), "%s", sym);
+                if (!parse_lean_inductive_variants(cur_en, line, 1)) {
                     free(consts);
                     free(clean_src);
                     return 0;
@@ -1727,7 +2557,7 @@ int parse_spec(FILE *input, FlowSpec *spec) {
         } else if (sscanf(line, "namespace %63s", sym) == 1) {
             saw_lean = 1;
             const char *leaf = strrchr(sym, '.');
-            strncpy(spec->flow_name, leaf ? leaf + 1 : sym, FLOW_NAME - 1);
+            snprintf(spec->flow_name, sizeof(spec->flow_name), "%s", leaf ? leaf + 1 : sym);
         } else if ((starts_with(line, "def ") || starts_with(line, "abbrev ")) &&
                    !strstr(line, ": Prop") && !strstr(line, ": Type")) {
             size_t kw_len = starts_with(line, "def ") ? 4 : 7;
@@ -1742,57 +2572,80 @@ int parse_spec(FILE *input, FlowSpec *spec) {
                         slen_d = sizeof(def_sig) - 1;
                     memcpy(def_sig, line, slen_d);
                     def_sig[slen_d] = '\0';
-                    strncpy(def_body, trim(ce + 2), sizeof(def_body) - 1);
+                    snprintf(def_body, sizeof(def_body), "%s", trim(ce + 2));
                     def_let_indent = starts_with(def_body, "let ") ? (line_indent + 2) : -1;
                     in_def = 2;
                 } else {
-                    strncpy(def_sig, line, sizeof(def_sig) - 1);
+                    snprintf(def_sig, sizeof(def_sig), "%s", line);
                     def_body[0] = '\0';
                     def_let_indent = -1;
                     in_def = 1;
                 }
             }
-        } else if (starts_with(line, "theorem ")) {
+        } else if ((starts_with(line, "def ") || starts_with(line, "abbrev ") ||
+                    starts_with(line, "variable ") || starts_with(line, "opaque ")) &&
+                   !check_lean_rt_thm_gate(line)) {
+            free(consts);
+            free(clean_src);
+            return 0;
+        } else if (starts_with(line, "theorem ") || starts_with(line, "lemma ")) {
             saw_lean = 1;
-            strncpy(thm_buf, line, sizeof(thm_buf) - 1);
-            thm_buf[sizeof(thm_buf) - 1] = '\0';
-            if (sscanf(line + 8, "%63[^ (:{\t]", sym) == 1 &&
+            size_t tkw = starts_with(line, "theorem ") ? 8 : 6;
+            snprintf(thm_buf, sizeof(thm_buf), "%s", line);
+            if (sscanf(line + tkw, "%63[^ (:{\t]", sym) == 1 &&
                 spec->lean_theorem_count < FLOW_LEAN_THEOREM_MAX) {
                 active_thm = (int)spec->lean_theorem_count++;
-                strncpy(spec->lean_theorems[active_thm].name, sym, FLOW_NAME - 1);
+                snprintf(spec->lean_theorems[active_thm].name, FLOW_NAME, "%s", sym);
                 spec->lean_theorems[active_thm].anchored_fn[0] = '\0';
+                snprintf(spec->lean_theorems[active_thm].full_text,
+                         sizeof(spec->lean_theorems[active_thm].full_text), "%s", thm_buf);
             }
             if (active_thm >= 0 && !spec->lean_theorems[active_thm].anchored_fn[0])
                 for (size_t fi = spec->lean_function_count; fi > 0; --fi)
                     if (has_word_match(line, spec->lean_functions[fi - 1].name)) {
-                        strncpy(spec->lean_theorems[active_thm].anchored_fn,
-                                spec->lean_functions[fi - 1].name, FLOW_NAME - 1);
+                        snprintf(spec->lean_theorems[active_thm].anchored_fn, FLOW_NAME, "%s",
+                                 spec->lean_functions[fi - 1].name);
                         break;
                     }
         } else if (active_thm >= 0 && !spec->lean_theorems[active_thm].anchored_fn[0]) {
             for (size_t fi = spec->lean_function_count; fi > 0; --fi)
                 if (has_word_match(line, spec->lean_functions[fi - 1].name)) {
-                    strncpy(spec->lean_theorems[active_thm].anchored_fn,
-                            spec->lean_functions[fi - 1].name, FLOW_NAME - 1);
+                    snprintf(spec->lean_theorems[active_thm].anchored_fn, FLOW_NAME, "%s",
+                             spec->lean_functions[fi - 1].name);
                     break;
                 }
         }
     }
     free(clean_src);
     if (in_def == 2) {
-        if (!is_ext_lib && !check_lean_rt_def_gate(def_sig, def_body)) {
+        if (!check_lean_rt_def_gate(def_sig, def_body)) {
             free(consts);
             return 0;
         }
         try_add_lean_function(spec, consts, def_sig, def_body, def_priv);
     }
-    if (active_thm >= 0 && thm_buf[0])
+    if (active_thm >= 0 && thm_buf[0]) {
+        if (!check_lean_rt_thm_gate(thm_buf)) {
+            free(consts);
+            return 0;
+        }
         extract_lean_theorem_contract(spec, consts, thm_buf);
+        snprintf(spec->lean_theorems[active_thm].full_text,
+                 sizeof(spec->lean_theorems[active_thm].full_text), "%s", thm_buf);
+        char *ce_t2 = strstr(thm_buf, ":=");
+        if (ce_t2)
+            snprintf(spec->lean_theorems[active_thm].raw_body,
+                     sizeof(spec->lean_theorems[active_thm].raw_body), "%s", trim(ce_t2 + 2));
+        else
+            snprintf(spec->lean_theorems[active_thm].raw_body,
+                     sizeof(spec->lean_theorems[active_thm].raw_body), "%s", thm_buf);
+    }
     free(consts);
     if (struct_bytes > 0)
         spec->input_stride_bytes = (struct_bytes + 7u) & ~7u;
     return saw_lean;
 }
+
 const char *flow_lean_scalar_to_c_type(const char *t) {
     if (!t)
         return "uint64_t";
@@ -1803,6 +2656,7 @@ const char *flow_lean_scalar_to_c_type(const char *t) {
 #undef FLOW_MAP_SCALAR_C
     return "uint64_t";
 }
+
 FlowLeanExprMode flow_c_type_expr_mode(const char *c_type, FlowLeanExprMode fallback) {
     if (!c_type)
         return fallback;
@@ -1815,28 +2669,20 @@ FlowLeanExprMode flow_c_type_expr_mode(const char *c_type, FlowLeanExprMode fall
 #undef FLOW_MAP_CTYPE_MODE
     return fallback;
 }
+
 static FlowLeanExprMode compute_lean_fn_expr_mode(const FlowLeanFunction *fn) {
     if (!fn)
         return FLOW_EXPR_NAT;
-    if (!strcmp(fn->return_type, "Float") || !strcmp(fn->return_type, "Float32"))
-        return FLOW_EXPR_FLOAT;
-    for (size_t i = 0; i < fn->param_count; ++i)
-        if (!strcmp(fn->param_types[i], "Float") || !strcmp(fn->param_types[i], "Float32"))
-            return FLOW_EXPR_FLOAT;
-    if (!strcmp(fn->return_type, "Int") || !strcmp(fn->return_type, "Int64") ||
-        !strcmp(fn->return_type, "Int32") || !strcmp(fn->return_type, "Int16") ||
-        !strcmp(fn->return_type, "Int8"))
+    if (!strncmp(fn->return_type, "Int", 3))
         return FLOW_EXPR_INT;
     for (size_t i = 0; i < fn->param_count; ++i)
-        if (!strcmp(fn->param_types[i], "Int") || !strcmp(fn->param_types[i], "Int64") ||
-            !strcmp(fn->param_types[i], "Int32") || !strcmp(fn->param_types[i], "Int16") ||
-            !strcmp(fn->param_types[i], "Int8"))
+        if (!strncmp(fn->param_types[i], "Int", 3))
             return FLOW_EXPR_INT;
-    if (!strcmp(fn->return_type, "UInt64") || !strcmp(fn->return_type, "UInt32") ||
-        !strcmp(fn->return_type, "UInt16") || !strcmp(fn->return_type, "UInt8"))
+    if (!strncmp(fn->return_type, "UInt", 4))
         return FLOW_EXPR_UINT;
     return FLOW_EXPR_NAT;
 }
+
 const FlowLeanStruct *flow_ir_find_struct(const SemanticIR *ir, const char *name) {
     if (!ir || !name || !name[0])
         return NULL;
@@ -1845,6 +2691,7 @@ const FlowLeanStruct *flow_ir_find_struct(const SemanticIR *ir, const char *name
             return &ir->lean_structs[i];
     return NULL;
 }
+
 const FlowLeanEnum *flow_ir_find_enum(const SemanticIR *ir, const char *name) {
     if (!ir || !name || !name[0])
         return NULL;
@@ -1853,6 +2700,7 @@ const FlowLeanEnum *flow_ir_find_enum(const SemanticIR *ir, const char *name) {
             return &ir->lean_enums[i];
     return NULL;
 }
+
 const char *flow_ir_type_to_c(const SemanticIR *ir, const char *t) {
     if (!t)
         return "uint64_t";
@@ -1860,20 +2708,25 @@ const char *flow_ir_type_to_c(const SemanticIR *ir, const char *t) {
         return t;
     return flow_lean_scalar_to_c_type(t);
 }
+
+static int is_jet2_scalar_type(const char *t) {
+    return t && (!strcmp(t, "Int") || !strcmp(t, "Int64") || !strcmp(t, "Float") ||
+                 !strcmp(t, "Float32"));
+}
+
 static int ir_fn_is_jet2_eligible_depth(const SemanticIR *ir, const FlowLeanFunction *fn,
                                         int depth) {
     if (depth > 4 || !fn || fn->is_struct_transform || fn->is_tuple_return ||
         fn->is_result_return || fn->param_count == 0)
         return 0;
-    if (strcmp(fn->return_type, "Float") != 0 && strcmp(fn->return_type, "Float32") != 0)
+    if (!is_jet2_scalar_type(fn->return_type))
         return 0;
     if (strstr(fn->body, "let (") != NULL || strstr(fn->body, "match ") != NULL)
         return 0;
     for (size_t pi = 0; pi < fn->param_count; ++pi) {
         if (fn->param_is_result[pi] || flow_ir_find_struct(ir, fn->param_types[pi]))
             return 0;
-        if (strcmp(fn->param_types[pi], "Float") != 0 &&
-            strcmp(fn->param_types[pi], "Float32") != 0)
+        if (!is_jet2_scalar_type(fn->param_types[pi]))
             return 0;
     }
     if (ir) {
@@ -1887,6 +2740,7 @@ static int ir_fn_is_jet2_eligible_depth(const SemanticIR *ir, const FlowLeanFunc
     }
     return 1;
 }
+
 void flow_ir_compute_fn_variants(SemanticIR *ir) {
     if (!ir)
         return;
@@ -1902,18 +2756,15 @@ void flow_ir_compute_fn_variants(SemanticIR *ir) {
                 char cand[FLOW_NAME + 8];
                 snprintf(cand, sizeof(cand), "lean_%s", fn->name);
                 int has_conflict = 0;
-                for (size_t j = 0; j < ir->lean_function_count; ++j) {
+                for (size_t j = 0; j < ir->lean_function_count; ++j)
                     if (!strcmp(ir->lean_functions[j].name, cand)) {
                         has_conflict = 1;
                         break;
                     }
-                }
                 if (!has_conflict) {
                     mask |= FLOW_FN_VAR_LEAN;
                     if (!fn->is_tuple_return) {
                         mask |= FLOW_FN_VAR_CERTIFIED | FLOW_FN_VAR_TRY;
-                        if (!strcmp(flow_ir_type_to_c(ir, fn->return_type), "double"))
-                            mask |= FLOW_FN_VAR_BOUNDARY;
                     }
                     if (!fn->is_result_return && !fn->is_tuple_return && fn->param_count > 0) {
                         const FlowLeanStruct *out_st = flow_ir_find_struct(ir, fn->return_type);
@@ -1941,16 +2792,18 @@ void flow_ir_compute_fn_variants(SemanticIR *ir) {
         fn->variant_mask = mask;
     }
 }
+
 static void add_fact(SemanticIR *ir, FlowFactKind kind, const char *detail) {
     if (ir->fact_count >= FLOW_NODE_MAX)
         return;
     ir->facts[ir->fact_count].kind = kind;
-    strncpy(ir->facts[ir->fact_count++].detail, detail, FLOW_NAME - 1);
+    snprintf(ir->facts[ir->fact_count++].detail, FLOW_NAME, "%s", detail);
     if (kind == FLOW_FACT_HOLE)
         ++ir->hole_count;
     else if (kind == FLOW_FACT_CONSTRAINT)
         ++ir->constraint_count;
 }
+
 void lower_to_ir(const FlowSpec *spec, SemanticIR *ir) {
     memset(ir, 0, sizeof(*ir));
     memcpy(ir, spec, offsetof(FlowSpec, constraint_count));

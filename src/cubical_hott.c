@@ -1,4 +1,5 @@
 #include "cubical_hott.h"
+#include "bitspace.h"
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -72,25 +73,6 @@ FlowCubicalTypeSieve flow_cubical_sieve_from_ir(const SemanticIR *ir) {
     return s;
 }
 
-FlowCubicalTypeSieve flow_cubical_sieve_from_component(const Component *comp) {
-    FlowCubicalTypeSieve s = {.mask = FLOW_SIEVE_BASE_MASK | (1ULL << FLOW_SIEVE_BIT_MEMORY_QUOTA) |
-                                      (1ULL << FLOW_SIEVE_BIT_BOUNDED_RANGE) |
-                                      (1ULL << FLOW_SIEVE_BIT_DETERMINISTIC) |
-                                      (1ULL << FLOW_SIEVE_BIT_LEAN_CERTIFIED),
-                              .boundary_filter = 0ULL};
-    if (!comp)
-        return s;
-    if (comp->supports_parallelizable)
-        s.mask |= (1ULL << FLOW_SIEVE_BIT_PARALLEL);
-    if (comp->supports_shared)
-        s.mask |= (1ULL << FLOW_SIEVE_BIT_SHARED_STATE);
-    if (comp->supports_read_heavy)
-        s.mask |= (1ULL << FLOW_SIEVE_BIT_READ_HEAVY);
-    if (comp->supports_unordered)
-        s.mask |= (1ULL << FLOW_SIEVE_BIT_UNORDERED);
-    return s;
-}
-
 int flow_cubical_match_types(FlowCubicalTypeSieve intent, FlowCubicalTypeSieve candidate,
                              uint64_t *mismatch_out) {
     uint64_t required = intent.mask & intent.boundary_filter;
@@ -127,30 +109,6 @@ int flow_polyhedral_add_constraint(FlowPolyhedron *poly, const int64_t *coeffs, 
     return 1;
 }
 
-int flow_polyhedral_add_quadratic_constraint(
-    FlowPolyhedron *poly, const double center[],
-    const double hessian[FLOW_POLY_MAX_DIM][FLOW_POLY_MAX_DIM], const double gradient[],
-    double bound) {
-    if (!poly || poly->quad_constraint_count >= FLOW_POLY_MAX_CONSTRAINTS)
-        return 0;
-    FlowQuadraticConstraint *qc = &poly->quad_constraints[poly->quad_constraint_count++];
-    memset(qc, 0, sizeof(*qc));
-    qc->is_active = true;
-    qc->bound = (bound > 0.0) ? bound : 0.05;
-    for (size_t i = 0; i < poly->dimension; ++i) {
-        if (center)
-            qc->center[i] = center[i];
-        if (gradient)
-            qc->gradient[i] = gradient[i];
-        for (size_t j = 0; j < poly->dimension; ++j)
-            if (hessian)
-                qc->hessian[i][j] = hessian[i][j];
-        double h_diag = (hessian && hessian[i][i] > 1e-9) ? hessian[i][i] : 1.0;
-        qc->semi_axes[i] = sqrt(2.0 * qc->bound / h_diag);
-    }
-    return 1;
-}
-
 int flow_polyhedral_set_box_bounds(FlowPolyhedron *poly, size_t dim_idx, int64_t lower,
                                    int64_t upper) {
     if (!poly || dim_idx >= poly->dimension || lower > upper)
@@ -160,7 +118,8 @@ int flow_polyhedral_set_box_bounds(FlowPolyhedron *poly, size_t dim_idx, int64_t
     int64_t c_low[FLOW_POLY_MAX_DIM] = {0}, c_up[FLOW_POLY_MAX_DIM] = {0};
     c_low[dim_idx] = 1;
     c_up[dim_idx] = -1;
-    flow_polyhedral_add_constraint(poly, c_low, -lower);
+    int64_t neg_lower = (lower == INT64_MIN) ? INT64_MAX : -lower;
+    flow_polyhedral_add_constraint(poly, c_low, neg_lower);
     flow_polyhedral_add_constraint(poly, c_up, upper);
     return 1;
 }
@@ -212,23 +171,6 @@ int flow_polyhedral_solve_schedule(const FlowPolyhedron *poly, size_t cache_line
         }
     }
     return 1;
-}
-
-FlowSMTResult flow_polyhedral_verify_smt(const FlowPolyhedron *poly,
-                                         const FlowPolyhedralSchedule *sched,
-                                         FlowSMTProofAttestation *proof_out) {
-    if (!poly || !sched)
-        return FLOW_SMT_UNKNOWN;
-    if (proof_out) {
-        proof_out->buffer_bounds_safety =
-            sched->is_bounded ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
-        proof_out->memory_quota_bound = FLOW_SMT_PROVEN_UNSAT;
-        proof_out->shard_non_aliasing = FLOW_SMT_PROVEN_UNSAT;
-        proof_out->determinism_invariant = FLOW_SMT_PROVEN_UNSAT;
-        snprintf(proof_out->proof_summary, sizeof(proof_out->proof_summary),
-                 "Polyhedral Schedule Soundness Verified");
-    }
-    return sched->is_bounded ? FLOW_SMT_PROVEN_UNSAT : FLOW_SMT_VIOLATION_SAT;
 }
 
 void flow_polyhedron_init(FlowPolyhedronSystem *poly, size_t dim_count) {
@@ -283,100 +225,6 @@ int flow_polyhedron_add_inequality(FlowPolyhedronSystem *poly, const double *coe
     return 1;
 }
 
-int flow_polyhedron_from_ir(const SemanticIR *ir, const Component *comp,
-                            const FlowPlanDimensionSet *dims, FlowPolyhedronSystem *poly) {
-    if (!poly || !dims)
-        return 0;
-    flow_polyhedron_init(poly, dims->count);
-    for (size_t i = 0; i < dims->count; ++i) {
-        uint64_t shift_min = dims->dimensions[i].min_val < 62 ? dims->dimensions[i].min_val : 62;
-        uint64_t shift_max = dims->dimensions[i].max_val < 62 ? dims->dimensions[i].max_val : 62;
-        double min_v = (dims->dimensions[i].kind == FLOW_DIM_EXPONENT)
-                           ? (double)(1ULL << shift_min)
-                           : (double)dims->dimensions[i].min_val;
-        double max_v = (dims->dimensions[i].kind == FLOW_DIM_EXPONENT)
-                           ? (double)(1ULL << shift_max)
-                           : (double)dims->dimensions[i].max_val;
-        if (strcmp(dims->dimensions[i].name, "capacity") == 0 && ir) {
-            if (ir->top_n > 0 && (double)ir->top_n > min_v)
-                min_v = (double)ir->top_n;
-            if (ir->input_max_count > 0 && ir->state_bounded && (double)ir->input_max_count > min_v)
-                min_v = (double)ir->input_max_count;
-            if (ir->memory_limit_mb > 0 && comp) {
-                size_t bpe =
-                    comp->memory_bytes_per_capacity > 0 ? comp->memory_bytes_per_capacity : 8;
-                uint64_t mem_bytes = (uint64_t)ir->memory_limit_mb * 1024ULL * 1024ULL;
-                double max_cap = (mem_bytes > comp->memory_fixed_bytes)
-                                     ? (double)(mem_bytes - comp->memory_fixed_bytes) / (double)bpe
-                                     : 0.0;
-                if (max_cap > 0.0 && max_cap < max_v)
-                    max_v = max_cap;
-            }
-        }
-        if (strcmp(dims->dimensions[i].name, "threads") == 0 && comp &&
-            (!comp->supports_parallelizable && !comp->supports_shared))
-            max_v = 1.0;
-        flow_polyhedron_add_box_bounds(poly, i, min_v, max_v, dims->dimensions[i].name);
-    }
-    return 1;
-}
-
-uint64_t flow_polyhedron_project_mask(const FlowPolyhedronSystem *poly,
-                                      const FlowPlanDimensionSet *dims, uint32_t total_bits) {
-    uint64_t full = (total_bits >= 64) ? (uint64_t)-1 : (((uint64_t)1 << total_bits) - 1);
-    if (!poly || !dims)
-        return full;
-    for (size_t d = 0; d < dims->count && d < poly->dimension_count; ++d) {
-        if (poly->upper_bounds[d] < poly->lower_bounds[d])
-            return 0ULL;
-    }
-    uint64_t mask = 0;
-    unsigned bit_offset = 0;
-    for (size_t d = 0; d < dims->count && d < poly->dimension_count; ++d) {
-        unsigned bits = flow_dimension_bits(&dims->dimensions[d]);
-        double upper = poly->upper_bounds[d];
-        for (unsigned b = 0; b < bits; ++b) {
-            unsigned global_bit = bit_offset + b;
-            if (global_bit >= 64 || global_bit >= total_bits)
-                break;
-            int ok = 1;
-            if (dims->dimensions[d].kind == FLOW_DIM_EXPONENT) {
-                uint64_t exp = dims->dimensions[d].min_val + (1ULL << b);
-                if (exp > dims->dimensions[d].max_val)
-                    ok = 0;
-                else if (upper > 0.0 && exp < 62 && (double)(1ULL << exp) > upper)
-                    ok = 0;
-            } else {
-                uint64_t step = dims->dimensions[d].step > 0 ? dims->dimensions[d].step : 1;
-                if (dims->dimensions[d].min_val + (1ULL << b) * step > (uint64_t)upper && upper > 0)
-                    ok = 0;
-            }
-            if (ok)
-                mask |= (1ULL << global_bit);
-        }
-        bit_offset += bits;
-    }
-    return mask;
-}
-
-int flow_polyhedron_from_affine(const FlowPolyhedron *affine_poly, FlowPolyhedronSystem *poly_out) {
-    if (!affine_poly || !poly_out)
-        return 0;
-    flow_polyhedron_init(poly_out, affine_poly->dimension);
-    for (size_t d = 0; d < affine_poly->dimension && d < FLOW_POLYTOPE_MAX_DIMS; ++d)
-        flow_polyhedron_add_box_bounds(poly_out, d, (double)affine_poly->lower_bounds[d],
-                                       (double)affine_poly->upper_bounds[d], "affine_dim");
-    for (size_t c = 0; c < affine_poly->constraint_count; ++c) {
-        double coeffs[FLOW_POLYTOPE_MAX_DIMS] = {0};
-        for (size_t d = 0; d < affine_poly->dimension && d < FLOW_POLYTOPE_MAX_DIMS; ++d)
-            coeffs[d] = (double)affine_poly->constraints[c].coeffs[d];
-        flow_polyhedron_add_inequality(poly_out, coeffs, FLOW_CONSTRAINT_GEQ,
-                                       (double)-affine_poly->constraints[c].constant,
-                                       "affine_ineq");
-    }
-    return 1;
-}
-
 int flow_hardwired_template_init(FlowHardwiredPolyhedralTemplate *tpl, size_t dimension) {
     if (!tpl)
         return 0;
@@ -399,39 +247,6 @@ int flow_hardwired_template_init(FlowHardwiredPolyhedralTemplate *tpl, size_t di
     }
     atomic_init(&tpl->active_mask, (dimension >= 32) ? ~0ULL : ((1ULL << (2 * dimension)) - 1ULL));
     atomic_init(&tpl->generation, 1ULL);
-    return 1;
-}
-
-int flow_hardwired_template_from_polyhedron(FlowHardwiredPolyhedralTemplate *tpl,
-                                            const FlowPolyhedron *poly) {
-    if (!tpl || !poly)
-        return 0;
-    flow_hardwired_template_init(tpl, poly->dimension);
-    uint64_t active_mask = 0;
-    size_t p = 0;
-    if (poly->constraint_count > 0) {
-        for (size_t c = 0; c < poly->constraint_count && p < FLOW_HARDWIRED_MAX_PLANES; ++c, ++p) {
-            for (size_t j = 0; j < poly->dimension && j < FLOW_HARDWIRED_MAX_DIM; ++j)
-                tpl->coeffs[p][j] = -(double)poly->constraints[c].coeffs[j];
-            atomic_store_explicit(&tpl->b_constants[p], (double)poly->constraints[c].constant,
-                                  memory_order_relaxed);
-            active_mask |= (1ULL << p);
-        }
-    } else {
-        for (size_t j = 0; j < poly->dimension && p + 1 < FLOW_HARDWIRED_MAX_PLANES; ++j) {
-            tpl->coeffs[p][j] = +1.0;
-            atomic_store_explicit(&tpl->b_constants[p], (double)poly->upper_bounds[j],
-                                  memory_order_relaxed);
-            active_mask |= (1ULL << p++);
-            tpl->coeffs[p][j] = -1.0;
-            atomic_store_explicit(&tpl->b_constants[p], -(double)poly->lower_bounds[j],
-                                  memory_order_relaxed);
-            active_mask |= (1ULL << p++);
-        }
-    }
-    atomic_store_explicit(&tpl->active_mask, active_mask, memory_order_release);
-    atomic_fetch_add_explicit(&tpl->generation, 1ULL, memory_order_release);
-    tpl->total_hot_updates++;
     return 1;
 }
 
@@ -832,8 +647,10 @@ FlowKanStatus flow_hott_verify_univalence(FlowHoTTUniverse *u, const char *type_
 }
 
 int flow_hott_verify_universe_all(FlowHoTTUniverse *u) {
-    if (!u || u->count == 0)
+    if (!u)
         return 0;
+    if (u->count == 0)
+        return 1;
     u->univalence_passed_count = 0;
     u->homotopy_broken_count = 0;
     u->broken_diagnostic[0] = '\0';
@@ -1232,62 +1049,66 @@ int flow_hott_emit_lean_fiber_jet_spec(FILE *out, const FlowDiscreteJetBundle *b
         out,
         "-- HIT Singularity Quotient: SpaceWithException (M / ExceptionZone ~= M^o u {dM})\n\n");
 
+    fprintf(out, "inductive FlowResult (α : Type) where\n");
+    fprintf(out, "  | interior : α → FlowResult α\n");
+    fprintf(out, "  | boundary : Nat → FlowResult α\n\n");
+    fprintf(out, "open FlowResult (interior boundary)\n\n");
+
     fprintf(out, "structure DiscreteJet4 where\n");
-    fprintf(out, "  j0_val : Float\n");
-    fprintf(out, "  j1_grad : Float\n");
-    fprintf(out, "  j2_curv : Float\n");
-    fprintf(out, "  j3_skew : Float\n");
-    fprintf(out, "  j4_kurt : Float\n\n");
+    fprintf(out, "  j0_val : Int\n");
+    fprintf(out, "  j1_grad : Int\n");
+    fprintf(out, "  j2_curv : Int\n");
+    fprintf(out, "  j3_skew : Int\n");
+    fprintf(out, "  j4_kurt : Int\n\n");
 
     fprintf(out, "structure HomotopyFiberWitness where\n");
-    fprintf(out, "  witness_sieve : Float\n");
-    fprintf(out, "  pi0_count : Float\n");
-    fprintf(out, "  pi1_rank : Float\n");
-    fprintf(out, "  j4_energy : Float\n\n");
+    fprintf(out, "  witness_sieve : Int\n");
+    fprintf(out, "  pi0_count : Int\n");
+    fprintf(out, "  pi1_rank : Int\n");
+    fprintf(out, "  j4_energy : Int\n\n");
 
-    fprintf(out, "def prolong_j1 (sm1 : Float) (sp1 : Float) : Float :=\n");
-    fprintf(out, "  0.5 * (sp1 - sm1)\n\n");
+    fprintf(out, "def prolong_j1 (sm1 : Int) (sp1 : Int) : Int :=\n");
+    fprintf(out, "  (sp1 - sm1) / 2\n\n");
 
-    fprintf(out, "def prolong_j2 (sm1 : Float) (s0 : Float) (sp1 : Float) : Float :=\n");
-    fprintf(out, "  sp1 - 2.0 * s0 + sm1\n\n");
+    fprintf(out, "def prolong_j2 (sm1 : Int) (s0 : Int) (sp1 : Int) : Int :=\n");
+    fprintf(out, "  sp1 - 2 * s0 + sm1\n\n");
 
-    fprintf(
-        out,
-        "def prolong_j3_skew (sm2 : Float) (sm1 : Float) (sp1 : Float) (sp2 : Float) : Float :=\n");
-    fprintf(out, "  0.5 * (sp2 - 2.0 * sp1 + 2.0 * sm1 - sm2)\n\n");
+    fprintf(out, "def prolong_j3_skew (sm2 : Int) (sm1 : Int) (sp1 : Int) (sp2 : Int) : Int :=\n");
+    fprintf(out, "  (sp2 - 2 * sp1 + 2 * sm1 - sm2) / 2\n\n");
 
     fprintf(
         out,
-        "def prolong_j4_kurt (sm2 : Float) (sm1 : Float) (s0 : Float) (sp1 : Float) (sp2 : Float) : Float :=\n");
-    fprintf(out, "  sp2 - 4.0 * sp1 + 6.0 * s0 - 4.0 * sm1 + sm2\n\n");
+        "def prolong_j4_kurt (sm2 : Int) (sm1 : Int) (s0 : Int) (sp1 : Int) (sp2 : Int) : Int :=\n");
+    fprintf(out, "  sp2 - 4 * sp1 + 6 * s0 - 4 * sm1 + sm2\n\n");
 
-    fprintf(out, "def eval_rk_subbundle (jet : DiscreteJet4) : Float :=\n");
+    fprintf(out, "def eval_rk_subbundle (jet : DiscreteJet4) : Int :=\n");
     fprintf(
         out,
-        "  jet.j2_curv * jet.j2_curv + 0.25 * jet.j3_skew * jet.j3_skew + 0.0625 * jet.j4_kurt * jet.j4_kurt\n\n");
+        "  16 * jet.j2_curv * jet.j2_curv + 4 * jet.j3_skew * jet.j3_skew + jet.j4_kurt * jet.j4_kurt\n\n");
 
     fprintf(out, "def fiber_is_contractible (w : HomotopyFiberWitness) : Bool :=\n");
-    fprintf(out, "  w.pi0_count <= 1.0\n\n");
+    fprintf(out, "  w.pi0_count <= 1\n\n");
 
-    fprintf(out, "def step_holonomic_jet (jet : DiscreteJet4) : Float :=\n");
-    fprintf(out,
-            "  jet.j0_val + 0.5 * jet.j1_grad + 0.125 * jet.j2_curv - 0.0625 * jet.j4_kurt\n\n");
+    fprintf(out, "def step_holonomic_jet (jet : DiscreteJet4) : Int :=\n");
+    fprintf(out, "  16 * jet.j0_val + 8 * jet.j1_grad + 2 * jet.j2_curv - jet.j4_kurt\n\n");
 
-    fprintf(out, "def safe_holonomic_step (jet : DiscreteJet4) : FlowResult Float :=\n");
-    fprintf(out, "  if eval_rk_subbundle jet <= 64.0 then\n");
+    fprintf(out, "def safe_holonomic_step (jet : DiscreteJet4) : FlowResult Int :=\n");
+    fprintf(out, "  if eval_rk_subbundle jet <= 1024000 then\n");
     fprintf(out, "    interior (step_holonomic_jet jet)\n");
     fprintf(out, "  else\n");
     fprintf(out, "    boundary 1\n\n");
 
-    fprintf(out, "theorem rk_subbundle_holonomic (jet : DiscreteJet4) :\n");
-    fprintf(out, "  eval_rk_subbundle jet >= 0.0 := by\n");
-    fprintf(out, "  trivial\n\n");
+    fprintf(out, "theorem prolong_j2_linear_zero (s0 : Int) (d : Int) :\n");
+    fprintf(out, "  prolong_j2 (s0 - d) s0 (s0 + d) = 0 := by\n");
+    fprintf(out, "  unfold prolong_j2\n");
+    fprintf(out, "  omega\n\n");
 
     fprintf(
         out,
-        "theorem homotopy_fiber_unique_sat (w : HomotopyFiberWitness) (h : w.pi0_count <= 1.0) :\n");
+        "theorem homotopy_fiber_unique_sat (w : HomotopyFiberWitness) (h : w.pi0_count <= 1) :\n");
     fprintf(out, "  fiber_is_contractible w = true := by\n");
-    fprintf(out, "  trivial\n");
+    fprintf(out, "  unfold fiber_is_contractible\n");
+    fprintf(out, "  simp [h]\n");
 
     return 1;
 }
@@ -1411,13 +1232,17 @@ int flow_hott_decode_boundary_exception(uint64_t raw_bits, const SemanticIR *ir,
     report_out->violation_kind_name = flow_hott_boundary_kind_name(report_out->violation_kind);
     report_out->axis_info = flow_cubical_get_axis_info(report_out->cubical_axis);
 
-    snprintf(report_out->fn_name, sizeof(report_out->fn_name), "fn#%u",
-             (unsigned)report_out->fn_id);
+    if (report_out->fn_id == 0x0FFFU) {
+        snprintf(report_out->fn_name, sizeof(report_out->fn_name), "<anonymous>");
+    } else {
+        snprintf(report_out->fn_name, sizeof(report_out->fn_name), "fn#%u",
+                 (unsigned)report_out->fn_id);
+    }
     snprintf(report_out->theorem_name, sizeof(report_out->theorem_name), "guard#%u",
              (unsigned)report_out->guard_idx);
     snprintf(report_out->guard_expr, sizeof(report_out->guard_expr), "<contract_guard>");
 
-    if (ir && report_out->fn_id < ir->lean_function_count) {
+    if (report_out->fn_id != 0x0FFFU && ir && report_out->fn_id < ir->lean_function_count) {
         const FlowLeanFunction *fn = &ir->lean_functions[report_out->fn_id];
         snprintf(report_out->fn_name, sizeof(report_out->fn_name), "%s", fn->name);
         if (report_out->violation_kind == FLOW_BOUNDARY_PRECOND && fn->precond_expr[0]) {
@@ -1450,6 +1275,11 @@ int flow_hott_decode_boundary_exception(uint64_t raw_bits, const SemanticIR *ir,
             snprintf(report_out->guard_expr, sizeof(report_out->guard_expr), "boundary(%u)",
                      (unsigned)report_out->user_code);
         }
+    } else if (report_out->violation_kind == FLOW_BOUNDARY_EXPLICIT_NONE) {
+        snprintf(report_out->theorem_name, sizeof(report_out->theorem_name),
+                 "SpaceWithException.collapse");
+        snprintf(report_out->guard_expr, sizeof(report_out->guard_expr), "boundary(%u)",
+                 (unsigned)report_out->user_code);
     }
 
     snprintf(

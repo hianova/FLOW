@@ -1,6 +1,7 @@
 #ifndef FLOW_SPSC_H
 #define FLOW_SPSC_H
 
+#include "flow.h"
 #include <stdatomic.h>
 #include <stddef.h>
 #include <stdint.h>

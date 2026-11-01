@@ -2,8 +2,6 @@
 #define FLOW_CUBICAL_HOTT_H
 
 #include "flow.h"
-#include "plugin.h"
-#include "bitspace.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -103,13 +101,12 @@ typedef struct {
 } FlowCubicalTypeSieve;
 
 FlowCubicalTypeSieve flow_cubical_sieve_from_ir(const SemanticIR *ir);
-FlowCubicalTypeSieve flow_cubical_sieve_from_component(const Component *comp);
 int flow_cubical_match_types(FlowCubicalTypeSieve intent, FlowCubicalTypeSieve candidate,
                              uint64_t *mismatch_out);
 
 /* Discrete Polytope Boundaries & Geometric Handover */
 #define FLOW_POLY_MAX_DIM         4
-#define FLOW_POLY_MAX_CONSTRAINTS 16
+#define FLOW_POLY_MAX_CONSTRAINTS 64
 
 typedef struct {
     int64_t coeffs[FLOW_POLY_MAX_DIM];
@@ -140,22 +137,15 @@ typedef struct {
 
 int flow_polyhedral_init(FlowPolyhedron *poly, size_t dimension);
 int flow_polyhedral_add_constraint(FlowPolyhedron *poly, const int64_t *coeffs, int64_t constant);
-int flow_polyhedral_add_quadratic_constraint(
-    FlowPolyhedron *poly, const double center[],
-    const double hessian[FLOW_POLY_MAX_DIM][FLOW_POLY_MAX_DIM], const double gradient[],
-    double bound);
 int flow_polyhedral_set_box_bounds(FlowPolyhedron *poly, size_t dim_idx, int64_t lower,
                                    int64_t upper);
 int flow_polyhedral_solve_schedule(const FlowPolyhedron *poly, size_t cache_line_bytes,
                                    size_t vector_register_bytes,
                                    FlowPolyhedralSchedule *schedule_out);
-FlowSMTResult flow_polyhedral_verify_smt(const FlowPolyhedron *poly,
-                                         const FlowPolyhedralSchedule *sched,
-                                         FlowSMTProofAttestation *proof_out);
 int flow_cubical_handover_polytope(uint64_t mask_p, uint64_t mask_q, uint64_t boundary_filter,
                                    FlowPolyhedron *poly, int64_t offset_out[FLOW_POLY_MAX_DIM]);
 
-#define FLOW_POLYTOPE_MAX_CONSTRAINTS 32
+#define FLOW_POLYTOPE_MAX_CONSTRAINTS 64
 #define FLOW_POLYTOPE_MAX_DIMS        16
 
 typedef enum {
@@ -181,11 +171,6 @@ int flow_polyhedron_add_box_bounds(FlowPolyhedronSystem *poly, size_t dim_idx, d
                                    double max_val, const char *tag);
 int flow_polyhedron_add_inequality(FlowPolyhedronSystem *poly, const double *coeffs,
                                    FlowConstraintOp op, double bound, const char *tag);
-int flow_polyhedron_from_ir(const SemanticIR *ir, const Component *comp,
-                            const FlowPlanDimensionSet *dims, FlowPolyhedronSystem *poly);
-uint64_t flow_polyhedron_project_mask(const FlowPolyhedronSystem *poly,
-                                      const FlowPlanDimensionSet *dims, uint32_t total_bits);
-int flow_polyhedron_from_affine(const FlowPolyhedron *affine_poly, FlowPolyhedronSystem *poly_out);
 
 #define FLOW_HARDWIRED_MAX_PLANES 64
 #define FLOW_HARDWIRED_MAX_DIM    8
@@ -206,8 +191,6 @@ typedef struct {
     double max_violation, projected_x[FLOW_HARDWIRED_MAX_DIM];
 } FlowHardwiredEvalResult;
 int flow_hardwired_template_init(FlowHardwiredPolyhedralTemplate *tpl, size_t dimension);
-int flow_hardwired_template_from_polyhedron(FlowHardwiredPolyhedralTemplate *tpl,
-                                            const FlowPolyhedron *poly);
 int flow_hardwired_eval(FlowHardwiredPolyhedralTemplate *tpl,
                         const double x[FLOW_HARDWIRED_MAX_DIM], FlowHardwiredEvalResult *res_out);
 
@@ -220,16 +203,6 @@ FlowSMTResult flow_cubical_verify_smt(const FlowCubicalSieve *sieve, uint64_t ma
 #define FLOW_AXIOM_DIM         64
 #define FLOW_AXIOM_LATTICE_DIM 4
 
-#ifndef FLOW_THERMAL_STATE_DEFINED
-#define FLOW_THERMAL_STATE_DEFINED
-typedef struct FlowThermalState {
-    double temp_c, temp_ambient_c, dtemp_dt, r_thermal, c_thermal, temp_throttle_c, temp_target_c,
-        active_power_w;
-    uint64_t throttle_events;
-    uint8_t is_throttled, reserved[7];
-} FlowThermalState;
-#endif
-
 typedef struct FlowUnifiedSection FlowUnifiedSection;
 struct __attribute__((aligned(64))) FlowUnifiedSection {
     double q[FLOW_AXIOM_DIM], p[FLOW_AXIOM_DIM], a[FLOW_AXIOM_DIM];
@@ -239,7 +212,6 @@ struct __attribute__((aligned(64))) FlowUnifiedSection {
     uint64_t total_lattice_points, bmf_subspace_mask;
     FlowBmf1BitCanvas bmf_canvas;
     double curvature_spectrum[FLOW_AXIOM_DIM];
-    FlowThermalState thermal;
     FlowSMTProofAttestation proof;
     uint64_t cubical_sieve;
     uint8_t kan_homotopy_status, omega_classifier_bit;
@@ -313,7 +285,7 @@ uint64_t flow_cubical_get_module_mask(const char *module_id);
  * Intensional Global Type Universe U_0 & Univalence Customs (A ~= B => A = U_0 B)
  * ============================================================================
  */
-#define FLOW_HOTT_UNIVERSE_MAX_TYPES 128
+#define FLOW_HOTT_UNIVERSE_MAX_TYPES 256
 #define FLOW_SIMD_SOA_LANES          64U
 
 typedef enum {
@@ -507,59 +479,220 @@ FLOW_BOUNDARY_VIOLATION_KIND_C17
     typedef struct {                          \
         bool value;                           \
         uint64_t boundary_tag;                \
+        uint16_t boundary_code;               \
+        bool is_interior;                     \
     } lean_result_bool;                       \
     typedef struct {                          \
         double value;                         \
         uint64_t boundary_tag;                \
+        uint16_t boundary_code;               \
+        bool is_interior;                     \
     } lean_result_double;                     \
     typedef struct {                          \
         float value;                          \
         uint64_t boundary_tag;                \
+        uint16_t boundary_code;               \
+        bool is_interior;                     \
     } lean_result_float;                      \
     typedef struct {                          \
         uint64_t value;                       \
         uint64_t boundary_tag;                \
+        uint16_t boundary_code;               \
+        bool is_interior;                     \
     } lean_result_uint64_t;                   \
     typedef struct {                          \
         int64_t value;                        \
         uint64_t boundary_tag;                \
+        uint16_t boundary_code;               \
+        bool is_interior;                     \
     } lean_result_int64_t;                    \
     typedef struct {                          \
         uint32_t value;                       \
         uint64_t boundary_tag;                \
+        uint16_t boundary_code;               \
+        bool is_interior;                     \
     } lean_result_uint32_t;                   \
     typedef struct {                          \
         int32_t value;                        \
         uint64_t boundary_tag;                \
+        uint16_t boundary_code;               \
+        bool is_interior;                     \
     } lean_result_int32_t;                    \
     typedef struct {                          \
         uint16_t value;                       \
         uint64_t boundary_tag;                \
+        uint16_t boundary_code;               \
+        bool is_interior;                     \
     } lean_result_uint16_t;                   \
     typedef struct {                          \
         int16_t value;                        \
         uint64_t boundary_tag;                \
+        uint16_t boundary_code;               \
+        bool is_interior;                     \
     } lean_result_int16_t;                    \
     typedef struct {                          \
         uint8_t value;                        \
         uint64_t boundary_tag;                \
+        uint16_t boundary_code;               \
+        bool is_interior;                     \
     } lean_result_uint8_t;                    \
     typedef struct {                          \
         int8_t value;                         \
         uint64_t boundary_tag;                \
+        uint16_t boundary_code;               \
+        bool is_interior;                     \
     } lean_result_int8_t;                     \
     typedef struct {                          \
         size_t value;                         \
         uint64_t boundary_tag;                \
+        uint16_t boundary_code;               \
+        bool is_interior;                     \
     } lean_result_size_t;                     \
     typedef struct {                          \
         ptrdiff_t value;                      \
         uint64_t boundary_tag;                \
+        uint16_t boundary_code;               \
+        bool is_interior;                     \
     } lean_result_ptrdiff_t;
+
+#define FLOW_LEAN_PRIMITIVE_WITNESS_HELPERS_C17                                                  \
+    static inline __attribute__((unused)) bool flowc_uncertify_bool(lean_certified_bool _w) {    \
+        return _w._verified;                                                                     \
+    }                                                                                            \
+    static inline __attribute__((unused)) bool flowc_certify_bool(                               \
+        bool _raw, lean_certified_bool *_out_witness) {                                          \
+        if (_out_witness)                                                                        \
+            _out_witness->_verified = _raw;                                                      \
+        return true;                                                                             \
+    }                                                                                            \
+    static inline __attribute__((unused)) double flowc_uncertify_double(                         \
+        lean_certified_double _w) {                                                              \
+        return _w._verified;                                                                     \
+    }                                                                                            \
+    static inline __attribute__((unused)) bool flowc_certify_double(                             \
+        double _raw, lean_certified_double *_out_witness) {                                      \
+        if (!__builtin_isfinite(_raw))                                                           \
+            return false;                                                                        \
+        if (_out_witness)                                                                        \
+            _out_witness->_verified = _raw;                                                      \
+        return true;                                                                             \
+    }                                                                                            \
+    static inline __attribute__((unused)) float flowc_uncertify_float(lean_certified_float _w) { \
+        return _w._verified;                                                                     \
+    }                                                                                            \
+    static inline __attribute__((unused)) bool flowc_certify_float(                              \
+        float _raw, lean_certified_float *_out_witness) {                                        \
+        if (!__builtin_isfinite(_raw))                                                           \
+            return false;                                                                        \
+        if (_out_witness)                                                                        \
+            _out_witness->_verified = _raw;                                                      \
+        return true;                                                                             \
+    }                                                                                            \
+    static inline __attribute__((unused)) uint64_t flowc_uncertify_uint64_t(                     \
+        lean_certified_uint64_t _w) {                                                            \
+        return _w._verified;                                                                     \
+    }                                                                                            \
+    static inline __attribute__((unused)) bool flowc_certify_uint64_t(                           \
+        uint64_t _raw, lean_certified_uint64_t *_out_witness) {                                  \
+        if (_out_witness)                                                                        \
+            _out_witness->_verified = _raw;                                                      \
+        return true;                                                                             \
+    }                                                                                            \
+    static inline __attribute__((unused)) int64_t flowc_uncertify_int64_t(                       \
+        lean_certified_int64_t _w) {                                                             \
+        return _w._verified;                                                                     \
+    }                                                                                            \
+    static inline __attribute__((unused)) bool flowc_certify_int64_t(                            \
+        int64_t _raw, lean_certified_int64_t *_out_witness) {                                    \
+        if (_out_witness)                                                                        \
+            _out_witness->_verified = _raw;                                                      \
+        return true;                                                                             \
+    }                                                                                            \
+    static inline __attribute__((unused)) uint32_t flowc_uncertify_uint32_t(                     \
+        lean_certified_uint32_t _w) {                                                            \
+        return _w._verified;                                                                     \
+    }                                                                                            \
+    static inline __attribute__((unused)) bool flowc_certify_uint32_t(                           \
+        uint32_t _raw, lean_certified_uint32_t *_out_witness) {                                  \
+        if (_out_witness)                                                                        \
+            _out_witness->_verified = _raw;                                                      \
+        return true;                                                                             \
+    }                                                                                            \
+    static inline __attribute__((unused)) int32_t flowc_uncertify_int32_t(                       \
+        lean_certified_int32_t _w) {                                                             \
+        return _w._verified;                                                                     \
+    }                                                                                            \
+    static inline __attribute__((unused)) bool flowc_certify_int32_t(                            \
+        int32_t _raw, lean_certified_int32_t *_out_witness) {                                    \
+        if (_out_witness)                                                                        \
+            _out_witness->_verified = _raw;                                                      \
+        return true;                                                                             \
+    }                                                                                            \
+    static inline __attribute__((unused)) uint16_t flowc_uncertify_uint16_t(                     \
+        lean_certified_uint16_t _w) {                                                            \
+        return _w._verified;                                                                     \
+    }                                                                                            \
+    static inline __attribute__((unused)) bool flowc_certify_uint16_t(                           \
+        uint16_t _raw, lean_certified_uint16_t *_out_witness) {                                  \
+        if (_out_witness)                                                                        \
+            _out_witness->_verified = _raw;                                                      \
+        return true;                                                                             \
+    }                                                                                            \
+    static inline __attribute__((unused)) int16_t flowc_uncertify_int16_t(                       \
+        lean_certified_int16_t _w) {                                                             \
+        return _w._verified;                                                                     \
+    }                                                                                            \
+    static inline __attribute__((unused)) bool flowc_certify_int16_t(                            \
+        int16_t _raw, lean_certified_int16_t *_out_witness) {                                    \
+        if (_out_witness)                                                                        \
+            _out_witness->_verified = _raw;                                                      \
+        return true;                                                                             \
+    }                                                                                            \
+    static inline __attribute__((unused)) uint8_t flowc_uncertify_uint8_t(                       \
+        lean_certified_uint8_t _w) {                                                             \
+        return _w._verified;                                                                     \
+    }                                                                                            \
+    static inline __attribute__((unused)) bool flowc_certify_uint8_t(                            \
+        uint8_t _raw, lean_certified_uint8_t *_out_witness) {                                    \
+        if (_out_witness)                                                                        \
+            _out_witness->_verified = _raw;                                                      \
+        return true;                                                                             \
+    }                                                                                            \
+    static inline __attribute__((unused)) int8_t flowc_uncertify_int8_t(                         \
+        lean_certified_int8_t _w) {                                                              \
+        return _w._verified;                                                                     \
+    }                                                                                            \
+    static inline __attribute__((unused)) bool flowc_certify_int8_t(                             \
+        int8_t _raw, lean_certified_int8_t *_out_witness) {                                      \
+        if (_out_witness)                                                                        \
+            _out_witness->_verified = _raw;                                                      \
+        return true;                                                                             \
+    }                                                                                            \
+    static inline __attribute__((unused)) size_t flowc_uncertify_size_t(                         \
+        lean_certified_size_t _w) {                                                              \
+        return _w._verified;                                                                     \
+    }                                                                                            \
+    static inline __attribute__((unused)) bool flowc_certify_size_t(                             \
+        size_t _raw, lean_certified_size_t *_out_witness) {                                      \
+        if (_out_witness)                                                                        \
+            _out_witness->_verified = _raw;                                                      \
+        return true;                                                                             \
+    }                                                                                            \
+    static inline __attribute__((unused)) ptrdiff_t flowc_uncertify_ptrdiff_t(                   \
+        lean_certified_ptrdiff_t _w) {                                                           \
+        return _w._verified;                                                                     \
+    }                                                                                            \
+    static inline __attribute__((unused)) bool flowc_certify_ptrdiff_t(                          \
+        ptrdiff_t _raw, lean_certified_ptrdiff_t *_out_witness) {                                \
+        if (_out_witness)                                                                        \
+            _out_witness->_verified = _raw;                                                      \
+        return true;                                                                             \
+    }
 
 #ifndef FLOW_LEAN_PRIMITIVE_WITNESS_TYPES_DEFINED
 #define FLOW_LEAN_PRIMITIVE_WITNESS_TYPES_DEFINED
 FLOW_LEAN_PRIMITIVE_WITNESS_TYPES_C17
+FLOW_LEAN_PRIMITIVE_WITNESS_HELPERS_C17
 #endif
 
 typedef struct {
@@ -609,6 +742,17 @@ typedef struct {
     static inline __attribute__((unused)) bool flowc_is_boundary_tag(uint64_t raw_bits) {          \
         return (raw_bits & FLOW_BOUNDARY_QNAN_PREFIX_MASK) == FLOW_BOUNDARY_QNAN_MAGIC;            \
     }                                                                                              \
+    static inline __attribute__((unused)) uint64_t flowc_stamp_boundary_tag_fn_id(                 \
+        uint64_t bits, uint16_t fn_id) {                                                           \
+        if (flowc_is_boundary_tag(bits)) {                                                         \
+            if (((bits >> 32U) & 0x0FFFULL) == 0x0FFFULL)                                          \
+                bits = (bits & ~(0x0FFFULL << 32U)) | (((uint64_t)(fn_id & 0x0FFFU)) << 32U);      \
+        }                                                                                          \
+        return bits;                                                                               \
+    }                                                                                              \
+    static inline __attribute__((unused)) uint16_t flowc_boundary_tag_code(uint64_t bits) {        \
+        return flowc_is_boundary_tag(bits) ? (uint16_t)(bits & 0x0FFFULL) : 0U;                    \
+    }                                                                                              \
     static inline __attribute__((unused)) double flowc_make_boundary_nan(                          \
         uint16_t fn_id, uint8_t guard_idx, uint8_t kind, uint8_t axis, uint16_t code) {            \
         uint64_t bits = flowc_make_boundary_tag(fn_id, guard_idx, kind, axis, code);               \
@@ -638,8 +782,7 @@ typedef struct {
         uint64_t bits = 0ULL;                                                                      \
         __builtin_memcpy(&bits, &val, sizeof(bits));                                               \
         if (flowc_is_boundary_tag(bits)) {                                                         \
-            if (((bits >> 32U) & 0x0FFFULL) == 0x0FFFULL)                                          \
-                bits = (bits & ~(0x0FFFULL << 32U)) | (((uint64_t)(fn_id & 0x0FFFU)) << 32U);      \
+            bits = flowc_stamp_boundary_tag_fn_id(bits, fn_id);                                    \
         } else if (!__builtin_isfinite(val)) {                                                     \
             bits = flowc_make_boundary_tag(fn_id, 0U, (uint8_t)FLOW_BOUNDARY_DOMAIN_SINGULARITY,   \
                                            49U, 0U);                                               \
@@ -667,32 +810,17 @@ static inline bool flow_hott_is_boundary_tag(uint64_t raw_bits) {
     return flowc_is_boundary_tag(raw_bits);
 }
 
-static inline double flow_result_float_interior(double val) {
-    return val;
-}
-
-static inline double flow_result_float_from_tag(uint64_t tag) {
-    uint64_t bits = flowc_is_boundary_tag(tag)
-                        ? tag
-                        : flowc_make_boundary_tag(0U, 0U, (uint8_t)FLOW_BOUNDARY_EXPLICIT_NONE,
-                                                  (uint8_t)FLOW_SIEVE_BIT_LEAN_CERTIFIED,
-                                                  (uint16_t)(tag & 0x0FFFU));
-    double out = 0.0;
-    __builtin_memcpy(&out, &bits, sizeof(out));
-    return out;
-}
-
-static inline double flow_result_float_boundary(uint16_t fn_id, uint8_t guard_idx,
-                                                uint8_t violation_kind, uint8_t cubical_axis,
-                                                uint16_t user_code) {
+static inline double flow_hott_make_boundary_nan(uint16_t fn_id, uint8_t guard_idx,
+                                                 uint8_t violation_kind, uint8_t cubical_axis,
+                                                 uint16_t user_code) {
     return flowc_make_boundary_nan(fn_id, guard_idx, violation_kind, cubical_axis, user_code);
 }
 
-static inline bool flow_result_float_is_boundary(double val) {
+static inline bool flow_hott_is_boundary_nan(double val) {
     return flowc_is_boundary_nan(val);
 }
 
-static inline uint64_t flow_result_float_extract_tag(double val) {
+static inline uint64_t flow_hott_extract_boundary_tag(double val) {
     return flowc_extract_boundary_tag(val);
 }
 

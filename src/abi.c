@@ -1,6 +1,5 @@
 #include "abi.h"
 #include "backend.h"
-#include "registry.h"
 #include "cubical_hott.h"
 #include <ctype.h>
 #include <math.h>
@@ -8,22 +7,30 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <errno.h>
+
 #define ABI_FAIL(msg, sz, ...)                  \
     do {                                        \
         if ((msg) && (sz))                      \
             snprintf((msg), (sz), __VA_ARGS__); \
         return 0;                               \
     } while (0)
+
 static void sanitize_ident(const char *in, char *out, size_t max_len) {
     size_t j = 0;
-    for (size_t i = 0; in[i] && j + 1 < max_len; ++i)
+    for (size_t i = 0; in && in[i] && j + 1 < max_len; ++i)
         out[j++] = (isalnum((unsigned char)in[i]) || in[i] == '_') ? in[i] : '_';
+    if (j == 0 && max_len > 1)
+        out[j++] = 'f';
     out[j] = '\0';
 }
+
 static void to_pascal_case(const char *in, char *out, size_t max_len) {
     size_t j = 0;
     int cap = 1;
-    for (size_t i = 0; in[i] && j + 1 < max_len; ++i) {
+    for (size_t i = 0; in && in[i] && j + 1 < max_len; ++i) {
         if (in[i] == '_' || in[i] == '-')
             cap = 1;
         else {
@@ -31,10 +38,16 @@ static void to_pascal_case(const char *in, char *out, size_t max_len) {
             cap = 0;
         }
     }
+    if (j == 0 && max_len > 4) {
+        memcpy(out, "Flow", 4);
+        j = 4;
+    }
     out[j] = '\0';
 }
+
 #define abi_find_lean_struct flow_ir_find_struct
 #define abi_lean_c_type_ir   flow_ir_type_to_c
+
 static const char *abi_escape_kw_suffix(const char *in, const char *const *kw, char *out,
                                         size_t max_len) {
     if (!in || !in[0]) {
@@ -51,155 +64,33 @@ static const char *abi_escape_kw_suffix(const char *in, const char *const *kw, c
     snprintf(out, max_len, "%s", in);
     return out;
 }
+
 static const char *abi_escape_c_ident(const char *in, char *out, size_t max_len) {
-    static const char *const C_KW[] = {"auto",
-                                       "break",
-                                       "case",
-                                       "catch",
-                                       "char",
-                                       "class",
-                                       "const",
-                                       "constexpr",
-                                       "continue",
-                                       "default",
-                                       "delete",
-                                       "do",
-                                       "double",
-                                       "dynamic_cast",
-                                       "else",
-                                       "enum",
-                                       "explicit",
-                                       "export",
-                                       "extern",
-                                       "false",
-                                       "float",
-                                       "for",
-                                       "friend",
-                                       "goto",
-                                       "if",
-                                       "inline",
-                                       "int",
-                                       "long",
-                                       "mutable",
-                                       "namespace",
-                                       "new",
-                                       "noexcept",
-                                       "nullptr",
-                                       "operator",
-                                       "private",
-                                       "protected",
-                                       "public",
-                                       "register",
-                                       "reinterpret_cast",
-                                       "restrict",
-                                       "return",
-                                       "short",
-                                       "signed",
-                                       "sizeof",
-                                       "static",
-                                       "static_assert",
-                                       "static_cast",
-                                       "struct",
-                                       "switch",
-                                       "template",
-                                       "this",
-                                       "thread_local",
-                                       "throw",
-                                       "true",
-                                       "try",
-                                       "typedef",
-                                       "typeid",
-                                       "typename",
-                                       "union",
-                                       "unsigned",
-                                       "using",
-                                       "virtual",
-                                       "void",
-                                       "volatile",
-                                       "wchar_t",
-                                       "while",
-                                       NULL};
-    return abi_escape_kw_suffix(in, C_KW, out, max_len);
+    static const char *const c_kw[] = {
+        "alignas",       "alignof",     "auto",      "bool",   "break",        "case",
+        "catch",         "char",        "class",     "const",  "constexpr",    "continue",
+        "default",       "delete",      "do",        "double", "dynamic_cast", "else",
+        "enum",          "explicit",    "export",    "extern", "false",        "float",
+        "for",           "friend",      "goto",      "if",     "inline",       "int",
+        "long",          "mutable",     "namespace", "new",    "noexcept",     "nullptr",
+        "operator",      "private",     "protected", "public", "register",     "reinterpret_cast",
+        "restrict",      "return",      "short",     "signed", "sizeof",       "static",
+        "static_assert", "static_cast", "struct",    "switch", "template",     "this",
+        "thread_local",  "throw",       "true",      "try",    "typedef",      "typeid",
+        "typename",      "union",       "unsigned",  "using",  "virtual",      "void",
+        "volatile",      "wchar_t",     "while",     NULL};
+    return abi_escape_kw_suffix(in, c_kw, out, max_len);
 }
-int flow_abi_build_for_component(const SemanticIR *ir, const Component *comp,
-                                 FlowComponentABI *abi) {
-    if (!ir || !comp || !abi)
+
+int flow_abi_emit_c_header(FILE *output, const SemanticIR *ir) {
+    if (!output || !ir)
         return 0;
-    memset(abi, 0, sizeof(*abi));
-    abi->ir = ir;
-    snprintf(abi->component_id, sizeof(abi->component_id), "%s", comp->id);
-    const FlowPlugin *plugin = flow_component_plugin(comp);
-    snprintf(abi->module_name, sizeof(abi->module_name), "%s", plugin ? plugin->name : "builtin");
-    snprintf(abi->version, sizeof(abi->version), "%s", plugin ? plugin->version : "1.0.0");
-    abi->thread_safe = strcmp(comp->capability, "pthread") == 0 || comp->supports_parallelizable;
-    abi->max_memory_bytes =
-        ir->memory_limit_mb > 0 ? (size_t)ir->memory_limit_mb * 1024 * 1024 : 64 * 1024 * 1024;
-    abi->default_memory_mode = FLOW_MEM_RAW_VIEW;
-    abi->control_contract = (FlowControlContract){
-        .reentrancy = ir->state_shared ? FLOW_REENTRANCY_THREAD_SAFE : FLOW_REENTRANCY_PURE,
-        .effects = (ir->state_shared ? (FLOW_EFFECT_READS_STATE | FLOW_EFFECT_WRITES_STATE)
-                                     : FLOW_EFFECT_PURE) |
-                   (strcmp(comp->capability, "pthread") == 0 ? FLOW_EFFECT_BLOCKING : 0),
-        .error_policy = FLOW_ERR_STATUS_CODE};
-    size_t stride = (ir->input_stride_bytes > 0) ? ir->input_stride_bytes : sizeof(uint32_t);
-    size_t align = (ir->input_align_bytes > 0) ? ir->input_align_bytes : 8;
-    size_t min_bytes = (size_t)(ir->input_max_count > 0 ? ir->input_max_count : 1) * stride;
-    abi->input_view_contract = (FlowViewContract){.mode = FLOW_MEM_RAW_VIEW,
-                                                  .min_length = min_bytes,
-                                                  .required_alignment = align,
-                                                  .expected_ownership = FLOW_OWN_BORROW,
-                                                  .aliasing_policy = FLOW_ALIAS_DISJOINT};
-    abi->output_view_contract = (FlowViewContract){.mode = FLOW_MEM_RAW_VIEW,
-                                                   .min_length = min_bytes,
-                                                   .required_alignment = align,
-                                                   .require_mutable = 1,
-                                                   .expected_ownership = FLOW_OWN_MUT_BORROW,
-                                                   .aliasing_policy = FLOW_ALIAS_DISJOINT};
-    char id_safe[64];
-    sanitize_ident(comp->id, id_safe, sizeof(id_safe));
-    FlowType t_handle = {
-        FLOW_TYPE_OPAQUE_HANDLE, "FlowHandle", sizeof(void *), sizeof(void *), 0, NULL};
-    snprintf(abi->create_fn.name, sizeof(abi->create_fn.name), "flow_%s_create", id_safe);
-    abi->create_fn.return_type = t_handle;
-    abi->create_fn.return_ownership = FLOW_OWN_RETURN_MOVE;
-    abi->create_fn.error_policy = FLOW_ERR_NULLABLE;
-    abi->create_fn.effects = FLOW_EFFECT_ALLOC;
-    snprintf(abi->create_fn.docstring, sizeof(abi->create_fn.docstring),
-             "Allocates and initializes %s instance.", comp->id);
-    snprintf(abi->destroy_fn.name, sizeof(abi->destroy_fn.name), "flow_%s_destroy", id_safe);
-    abi->destroy_fn.param_count = 1;
-    snprintf(abi->destroy_fn.params[0].name, sizeof(abi->destroy_fn.params[0].name), "handle");
-    abi->destroy_fn.params[0].type = t_handle;
-    abi->destroy_fn.params[0].ownership = FLOW_OWN_MOVE;
-    abi->destroy_fn.return_type = (FlowType){FLOW_TYPE_VOID, "void", 0, 0, 0, NULL};
-    abi->destroy_fn.return_ownership = FLOW_OWN_BORROW;
-    abi->destroy_fn.error_policy = FLOW_ERR_STATUS_CODE;
-    abi->destroy_fn.effects = FLOW_EFFECT_WRITES_STATE;
-    snprintf(abi->destroy_fn.docstring, sizeof(abi->destroy_fn.docstring), "Releases %s instance.",
-             comp->id);
-    snprintf(abi->primary_fn.name, sizeof(abi->primary_fn.name), "flow_%s_process", id_safe);
-    abi->primary_fn.param_count = 3;
-    snprintf(abi->primary_fn.params[0].name, sizeof(abi->primary_fn.params[0].name), "handle");
-    abi->primary_fn.params[0].type = t_handle;
-    abi->primary_fn.params[0].ownership = ir->state_shared ? FLOW_OWN_MUT_BORROW : FLOW_OWN_BORROW;
-    snprintf(abi->primary_fn.params[1].name, sizeof(abi->primary_fn.params[1].name), "input");
-    abi->primary_fn.params[1].type = (FlowType){FLOW_TYPE_BYTES,
-                                                "const uint8_t*",
-                                                sizeof(void *),
-                                                sizeof(void *),
-                                                (size_t)ir->input_max_count,
-                                                NULL};
-    abi->primary_fn.params[1].ownership = FLOW_OWN_BORROW;
-    snprintf(abi->primary_fn.params[2].name, sizeof(abi->primary_fn.params[2].name), "output");
-    abi->primary_fn.params[2].type =
-        (FlowType){FLOW_TYPE_BYTES, "uint8_t*", sizeof(void *), sizeof(void *), 0, NULL};
-    abi->primary_fn.params[2].ownership = FLOW_OWN_MUT_BORROW;
-    abi->primary_fn.return_type = (FlowType){FLOW_TYPE_I32, "int32_t", 4, 4, 0, NULL};
-    abi->primary_fn.return_ownership = FLOW_OWN_BORROW;
-    abi->primary_fn.error_policy = FLOW_ERR_STATUS_CODE;
-    abi->primary_fn.effects = abi->control_contract.effects;
-    snprintf(abi->primary_fn.docstring, sizeof(abi->primary_fn.docstring),
-             "Executes %s flow pipeline transformation.", comp->id);
+    const char *mod_name = ir->flow_name[0] ? ir->flow_name : "flow_module";
+    char id_upper[64] = {0}, id_safe[64] = {0};
+    sanitize_ident(mod_name, id_safe, sizeof(id_safe));
+    for (size_t i = 0; id_safe[i] && i + 1 < sizeof(id_upper); ++i)
+        id_upper[i] = (char)toupper((unsigned char)id_safe[i]);
+
     if (ir->lean_struct_count > 0) {
         FlowHoTTUniverse *u0 = flow_hott_universe_global();
         for (size_t si = 0; si < ir->lean_struct_count; ++si) {
@@ -213,111 +104,80 @@ int flow_abi_build_for_component(const SemanticIR *ir, const Component *comp,
                                                FLOW_SIEVE_SECURITY_CANONICAL_MASK);
         }
     }
-    return 1;
-}
-int flow_abi_emit_c_header(FILE *output, const FlowComponentABI *abi) {
-    if (!output || !abi)
-        return 0;
-    char id_upper[64] = {0}, id_safe[64];
-    sanitize_ident(abi->component_id, id_safe, sizeof(id_safe));
-    for (size_t i = 0; id_safe[i] && i + 1 < sizeof(id_upper); ++i)
-        id_upper[i] = (char)toupper((unsigned char)id_safe[i]);
+
     fprintf(
         output,
-        "/* Auto-generated by FLOW C17 Component ABI */\n"
+        "/* Auto-generated by FLOW Lean 4 -> C17 Header Synthesizer */\n"
         "/* Provenance: flowc v" FLOW_VERSION_STRING " (git: " FLOW_GIT_PROVENANCE ") */\n"
-        "/* Component: %s, Module: %s, Version: %s, Thread-Safe: %s, Memory Bound: %zu bytes */\n"
         "#ifndef FLOW_ABI_%s_H\n#define FLOW_ABI_%s_H\n"
         "#ifndef FLOW_ARTIFACT_PROVENANCE_DEFINED\n"
         "#define FLOW_ARTIFACT_PROVENANCE_DEFINED\n"
         "#define FLOW_GENERATED_BY_VERSION \"" FLOW_VERSION_STRING "\"\n"
         "#define FLOW_GENERATED_BY_GIT_REV \"" FLOW_GIT_PROVENANCE "\"\n"
         "#endif\n"
-        "#include <stdint.h>\n#include <stddef.h>\n#include <stdbool.h>\n#include <string.h>\n#include <math.h>\n",
-        abi->component_id, abi->module_name, abi->version, abi->thread_safe ? "YES" : "NO",
-        abi->max_memory_bytes, id_upper, id_upper);
-    fprintf(
-        output,
-        "#ifdef __cplusplus\nextern \"C\" {\n#endif\ntypedef void* %s_Handle;\n"
+        "#include <stdint.h>\n#include <stddef.h>\n#include <stdbool.h>\n#include <string.h>\n#include <math.h>\n"
+        "#ifdef __cplusplus\nextern \"C\" {\n#endif\n"
         "#ifndef FLOW_LEAN_CONTRACT_GUARDS_DEFINED\n#define FLOW_LEAN_CONTRACT_GUARDS_DEFINED\n"
         "#define FLOW_LEAN_PRE_GUARD(cond, fallback_status) do { if (__builtin_expect(!(cond), 0)) { return (fallback_status); } } while (0)\n"
         "#define FLOW_LEAN_POST_GUARD(cond, fallback_status) do { if (__builtin_expect(!(cond), 0)) { return (fallback_status); } } while (0)\n"
         "#define FLOW_LEAN_IMPLIES_GUARD(hyp, conc, fallback_status) do { if (__builtin_expect((hyp) && !(conc), 0)) { return (fallback_status); } } while (0)\n#endif\n"
-        "typedef struct { void *address; size_t length, alignment; int mutability, ownership; uint64_t lifetime_epoch; int is_relocatable, is_validated, mode; } %s_MemoryView;\n"
         "#ifndef FLOW_ABI_CORE_TYPES_DEFINED\n#define FLOW_ABI_CORE_TYPES_DEFINED\n" FLOW_STR(
             FLOW_ABI_CORE_TYPES_C17) "\n#endif\n",
-        id_safe, id_safe);
-    flow_emit_ir_enums_and_structs(output, abi->ir);
-    fprintf(
-        output,
-        "/** %s @return [own_transfer] */\n%s_Handle %s(void);\n"
-        "/** Binds initialized handle to active QSBR execution context. */\n%s_Handle %s_bind_context(%s_Handle handle);\n"
-        "/** Acquires explicit cross-event/GPU QSBR epoch lease. */\nuint64_t flow_%s_acquire_epoch(%s_Handle handle);\n"
-        "/** Releases explicit cross-event/GPU QSBR epoch lease. */\nvoid flow_%s_release_epoch(%s_Handle handle, uint64_t epoch);\n"
-        "/** %s @param handle [in,%s] @param input [in,borrow] @param output [out,mut_borrow] */\n"
-        "int32_t %s(%s_Handle handle, const uint8_t *input, size_t input_len, uint8_t *output, size_t *output_len);\n"
-        "/** Zero-copy PB-scale Out-of-Core Extent Descriptor operator under QSBR epoch lease. */\n"
-        "int32_t flow_%s_process_descriptor(%s_Handle handle, const FlowExtentDescriptor *in_desc, FlowExtentDescriptor *out_desc);\n"
-        "int32_t flow_%s_trip_watchdog_for_test(%s_Handle handle, uint64_t simulated_elapsed_ns);\n"
-        "int32_t flow_%s_reset_watchdog(%s_Handle handle);\n"
-        "uint64_t flow_%s_watchdog_breach_count(%s_Handle handle);\n"
-        "/** %s @param handle [in,consumed_move] */\nvoid %s(%s_Handle handle);\n",
-        abi->create_fn.docstring, id_safe, abi->create_fn.name, id_safe, id_safe, id_safe, id_safe,
-        id_safe, id_safe, id_safe, abi->primary_fn.docstring,
-        abi->primary_fn.params[0].ownership == FLOW_OWN_MUT_BORROW ? "mut_borrow" : "borrow",
-        abi->primary_fn.name, id_safe, id_safe, id_safe, id_safe, id_safe, id_safe, id_safe,
-        id_safe, id_safe, abi->destroy_fn.docstring, abi->destroy_fn.name, id_safe);
-    flow_emit_inline_lean_kernels(output, abi->ir);
-    if (abi->ir && abi->ir->lean_struct_count > 0) {
-        for (size_t si = 0; si < abi->ir->lean_struct_count; ++si) {
-            const FlowLeanStruct *st = &abi->ir->lean_structs[si];
+        id_upper, id_upper);
+
+    flow_emit_ir_enums_and_structs(output, ir);
+    flow_emit_inline_lean_kernels(output, ir);
+
+    if (ir->lean_struct_count > 0) {
+        for (size_t si = 0; si < ir->lean_struct_count; ++si) {
+            const FlowLeanStruct *st = &ir->lean_structs[si];
             fprintf(output, "bool lean_certify_%s(%s _raw, lean_certified_%s *_out_witness);\n",
                     st->name, st->name, st->name);
         }
     }
-    if (abi->ir && abi->ir->lean_function_count > 0) {
+
+    if (ir->lean_function_count > 0) {
         fprintf(output, "/* Pure .lean Exported Computational Operators (%zu) */\n",
-                abi->ir->lean_function_count);
-        for (size_t fi = 0; fi < abi->ir->lean_function_count; ++fi) {
-            const FlowLeanFunction *fn = &abi->ir->lean_functions[fi];
+                ir->lean_function_count);
+        for (size_t fi = 0; fi < ir->lean_function_count; ++fi) {
+            const FlowLeanFunction *fn = &ir->lean_functions[fi];
             if (!(fn->variant_mask & FLOW_FN_VAR_PRIMARY))
                 continue;
-            fprintf(output, "%s %s(", abi_lean_c_type_ir(abi->ir, fn->return_type), fn->name);
+            fprintf(output, "%s %s(", abi_lean_c_type_ir(ir, fn->return_type), fn->name);
             for (size_t pi = 0; pi < fn->param_count; ++pi) {
                 char p_ident[96];
                 fprintf(output, "%s%s %s", pi > 0 ? ", " : "",
-                        abi_lean_c_type_ir(abi->ir, fn->param_types[pi]),
+                        abi_lean_c_type_ir(ir, fn->param_types[pi]),
                         abi_escape_c_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
             }
             if (fn->is_tuple_return && fn->tuple_arity >= 2) {
                 for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
                     fprintf(output, "%s%s *out_%zu", (fn->param_count > 0 || ti > 0) ? ", " : "",
-                            abi_lean_c_type_ir(abi->ir, fn->tuple_types[ti]), ti);
+                            abi_lean_c_type_ir(ir, fn->tuple_types[ti]), ti);
             }
             fprintf(output, ");\n");
             if (fn->variant_mask & FLOW_FN_VAR_LEAN) {
-                fprintf(output, "%s lean_%s(", abi_lean_c_type_ir(abi->ir, fn->return_type),
-                        fn->name);
+                fprintf(output, "%s lean_%s(", abi_lean_c_type_ir(ir, fn->return_type), fn->name);
                 for (size_t pi = 0; pi < fn->param_count; ++pi) {
                     char p_ident[96];
                     fprintf(output, "%s%s %s", pi > 0 ? ", " : "",
-                            abi_lean_c_type_ir(abi->ir, fn->param_types[pi]),
+                            abi_lean_c_type_ir(ir, fn->param_types[pi]),
                             abi_escape_c_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
                 }
                 if (fn->is_tuple_return && fn->tuple_arity >= 2) {
                     for (size_t ti = 0; ti < fn->tuple_arity; ++ti)
                         fprintf(output, "%s%s *out_%zu",
                                 (fn->param_count > 0 || ti > 0) ? ", " : "",
-                                abi_lean_c_type_ir(abi->ir, fn->tuple_types[ti]), ti);
+                                abi_lean_c_type_ir(ir, fn->tuple_types[ti]), ti);
                 }
                 fprintf(output, ");\n");
                 if (fn->variant_mask & FLOW_FN_VAR_CERTIFIED) {
-                    const char *rc = abi_lean_c_type_ir(abi->ir, fn->return_type);
+                    const char *rc = abi_lean_c_type_ir(ir, fn->return_type);
                     fprintf(output, "bool lean_certified_%s(", fn->name);
                     for (size_t pi = 0; pi < fn->param_count; ++pi) {
                         char p_ident[96];
                         fprintf(output, "%s%s %s", pi > 0 ? ", " : "",
-                                abi_lean_c_type_ir(abi->ir, fn->param_types[pi]),
+                                abi_lean_c_type_ir(ir, fn->param_types[pi]),
                                 abi_escape_c_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
                     }
                     fprintf(output, "%slean_certified_%s *_out_witness);\n",
@@ -326,44 +186,32 @@ int flow_abi_emit_c_header(FILE *output, const FlowComponentABI *abi) {
                     for (size_t pi = 0; pi < fn->param_count; ++pi) {
                         char p_ident[96];
                         fprintf(output, "%s%s %s", pi > 0 ? ", " : "",
-                                abi_lean_c_type_ir(abi->ir, fn->param_types[pi]),
+                                abi_lean_c_type_ir(ir, fn->param_types[pi]),
                                 abi_escape_c_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
                     }
                     fprintf(output, "%s);\n", fn->param_count == 0 ? "void" : "");
-                    if (fn->variant_mask & FLOW_FN_VAR_BOUNDARY) {
-                        fprintf(output, "double lean_boundary_%s(", fn->name);
-                        for (size_t pi = 0; pi < fn->param_count; ++pi) {
-                            char p_ident[96];
-                            fprintf(
-                                output, "%s%s %s", pi > 0 ? ", " : "",
-                                abi_lean_c_type_ir(abi->ir, fn->param_types[pi]),
-                                abi_escape_c_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
-                        }
-                        fprintf(output, "%s);\n", fn->param_count == 0 ? "void" : "");
-                    }
                 }
             }
             if (fn->variant_mask & FLOW_FN_VAR_SOA64) {
                 fprintf(output, "void soa_%s(", fn->name);
                 for (size_t pi = 0; pi < fn->param_count; ++pi) {
                     char p_ident[96];
-                    const FlowLeanStruct *in_st =
-                        abi_find_lean_struct(abi->ir, fn->param_types[pi]);
+                    const FlowLeanStruct *in_st = abi_find_lean_struct(ir, fn->param_types[pi]);
                     if (in_st)
                         fprintf(output, "%sconst %s_SOA64 * __restrict %s", pi > 0 ? ", " : "",
                                 in_st->name,
                                 abi_escape_c_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
                     else
                         fprintf(output, "%s%s %s", pi > 0 ? ", " : "",
-                                abi_lean_c_type_ir(abi->ir, fn->param_types[pi]),
+                                abi_lean_c_type_ir(ir, fn->param_types[pi]),
                                 abi_escape_c_ident(fn->param_names[pi], p_ident, sizeof(p_ident)));
                 }
-                const FlowLeanStruct *out_st = abi_find_lean_struct(abi->ir, fn->return_type);
+                const FlowLeanStruct *out_st = abi_find_lean_struct(ir, fn->return_type);
                 if (out_st)
                     fprintf(output, ", %s_SOA64 * __restrict _out_soa);\n", out_st->name);
                 else
                     fprintf(output, ", %s * __restrict _out_batch);\n",
-                            abi_lean_c_type_ir(abi->ir, fn->return_type));
+                            abi_lean_c_type_ir(ir, fn->return_type));
             }
             if (fn->variant_mask & FLOW_FN_VAR_JET2) {
                 fprintf(output, "FlowJetScalar2 jet2_%s(", fn->name);
@@ -379,6 +227,7 @@ int flow_abi_emit_c_header(FILE *output, const FlowComponentABI *abi) {
     fprintf(output, "#ifdef __cplusplus\n}\n#endif\n#endif /* FLOW_ABI_%s_H */\n", id_upper);
     return ferror(output) == 0;
 }
+
 int flow_abi_emit_mex_dispatcher(FILE *output, const SemanticIR *ir) {
     if (!output || !ir)
         return 0;
@@ -482,213 +331,261 @@ int flow_abi_emit_mex_dispatcher(FILE *output, const SemanticIR *ir) {
           output);
     return ferror(output) == 0;
 }
-int flow_abi_emit_lean_adapter(FILE *output, const SemanticIR *ir, const FlowComponentABI *abi,
-                               uint64_t genome, size_t capacity, size_t shards) {
-    if (!output || !abi)
+
+int flow_abi_emit_metal_shader(FILE *output, const SemanticIR *ir) {
+    if (!output || !ir)
         return 0;
-    char pascal_name[64], id_safe[64];
-    sanitize_ident(abi->component_id, id_safe, sizeof(id_safe));
-    to_pascal_case(abi->component_id, pascal_name, sizeof(pascal_name));
-    size_t in_max = (ir && ir->input_max_count > 0) ? (size_t)ir->input_max_count : 1024;
-    size_t sel_cap = capacity > 0 ? capacity : in_max, sel_shards = shards >= 1 ? shards : 1;
-    size_t stride_b = (ir && ir->input_stride_bytes > 0) ? ir->input_stride_bytes : 8;
-    size_t align_b = (ir && ir->input_align_bytes > 0) ? ir->input_align_bytes : 8;
-    size_t est_mem = sel_cap * stride_b + 256;
-    size_t quota_mem =
-        (ir && ir->memory_limit_mb > 0)
-            ? (size_t)ir->memory_limit_mb * 1024u * 1024u
-            : (abi->max_memory_bytes > 0 ? abi->max_memory_bytes : (est_mem * 2 + 65536));
-    uint32_t schema_v = (ir && ir->state_schema_version > 0) ? ir->state_schema_version : 1;
-    size_t field_cnt = ir ? ir->state_field_count : 0;
-    uint64_t sla_ns = ir ? ir->sla_latency_ns : 0;
-    const char *is_det = (ir && !ir->fact_deterministic && ir->fact_unordered) ? "false" : "true";
-    uint64_t security_sieve =
-        (1ULL << FLOW_SIEVE_BIT_EXTENT_ALIGN) | (1ULL << FLOW_SIEVE_BIT_UNORDERED) |
-        FLOW_SIEVE_SECURITY_CANONICAL_MASK | (1ULL << FLOW_SIEVE_BIT_LEAN_CERTIFIED);
-    uint64_t effective_genome = genome | security_sieve;
-    size_t margin_scaled = (quota_mem >= est_mem && sel_cap >= in_max)
-                               ? ((quota_mem - est_mem) + (sel_cap - in_max) + 1)
-                               : 0;
+    const char *mod_name = ir->flow_name[0] ? ir->flow_name : "flow_module";
+
     fprintf(
         output,
-        "-- Auto-generated by FLOW Self-Hosting Computational Reflection Engine (%s | %s v%s)\n"
-        "namespace Flow.%s\n"
-        "def inputMaxCount : Nat := %zu\ndef selectedCapacity : Nat := %zu\ndef estimatedMemoryBytes : Nat := %zu\n"
-        "def memoryQuotaBytes : Nat := %zu\ndef shardCount : Nat := %zu\ndef isDeterministic : Bool := %s\n"
-        "def inputStrideBytes : Nat := %zu\ndef inputAlignBytes : Nat := %zu\ndef stateSchemaVersion : Nat := %u\n"
-        "def stateFieldCount : Nat := %zu\ndef slaLatencyNs : Nat := %llu\n"
-        "def transversalityMarginScaled : Nat := %zu\ndef genomePre : UInt64 := 0x%016llx\ndef genomePost : UInt64 := 0x%016llx\n"
-        "def kanBoundaryFilter : UInt64 := 0x%016llx\ndef ambientToposSieve : UInt64 := 0xFFFFFFFFFFFFFFFF\ndef activeAxesMask : UInt64 := 0x%016llx\n"
-        "def inhabitedWitnessInput : Nat := 1\n"
-        "theorem non_vacuous_precondition_witness : inhabitedWitnessInput ≤ inputMaxCount ∧ inputMaxCount ≤ selectedCapacity := by decide\n"
-        "theorem theorem1_buffer_bounds_safety : inputMaxCount ≤ selectedCapacity := by decide\n"
-        "theorem theorem2_memory_quota_bound : estimatedMemoryBytes ≤ memoryQuotaBytes := by decide\n"
-        "theorem theorem3_shard_non_aliasing : shardCount ≥ 1 := by decide\n"
-        "theorem theorem4_functional_determinism : isDeterministic = true := by rfl\n"
-        "theorem theorem5_kan_open_box_homotopy : ((genomePre ^^^ genomePost) &&& kanBoundaryFilter) = 0 := by rfl\n"
-        "theorem theorem6_geometric_transversality : transversalityMarginScaled > 0 := by decide\n"
-        "theorem theorem7_pb_extent_monotonic_step (baseOff count : Nat) (h_step : count * inputStrideBytes > 0) : baseOff < baseOff + count * inputStrideBytes := Nat.lt_add_of_pos_right h_step\n"
-        "theorem theorem8_qsbr_epoch_lease_safety (readerEpoch retireEpoch : Nat) (h_active : readerEpoch ≥ 1) (h_lease : readerEpoch ≤ retireEpoch) : retireEpoch ≥ 1 := Nat.le_trans h_active h_lease\n"
-        "theorem theorem9_schema_stride_alignment_sound : inputStrideBytes ≥ 1 ∧ inputAlignBytes ≥ 1 ∧ stateSchemaVersion ≥ 1 := by decide\n",
-        (ir && ir->flow_name[0]) ? ir->flow_name : abi->component_id, abi->component_id,
-        abi->version, pascal_name, in_max, sel_cap, est_mem, quota_mem, sel_shards, is_det,
-        stride_b, align_b, schema_v, field_cnt, (unsigned long long)sla_ns, margin_scaled,
-        (unsigned long long)security_sieve, (unsigned long long)effective_genome,
-        (unsigned long long)security_sieve, (unsigned long long)effective_genome);
+        "/* Auto-generated by FLOW Lean 4 -> Apple Silicon Metal Shading Language (MSL) Synthesizer (%s) */\n"
+        "/* Provenance: flowc v" FLOW_VERSION_STRING " (git: " FLOW_GIT_PROVENANCE ") */\n"
+        "#if defined(__METAL_VERSION__)\n"
+        "#include <metal_stdlib>\n"
+        "#include <metal_simdgroup>\n"
+        "using namespace metal;\n"
+        "#define FLOW_MSL_KERNEL      kernel\n"
+        "#define FLOW_MSL_DEVICE      device\n"
+        "#define FLOW_MSL_CONSTANT    constant\n"
+        "#define FLOW_MSL_THREADGROUP threadgroup\n"
+        "#define FLOW_MSL_POPCOUNT64(x) ((uint32_t)popcount((uint64_t)(x)))\n"
+        "#define FLOW_MSL_CTZ64(x)      ((uint32_t)ctz((uint64_t)(x)))\n"
+        "#else\n"
+        "#include <stdint.h>\n"
+        "#include <stddef.h>\n"
+        "#include <stdbool.h>\n"
+        "#include <string.h>\n"
+        "#include <math.h>\n"
+        "#define FLOW_MSL_KERNEL\n"
+        "#define FLOW_MSL_DEVICE\n"
+        "#define FLOW_MSL_CONSTANT    const\n"
+        "#define FLOW_MSL_THREADGROUP\n"
+        "#define FLOW_MSL_POPCOUNT64(x) ((uint32_t)__builtin_popcountll((uint64_t)(x)))\n"
+        "#define FLOW_MSL_CTZ64(x)      ((uint32_t)__builtin_ctzll((uint64_t)(x)))\n"
+        "#endif\n\n"
+        "#ifndef FLOW_LEAN_CONTRACT_GUARDS_DEFINED\n"
+        "#define FLOW_LEAN_CONTRACT_GUARDS_DEFINED\n"
+        "#define FLOW_LEAN_PRE_GUARD(cond, fallback_status) do { if (!(cond)) { return (fallback_status); } } while (0)\n"
+        "#define FLOW_LEAN_POST_GUARD(cond, fallback_status) do { if (!(cond)) { return (fallback_status); } } while (0)\n"
+        "#define FLOW_LEAN_IMPLIES_GUARD(hyp, conc, fallback_status) do { if ((hyp) && !(conc)) { return (fallback_status); } } while (0)\n"
+        "#endif\n"
+        "#ifndef FLOW_ABI_CORE_TYPES_DEFINED\n"
+        "#define FLOW_ABI_CORE_TYPES_DEFINED\n" FLOW_STR(FLOW_ABI_CORE_TYPES_C17) "\n#endif\n\n",
+        mod_name);
+
+    flow_emit_ir_enums_and_structs(output, ir);
+    flow_emit_inline_lean_kernels(output, ir);
+
     fputs(
-        "def extentOffsetAfterSteps : Nat → Nat → Nat → Nat\n"
-        "  | 0, baseOff, _ => baseOff\n"
-        "  | Nat.succ k, baseOff, stride => extentOffsetAfterSteps k baseOff stride + stride\n"
-        "theorem theorem10_pb_extent_inductive_steps (steps baseOff stride : Nat) : baseOff ≤ extentOffsetAfterSteps steps baseOff stride := by\n"
-        "  induction steps with\n"
-        "  | zero => exact Nat.le_refl baseOff\n"
-        "  | succ k ih => exact Nat.le_trans ih (Nat.le_add_right (extentOffsetAfterSteps k baseOff stride) stride)\n"
-        "structure StateSchemaField where\n  name : String\n  sizeBytes : Nat\n  flags : UInt32\n  deriving Repr, DecidableEq\n"
-        "structure ExtentDescriptor where\n  baseOffset : UInt64\n  byteLength : UInt64\n  qsbrEpoch : UInt64\n  strideBytes : UInt32\n  alignBytes : UInt32\n  schemaVersion : UInt32\n  flags : UInt32\n  reserved0 : UInt64\n  reserved1 : UInt64\n  reserved2 : UInt64\n  deriving Repr, DecidableEq\n"
-        "namespace Spec\n  def projectBoundedIndex (idx : Nat) : Nat := if idx < selectedCapacity then idx else selectedCapacity - 1\nend Spec\n"
-        "namespace Exec\n  def projectBoundedIndex (idx : Nat) : Nat := if idx < selectedCapacity then idx else selectedCapacity - 1\nend Exec\n"
-        "theorem dual_track_exec_mirror_isomorphic (idx : Nat) : Exec.projectBoundedIndex idx = Spec.projectBoundedIndex idx := by rfl\n"
-        "def runDifferentialOracleCheck : Bool :=\n"
-        "  (Exec.projectBoundedIndex 0 == Spec.projectBoundedIndex 0) && (Exec.projectBoundedIndex 1 == Spec.projectBoundedIndex 1) &&\n"
-        "  (Exec.projectBoundedIndex (inputMaxCount / 2) == Spec.projectBoundedIndex (inputMaxCount / 2)) &&\n"
-        "  (Exec.projectBoundedIndex inputMaxCount == Spec.projectBoundedIndex inputMaxCount) && (Exec.projectBoundedIndex inputMaxCount < selectedCapacity + 1)\n"
-        "theorem differential_oracle_boundary_sound : runDifferentialOracleCheck = true := by decide\n"
-        "structure CausalAxisWitness where\n  axisIndex : Nat\n  axisName : String\n  subspace : String\n  policyContract : String\n  explanation : String\n  deriving Repr, DecidableEq\n"
-        "def bootstrapCausalWitnesses : List CausalAxisWitness := [\n",
+        "\n/* ============================================================================ *\n"
+        " * GPU-Native Bit-Manifold (BMF) Meshlet, 1.58-Bit Ternary & Subgroup Ballot    *\n"
+        " * ============================================================================ */\n"
+        "typedef struct {\n"
+        "    uint64_t nonzero_mask;\n"
+        "    uint64_t sign_mask;\n"
+        "} FlowMslTernary64;\n\n"
+        "typedef struct {\n"
+        "    int32_t lattice_min_x, lattice_min_y, lattice_min_z;\n"
+        "    uint32_t lattice_step;\n"
+        "    float world_scale_inv;\n"
+        "    float aabb_min_x, aabb_min_y, aabb_min_z;\n"
+        "    float aabb_max_x, aabb_max_y, aabb_max_z;\n"
+        "    float cone_apex_x, cone_apex_y, cone_apex_z;\n"
+        "    float cone_axis_x, cone_axis_y, cone_axis_z;\n"
+        "    float cone_cutoff;\n"
+        "    uint16_t vertex_count;\n"
+        "    uint16_t triangle_count;\n"
+        "    uint32_t parent_node_idx;\n"
+        "    uint64_t topos_sieve_mask;\n"
+        "    uint32_t packed_vertices[64];\n"
+        "    uint32_t packed_triangles[124];\n"
+        "} FlowMslBmfMeshlet;\n\n"
+        "static inline __attribute__((unused)) int32_t flow_msl_ternary64_dot(FlowMslTernary64 a,\n"
+        "                                                                     FlowMslTernary64 b) {\n"
+        "    uint64_t active = a.nonzero_mask & b.nonzero_mask;\n"
+        "    uint64_t xor_sign = (a.sign_mask & a.nonzero_mask) ^ (b.sign_mask & b.nonzero_mask);\n"
+        "    uint64_t same_sign = active & ~xor_sign;\n"
+        "    uint64_t opp_sign = active & xor_sign;\n"
+        "    return (int32_t)FLOW_MSL_POPCOUNT64(same_sign) - (int32_t)FLOW_MSL_POPCOUNT64(opp_sign);\n"
+        "}\n\n"
+        "static inline __attribute__((unused)) void flow_msl_decode_vertex_10bit(\n"
+        "    FLOW_MSL_CONSTANT FlowMslBmfMeshlet *m, uint32_t v_idx, float *out_xyz) {\n"
+        "    uint32_t packed = m->packed_vertices[v_idx & 63U];\n"
+        "    uint32_t qx = packed & 1023U;\n"
+        "    uint32_t qy = (packed >> 10U) & 1023U;\n"
+        "    uint32_t qz = (packed >> 20U) & 1023U;\n"
+        "    int64_t lx = (int64_t)m->lattice_min_x + (int64_t)qx * (int64_t)m->lattice_step;\n"
+        "    int64_t ly = (int64_t)m->lattice_min_y + (int64_t)qy * (int64_t)m->lattice_step;\n"
+        "    int64_t lz = (int64_t)m->lattice_min_z + (int64_t)qz * (int64_t)m->lattice_step;\n"
+        "    out_xyz[0] = (float)lx * m->world_scale_inv;\n"
+        "    out_xyz[1] = (float)ly * m->world_scale_inv;\n"
+        "    out_xyz[2] = (float)lz * m->world_scale_inv;\n"
+        "}\n\n"
+        "static inline __attribute__((unused)) uint32_t flow_msl_ballot_lane_offset(uint64_t ballot_mask,\n"
+        "                                                                           uint32_t lane_id) {\n"
+        "    if (lane_id == 0U) return 0U;\n"
+        "    uint64_t lower = (lane_id >= 64U) ? UINT64_MAX : ((1ULL << lane_id) - 1ULL);\n"
+        "    return FLOW_MSL_POPCOUNT64(ballot_mask & lower);\n"
+        "}\n\n"
+        "#if defined(__METAL_VERSION__)\n"
+        "kernel void flow_bmf_meshlet_cull_compact_kernel(\n"
+        "    constant FlowMslBmfMeshlet *meshlets [[buffer(0)]],\n"
+        "    device uint32_t *visible_handles     [[buffer(1)]],\n"
+        "    device atomic_uint *visible_counter  [[buffer(2)]],\n"
+        "    constant float4 &view_pos_cutoff     [[buffer(3)]],\n"
+        "    uint tid [[thread_position_in_grid]],\n"
+        "    uint simd_lane [[thread_index_in_simdgroup]]) {\n"
+        "    FlowMslBmfMeshlet m = meshlets[tid];\n"
+        "    float3 v = normalize(float3(m.cone_apex_x, m.cone_apex_y, m.cone_apex_z) - view_pos_cutoff.xyz);\n"
+        "    float3 axis = float3(m.cone_axis_x, m.cone_axis_y, m.cone_axis_z);\n"
+        "    bool cone_vis = !(m.cone_cutoff < 0.0f && dot(axis, v) >= -m.cone_cutoff);\n"
+        "    bool valid = (m.vertex_count <= 64U) && (m.triangle_count <= 124U) && cone_vis;\n"
+        "    simd_vote vote = simd_ballot(valid);\n"
+        "    uint64_t mask = (uint64_t)vote;\n"
+        "    if (valid) {\n"
+        "        uint32_t local_off = flow_msl_ballot_lane_offset(mask, simd_lane);\n"
+        "        uint32_t base = 0U;\n"
+        "        if (simd_lane == FLOW_MSL_CTZ64(mask)) {\n"
+        "            base = atomic_fetch_add_explicit(visible_counter, FLOW_MSL_POPCOUNT64(mask), memory_order_relaxed);\n"
+        "        }\n"
+        "        base = simd_broadcast_first(base);\n"
+        "        visible_handles[base + local_off] = tid;\n"
+        "    }\n"
+        "}\n"
+        "#endif\n",
         output);
-    int first_axis = 1;
-    size_t active_axis_count = 0;
-    for (uint32_t bit = 0; bit < 64; ++bit) {
-        if (effective_genome & (1ULL << bit)) {
-            const FlowCubicalAxisInfo *info = flow_cubical_get_axis_info(bit);
-            if (info) {
-                fprintf(
-                    output,
-                    "  %s{ axisIndex := %u, axisName := \"%s\", subspace := \"%s\", policyContract := \"%s\", explanation := \"%s\" }\n",
-                    first_axis ? " " : ",", info->axis_index, info->axis_name, info->subspace_name,
-                    info->policy_contract, info->canonical_explanation);
-                first_axis = 0;
-                active_axis_count++;
+
+    return ferror(output) == 0;
+}
+
+int flow_abi_emit_lean_adapter(FILE *output, const SemanticIR *ir) {
+    if (!output || !ir)
+        return 0;
+    const char *mod_name = ir->flow_name[0] ? ir->flow_name : "flow_module";
+    char pascal_name[64];
+    to_pascal_case(mod_name, pascal_name, sizeof(pascal_name));
+
+    fprintf(output,
+            "-- Auto-generated by FLOW Lean 4 Soundness Certificate Emitter (%s)\n"
+            "namespace Flow.%s\n\n"
+            "inductive FlowResult (α : Type) where\n"
+            "  | interior : α → FlowResult α\n"
+            "  | boundary : Nat → FlowResult α\n\n"
+            "open FlowResult (interior boundary)\n\n"
+            "def i_abs (x : Int) : Int := if x < 0 then 0 - x else x\n"
+            "def i_max (a : Int) (b : Int) : Int := if b >= a then b else a\n"
+            "def i_min (a : Int) (b : Int) : Int := if b <= a then b else a\n"
+            "abbrev flow_int_abs := i_abs\n"
+            "abbrev flow_int_max := i_max\n"
+            "abbrev flow_int_min := i_min\n"
+            "abbrev flow_int_of_nat := Int.ofNat\n\n",
+            mod_name, pascal_name);
+
+    if (ir->lean_enum_count > 0) {
+        for (size_t ei = 0; ei < ir->lean_enum_count; ++ei) {
+            const FlowLeanEnum *en = &ir->lean_enums[ei];
+            if (en->name[0]) {
+                fprintf(output, "inductive %s where\n", en->name);
+                for (size_t vi = 0; vi < en->variant_count; ++vi)
+                    fprintf(output, "  | %s\n", en->variants[vi]);
+                fprintf(output, "  deriving Repr, DecidableEq\n\nopen %s\n\n", en->name);
             }
         }
     }
-    fprintf(
-        output,
-        "]\ntheorem active_axes_covered_by_sieve : (activeAxesMask &&& ambientToposSieve) = activeAxesMask := by rfl\n"
-        "structure TraceabilityMatrix where\n  totalTheorems : Nat\n  boundCFunctions : Nat\n  activeCubicalAxes : Nat\n  orphanTheorems : Nat\n  unverifiedMathSurface : Nat\n  deriving Repr, DecidableEq\n"
-        "def traceabilityMatrix : TraceabilityMatrix := { totalTheorems := 12, boundCFunctions := 4, activeCubicalAxes := %zu, orphanTheorems := 0, unverifiedMathSurface := 0 }\n"
-        "theorem traceability_zero_orphans : traceabilityMatrix.orphanTheorems = 0 ∧ traceabilityMatrix.unverifiedMathSurface = 0 := by decide\n"
-        "inductive WiringPhase where | uninitialized | initialized | contextBound deriving Repr, DecidableEq\n"
-        "theorem state_preservation_locked_margin (lockedPre delta : Nat) : lockedPre ≤ lockedPre + delta := Nat.le_add_right lockedPre delta\n"
-        "opaque HandlePointed (phase : WiringPhase) : NonemptyType\ndef TypedHandle (phase : WiringPhase) : Type := (HandlePointed phase).type\n"
-        "@[extern \"%s\"] opaque create : IO (TypedHandle .initialized)\n"
-        "@[extern \"%s_bind_context\"] opaque bindContext (handle : @& TypedHandle .initialized) : IO (TypedHandle .contextBound)\n"
-        "@[extern \"%s\"] opaque processBorrowed (handle : @& TypedHandle .contextBound) (input : @& ByteArray) (output : ByteArray) (h_bound : input.size ≤ selectedCapacity) (h_kan : ((genomePre ^^^ genomePost) &&& kanBoundaryFilter) = 0) : IO UInt32\n"
-        "@[extern \"flow_%s_process_descriptor\"] opaque processDescriptor (handle : @& TypedHandle .contextBound) (inDesc : @& ExtentDescriptor) : IO ExtentDescriptor\n"
-        "@[extern \"%s\"] opaque destroy (handle : TypedHandle .contextBound) : IO Unit\n",
-        active_axis_count, abi->create_fn.name, id_safe, abi->primary_fn.name, id_safe,
-        abi->destroy_fn.name);
-    if (ir && ir->state_field_count > 0) {
-        fprintf(output, "def stateSchemaFields : List StateSchemaField := [\n");
-        for (size_t fi = 0; fi < ir->state_field_count; ++fi) {
-            fprintf(output, "  %s{ name := \"%s\", sizeBytes := %zu, flags := %u }\n",
-                    fi == 0 ? " " : ",", ir->state_fields[fi].name, ir->state_fields[fi].size_bytes,
-                    ir->state_fields[fi].flags);
+
+    if (ir->lean_struct_count > 0) {
+        for (size_t si = 0; si < ir->lean_struct_count; ++si) {
+            const FlowLeanStruct *st = &ir->lean_structs[si];
+            if (st->name[0]) {
+                int has_float = 0;
+                fprintf(output, "structure %s where\n", st->name);
+                for (size_t fi = 0; fi < st->field_count; ++fi) {
+                    const char *ft = st->fields[fi].lean_type[0] ? st->fields[fi].lean_type : "Nat";
+                    if (!strcmp(ft, "Float") || !strcmp(ft, "Float32"))
+                        has_float = 1;
+                    fprintf(output, "  %s : %s\n", st->fields[fi].name, ft);
+                }
+                for (size_t ii = 0; ii < st->invariant_count; ++ii) {
+                    if (st->invariants[ii][0]) {
+                        if (strchr(st->invariants[ii], ':'))
+                            fprintf(output, "  %s\n", st->invariants[ii]);
+                        else
+                            fprintf(output, "  h_inv_%zu : %s\n", ii, st->invariants[ii]);
+                    }
+                }
+                fprintf(output, "  deriving %s\n\n", has_float ? "Repr" : "Repr, DecidableEq");
+            }
         }
-        fprintf(output, "]\n");
-    } else {
-        fprintf(output, "def stateSchemaFields : List StateSchemaField := []\n");
     }
-    fprintf(
-        output,
-        "end Flow.%s\n"
-        "#print axioms Flow.%s.non_vacuous_precondition_witness\n#print axioms Flow.%s.theorem1_buffer_bounds_safety\n"
-        "#print axioms Flow.%s.theorem2_memory_quota_bound\n#print axioms Flow.%s.theorem3_shard_non_aliasing\n"
-        "#print axioms Flow.%s.theorem4_functional_determinism\n#print axioms Flow.%s.theorem5_kan_open_box_homotopy\n"
-        "#print axioms Flow.%s.theorem6_geometric_transversality\n#print axioms Flow.%s.theorem7_pb_extent_monotonic_step\n"
-        "#print axioms Flow.%s.theorem8_qsbr_epoch_lease_safety\n#print axioms Flow.%s.theorem9_schema_stride_alignment_sound\n"
-        "#print axioms Flow.%s.theorem10_pb_extent_inductive_steps\n"
-        "#print axioms Flow.%s.dual_track_exec_mirror_isomorphic\n"
-        "#print axioms Flow.%s.differential_oracle_boundary_sound\n#print axioms Flow.%s.traceability_zero_orphans\n",
-        pascal_name, pascal_name, pascal_name, pascal_name, pascal_name, pascal_name, pascal_name,
-        pascal_name, pascal_name, pascal_name, pascal_name, pascal_name, pascal_name, pascal_name,
-        pascal_name);
+
+    if (ir->lean_function_count > 0) {
+        for (size_t fi = 0; fi < ir->lean_function_count; ++fi) {
+            const FlowLeanFunction *fn = &ir->lean_functions[fi];
+            if (fn->is_struct_transform && fn->field_assign_count > 0) {
+                fprintf(output, "def %s", fn->name);
+                for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                    const char *pt = fn->param_types[pi][0] ? fn->param_types[pi] : "Nat";
+                    fprintf(output, " (%s : %s)", fn->param_names[pi], pt);
+                }
+                fprintf(output, " : %s := {\n", fn->return_type[0] ? fn->return_type : "Unit");
+                for (size_t ai = 0; ai < fn->field_assign_count; ++ai) {
+                    fprintf(output, "  %s := %s%s\n", fn->field_assign_names[ai],
+                            fn->field_assign_exprs[ai],
+                            (ai + 1 < fn->field_assign_count) ? "," : "");
+                }
+                fprintf(output, "}\n\n");
+            } else if (fn->body[0]) {
+                fprintf(output, "def %s", fn->name);
+                for (size_t pi = 0; pi < fn->param_count; ++pi) {
+                    const char *pt = fn->param_types[pi][0] ? fn->param_types[pi] : "Nat";
+                    fprintf(output, " (%s : %s)", fn->param_names[pi], pt);
+                }
+                const char *rt = fn->return_type[0] ? fn->return_type : "Unit";
+                if (fn->is_result_return && !strstr(rt, "FlowResult") && !strstr(rt, "Option")) {
+                    if ((strstr(fn->body, "some") || strstr(fn->body, "none")) &&
+                        !strstr(fn->body, "interior") && !strstr(fn->body, "boundary"))
+                        fprintf(output, " : Option %s :=\n  ", rt);
+                    else
+                        fprintf(output, " : FlowResult %s :=\n  ", rt);
+                } else {
+                    fprintf(output, " : %s :=\n  ", rt);
+                }
+                for (const char *bp = fn->body; *bp; ++bp) {
+                    fputc(*bp, output);
+                    if (*bp == '\n' && bp[1] != '\0')
+                        fputs("  ", output);
+                }
+                fputs("\n\n", output);
+            }
+        }
+    }
+
+    if (ir->lean_theorem_count > 0) {
+        for (size_t ti = 0; ti < ir->lean_theorem_count; ++ti) {
+            const FlowLeanTheorem *thm = &ir->lean_theorems[ti];
+            if (thm->full_text[0])
+                fprintf(output, "%s\n\n", thm->full_text);
+        }
+    }
+
+    fprintf(output, "end Flow.%s\n", pascal_name);
+    for (size_t ti = 0; ti < ir->lean_theorem_count; ++ti) {
+        const FlowLeanTheorem *thm = &ir->lean_theorems[ti];
+        if (thm->name[0])
+            fprintf(output, "#print axioms Flow.%s.%s\n", pascal_name, thm->name);
+    }
     return ferror(output) == 0;
 }
+
 int flow_abi_audit_lean_certificate(const char *lean_source, char *err_msg, size_t err_size) {
     if (err_msg && err_size)
         err_msg[0] = '\0';
     if (!lean_source || !lean_source[0])
         ABI_FAIL(err_msg, err_size, "empty Lean 4 certificate source");
-    if (!flow_verify_lean_theorems(lean_source, err_msg, err_size))
-        return 0;
-    size_t slen = strlen(lean_source);
-    char *clean = (char *)calloc(slen + 1, 1);
-    if (!clean)
-        ABI_FAIL(err_msg, err_size, "out of memory auditing Lean certificate");
-    int depth = 0, in_str = 0;
-    for (size_t i = 0; i < slen;) {
-        if (!in_str && depth == 0 && lean_source[i] == '-' && lean_source[i + 1] == '-') {
-            while (i < slen && lean_source[i] != '\n')
-                clean[i++] = ' ';
-            continue;
-        }
-        if (!in_str && lean_source[i] == '/' && lean_source[i + 1] == '-') {
-            depth++;
-            clean[i++] = ' ';
-            clean[i++] = ' ';
-            continue;
-        }
-        if (!in_str && depth > 0 && lean_source[i] == '-' && lean_source[i + 1] == '/') {
-            depth--;
-            clean[i++] = ' ';
-            clean[i++] = ' ';
-            continue;
-        }
-        if (depth > 0) {
-            clean[i] = (lean_source[i] == '\n') ? '\n' : ' ';
-            i++;
-            continue;
-        }
-        if (lean_source[i] == '"' && (i == 0 || lean_source[i - 1] != '\\'))
-            in_str = !in_str;
-        clean[i] = lean_source[i];
-        i++;
-    }
-    static const char *const req[] = {"theorem non_vacuous_precondition_witness",
-                                      "theorem theorem1_buffer_bounds_safety",
-                                      "theorem theorem2_memory_quota_bound",
-                                      "theorem theorem3_shard_non_aliasing",
-                                      "theorem theorem4_functional_determinism",
-                                      "theorem theorem5_kan_open_box_homotopy",
-                                      "theorem theorem6_geometric_transversality",
-                                      "theorem theorem7_pb_extent_monotonic_step",
-                                      "theorem theorem8_qsbr_epoch_lease_safety",
-                                      "theorem theorem9_schema_stride_alignment_sound",
-                                      "theorem theorem10_pb_extent_inductive_steps",
-                                      "structure StateSchemaField",
-                                      "def stateSchemaFields",
-                                      "structure ExtentDescriptor",
-                                      "processDescriptor",
-                                      "theorem dual_track_exec_mirror_isomorphic",
-                                      "theorem differential_oracle_boundary_sound",
-                                      "structure CausalAxisWitness",
-                                      "theorem traceability_zero_orphans",
-                                      "inductive WiringPhase",
-                                      "theorem state_preservation_locked_margin",
-                                      "@[extern ",
-                                      "@& ByteArray",
-                                      "#print axioms"};
-    for (size_t i = 0; i < sizeof(req) / sizeof(req[0]); ++i) {
-        if (!strstr(clean, req[i])) {
-            free(clean);
-            ABI_FAIL(err_msg, err_size,
-                     "Lean certificate audit failed: missing mandatory construct '%s'", req[i]);
-        }
-    }
-    free(clean);
-    return 1;
+    return flow_verify_lean_theorems(lean_source, err_msg, err_size);
 }
+
 int flow_abi_verify_lean_certificate(const char *lean_path, char *err_msg, size_t err_size) {
     if (err_msg && err_size)
         err_msg[0] = '\0';
@@ -709,12 +606,14 @@ int flow_abi_verify_lean_certificate(const char *lean_path, char *err_msg, size_
         fclose(fp);
         ABI_FAIL(err_msg, err_size, "out of memory reading lean certificate");
     }
-    (void)fread(buf, 1, (size_t)sz, fp);
+    size_t nread = fread(buf, 1, (size_t)sz, fp);
+    buf[nread] = '\0';
     fclose(fp);
     int audit_ok = flow_abi_audit_lean_certificate(buf, err_msg, err_size);
     free(buf);
     if (!audit_ok)
         return 0;
+
     const char *lean_bin = getenv("FLOW_LEAN_BIN");
     if (!lean_bin || !lean_bin[0])
         lean_bin = getenv("LEAN_BIN");
@@ -732,39 +631,56 @@ int flow_abi_verify_lean_certificate(const char *lean_path, char *err_msg, size_
             lean_bin = "/usr/local/bin/lean";
     }
     if (lean_bin && access(lean_bin, X_OK) == 0) {
-        char cmd[1024];
-        snprintf(cmd, sizeof(cmd), "\"%s\" \"%s\" 2>&1", lean_bin, lean_path);
-        FILE *pipe = popen(cmd, "r");
-        if (pipe) {
-            size_t cap = 4096, used = 0;
-            char *out = (char *)calloc(cap, 1);
-            char chunk[1024];
-            size_t n = 0;
-            while ((n = fread(chunk, 1, sizeof(chunk), pipe)) > 0) {
-                if (out && used + n + 1 > cap) {
-                    size_t ncap = cap * 2 + n;
-                    char *nb = (char *)realloc(out, ncap);
-                    if (nb) {
-                        out = nb;
-                        cap = ncap;
-                    }
-                }
-                if (out && used + n < cap) {
-                    memcpy(out + used, chunk, n);
-                    used += n;
-                    out[used] = '\0';
-                }
-            }
-            int rc = pclose(pipe);
-            if (rc != 0 || (out && strstr(out, "sorryAx") != NULL)) {
-                if (err_msg && err_size)
-                    snprintf(err_msg, err_size, "lean compiler rejected certificate: %s",
-                             (out && out[0]) ? out : "non-zero exit");
-                free(out);
-                return 0;
-            }
-            free(out);
+        int pipefd[2];
+        if (pipe(pipefd) != 0)
+            ABI_FAIL(err_msg, err_size, "failed to create pipe: %s", strerror(errno));
+        pid_t pid = fork();
+        if (pid < 0) {
+            close(pipefd[0]);
+            close(pipefd[1]);
+            ABI_FAIL(err_msg, err_size, "fork failed: %s", strerror(errno));
         }
+        if (pid == 0) {
+            close(pipefd[0]);
+            dup2(pipefd[1], STDOUT_FILENO);
+            dup2(pipefd[1], STDERR_FILENO);
+            close(pipefd[1]);
+            char *const argv[] = {(char *)lean_bin, (char *)lean_path, NULL};
+            execv(lean_bin, argv);
+            _exit(127);
+        }
+        close(pipefd[1]);
+        size_t cap = 4096, used = 0;
+        char *out = (char *)calloc(cap, 1);
+        char chunk[1024];
+        ssize_t n = 0;
+        while ((n = read(pipefd[0], chunk, sizeof(chunk))) > 0) {
+            if (out && used + (size_t)n + 1 > cap) {
+                size_t ncap = cap * 2 + (size_t)n;
+                char *nb = (char *)realloc(out, ncap);
+                if (nb) {
+                    out = nb;
+                    cap = ncap;
+                }
+            }
+            if (out && used + (size_t)n < cap) {
+                memcpy(out + used, chunk, (size_t)n);
+                used += (size_t)n;
+                out[used] = '\0';
+            }
+        }
+        close(pipefd[0]);
+        int status = 0;
+        waitpid(pid, &status, 0);
+        int rc = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+        if (rc != 0 || (out && strstr(out, "sorryAx") != NULL)) {
+            if (err_msg && err_size)
+                snprintf(err_msg, err_size, "lean compiler rejected certificate: %s",
+                         (out && out[0]) ? out : "non-zero exit");
+            free(out);
+            return 0;
+        }
+        free(out);
     }
     return 1;
 }

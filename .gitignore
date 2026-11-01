@@ -8,6 +8,5 @@ Cargo.lock
 *.dylib
 *.a
 
-# Temporary dynamic fvec models in local runtime
-.flow/vecs/tmp_*
-.flow/vecs/auto_*
+.agents/
+
