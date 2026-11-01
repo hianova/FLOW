@@ -2,7 +2,6 @@
 #include "backend.h"
 #include "abi.h"
 #include "flow.h"
-#include "registry.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -22,7 +21,6 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
 int LLVMFuzzerInitialize(int *argc, char ***argv) {
     (void)argc;
     (void)argv;
-    flow_registry_init();
     return 0;
 }
 
@@ -43,32 +41,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         lower_to_ir(&spec, &ir);
         FUZZ_CHECK(ir.input_max_count >= 0);
 
-        FlowBitSpace space;
-        if (flow_bitspace_init_for_ir(&ir, &space)) {
-            FlowBitSearchResult search_res;
-            memset(&search_res, 0, sizeof(search_res));
-            flow_bitspace_search(&space, 10, 42, 0, NULL, &search_res);
-            FUZZ_CHECK(search_res.heatmap.total_mutations <= 64);
-
-            if (search_res.best_plan.component != NULL) {
-                FlowPlanArtifact artifact;
-                flow_plan_to_artifact(&search_res.best_plan, &ir, 42, &artifact);
-                char val_err[128] = {0};
-                (void)flow_artifact_validate(&artifact, &ir, &space, val_err, sizeof(val_err));
-
-                FILE *sink = tmpfile();
-                if (sink) {
-                    SearchResult sres;
-                    memset(&sres, 0, sizeof(sres));
-                    flow_plan_to_search_result(&search_res.best_plan, &ir, 42, &sres);
-                    VerificationReport vrep;
-                    memset(&vrep, 0, sizeof(vrep));
-                    if (verify_candidate(&ir, search_res.best_plan.component, &sres, &vrep)) {
-                        (void)emit_c(sink, &ir, search_res.best_plan.component, &sres, &vrep, 0);
-                    }
-                    fclose(sink);
-                }
-            }
+        FILE *sink = tmpfile();
+        if (sink) {
+            (void)emit_c(sink, &ir);
+            fclose(sink);
         }
         flow_ir_cleanup(&ir);
     }
@@ -89,6 +65,8 @@ static uint64_t fuzz_prng(uint64_t *state) {
 }
 
 int main(int argc, char **argv) {
+    flow_parser_set_quiet(1);
+    setenv("FLOW_LEAN_BIN", "/nonexistent/lean", 1);
     LLVMFuzzerInitialize(&argc, &argv);
 
     /* 1. Corpus of valid, malformed, pathological and boundary pure .lean inputs */
@@ -96,9 +74,10 @@ int main(int argc, char **argv) {
         /* Valid pure .lean specifications */
         "structure ReflexState where\n  pos : UInt64\n  vel : UInt64\n\ndef stepKernel (pos : UInt64) (vel : UInt64) : UInt64 :=\n  if pos + vel > 100 then 0 else 1\n\ntheorem step_safe : stepKernel 10 20 = 1 := by decide\n",
         "def badSub (a : Nat) (b : Nat) : Nat :=\n  a - b\ntheorem sub_zero : badSub 3 10 = 0 := by decide\n",
-        "namespace Quant.Quote\nprivate def spread (x : Float) : Float := x * 0.5\ndef quote (m : Float) : Float := m + spread m\ntheorem q_ok (m : Float) (h : m > 0.0) : quote m > m := by decide\nend Quant.Quote\n",
+        "namespace Quant.Quote\nprivate def spread (x : Int64) : Int64 := x / 2\ndef quote (m : Int64) : Int64 := m + spread m\ntheorem q_ok (m : Int64) (h : m > 0) : quote m >= m := by omega\nend Quant.Quote\n",
 
-        /* Retired @annotations & malformed .lean specifications */
+        /* Retired @annotations, Float rejection & malformed .lean specifications */
+        "def badFloat (x : Float) : Float := x\n",
         "@quota {\n  deadline: 200us\n}\n",
         "@embodied {\n  frequency 1000hz\n}\n",
         "@reload {\n  version: 2\n}\n",

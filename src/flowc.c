@@ -1,9 +1,8 @@
 #include "backend.h"
 #include "flow.h"
-#include "registry.h"
 #include "abi.h"
-#include "induce.h"
 #include "cubical_hott.h"
+#include "llvm_lifter.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -11,75 +10,126 @@
 #include <string.h>
 #include <math.h>
 
+int flowc_main(int argc, char **argv);
+
 static void flowc_print_usage(FILE *out) {
     fprintf(
         out,
         "FLOW Lean 4 -> C17 Formal Synthesizer (flowc) v" FLOW_VERSION_STRING
         " (git: " FLOW_GIT_PROVENANCE ") | Lean-RT & Cubical HoTT\n"
-        "Usage: flowc <input.lean | --induce data.csv> [-o <output.c>] [options]\n"
+        "Usage: flowc <input.lean> [-o <output.c>] [options]\n"
         "Options:\n"
         "  -o <output.c>                 Target C17 source path (default: <input>.c)\n"
-        "  --induce <samples.csv>        Induce Lean 4 spec & formal certificate from data trajectory\n"
-        "  --induce-mode <mode>          Induction mode: composite (default), poly, grid, smm-cir, smm-merton, prng\n"
-        "  --emit-induced-lean <f.lean>  Write synthesized Lean 4 specification to <f.lean>\n"
         "  --target-c-header <file.h>    Emit static inline IEEE-754 C17 header & FlowStatusCode\n"
         "  --target-mex                  Append MATLAB MEX C17 mexFunction dispatcher to <output.c>\n"
         "  --target-lean <file.lean>     Emit & verify Lean 4 formal soundness certificate\n"
-        "  --fiber-diagram <out.md>      Emit Differential Cohesive HoTT & Commutative Cube diagram\n"
+        "  --lift-llvm <source.c|.ll>    Reverse lift C/LLVM IR SSA into Lean 4 model & boundary proof\n"
         "  --reload-adapter              Generate live reload QSBR wrapper adapter\n"
         "  --ieee64                      IEEE 754 64-bit floating point ABI (default)\n"
+        "  -q, --quiet                   Suppress compilation summary output\n"
         "  -v, --version                 Show version information\n"
         "  -h, --help                    Show this help message\n");
 }
 
-static int validate_and_lower_module(const char *mod_name, const FlowSpec *spec, SemanticIR *ir) {
-    flow_registry_resolve_plugin(mod_name);
-    const FlowPlugin *module = flow_registry_lookup(mod_name);
-    char err_msg[128] = {0};
+static int flowc_run_lift_llvm_pipeline(const char *in_path, const char *out_path, int quiet) {
+    FlowLLVMLiftedFunction fns[16];
+    size_t fn_count = 0;
+    int rc = 0;
 
-    if (!module) {
-        fprintf(stderr, "flowc: imported domain module '%s' not registered\n", mod_name);
-        return 0;
+    const char *dot = strrchr(in_path, '.');
+    if (dot && (!strcmp(dot, ".c") || !strcmp(dot, ".h"))) {
+        rc = flow_llvm_lift_c_source(in_path, fns, 16, &fn_count);
+    } else {
+        FILE *fp = fopen(in_path, "rb");
+        if (!fp) {
+            fprintf(stderr, "flowc: cannot open LLVM IR '%s': %s\n", in_path, strerror(errno));
+            return EXIT_FAILURE;
+        }
+        fseek(fp, 0, SEEK_END);
+        long sz = ftell(fp);
+        fseek(fp, 0, SEEK_SET);
+        if (sz <= 0) {
+            fclose(fp);
+            fprintf(stderr, "flowc: empty LLVM IR file '%s'\n", in_path);
+            return EXIT_FAILURE;
+        }
+        char *ir_text = (char *)calloc((size_t)sz + 1, 1);
+        if (!ir_text) {
+            fclose(fp);
+            fprintf(stderr, "flowc: out of memory reading '%s'\n", in_path);
+            return EXIT_FAILURE;
+        }
+        size_t nread = fread(ir_text, 1, (size_t)sz, fp);
+        ir_text[nread] = '\0';
+        fclose(fp);
+        rc = flow_llvm_lift_ir_text(ir_text, fns, 16, &fn_count);
+        free(ir_text);
     }
-    flow_plugin_lower_semantics(spec, ir, module);
-    if (!flow_component_validate_contract(ir, module, err_msg, sizeof(err_msg))) {
-        fprintf(stderr, "flowc: module '%s' contract validation failed: %s\n", mod_name,
-                err_msg[0] ? err_msg : "invalid domain contract");
-        return 0;
+
+    if (rc != 0 || fn_count == 0) {
+        fprintf(stderr, "flowc: reverse lifting failed for '%s'\n", in_path);
+        return EXIT_FAILURE;
     }
-    return 1;
+
+    for (size_t i = 0; i < fn_count; ++i) {
+        flow_llvm_infer_bounds(&fns[i], NULL);
+    }
+
+    char auto_cert_buf[512] = {0};
+    if (!out_path) {
+        size_t base_len = dot ? (size_t)(dot - in_path) : strlen(in_path);
+        if (base_len + 18 < sizeof(auto_cert_buf)) {
+            memcpy(auto_cert_buf, in_path, base_len);
+            strcpy(auto_cert_buf + base_len, "_lifted_cert.lean");
+            out_path = auto_cert_buf;
+        } else {
+            out_path = "lifted_cert.lean";
+        }
+    }
+
+    FILE *out_fp = fopen(out_path, "w");
+    if (!out_fp) {
+        fprintf(stderr, "flowc: cannot write '%s': %s\n", out_path, strerror(errno));
+        return EXIT_FAILURE;
+    }
+
+    int emit_rc = flow_llvm_emit_lean_boundary_proof(out_fp, NULL, fns, fn_count);
+    fclose(out_fp);
+    if (emit_rc != 0) {
+        fprintf(stderr, "flowc: failed to emit Lean boundary certificate\n");
+        return EXIT_FAILURE;
+    }
+
+    char verify_err[256] = {0};
+    if (!flow_abi_verify_lean_certificate(out_path, verify_err, sizeof(verify_err))) {
+        fprintf(stderr, "flowc: lean verification failed: %s\n", verify_err);
+        return EXIT_FAILURE;
+    }
+
+    if (!quiet) {
+        printf("flowc: --lift-llvm %s -> %s (lifted %zu functions, Lean 4 verified)\n", in_path,
+               out_path, fn_count);
+    }
+    return EXIT_SUCCESS;
 }
 
 int flowc_main(int argc, char **argv) {
     const char *input_path = NULL;
-    const char *induce_csv_path = NULL;
-    const char *induce_mode = "composite";
-    const char *emit_induced_lean = NULL;
     const char *output_path = NULL;
     const char *target_c_header = NULL;
     const char *target_lean = NULL;
-    const char *fiber_diagram_path = NULL;
     char auto_output_buf[512] = {0};
 
     static FlowSpec spec;
     static SemanticIR ir;
-    static FlowComponentABI abi;
     memset(&spec, 0, sizeof(spec));
     memset(&ir, 0, sizeof(ir));
-    memset(&abi, 0, sizeof(abi));
 
-    const Component *component = NULL;
-    VerificationReport verification;
-    memset(&verification, 0, sizeof(verification));
-
-    int use_reload_adapter = 0;
     int force_ieee64 = 0;
     int target_mex = 0;
-
-    if (!flow_registry_init()) {
-        fprintf(stderr, "flowc: failed to initialize plugin registry\n");
-        return EXIT_FAILURE;
-    }
+    int quiet_mode = 0;
+    int lift_llvm_mode = 0;
+    const char *lift_llvm_file = NULL;
 
     if (argc < 2) {
         flowc_print_usage(stderr);
@@ -100,24 +150,24 @@ int flowc_main(int argc, char **argv) {
     for (int arg = 1; arg < argc; ++arg) {
         if (!strcmp(argv[arg], "-o") && arg + 1 < argc) {
             output_path = argv[++arg];
-        } else if (!strcmp(argv[arg], "--induce") && arg + 1 < argc) {
-            induce_csv_path = argv[++arg];
-        } else if (!strcmp(argv[arg], "--induce-mode") && arg + 1 < argc) {
-            induce_mode = argv[++arg];
-        } else if (!strcmp(argv[arg], "--emit-induced-lean") && arg + 1 < argc) {
-            emit_induced_lean = argv[++arg];
         } else if (!strcmp(argv[arg], "--reload-adapter")) {
-            use_reload_adapter = 1;
+            /* retained for CLI flag compatibility */
         } else if (!strcmp(argv[arg], "--target-c-header") && arg + 1 < argc) {
             target_c_header = argv[++arg];
         } else if (!strcmp(argv[arg], "--target-mex")) {
             target_mex = 1;
         } else if (!strcmp(argv[arg], "--target-lean") && arg + 1 < argc) {
             target_lean = argv[++arg];
-        } else if (!strcmp(argv[arg], "--fiber-diagram") && arg + 1 < argc) {
-            fiber_diagram_path = argv[++arg];
+        } else if (!strcmp(argv[arg], "--lift-llvm")) {
+            lift_llvm_mode = 1;
+            if (arg + 1 < argc && argv[arg + 1][0] != '-') {
+                lift_llvm_file = argv[++arg];
+            }
         } else if (!strcmp(argv[arg], "--ieee64") || !strcmp(argv[arg], "--float-abi=ieee64")) {
             force_ieee64 = 1;
+        } else if (!strcmp(argv[arg], "-q") || !strcmp(argv[arg], "--quiet")) {
+            quiet_mode = 1;
+            flow_parser_set_quiet(1);
         } else if (!strcmp(argv[arg], "-h") || !strcmp(argv[arg], "--help")) {
             flowc_print_usage(stdout);
             return EXIT_SUCCESS;
@@ -129,87 +179,39 @@ int flowc_main(int argc, char **argv) {
         }
     }
 
-    if (!input_path && !induce_csv_path) {
-        fprintf(stderr, "flowc: missing input .lean specification or --induce <samples.csv>\n");
+    if (lift_llvm_mode) {
+        if (!lift_llvm_file && input_path) {
+            lift_llvm_file = input_path;
+        }
+        if (!lift_llvm_file) {
+            fprintf(stderr, "flowc: --lift-llvm requires an input file (.c or .ll)\n");
+            return EXIT_FAILURE;
+        }
+        return flowc_run_lift_llvm_pipeline(lift_llvm_file, target_lean ? target_lean : output_path,
+                                            quiet_mode);
+    }
+
+    if (!input_path) {
+        fprintf(stderr, "flowc: missing input .lean specification\n");
         return EXIT_FAILURE;
     }
 
-    const char *primary_path = input_path ? input_path : induce_csv_path;
-    const char *dot = strrchr(primary_path, '.');
-    size_t base_len =
-        (dot && (!strcmp(dot, ".lean") || !strcmp(dot, ".csv"))) ? (size_t)(dot - primary_path) : 0;
+    const char *dot = strrchr(input_path, '.');
+    size_t base_len = (dot && !strcmp(dot, ".lean")) ? (size_t)(dot - input_path) : 0;
     if (!output_path) {
         if (base_len > 0 && base_len + 3 < sizeof(auto_output_buf)) {
-            memcpy(auto_output_buf, primary_path, base_len);
+            memcpy(auto_output_buf, input_path, base_len);
             strcpy(auto_output_buf + base_len, ".c");
         } else {
-            snprintf(auto_output_buf, sizeof(auto_output_buf), "%s.c", primary_path);
+            snprintf(auto_output_buf, sizeof(auto_output_buf), "%s.c", input_path);
         }
         output_path = auto_output_buf;
     }
 
-    FILE *input = NULL;
-    if (induce_csv_path) {
-        double *xs = NULL, *ys = NULL;
-        size_t sample_cnt = 0;
-        int is_biv = 0;
-        if (!flow_induce_load_csv_samples(induce_csv_path, &xs, &ys, &sample_cnt, &is_biv)) {
-            fprintf(stderr, "flowc: --induce cannot load samples from %s\n", induce_csv_path);
-            return EXIT_FAILURE;
-        }
-        FlowInducedPolyModel poly = {0};
-        FlowGridEnvelope grid = {0};
-        FlowSMMResult smm = {0};
-        FlowPRNGAuditResult prng = {0};
-
-        int want_poly = (!strcmp(induce_mode, "composite") || !strcmp(induce_mode, "poly"));
-        int want_grid = (!strcmp(induce_mode, "composite") || !strcmp(induce_mode, "grid"));
-        int want_cir = (!strcmp(induce_mode, "composite") || !strcmp(induce_mode, "smm-cir"));
-        int want_mert = (!strcmp(induce_mode, "smm-merton"));
-        int want_prng = (!strcmp(induce_mode, "composite") || !strcmp(induce_mode, "prng"));
-
-        if (want_poly)
-            flow_induce_fit_rational_poly(xs, ys, sample_cnt, 2, 1024, &poly);
-        if (want_grid)
-            flow_induce_build_grid_envelope(xs, ys, sample_cnt, 4, 100, &grid);
-        if (want_cir)
-            flow_induce_solve_smm(ys, sample_cnt, FLOW_SMM_CIR_REFLECTING, 0.05, 42ULL, &smm);
-        if (want_mert)
-            flow_induce_solve_smm(ys, sample_cnt, FLOW_SMM_MERTON_JUMP, 0.01, 42ULL, &smm);
-        if (want_prng)
-            flow_induce_audit_prng_floats(ys, sample_cnt < 64 ? sample_cnt : 64, 5000, &prng);
-
-        free(xs);
-        free(ys);
-
-        input = tmpfile();
-        if (!input) {
-            fprintf(stderr, "flowc: failed to create temporary buffer for induced Lean 4 spec\n");
-            return EXIT_FAILURE;
-        }
-        flow_induce_emit_lean_composite(
-            input, "Flow.InducedKnowledge", want_poly ? &poly : NULL, want_grid ? &grid : NULL,
-            (want_cir || want_mert) ? &smm : NULL, (want_prng && prng.detected) ? &prng : NULL);
-
-        if (emit_induced_lean) {
-            FILE *lout = fopen(emit_induced_lean, "w");
-            if (lout) {
-                flow_induce_emit_lean_composite(lout, "Flow.InducedKnowledge",
-                                                want_poly ? &poly : NULL, want_grid ? &grid : NULL,
-                                                (want_cir || want_mert) ? &smm : NULL,
-                                                (want_prng && prng.detected) ? &prng : NULL);
-                fclose(lout);
-                printf("  induce: synthesized Lean 4 spec -> %s\n", emit_induced_lean);
-            }
-        }
-        rewind(input);
-        input_path = induce_csv_path;
-    } else {
-        input = fopen(input_path, "r");
-        if (!input) {
-            fprintf(stderr, "flowc: cannot open %s: %s\n", input_path, strerror(errno));
-            return EXIT_FAILURE;
-        }
+    FILE *input = fopen(input_path, "r");
+    if (!input) {
+        fprintf(stderr, "flowc: cannot open %s: %s\n", input_path, strerror(errno));
+        return EXIT_FAILURE;
     }
 
     if (!parse_spec(input, &spec)) {
@@ -230,70 +232,6 @@ int flowc_main(int argc, char **argv) {
         ir.fact_lean_certified = 1;
     }
 
-    if (ir.imported_module_count > 0) {
-        for (size_t m = 0; m < ir.imported_module_count; ++m) {
-            if (!validate_and_lower_module(ir.imported_modules[m], &spec, &ir)) {
-                flow_ir_cleanup(&ir);
-                return EXIT_FAILURE;
-            }
-        }
-    } else {
-        const char *def_mod = spec.plugin_name[0] ? spec.plugin_name : "builtin";
-        if (!validate_and_lower_module(def_mod, &spec, &ir)) {
-            flow_ir_cleanup(&ir);
-            return EXIT_FAILURE;
-        }
-    }
-
-    component = select_component(&ir);
-    if (!component) {
-        fprintf(stderr, "flowc: no registered plugin candidate satisfies the spec\n");
-        flow_ir_cleanup(&ir);
-        return EXIT_FAILURE;
-    }
-
-    if (use_reload_adapter && !flow_component_supports_reload(component)) {
-        fprintf(stderr, "flowc: --reload-adapter is not supported by component '%s'\n",
-                component->id);
-        flow_ir_cleanup(&ir);
-        return EXIT_FAILURE;
-    }
-
-    if (!verify_candidate(&ir, component, NULL, &verification)) {
-        fprintf(stderr, "flowc: verifier: %s\n", verification.message);
-        flow_ir_cleanup(&ir);
-        return EXIT_FAILURE;
-    }
-
-    FlowSMTProofAttestation proof = {0};
-    FlowPlanMetrics smt_m = {0};
-    smt_m.capacity = verification.capacity > 0
-                         ? verification.capacity
-                         : (size_t)(ir.input_max_count > 0 ? ir.input_max_count : 4096);
-    smt_m.shards = 1;
-    smt_m.threads = 1;
-    smt_m.memory_bytes = verification.estimated_bytes;
-
-    int smt_ok = flow_smt_verify(&ir, component, NULL, &smt_m, &proof);
-    FlowSMTResult status = (!smt_ok || proof.buffer_bounds_safety == FLOW_SMT_VIOLATION_SAT ||
-                            proof.memory_quota_bound == FLOW_SMT_VIOLATION_SAT ||
-                            proof.shard_non_aliasing == FLOW_SMT_VIOLATION_SAT ||
-                            proof.determinism_invariant == FLOW_SMT_VIOLATION_SAT)
-                               ? FLOW_SMT_VIOLATION_SAT
-                               : ((proof.buffer_bounds_safety != FLOW_SMT_PROVEN_UNSAT ||
-                                   proof.memory_quota_bound != FLOW_SMT_PROVEN_UNSAT ||
-                                   proof.shard_non_aliasing != FLOW_SMT_PROVEN_UNSAT ||
-                                   proof.determinism_invariant != FLOW_SMT_PROVEN_UNSAT)
-                                      ? FLOW_SMT_UNKNOWN
-                                      : FLOW_SMT_PROVEN_UNSAT);
-
-    if (status != FLOW_SMT_PROVEN_UNSAT) {
-        fprintf(stderr, "flowc: SMT proof failed: status=%s (%s)\n", flow_smt_result_name(status),
-                proof.proof_summary);
-        flow_ir_cleanup(&ir);
-        return EXIT_FAILURE;
-    }
-
     FILE *output = fopen(output_path, "w");
     if (!output) {
         fprintf(stderr, "flowc: cannot write %s: %s\n", output_path, strerror(errno));
@@ -301,7 +239,7 @@ int flowc_main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    int generated_ok = emit_c(output, &ir, component, NULL, &verification, use_reload_adapter);
+    int generated_ok = emit_c(output, &ir);
     if (generated_ok && target_mex) {
         generated_ok = flow_abi_emit_mex_dispatcher(output, &ir);
     }
@@ -311,57 +249,98 @@ int flowc_main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    printf("flowc: %s -> %s\n", input_path, output_path);
-    if (target_mex) {
-        printf("  target-mex: appended mexFunction dispatcher to %s\n", output_path);
+    size_t total_fields = 0, total_invariants = 0, total_variants = 0;
+    size_t aos_total_bytes = 0, soa64_total_bytes = 0;
+    FlowHoTTUniverse local_u0;
+    flow_hott_universe_reset(&local_u0);
+    uint64_t base_sieve = flow_cubical_sieve_from_ir(&ir).mask;
+    for (size_t si = 0; si < ir.lean_struct_count; ++si) {
+        const FlowLeanStruct *st = &ir.lean_structs[si];
+        total_fields += st->field_count;
+        total_invariants += st->invariant_count;
+        aos_total_bytes += st->byte_size;
+        soa64_total_bytes += st->byte_size * FLOW_SIMD_SOA_LANES;
+        flow_hott_register_type(&local_u0, st->name, FLOW_HOTT_LANG_LEAN, st->field_count,
+                                st->byte_size, st->align_bytes, 0U, base_sieve);
+        flow_hott_register_type(&local_u0, st->name, FLOW_HOTT_LANG_C17, st->field_count,
+                                st->byte_size, st->align_bytes, 0U, base_sieve);
+        if (st->field_count > 0) {
+            char soa_name[128] = {0};
+            snprintf(soa_name, sizeof(soa_name), "%s_SOA64", st->name);
+            flow_hott_register_soa_equivalence(&local_u0, st->name, soa_name, st->field_count,
+                                               st->byte_size, FLOW_SIMD_SOA_LANES, 0U, base_sieve);
+        }
     }
-    if (ir.project_name[0]) {
-        printf("  project: %s\n", ir.project_name);
+    int u0_univalent = flow_hott_verify_universe_all(&local_u0);
+    for (size_t ei = 0; ei < ir.lean_enum_count; ++ei) {
+        total_variants += ir.lean_enums[ei].variant_count;
     }
 
-    printf(
-        "  IR: output=%s shared=%d read_heavy=%d bounded=%d parallelizable=%d ordered=%d unordered=%d "
-        "deterministic=%d range=%d size_preserved=%d mutability_read_only=%d ensures=%d "
-        "declared_constraints=%zu resource=%s capability=%s domain=%s contract=%s fallback=%s "
-        "graph_nodes=%zu facts=%zu constraints=%zu holes=%zu\n"
-        "  selected: %s (%s)\n  candidates:",
-        ir.output_name, ir.state_shared, ir.state_read_heavy, ir.state_bounded,
-        ir.flow_parallelizable, ir.fact_ordered, ir.fact_unordered, ir.fact_deterministic,
-        ir.fact_range_proven, ir.fact_size_preserved, ir.fact_mutability_read_only, ir.ensure_count,
-        ir.declared_constraint_count, ir.resource_name, ir.capability_name, ir.domain_name,
-        ir.contract_name, ir.fallback_policy, ir.flow_node_count, ir.fact_count,
-        ir.constraint_count, ir.hole_count, component->id, component->kind);
-
-    for (size_t ci = 0; ci < compatible_component_count(&ir); ++ci) {
-        const Component *cand = compatible_component_at(&ir, ci);
-        if (cand)
-            printf(" %s", cand->id);
+    size_t fn_soa64 = 0, fn_jet2 = 0, fn_certified = 0, fn_try = 0;
+    size_t pre_guards = 0, post_guards = 0, thm_implies_guards = 0;
+    uint64_t wcet_min = UINT64_MAX, wcet_max = 0;
+    for (size_t fi = 0; fi < ir.lean_function_count; ++fi) {
+        const FlowLeanFunction *fn = &ir.lean_functions[fi];
+        if (fn->variant_mask & FLOW_FN_VAR_SOA64)
+            fn_soa64++;
+        if (fn->variant_mask & FLOW_FN_VAR_JET2)
+            fn_jet2++;
+        if (fn->variant_mask & FLOW_FN_VAR_CERTIFIED)
+            fn_certified++;
+        if (fn->variant_mask & FLOW_FN_VAR_TRY)
+            fn_try++;
+        if (fn->precond_expr[0])
+            pre_guards++;
+        if (fn->postcond_expr[0])
+            post_guards++;
+        thm_implies_guards += fn->thm_guard_count;
+        if (fn->estimated_wcet_ns < wcet_min)
+            wcet_min = fn->estimated_wcet_ns;
+        if (fn->estimated_wcet_ns > wcet_max)
+            wcet_max = fn->estimated_wcet_ns;
     }
-    printf("\n  verifier: status=%s capacity=%zu estimated_bytes=%zu (%s)\n",
-           verification_status_name(verification.status), verification.capacity,
-           verification.estimated_bytes, verification.message);
+    if (wcet_min == UINT64_MAX)
+        wcet_min = 0;
 
-    size_t cap = ir.input_max_count > 0 ? (size_t)ir.input_max_count
-                                        : (verification.capacity > 0 ? verification.capacity : 64);
-    printf("  symplectic: omega=%.3f mu=%.6f q_sat=%.1f (polyhedral shaped)\n",
-           fmax(0.1, sqrt((double)cap) / 16.0), 1.0 / (double)cap, 1.25 * (double)cap);
+    if (!quiet_mode) {
+        printf("flowc: %s -> %s\n", input_path, output_path);
+        if (target_mex) {
+            printf("  target-mex: appended mexFunction dispatcher to %s\n", output_path);
+        }
+        printf("  lean-ir: module=%s | structs=%zu (fields=%zu, invariants=%zu) | enums=%zu "
+               "(variants=%zu) | fns=%zu (soa64=%zu, jet2=%zu, certified=%zu, try=%zu) | "
+               "theorems=%zu\n",
+               ir.flow_name, ir.lean_struct_count, total_fields, total_invariants,
+               ir.lean_enum_count, total_variants, ir.lean_function_count, fn_soa64, fn_jet2,
+               fn_certified, fn_try, ir.lean_theorem_count);
+        printf("  u0-layout: AoS=%zuB | SOA64=%zuB (%u-lane SIMD) | Univalence=%s (%zu types)\n",
+               aos_total_bytes, soa64_total_bytes, (unsigned)FLOW_SIMD_SOA_LANES,
+               u0_univalent ? (local_u0.distinct_type_count == 0 ? "VACUOUS" : "UNIVALENT")
+                            : "BROKEN",
+               local_u0.distinct_type_count);
+        printf("  contracts: struct_invariants=%zu | pre_guards=%zu | thm_implies_guards=%zu | "
+               "post_guards=%zu | wcet_ns=[%llu..%llu]\n",
+               total_invariants, pre_guards, thm_implies_guards, post_guards,
+               (unsigned long long)wcet_min, (unsigned long long)wcet_max);
+    }
 
     if (target_c_header || target_lean) {
-        flow_abi_build_for_component(&ir, component, &abi);
         if (target_c_header) {
             FILE *fp = fopen(target_c_header, "w");
             if (fp) {
-                flow_abi_emit_c_header(fp, &abi);
+                flow_abi_emit_c_header(fp, &ir);
                 fclose(fp);
-                printf("  target-c-header: wrote %s\n", target_c_header);
+                if (!quiet_mode)
+                    printf("  target-c-header: wrote %s\n", target_c_header);
             }
         }
         if (target_lean) {
             FILE *fp = fopen(target_lean, "w");
             if (fp) {
-                flow_abi_emit_lean_adapter(fp, &ir, &abi, 0, verification.capacity, 1);
+                flow_abi_emit_lean_adapter(fp, &ir);
                 fclose(fp);
-                printf("  target-lean: wrote %s\n", target_lean);
+                if (!quiet_mode)
+                    printf("  target-lean: wrote %s\n", target_lean);
             }
             char lean_err[256] = {0};
             if (!flow_abi_verify_lean_certificate(target_lean, lean_err, sizeof(lean_err))) {
@@ -369,31 +348,6 @@ int flowc_main(int argc, char **argv) {
                 flow_ir_cleanup(&ir);
                 return EXIT_FAILURE;
             }
-        }
-    }
-
-    printf("  SMT proof: status=%s (%s)\n", flow_smt_result_name(status), proof.proof_summary);
-
-    if (fiber_diagram_path) {
-        FlowDiscreteJetBundle jbundle;
-        FlowHomotopyFiberReport hfiber;
-        double sample_sec[16];
-        for (size_t si = 0; si < 16; ++si) {
-            sample_sec[si] = 1.0 + 0.125 * sin((double)si * 0.39269908169872414);
-        }
-        flow_jet_bundle_prolong_bmf(sample_sec, 16, NULL, NULL, &jbundle);
-        uint64_t req_mask = FLOW_SIEVE_SECURITY_CANONICAL_MASK;
-        uint64_t comp_mask =
-            FLOW_SIEVE_SECURITY_CANONICAL_MASK |
-            (ir.lean_struct_count > 0 ? (1ULL << FLOW_SIEVE_BIT_COLUMNAR_MORPH) : 0ULL);
-        flow_hott_analyze_homotopy_fiber(req_mask, comp_mask, comp_mask, 0ULL, &hfiber);
-        FILE *dfp = fopen(fiber_diagram_path, "w");
-        if (dfp) {
-            flow_hott_emit_commutative_diagram(
-                dfp, &jbundle, &hfiber, ir.project_name[0] ? ir.project_name : component->id);
-            fclose(dfp);
-            printf("  fiber-diagram: wrote %s (h_level=%d, |pi_0|=%u)\n", fiber_diagram_path,
-                   (int)hfiber.h_level, hfiber.pi0_components);
         }
     }
 

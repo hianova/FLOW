@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #endif
 #include "flow_jet.h"
+#include "flow_hw_probe.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,9 +21,11 @@
 #include <pthread.h>
 #include <sched.h>
 #endif
+
 uint32_t flow_jet_crc32(const void *data, size_t length) {
     return flow_crc32_ieee(data, length);
 }
+
 int flow_jet_init_extended(FlowJet *jet, const char *id, const char *name, uint32_t dim,
                            uint32_t koopman_dim, uint32_t taps) {
     if (!jet)
@@ -67,97 +70,15 @@ int flow_jet_init_extended(FlowJet *jet, const char *id, const char *name, uint3
     jet->payload.proof =
         (FlowSMTProofAttestation){FLOW_SMT_PROVEN_UNSAT, FLOW_SMT_PROVEN_UNSAT,
                                   FLOW_SMT_PROVEN_UNSAT, FLOW_SMT_PROVEN_UNSAT, ""};
-    flow_jet_thermal_init_default(&jet->payload.thermal);
     jet->header.hamiltonian_energy = flow_jet_hamiltonian(jet);
     return 1;
 }
+
 int flow_jet_init(FlowJet *jet, const char *id, const char *name) {
     return flow_jet_init_extended(jet, id, name, FLOW_JET_STANDARD_DIM,
                                   FLOW_JET_STANDARD_KOOPMAN_DIM, FLOW_JET_STANDARD_TAPS);
 }
-int flow_jet_edmd_init(FlowJetStreamingEDMD *edmd, uint32_t dim, double forgetting_factor) {
-    if (!edmd)
-        return 0;
-    memset(edmd, 0, sizeof(*edmd));
-    edmd->dim = (dim > 0 && dim <= FLOW_JET_MAX_KOOPMAN_DIM) ? dim : FLOW_JET_STANDARD_KOOPMAN_DIM;
-    edmd->forgetting_factor = (forgetting_factor >= 0.5 && forgetting_factor <= 1.0)
-                                  ? forgetting_factor
-                                  : FLOW_JET_EDMD_DEFAULT_LAMBDA;
-    for (size_t i = 0; i < edmd->dim; ++i) {
-        edmd->P[i][i] = 100.0;
-        edmd->A[i][i] = 0.99;
-        edmd->K[i][i] = -0.05;
-    }
-    return 1;
-}
-int flow_jet_edmd_update(FlowJetStreamingEDMD *edmd, const double x_curr[], const double x_next[],
-                         double dt) {
-    if (!edmd || !x_curr || !x_next)
-        return 0;
-    uint32_t d = edmd->dim;
-    double lambda = edmd->forgetting_factor, gamma = lambda, v[FLOW_JET_MAX_KOOPMAN_DIM] = {0},
-           k[FLOW_JET_MAX_KOOPMAN_DIM], e[FLOW_JET_MAX_KOOPMAN_DIM];
-    for (size_t i = 0; i < d; ++i) {
-        for (size_t j = 0; j < d; ++j)
-            v[i] += edmd->P[i][j] * x_curr[j];
-        gamma += x_curr[i] * v[i];
-    }
-    if (gamma < 1e-9)
-        return 0;
-    for (size_t i = 0; i < d; ++i) {
-        k[i] = v[i] / gamma;
-        double pred = 0.0;
-        for (size_t j = 0; j < d; ++j)
-            pred += edmd->A[i][j] * x_curr[j];
-        e[i] = x_next[i] - pred;
-    }
-    for (size_t i = 0; i < d; ++i)
-        for (size_t j = 0; j < d; ++j) {
-            edmd->A[i][j] += e[i] * k[j];
-            edmd->P[i][j] = (edmd->P[i][j] - k[i] * v[j]) / lambda;
-        }
-    for (size_t i = 0; i < d; ++i)
-        for (size_t j = i + 1; j < d; ++j)
-            edmd->P[i][j] = edmd->P[j][i] = 0.5 * (edmd->P[i][j] + edmd->P[j][i]);
-    double eff_dt = (dt > 1e-6) ? dt : 0.01, trace_K = 0.0;
-    for (size_t i = 0; i < d; ++i) {
-        for (size_t j = 0; j < d; ++j)
-            edmd->K[i][j] = (edmd->A[i][j] - (i == j ? 1.0 : 0.0)) / eff_dt;
-        trace_K += edmd->K[i][i];
-    }
-    if (trace_K >= -0.05) {
-        double shift = (trace_K + 0.06) / (double)d;
-        for (size_t i = 0; i < d; ++i) {
-            edmd->K[i][i] -= shift;
-            edmd->A[i][i] = 1.0 + edmd->K[i][i] * eff_dt;
-        }
-    }
-    edmd->update_count++;
-    return 1;
-}
-int flow_jet_apply_learned_koopman(FlowJet *jet, const FlowJetStreamingEDMD *edmd) {
-    if (!jet || !edmd)
-        return 0;
-    uint32_t d = edmd->dim < FLOW_JET_MAX_KOOPMAN_DIM ? edmd->dim : FLOW_JET_MAX_KOOPMAN_DIM;
-    jet->header.koopman_dim = (uint8_t)d;
-    for (size_t i = 0; i < d; ++i)
-        for (size_t j = 0; j < d; ++j)
-            jet->payload.koopman_matrix[i][j] = edmd->K[i][j];
-    return 1;
-}
-int flow_jet_stream_learn_step(FlowJet *jet, FlowJetStreamingEDMD *edmd, const double pmu_obs[],
-                               double dt) {
-    if (!jet || !edmd || !pmu_obs)
-        return 0;
-    uint32_t d = edmd->dim;
-    double x_curr[FLOW_JET_MAX_KOOPMAN_DIM];
-    memcpy(x_curr, jet->payload.q, d * sizeof(double));
-    if (!flow_jet_edmd_update(edmd, x_curr, pmu_obs, dt))
-        return 0;
-    flow_jet_apply_learned_koopman(jet, edmd);
-    memcpy(jet->payload.q, pmu_obs, d * sizeof(double));
-    return 1;
-}
+
 int flow_jet_potential_init_default(FlowJetPotentialLandscape *l, uint32_t dim) {
     if (!l)
         return 0;
@@ -173,11 +94,17 @@ int flow_jet_potential_init_default(FlowJetPotentialLandscape *l, uint32_t dim) 
     }
     return 1;
 }
+
 int flow_jet_potential_eval_gradient(const FlowJetPotentialLandscape *l, const double q[],
                                      double grad_out[]) {
-    for (size_t i = 0; i < l->dim; ++i) {
+    if (!l || !q || !grad_out)
+        return 0;
+    size_t dim = (l->dim <= FLOW_JET_MAX_DIM) ? l->dim : FLOW_JET_MAX_DIM;
+    for (size_t i = 0; i < dim; ++i) {
         double grad_base = l->omega[i] * l->omega[i] * (q[i] - l->q_equilibrium[i]);
         double diff_sat = l->q_saturation[i] - fabs(q[i]);
+        if (fabs(diff_sat) < 1e-6)
+            diff_sat = (diff_sat >= 0.0) ? 1e-6 : -1e-6;
         double grad_barrier =
             ((q[i] >= 0.0) ? 1.0 : -1.0) * (2.0 * l->barrier_mu) / (diff_sat * diff_sat * diff_sat);
         double grad_moreau =
@@ -188,10 +115,16 @@ int flow_jet_potential_eval_gradient(const FlowJetPotentialLandscape *l, const d
     }
     return 1;
 }
+
 int flow_jet_symplectic_step_with_potential(FlowJet *jet, const FlowJetPotentialLandscape *l,
                                             double dt) {
+    if (!jet || !l || dt <= 0.0 || !isfinite(dt))
+        return 0;
+    if (jet->header.vector_dim > FLOW_JET_MAX_DIM)
+        jet->header.vector_dim = FLOW_JET_MAX_DIM;
     uint32_t dim = jet->header.vector_dim;
-    double grad0[FLOW_JET_MAX_DIM], grad1[FLOW_JET_MAX_DIM], p_half[FLOW_JET_MAX_DIM];
+    double grad0[FLOW_JET_MAX_DIM] = {0}, grad1[FLOW_JET_MAX_DIM] = {0},
+           p_half[FLOW_JET_MAX_DIM] = {0};
     flow_jet_potential_eval_gradient(l, jet->payload.q, grad0);
     for (size_t i = 0; i < dim; ++i) {
         p_half[i] = jet->payload.p[i] - 0.5 * dt * grad0[i];
@@ -206,12 +139,18 @@ int flow_jet_symplectic_step_with_potential(FlowJet *jet, const FlowJetPotential
     jet->header.hamiltonian_energy = flow_jet_hamiltonian(jet);
     return 1;
 }
+
 double flow_jet_hamiltonian(const FlowJet *jet) {
+    if (!jet)
+        return 0.0;
+    size_t dim =
+        (jet->header.vector_dim > FLOW_JET_MAX_DIM) ? FLOW_JET_MAX_DIM : jet->header.vector_dim;
     double E = 0.0;
-    for (size_t i = 0; i < jet->header.vector_dim; ++i)
+    for (size_t i = 0; i < dim; ++i)
         E += 0.5 * (jet->payload.p[i] * jet->payload.p[i] + jet->payload.q[i] * jet->payload.q[i]);
     return E;
 }
+
 void flow_verlet_step_harmonic(size_t dim, double *q, double *p, double *a,
                                const double *omega_spectrum, double dt) {
     if (!q || !p || !a || dt <= 0.0)
@@ -224,79 +163,30 @@ void flow_verlet_step_harmonic(size_t dim, double *q, double *p, double *a,
         p[i] = p_half - 0.5 * dt * (omega * q[i]);
     }
 }
+
 int flow_jet_symplectic_step(FlowJet *jet, double dt) {
     if (!jet || dt <= 0.0)
         return 0;
+    if (jet->header.vector_dim > FLOW_JET_MAX_DIM)
+        jet->header.vector_dim = FLOW_JET_MAX_DIM;
     flow_verlet_step_harmonic(jet->header.vector_dim, jet->payload.q, jet->payload.p,
                               jet->payload.a, NULL, dt);
     flow_jet_mori_zwanzig_step(jet, dt);
     jet->header.hamiltonian_energy = flow_jet_hamiltonian(jet);
     return 1;
 }
-void flow_jet_thermal_init_default(FlowThermalState *th) {
-    if (th)
-        *th = (FlowThermalState){.temp_c = FLOW_THERMAL_DEFAULT_TEMP_C,
-                                 .temp_ambient_c = FLOW_THERMAL_DEFAULT_AMBIENT_C,
-                                 .r_thermal = FLOW_THERMAL_DEFAULT_R_TH,
-                                 .c_thermal = FLOW_THERMAL_DEFAULT_C_TH,
-                                 .temp_throttle_c = FLOW_THERMAL_DEFAULT_THROTTLE_C,
-                                 .temp_target_c = FLOW_THERMAL_DEFAULT_TARGET_C,
-                                 .active_power_w = FLOW_THERMAL_DEFAULT_POWER_W};
-}
-int flow_thermal_state_step(FlowThermalState *th, double p_active_watts, double dt_sec) {
-    if (!th || dt_sec <= 0.0)
-        return 0;
-    if (th->c_thermal <= 0.0 || th->r_thermal <= 0.0)
-        flow_jet_thermal_init_default(th);
-    if (p_active_watts >= 0.0)
-        th->active_power_w = p_active_watts;
-    th->dtemp_dt =
-        (th->active_power_w - (th->temp_c - th->temp_ambient_c) / th->r_thermal) / th->c_thermal;
-    th->temp_c += th->dtemp_dt * dt_sec;
-    if (th->temp_c >= th->temp_throttle_c && !th->is_throttled) {
-        th->throttle_events++;
-        th->is_throttled = 1;
-    } else if (th->temp_c < th->temp_target_c) {
-        th->is_throttled = 0;
-    }
-    return 1;
-}
-int flow_jet_thermal_step(FlowJet *jet, double p_active_watts, double dt_sec) {
-    if (!jet || dt_sec <= 0.0)
-        return 0;
-    if (!flow_thermal_state_step(&jet->payload.thermal, p_active_watts, dt_sec))
-        return 0;
-    jet->payload.s += jet->payload.thermal.active_power_w * dt_sec;
-    return 1;
-}
-double flow_jet_thermal_predict_horizon(const FlowJet *jet, double horizon_sec) {
-    return (!jet || jet->payload.thermal.c_thermal <= 0.0)
-               ? FLOW_THERMAL_DEFAULT_AMBIENT_C
-               : jet->payload.thermal.temp_c + jet->payload.thermal.dtemp_dt * horizon_sec;
-}
-double flow_jet_thermal_prune_factor(const FlowJet *jet, double horizon_sec) {
-    if (!jet)
-        return 1.0;
-    double t_pred = flow_jet_thermal_predict_horizon(jet, horizon_sec);
-    const FlowThermalState *th = &jet->payload.thermal;
-    double t_ceil = (th->temp_target_c > 0.0) ? th->temp_target_c : FLOW_THERMAL_DEFAULT_TARGET_C,
-           t_trip = (th->temp_throttle_c > t_ceil) ? th->temp_throttle_c
-                                                   : FLOW_THERMAL_DEFAULT_THROTTLE_C;
-    return t_pred <= t_ceil
-               ? 1.0
-               : fmax(0.2, 1.0 - 0.58 * fmin(1.0, (t_pred - t_ceil) / (t_trip - t_ceil)));
-}
-int flow_jet_contact_step(FlowJet *jet, double dt, double p_active_watts) {
-    return (jet && flow_jet_symplectic_step(jet, dt))
-               ? flow_jet_thermal_step(jet, p_active_watts, dt)
-               : 0;
-}
+
 int flow_jet_mori_zwanzig_step(FlowJet *jet, double dt) {
+    if (!jet)
+        return 0;
+    size_t dim =
+        (jet->header.vector_dim > FLOW_JET_MAX_DIM) ? FLOW_JET_MAX_DIM : jet->header.vector_dim;
     double decay = exp(-FLOW_JET_MZ_STEP_DECAY * dt), weight = jet->payload.memory_kernel[0];
-    for (size_t i = 0; i < jet->header.vector_dim; ++i)
+    for (size_t i = 0; i < dim; ++i)
         jet->memory_integral[i] = jet->memory_integral[i] * decay + weight * jet->payload.p[i] * dt;
     return 1;
 }
+
 int flow_jet_koopman_predict(const FlowJet *jet, double dt, double *observable_out) {
     if (!jet || !observable_out)
         return 0;
@@ -314,6 +204,7 @@ int flow_jet_koopman_predict(const FlowJet *jet, double dt, double *observable_o
     }
     return 1;
 }
+
 double flow_jet_phase_distance(const FlowJet *a, const FlowJet *b) {
     if (!a || !b)
         return 1.0e12;
@@ -328,9 +219,11 @@ double flow_jet_phase_distance(const FlowJet *a, const FlowJet *b) {
     }
     return sqrt(dist_sq);
 }
+
 static double clamp_finite(double v, double b) {
     return (isnan(v) || isinf(v)) ? 0.0 : (v > b ? b : (v < -b ? -b : v));
 }
+
 int flow_jet_clamp_to_safety_envelope(FlowJet *jet, double max_q, double max_p, double max_a) {
     if (!jet)
         return 0;
@@ -347,88 +240,7 @@ int flow_jet_clamp_to_safety_envelope(FlowJet *jet, double max_q, double max_p, 
     jet->header.hamiltonian_energy = flow_jet_hamiltonian(jet);
     return 1;
 }
-int flow_jet_write_file(const FlowJet *jet, const char *filepath) {
-    if (!jet || !filepath)
-        return 0;
-    FILE *f = fopen(filepath, "wb");
-    if (!f)
-        return 0;
-    FlowJetHeader hdr = jet->header;
-    hdr.payload_size = sizeof(FlowJetPayload);
-    uint32_t hdr_crc = flow_jet_crc32(&hdr, offsetof(FlowJetHeader, content_hash));
-    snprintf(hdr.content_hash, sizeof(hdr.content_hash), "%08x", hdr_crc);
-    uint8_t header_buf[FLOW_FJET_HEADER_SIZE] = {0};
-    memcpy(header_buf, &hdr, sizeof(hdr));
-    memcpy(header_buf + FLOW_FJET_HEADER_SIZE - sizeof(uint32_t), &hdr_crc, sizeof(uint32_t));
-    FlowJetPayload payload = jet->payload;
-    payload.crc32 = flow_jet_crc32(&payload, offsetof(FlowJetPayload, crc32));
-    int ok = (fwrite(header_buf, 1, FLOW_FJET_HEADER_SIZE, f) == FLOW_FJET_HEADER_SIZE) &&
-             (fwrite(&payload, sizeof(payload), 1, f) == 1);
-    fclose(f);
-    return ok;
-}
-int flow_jet_read_file(const char *filepath, FlowJet *jet_out) {
-    if (!filepath || !jet_out)
-        return 0;
-    FILE *f = fopen(filepath, "rb");
-    if (!f)
-        return 0;
-    uint8_t header_buf[FLOW_FJET_HEADER_SIZE];
-    if (fread(header_buf, 1, FLOW_FJET_HEADER_SIZE, f) != FLOW_FJET_HEADER_SIZE) {
-        fclose(f);
-        return 0;
-    }
-    FlowJetHeader hdr = {0};
-    memcpy(&hdr, header_buf, sizeof(hdr));
-    if (strncmp(hdr.magic, FLOW_FJET_MAGIC, 7) != 0) {
-        fclose(f);
-        return 0;
-    }
-    if (hdr.vector_dim == 0 || hdr.vector_dim > FLOW_JET_MAX_DIM || isnan(hdr.hamiltonian_energy) ||
-        isinf(hdr.hamiltonian_energy) || hdr.hamiltonian_energy < 0.0) {
-        fclose(f);
-        return 0;
-    }
-    uint32_t expected_hdr_crc = flow_jet_crc32(&hdr, offsetof(FlowJetHeader, content_hash)),
-             stored_hdr_crc = 0;
-    memcpy(&stored_hdr_crc, header_buf + FLOW_FJET_HEADER_SIZE - sizeof(uint32_t),
-           sizeof(uint32_t));
-    if (stored_hdr_crc != expected_hdr_crc) {
-        fclose(f);
-        return 0;
-    }
-    FlowJetPayload payload = {0};
-    if (hdr.payload_size == sizeof(FlowJetPayload)) {
-        int ok = (fread(&payload, sizeof(payload), 1, f) == 1);
-        fclose(f);
-        if (!ok || payload.crc32 != flow_jet_crc32(&payload, offsetof(FlowJetPayload, crc32)))
-            return 0;
-    } else {
-        uint8_t temp_buf[4096];
-        if (hdr.payload_size < 300 || hdr.payload_size > sizeof(temp_buf)) {
-            fclose(f);
-            return 0;
-        }
-        size_t read_bytes = fread(temp_buf, 1, hdr.payload_size, f);
-        fclose(f);
-        if (read_bytes != hdr.payload_size)
-            return 0;
-        uint32_t file_crc = 0;
-        memcpy(&file_crc, temp_buf + read_bytes - 4, 4);
-        if (file_crc != flow_jet_crc32(temp_buf, read_bytes - 4))
-            return 0;
-        memcpy(payload.q, temp_buf, 16 * sizeof(double));
-        memcpy(payload.p, temp_buf + 16 * sizeof(double), 16 * sizeof(double));
-        memcpy(payload.a, temp_buf + 32 * sizeof(double), 16 * sizeof(double));
-        flow_bmf_canvas_init(&payload.staged_canvas, 0, ~0ULL, ~0ULL, 0x1234567890ABCDEFULL);
-        payload.pure_genome = 0x1234567890ABCDEFULL;
-        payload.crc32 = file_crc;
-    }
-    memset(jet_out, 0, sizeof(*jet_out));
-    jet_out->header = hdr;
-    jet_out->payload = payload;
-    return 1;
-}
+
 FlowSMTResult flow_jet_verify_symplectic_soundness_smt(const FlowJet *jet,
                                                        FlowSMTProofAttestation *proof_out) {
     if (!jet)
@@ -464,204 +276,9 @@ FlowSMTResult flow_jet_verify_symplectic_soundness_smt(const FlowJet *jet,
         "SMT JET SOUND: H=%.4f, Tr(K)=%.2f, MZ_taps=%d, 64B_Confinement=YES (Zero-Defect)", H,
         trace_K, (int)eff_taps);
 }
-int flow_moreau_init(FlowMoreauHysteresis *hys, double x_low, double x_high, int initial_state) {
-    if (!hys || x_low >= x_high)
-        return 0;
-    *hys = (FlowMoreauHysteresis){.threshold_low = x_low,
-                                  .threshold_high = x_high,
-                                  .discrete_state = initial_state ? 1 : 0,
-                                  .current_value = initial_state ? x_high : x_low};
-    return 1;
-}
-int flow_moreau_step(FlowMoreauHysteresis *hys, double input_signal) {
-    if (!hys)
-        return 0;
-    hys->total_updates++;
-    hys->current_value = input_signal;
-    int prev = hys->discrete_state;
-    if (input_signal >= hys->threshold_high) {
-        hys->discrete_state = 1;
-        hys->state_transitions += (prev == 0);
-    } else if (input_signal <= hys->threshold_low) {
-        hys->discrete_state = 0;
-        hys->state_transitions += (prev == 1);
-    } else {
-        hys->flutters_suppressed++;
-    }
-    return hys->discrete_state;
-}
-FlowSMTResult flow_moreau_verify_smt(const FlowMoreauHysteresis *hys,
-                                     FlowSMTProofAttestation *proof_out) {
-    if (!hys)
-        return FLOW_SMT_UNKNOWN;
-    const FlowBoxConstraint rules[] = {
-        FLOW_SMT_RULE("convex set ordering", hys->threshold_low >= hys->threshold_high, 0, 0,
-                      FLOW_BOX_THEOREM_BUFFER_BOUNDS,
-                      "Hysteresis threshold bounds inverted or degenerate"),
-        FLOW_SMT_RULE("discrete state binary", hys->discrete_state != 0 && hys->discrete_state != 1,
-                      0, 0, FLOW_BOX_THEOREM_SHARD_ISOLATION, "Hysteresis state is not binary")};
-    return FLOW_SMT_VERIFY_RULES(
-        "moreau_hysteresis", proof_out, rules,
-        "SMT MOREAU SOUND: Deadband=[%.2f, %.2f], State=%d, FluttersAbsorbed=%llu (Zero-Defect Soundness)",
-        hys->threshold_low, hys->threshold_high, hys->discrete_state,
-        (unsigned long long)hys->flutters_suppressed);
-}
 
 /* ============================================================================
- * Phase-Space Attention Context Switch Router (Q, K_i, V_i) + Kan Handover
- * ============================================================================ */
-int flow_phase_attention_init(FlowPhaseAttentionRouter *router, size_t phase_dim,
-                              uint32_t emergency_regime_idx) {
-    if (!router)
-        return 0;
-    memset(router, 0, sizeof(*router));
-    if (!flow_hardwired_template_init(&router->poly_template, phase_dim))
-        return 0;
-    atomic_store_explicit(&router->poly_template.active_mask, 0ULL, memory_order_release);
-    router->emergency_regime_idx = emergency_regime_idx;
-    return 1;
-}
-
-int flow_phase_attention_set_plane(FlowPhaseAttentionRouter *router, uint32_t plane_idx,
-                                   const double coeffs[], double bound, bool enable_hysteresis,
-                                   double hys_low, double hys_high) {
-    if (!router || !coeffs || plane_idx >= FLOW_HARDWIRED_MAX_PLANES)
-        return 0;
-    size_t dim = router->poly_template.dimension;
-    for (size_t j = 0; j < FLOW_HARDWIRED_MAX_DIM; ++j)
-        router->poly_template.coeffs[plane_idx][j] = (j < dim) ? coeffs[j] : 0.0;
-    atomic_store_explicit(&router->poly_template.b_constants[plane_idx], bound,
-                          memory_order_relaxed);
-    uint64_t cur_mask =
-        atomic_load_explicit(&router->poly_template.active_mask, memory_order_relaxed);
-    atomic_store_explicit(&router->poly_template.active_mask, cur_mask | (1ULL << plane_idx),
-                          memory_order_release);
-    if (enable_hysteresis && hys_low < hys_high) {
-        flow_moreau_init(&router->plane_hysteresis[plane_idx], hys_low, hys_high, 0);
-        router->hysteresis_enabled_mask |= (1ULL << plane_idx);
-    } else {
-        router->hysteresis_enabled_mask &= ~(1ULL << plane_idx);
-    }
-    return 1;
-}
-
-int flow_phase_attention_register_head(FlowPhaseAttentionRouter *router,
-                                       const FlowPhaseAttentionHead *head, uint32_t *idx_out) {
-    if (!router || !head || router->head_count >= FLOW_PHASE_ATTENTION_MAX_HEADS)
-        return 0;
-    uint32_t idx = router->head_count++;
-    router->heads[idx] = *head;
-    if (idx == 0)
-        router->active_regime_idx = 0;
-    if (idx_out)
-        *idx_out = idx;
-    return 1;
-}
-
-uint64_t flow_phase_attention_project_query(FlowPhaseAttentionRouter *router,
-                                            const double state_vec[FLOW_PHASE_ATTENTION_DIM]) {
-    if (!router || !state_vec)
-        return 0ULL;
-    FlowHardwiredEvalResult eval_res;
-    memset(&eval_res, 0, sizeof(eval_res));
-    flow_hardwired_eval(&router->poly_template, state_vec, &eval_res);
-    uint64_t active =
-        atomic_load_explicit(&router->poly_template.active_mask, memory_order_acquire);
-    uint64_t q_sieve = (~eval_res.violated_mask) & active;
-    uint64_t hys_mask = router->hysteresis_enabled_mask & active;
-    if (hys_mask != 0ULL) {
-        size_t dim = router->poly_template.dimension;
-        uint64_t rem = hys_mask;
-        while (rem != 0ULL) {
-            uint32_t p = (uint32_t)__builtin_ctzll(rem);
-            rem &= (rem - 1ULL);
-            double dot = 0.0;
-            for (size_t j = 0; j < dim; ++j)
-                dot += router->poly_template.coeffs[p][j] * eval_res.projected_x[j];
-            uint64_t prev_flutters = router->plane_hysteresis[p].flutters_suppressed;
-            int violated = flow_moreau_step(&router->plane_hysteresis[p], dot);
-            router->hysteresis_flutters_suppressed +=
-                (router->plane_hysteresis[p].flutters_suppressed - prev_flutters);
-            if (violated)
-                q_sieve &= ~(1ULL << p);
-            else
-                q_sieve |= (1ULL << p);
-        }
-    }
-    router->last_query_sieve = q_sieve;
-    return q_sieve;
-}
-
-int flow_phase_attention_route_and_step(FlowPhaseAttentionRouter *router, FlowJet *jet,
-                                        const double state_vec[FLOW_PHASE_ATTENTION_DIM],
-                                        const void *certified_input, void *action_out,
-                                        uint32_t *selected_regime_out) {
-    if (!router || router->head_count == 0)
-        return -1;
-    double fallback_vec[FLOW_PHASE_ATTENTION_DIM] = {0};
-    const double *q_vec = state_vec;
-    if (!q_vec) {
-        if (jet) {
-            for (size_t j = 0; j < FLOW_PHASE_ATTENTION_DIM; ++j)
-                fallback_vec[j] = jet->payload.q[j];
-        }
-        q_vec = fallback_vec;
-    }
-    uint64_t q_sieve = flow_phase_attention_project_query(router, q_vec);
-    uint32_t match_mask = 0U;
-    for (uint32_t i = 0; i < router->head_count; ++i) {
-        uint64_t km = router->heads[i].key_mask;
-        uint64_t kp = router->heads[i].key_polarity & km;
-        uint32_t matched = ((q_sieve & km) == kp) ? 1U : 0U;
-        match_mask |= (matched << i);
-    }
-    uint32_t target_idx =
-        (router->emergency_regime_idx < router->head_count) ? router->emergency_regime_idx : 0U;
-    if (match_mask != 0U) {
-        uint32_t first_idx = (uint32_t)__builtin_ctz(match_mask);
-        target_idx = first_idx;
-        uint32_t best_prio = router->heads[first_idx].priority;
-        uint32_t rem = match_mask & (match_mask - 1U);
-        while (rem != 0U) {
-            uint32_t cand = (uint32_t)__builtin_ctz(rem);
-            rem &= (rem - 1U);
-            if (router->heads[cand].priority > best_prio) {
-                best_prio = router->heads[cand].priority;
-                target_idx = cand;
-            }
-        }
-    }
-    if (target_idx != router->active_regime_idx) {
-        const FlowPhaseAttentionHead *prev_h = &router->heads[router->active_regime_idx];
-        const FlowPhaseAttentionHead *next_h = &router->heads[target_idx];
-        uint64_t mismatch = 0ULL;
-        if (flow_kan_check_homotopy(prev_h->state_sieve, next_h->state_sieve,
-                                    next_h->kan_boundary_filter,
-                                    &mismatch) != FLOW_KAN_FILLED_HOMOTOPIC) {
-            router->kan_singularity_blocks++;
-            target_idx = (router->emergency_regime_idx < router->head_count)
-                             ? router->emergency_regime_idx
-                             : 0U;
-        }
-        if (target_idx != router->active_regime_idx) {
-            router->active_regime_idx = target_idx;
-            router->context_switches++;
-        }
-    }
-    if (jet) {
-        jet->payload.bmf_subspace_mask = router->heads[target_idx].state_sieve;
-        jet->payload.section.cubical_sieve = q_sieve;
-    }
-    router->total_routes++;
-    if (selected_regime_out)
-        *selected_regime_out = target_idx;
-    if (router->heads[target_idx].kernel)
-        return router->heads[target_idx].kernel(jet, certified_input, action_out);
-    return 0;
-}
-
-/* ============================================================================
- * Hardware Telemetry, Cycle Probes & NUMA Topology (folded into flow_jet.c)
+ * Hardware Telemetry, Cycle Probes & NUMA Topology
  * ============================================================================ */
 #if defined(__APPLE__)
 static int sysctl_u32(const char *name, uint32_t *out) {
@@ -682,6 +299,7 @@ static void sysctl_sz(const char *name, size_t *out) {
 static uint64_t g_timer_freq_hz = 0;
 static const char *g_rapl_path = "/sys/class/powercap/intel-rapl/intel-rapl:0/energy_uj";
 static bool g_rapl_available = false;
+
 int flow_hardware_telemetry_init(void) {
 #if defined(__aarch64__) || defined(__arm64__)
     uint64_t val;
@@ -695,11 +313,13 @@ int flow_hardware_telemetry_init(void) {
     g_rapl_available = (access(g_rapl_path, R_OK) == 0);
     return 1;
 }
+
 uint64_t flow_hardware_timer_frequency_hz(void) {
     if (!g_timer_freq_hz)
         flow_hardware_telemetry_init();
     return g_timer_freq_hz;
 }
+
 double flow_hardware_energy_uj(void) {
     if (g_rapl_available) {
         FILE *f = fopen(g_rapl_path, "r");
@@ -716,6 +336,7 @@ double flow_hardware_energy_uj(void) {
     return ((freq > 0) ? (double)cycles / (double)freq : 0.0) * FLOW_HW_FALLBACK_TDP_WATTS *
            1000000.0;
 }
+
 void flow_hardware_probe_start(FlowPhysicalProbe *probe) {
     if (!probe)
         return;
@@ -724,6 +345,7 @@ void flow_hardware_probe_start(FlowPhysicalProbe *probe) {
     probe->start_energy_uj = flow_hardware_energy_uj();
     probe->is_estimated_power = !g_rapl_available;
 }
+
 void flow_hardware_probe_stop(FlowPhysicalProbe *probe) {
     if (!probe)
         return;
@@ -743,20 +365,7 @@ void flow_hardware_probe_stop(FlowPhysicalProbe *probe) {
             ? (probe->dissipated_energy_uj / (probe->elapsed_nanoseconds / 1000.0))
             : 0.0;
 }
-void flow_hardware_probe_update_thermal(const FlowPhysicalProbe *probe, FlowThermalState *thermal,
-                                        double dt_sec) {
-    if (!probe || !thermal)
-        return;
-    double p_watts = probe->physical_power_watts > 0.0 ? probe->physical_power_watts
-                                                       : FLOW_HW_FALLBACK_TDP_WATTS;
-    if (dt_sec > 0.0) {
-        flow_thermal_state_step(thermal, p_watts, dt_sec);
-    } else {
-        if (thermal->c_thermal <= 0.0 || thermal->r_thermal <= 0.0)
-            flow_jet_thermal_init_default(thermal);
-        thermal->active_power_w = p_watts;
-    }
-}
+
 int flow_numa_topology_discover(FlowHardwareTopology *topo) {
     if (!topo)
         return 0;
@@ -814,6 +423,7 @@ int flow_numa_topology_discover(FlowHardwareTopology *topo) {
 #endif
     return 1;
 }
+
 int flow_numa_pin_thread(uint32_t core_id) {
 #if defined(__APPLE__)
     (void)core_id;
@@ -831,6 +441,7 @@ int flow_numa_pin_thread(uint32_t core_id) {
     return 1;
 #endif
 }
+
 void *flow_numa_alloc_local(size_t bytes) {
     if (!bytes)
         return NULL;
@@ -842,7 +453,19 @@ void *flow_numa_alloc_local(size_t bytes) {
         ((volatile uint8_t *)ptr)[off] = 0;
     return ptr;
 }
+
 void flow_numa_free_local(void *ptr, size_t bytes) {
     if (ptr && bytes)
         munmap(ptr, (bytes + (FLOW_OS_PAGE_BYTES - 1U)) & ~(size_t)(FLOW_OS_PAGE_BYTES - 1U));
+}
+
+uint64_t flow_hardware_frequency_hz(void) {
+    return flow_hardware_timer_frequency_hz();
+}
+
+FlowHardwareTopology flow_hardware_topology(void) {
+    FlowHardwareTopology t;
+    memset(&t, 0, sizeof(t));
+    (void)flow_numa_topology_discover(&t);
+    return t;
 }

@@ -1,144 +1,114 @@
-<p align="center">
-  <img src="assets/banner.svg" alt="FLOW Banner" width="100%" />
-</p>
+# FLOW — HoTT × 2-Jet Mathematical-to-Code Grounding Interface
 
-# FLOW: 64-Bit Discrete Cubical HoTT Engine
+> **透過 Cubical HoTT（離散同倫型別／Grothendieck Topos 篩／Univalence 零拷貝同構）與 2-Jet（連續微分流形／二階切空間與曲率叢），創造將「純數學規範無損落地為機器執行碼」的標準介面。**
 
-[![CI](https://github.com/hianova/FLOW/actions/workflows/ci.yml/badge.svg)](https://github.com/hianova/FLOW/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-v2.9.0-blue.svg)](VERSION)
-[![Standard](https://img.shields.io/badge/C17-Zero%20Warnings%20(-Werror)-success.svg)](Makefile)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
-> **64-Bit Discrete Cubical Homotopy Type Theory (HoTT) Engine, De Morgan Parallel Interval Algebra & Intensional Univalence Universe $U_0$**
-
-FLOW 是一個專注於**離散同倫類型論（Discrete Cubical Homotopy Type Theory）**與**單價型別宇宙（Univalence Universe $U_0$）**的極簡高效率 C17 形式化驗證基礎庫。
-
-專案徹底揚棄傳統冗贅的配置 DSL 與過度包裝的學術空殼，直接將同倫幾何約束、Kan 復形開盒條件與單價公理（$A \simeq B \implies A =_{U_0} B$）映射至現代 64 位元暫存器與純粹 C17 資料流中。全庫採用 **LLVM TableGen 風格 X-Macro 單一真相表（SSOT）**、**Linux Single-Header 宏統合** 與 **[`.clang-format`](.clang-format) 多行可讀排版**，不依賴 AI Agent、任何外部開發者與審計者閱讀原始碼即可直接修改與驗證（詳見 **[《FLOW Book》第八章：Architecture & X-Macro Hacking Guide](flow-book/src/ch08_architecture_and_xmacro_hacking_guide.md)**）。
+FLOW 不是通用語言執行期或容器搜尋器，而是連結 **純形式化數學規範（Lean 4）**、**連續物理微分流形（2-Jet Bundle $J^2(\mathcal{M}, \mathcal{N})$）** 與 **底層硬體指令集（Zero-GC C17 / LLVM SSA）** 的雙向標準介面。
 
 ---
 
-## 🏛️ 核心架構：離散同倫類型論 (Cubical HoTT Core)
+## 1. 核心架構：HoTT × 2-Jet 雙向落地閉環
 
-FLOW 的理論核心完全建立在離散立方體集（Discrete Cubical Sets）與格羅滕迪克拓撲（Grothendieck Topos）之上，提供 100% 形式化自洽的六大同倫演算支柱：
-
-```text
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│             FLOW: 64-Bit Discrete Cubical HoTT Mathematical Foundations                 │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                        │
-│  1️⃣ De Morgan 抽象區間與並行位元代數 (Interval I = {0, 1})                             │
-│     • 交集 (Meet, AND)、聯集 (Join, OR)、以及對偶反演 (Involution, NOT ~)              │
-│     • 單 CPU 週期內完成 64 維空間的 De Morgan 對偶恆等式驗證：                         │
-│       ~(a ∧ b) == (~a ∨ ~b)                                                            │
-│                                                                                        │
-│  2️⃣ 立方體集幾何運算子 (Cubical Face & Degeneracy Operators)                           │
-│     • 面投影運算子 (Face Projections): ∂_i^0 與 ∂_i^1                                  │
-│     • 退化運算子 (Degeneracy Operators): ε_i 插入中性態                                │
-│     • 嚴格保證立方體面運算子交換律：∂_i^e ∂_j^d == ∂_{j-1}^d ∂_i^e (i < j)            │
-│                                                                                        │
-│  3️⃣ Kan 條件與開盒填塞 (Kan Open-Box Filling & Homotopy Equivalence)                   │
-│     • 邊界篩網濾波與差分匹配：Mismatch = (Mask_p ^ Mask_q) & BoundaryFilter == 0      │
-│     • 零不匹配判定為同倫等價 (Kan Filled Homotopic)，非零即判定為拓撲奇點阻礙           │
-│                                                                                        │
-│  4️⃣ 格羅滕迪克拓撲子物件分類子 (Topos Subobject Classifier Ω = 2) 與見證型別           │
-│     • 映射同構：Hom(X, Ω) ≃ Sub(X)，子物件特徵標籤 χ ∈ {0, 1}                          │
-│     • 自動將 Lean 4 依賴型別 (Σ x : A, P(x)) 合成為 C17 編譯期不可偽造憑證             │
-│       (lean_certified_<T> / flowc_certify_<T>)，消除下游 I/O 未驗證呼叫                │
-│                                                                                        │
-│  5️⃣ 64 維超立方體微架構語義篩網與相空間注意力路由 (Phase-Space Attention Router)       │
-│     • 將記憶體、並發、排程、資料佈局與安全策略正交投影至 64 維幾何軸                   │
-│     • 以超平面內積投影 Q、多面體域遮罩 K_i、Moreau 遲滯防抖與 Kan 開盒同倫交接         │
-│       實現 O(1) 無分支策略上下文切換 (FlowPhaseAttentionRouter)                        │
-│                                                                                        │
-│  6️⃣ 內涵全域型別宇宙 U_0、單價性 AOS ⟷ SIMD SOA64 提升與微分凝聚 4-Jet (J^4 E)         │
-│     • 註冊跨語言型別（Lean 4 標量規範 ⟷ C17 ABI）並證明 A[64] ≃ A_SOA64                │
-│     • 自動合成 64 通道快取對齊 <Struct>_SOA64 與向量化算子 flowc_soa_<fn>              │
-│     • 支援同倫纖維 fib_{ev}(1) 之 h-Level (-2, -1, 0, 1) 診斷與離散 4-Jet 延拓         │
-│                                                                                        │
-└────────────────────────────────────────────────────────────────────────────────────────┘
+```
+                    ┌────────────────────────────────────────────────────────┐
+                    │              Pure Lean 4 Formal Specification          │
+                    │   structures, total functions, relational invariants,  │
+                    │   theorems: P(x) -> Q(x, f(x)), SpaceWithException     │
+                    └───────────────┬────────────────────────▲───────────────┘
+                                    │                        │
+        [正向合成 Direct Synthesis]  │                        │ [逆向推導 Reverse Lifting]
+        flowc spec.lean -o out.c    │                        │ flowc --lift-llvm (<file.ll/.c>)
+        --target-c-header out.h     │                        │ Abstract Interval + Known-Bits
+                                    ▼                        │
+                    ┌────────────────────────────────────────┴───────────────┐
+                    │         HoTT × 2-Jet Formal-Physical Bridge            │
+                    │  • 2-Jet Bundle J^2(M,N): (v, df, d^2f, L_f V)         │
+                    │  • O(1) Projection -> 64-bit Grothendieck Topos Sieve  │
+                    │  • 1-Cycle Kan Open-Box Homotopy & Fallback Operator   │
+                    │  • Univalence (A ≃ B) ≃ (A = B) Zero-Copy mmap Mirror  │
+                    └───────────────────────────┬────────────────────────────┘
+                                                │
+                                                ▼
+                    ┌────────────────────────────────────────────────────────┐
+                    │        Embodied Hardware / Zero-GC C17 / MATLAB MEX    │
+                    └────────────────────────────────────────────────────────┘
 ```
 
+### I. 2-Jet 連續微分叢（[`src/flow_jet.h`](src/flow_jet.h) / [`src/flow_jet.c`](src/flow_jet.c)）
+實作連續物理流形上的二階前向自動微分代數 $\mathbb{J}_2 = \mathbb{R}[\epsilon]/(\epsilon^3)$：
+- **二階展開元 (`FlowJetScalar2`)**：同時攜帶零階狀態值 $f(x)$、一階切空間雅可比導數 $\nabla f(x)$ 與二階海森曲率 $\nabla^2 f(x)$，全程無動態配置、具備完整 IEEE-754 算術封閉性。
+- **辛幾何相空間與控制障礙函數（CBF）**：於連續控制迴路中即時計算李導數（Lie Derivative）$\mathcal{L}_f V = \langle \nabla V(x), \dot{x} \rangle$、泊松括號 $\{f, g\}$、Koopman 譜半徑與 Mori-Zwanzig 非馬可夫記憶核，防止離散採樣間隙的包絡線穿透（Inter-sample Tunneling）。
+
+### II. Cubical HoTT 離散同倫核（[`src/cubical_hott.h`](src/cubical_hott.h) / [`src/cubical_hott.c`](src/cubical_hott.c)）
+將高階同倫型別論（Homotopy Type Theory）落地為硬體暫存器級別的位元代數：
+- **64-bit Grothendieck Topos 篩（Topos Sieve）**：以單一 `uint64_t` 位元遮罩編碼多維前置不變量，透過 `flow_topos_classify_subobject` 在單一 CPU 週期內判定觀測態是否覆蓋定理前件。
+- **Kan Open-Box 同倫填補（`flow_kan_check_homotopy`）**：檢驗狀態轉移路徑是否維持同倫等價；若受保護邊界軸破裂（`FLOW_KAN_OBSTRUCTED_SINGULARITY`），立即觸發安全退避。
+- **高階歸納型別（HIT）異常坍縮（`SpaceWithException`）**：內部合法狀態滿足可縮空間 $\text{isContr}$（$h$-level $-2$），而違反合約的異常子流形則商化（Quotient）為 0 維邊界奇異點 $\partial\mathcal{M}$，並壓入 IEEE-754 Quiet NaN 51-bit payload（`0x7FF84...`），在硬體流水線中零分支傳播。
+- **Univalence 公理零拷貝傳輸（[`src/reload.h`](src/reload.h) / [`src/reload.c`](src/reload.c)）**：利用 POSIX 雙重虛擬記憶體映射（Dual-Mapped `mmap` Ring Buffer）與 QSBR 靜止期回收，將類型同構 $(A \simeq B) \simeq (A = B)$ 落地為零拷貝位址視圖切換。
+
+### III. `HoTT × 2-Jet` 橋接標準介面（[`src/flow_bridge.h`](src/flow_bridge.h) / [`src/flow_bridge.c`](src/flow_bridge.c)）
+`FlowPhysicalBridge` 與 `flow_bridge_execute_hott_jet_step` 將連續微分流形與離散同倫篩合而為一：
+1. **2-Jet 篩投射（`flow_bridge_project_jet2_sieve`）**：將感測或算子輸出的 2-Jet 樣本 $(v, d_1, d_2)$ 投射至 64-bit Topos Sieve：
+   - Bit 0 (`FLOW_JET_SIEVE_FINITE`)：$v, d_1, d_2 \in \mathbb{R}$（無 NaN / Inf）
+   - Bit 1 (`FLOW_JET_SIEVE_ZERO_ORDER_BOX`)：零階狀態包絡線 $v \in [v_{\min}, v_{\max}]$
+   - Bit 2 (`FLOW_JET_SIEVE_FIRST_ORDER_LIPSCHITZ`)：一階切空間 Lipschitz 界限 $|d_1| \le L_{\max}$
+   - Bit 3 (`FLOW_JET_SIEVE_SECOND_ORDER_CURVATURE`)：二階海森曲率界限 $|d_2| \le \kappa_{\max}$
+   - Bit 4 (`FLOW_JET_SIEVE_LYAPUNOV_DISSIPATIVE`)：Lyapunov 指數耗散條件 $v \cdot d_1 \le -\gamma v^2$
+   - Bit 5 (`FLOW_JET_SIEVE_TRANSVERSALITY`)：Thom 橫截性條件（迫近邊界 $\partial\mathcal{M}$ 時 $|d_1| \ge \epsilon_{\text{trans}}$）
+2. **形式化守衛與同倫保底**：依序執行感測器量化（`quantize_observation`）、前置條件守衛（`check_precondition`）、Topos 篩與 Kan 同倫檢驗、主算子執行與硬體週期監控、後置與關係不變量守衛（`check_postcondition` / `check_relational_invariant`）；任何一步破裂均自動切換至同倫安全算子（`fallback_operator`）並輸出精確的 `FlowBoundaryViolationKind` 診斷標籤。
+
+### IV. 正向編譯與 LLVM 逆向邊界推導（[`src/flowc.c`](src/flowc.c) / [`src/llvm_lifter.c`](src/llvm_lifter.c)）
+- **正向直接映射**：純 Lean 4 規範（支援歐幾里得整數除法 `flow_int_div` / `flow_int_mod`、飽和自然數減法 `flow_nat_sub`、結構體不變量與定理蘊含守衛）直接編譯為獨立 Zero-GC C17 原始碼、單檔 `static inline` 標頭或 MATLAB MEX C 算子。
+- **LLVM SSA 逆向推導**：當工程算子包含底層 C/LLVM 實作時，`flowc --lift-llvm` 直接解析 LLVM IR SSA 指令集（`add`, `sub`, `mul`, `sdiv`, `udiv`, `shl`, `lshr`, `ashr`, `and`, `or`, `xor`, `icmp`, `select`, `phi` 等），執行前向抽象區間分析（Interval Analysis）與已知位元傳播（Known-Bits Propagation），逆向合成 Lean 4 `BitVec` 邊界證明檔案（`theorem <fn>_in_bounds`）。
+
 ---
 
-## 🛠️ 核心歸納知識合成與輔助系統工程基石
+## 2. 模組架構一覽
 
-除了純粹的同倫代數與演繹驗證，FLOW 內建**歸納式知識合成引擎（Inductive Knowledge Synthesis Engine）**與輕量 C17 執行期模組：
-- **歸納式知識合成核心** (`induce.{h,c}`)：從未知採樣軌跡提取四階經驗矩與積分概率度量（IPM / Wasserstein-1 / KS），透過連分數逼近擬合精確有理數多項式（$c_k \in \mathbb{Q}$）、建構有限網格安全包絡（Computational Reflection via `by decide`）、執行 SMM 蒙地卡羅反向推導（Merton 跳躍擴散與 CIR Feller 條件 $2ab \ge \sigma^2$），並自動合成零 GC Lean 4 憑證與雙軌 C17 算子。
-- **代數密碼分析與偽隨機逆向審計外掛** (`plugins/cryptanalysis.{h,c,lean}`)：支援 `MT19937` $\mathbb{F}_2$ 逆淬火與 624 維逆扭轉（Untwisting）還原初始 `seed=42`、`PCG32` 64-bit 隱藏狀態重構、$64 \times 64$ $\mathbb{F}_2$ 線性系統求解、確定性低差異數列（Certified QMC）星號差異度驗證，以及硬體 Arbiter PUF 最小熵（NIST SP 800-90B $H_\infty$）與 Lipschitz 界限認證。
-- **子物件分類器見證型別與單價性 SIMD SOA64 自動傳輸** (`abi.c`, `backend.c`, `cubical_hott.{h,c}`)：將帶有 `Prop` 不變量的 Lean 4 `structure` 與定理契約合成為 C17 編譯期不可偽造憑證 `lean_certified_<T>`，並利用單價公理（$A[64] \simeq A_{\text{SOA64}}$）自動把單筆 `struct` 算子提升為 64 通道 AVX-512/NEON 友善的 `flowc_soa_<fn>` 批量算子。
-- **微分凝聚同倫（Differential Cohesive HoTT）、離散 4-Jet 纖維叢（$J^4 E$）與相空間注意力路由** (`cubical_hott.{h,c}`, `flow_jet.{h,c}`)：實作同倫纖維 $\mathrm{fib}_{ev_\Phi}(\mathbf{1})$ 的 $h$-Level（$-2$ 唯一解可收縮、$-1$ 空型別 UNSAT、$0$ 多解振盪集合、$1$ 對稱群胚 $A // G$）自動診斷與收縮釘死（Pinning Collapse）、位元流形離散 4-Jet 延拓 $j^4 s : M \to J^4 E$ 與 Cartan-Kähler 可積性檢驗，以及結合 Moreau 遲滯防抖與 Kan 開盒同倫交接的 $O(1)$ 相空間注意力路由器（`FlowPhaseAttentionRouter`）。
-- **QSBR 無鎖世代熱重載** (`reload.h`)：基於靜止狀態（Quiescent State）的世代動態切換與無鎖 Epoch 推進。
-- **無鎖快取對齊 SPSC 環形緩衝區** (`flow_spsc.h`)：純 C17 Header-only 單生產者單消費者佇列。
+| 檔案 | 職責說明 |
+| :--- | :--- |
+| [`src/flow_bridge.h`](src/flow_bridge.h), [`src/flow_bridge.c`](src/flow_bridge.c) | **HoTT × 2-Jet 核心橋接介面**：2-Jet 流形包絡線投射、Kan 同倫檢驗、量化／反量化與單週期保底算子切換 |
+| [`src/cubical_hott.h`](src/cubical_hott.h), [`src/cubical_hott.c`](src/cubical_hott.c) | **Cubical HoTT 離散同倫核**：64-bit Grothendieck Topos 篩、Kan Open-Box、HIT 異常商空間與多面體前拉/推前 |
+| [`src/flow_jet.h`](src/flow_jet.h), [`src/flow_jet.c`](src/flow_jet.c) | **2-Jet 連續微分幾何引擎**：二階前向自動微分 $\mathbb{J}_2$、辛幾何泊松括號、Koopman 譜與 Mori-Zwanzig 記憶核 |
+| [`src/llvm_lifter.h`](src/llvm_lifter.h), [`src/llvm_lifter.c`](src/llvm_lifter.c) | **LLVM SSA 逆向推導器**：從 LLVM IR / C 算子逆向推導抽象數值邊界並生成 Lean 4 `BitVec` 邊界證明義務 |
+| [`src/parser.c`](src/parser.c), [`src/backend.c`](src/backend.c), [`src/abi.c`](src/abi.c) | **Pure Lean 4 $\to$ Zero-GC C17 編譯器**：語法解析、定理前件／後件提取、C17 / Header / MEX 生成與憑證審計 |
+| [`src/bitspace.h`](src/bitspace.h), [`src/bitspace.c`](src/bitspace.c) | **精確數值與位元流形代數**：Lean 4 歐幾里得整數算術（`flow_int_div`/`mod`）、`FlowU256` 蒙哥馬利模冪與 Miller-Rabin 質數檢定 |
+| [`src/reload.h`](src/reload.h), [`src/reload.c`](src/reload.c), [`src/flow_spsc.h`](src/flow_spsc.h) | **Univalence 零拷貝與併發底層**：雙重映射 `mmap` 環形緩衝區、QSBR 無鎖熱替換與 Lamport SPSC 佇列 |
+| [`src/flowc.c`](src/flowc.c) | **唯一編譯器與逆向推導 CLI (`flowc`)**：支援正向 `.lean -> .c/.h` 與逆向 `--lift-llvm` |
+| [`plugins/embodied.lean`](plugins/embodied.lean), [`plugins/cryptanalysis.lean`](plugins/cryptanalysis.lean) | **純 Lean 4 參考規範範例**：1kHz ZMP 具身關節動力學規範與位元流形密碼分析規範 |
+| [`tests/test_hott_jet.c`](tests/test_hott_jet.c), [`tests/test_compiler_lifter.c`](tests/test_compiler_lifter.c), [`tests/fuzz-test.c`](tests/fuzz-test.c) | **毫秒級全記憶體核心測試套件**：涵蓋 HoTT × 2-Jet 代數核心、Lean 4 $\leftrightarrow$ C17/LLVM 雙向編譯與語法模糊測試 |
 
 ---
 
-## 💻 快速開始 (Quick Start)
+## 3. 快速建置與命令列用法 (`flowc`)
 
-### 1. 編譯專案核心與執行 Cubical HoTT 全套測試
+### 建置編譯器與執行期靜態庫
+```bash
+make clean && make
+```
+產出目標：
+- `build/flowc`：Pure Lean 4 $\to$ C17 編譯器與 LLVM SSA $\to$ Lean 4 逆向推導 CLI
+- `build/libflow.a`：完整編譯器與數學執行期靜態庫
+- `build/libflow_rt.a`：可獨立連結之極輕量執行期庫（含 2-Jet、Cubical HoTT、HoTT × Jet Bridge、QSBR、精確數值）
 
-```sh
-# 編譯 libflow.a, flowc 編譯器, flowy 內省工具與動態外掛 (embodied / cryptanalysis)
-make -j4 all
+### `flowc` 核心用法
+```bash
+# 1. 將純 Lean 4 規範編譯為獨立 Zero-GC C17 與單檔 static inline 標頭
+./build/flowc plugins/embodied.lean -o build/embodied_gen.c --target-c-header build/embodied_gen.h
 
-# 執行全套領域測試與模糊測試 (628 項斷言 + 1,000 次模糊測試 100% 通過)
+# 2. 產生 MATLAB C-MEX 介面或 Lean 4 自包含證明憑證
+./build/flowc plugins/embodied.lean -o build/embodied_mex.c --target-mex
+./build/flowc plugins/embodied.lean -o build/embodied_gen.c --target-lean build/embodied_cert.lean
+
+# 3. 從 LLVM IR (.ll) 或 C17 算子逆向推導抽象數值邊界並生成 Lean 4 證明義務
+./build/flowc --lift-llvm operator.ll -o boundary_proof.lean
+./build/flowc --lift-llvm operator.c -o boundary_proof.lean
+```
+
+### 執行毫秒級全記憶體測試套件
+```bash
 make test
 ```
-
-### 2. 檢驗型別宇宙、單價性證明與歸納知識提煉 (`flowy`)
-
-```sh
-# 檢視 64-Bit De Morgan 篩網 (I^64) 與內涵型別宇宙 U_0 單價性驗證狀態
-./build/flowy topos
-
-# 執行形式化一致性審查
-./build/flowy audit
-
-# 執行 10,000 筆樣本歸納提煉、SMM 隨機微分方程反推與 PRNG Seed=42 逆向審計
-./build/flowy induce --benchmark -o build/discovered.lean
-```
-
-### 3. 將 Lean 4 規格或外部採樣軌跡合成為純淨 C17 標頭檔 (`flowc`)
-
-```sh
-# 編譯純量 Lean 4 規範至 C17 實作與 static inline 標頭檔
-./build/flowc spec.lean -o build/spec.c --target-c-header build/spec.h
-
-# 從外部 CSV 採樣軌跡自動歸納合成 Lean 4 憑證並直接編譯為 C17 算子
-./build/flowc --induce samples.csv -o build/induced.c --target-c-header build/induced.h --emit-induced-lean build/induced.lean
-
-# 生成附帶 MATLAB MEX 分派器的 C17 接口與 4D 同倫交換立方體圖表
-./build/flowc spec.lean -o build/spec_mex.c --target-c-header build/spec.h --target-mex --fiber-diagram build/cohesive_cube.md
-```
-
----
-
-## 🗂️ 專案目錄結構 (Repository Layout)
-
-```text
-FLOW/
-├── src/
-│   ├── cubical_hott.{h,c}             # 64-Bit 離散 Cubical HoTT、單價 SOA64、同倫纖維 h-Level 與離散 4-Jet (J^4 E)
-│   ├── induce.{h,c}                   # 歸納式知識合成引擎：IPM 矩匹配、有理數擬合、網格反射、SMM 與 PRNG 逆向
-│   ├── flow.h / parser.c              # 標量 Lean 4 解析器與語義 IR 降階
-│   ├── backend.{h,c}                  # 純 C17 算子、見證型別 (lean_certified_<T>) 與 SIMD SOA64 代碼生成
-│   ├── abi.{h,c} / registry.{h,c}     # C17 標頭檔、MEX 分派器合成、型別指紋登錄與 DSO 載入
-│   ├── flow_spsc.h                    # 快取行對齊的純 C17 無鎖 SPSC 環形緩衝區
-│   ├── flow_jet.{h,c}                 # 2-Jet Forward AD 二階自動微分與 O(1) 相空間注意力路由器 (FlowPhaseAttentionRouter)
-│   ├── reload.{h,c}                   # 無鎖 QSBR 世代動態熱重載
-│   └── flowy.{h,c} / flowc.c / flowy_main.c # CLI 編譯器與同倫宇宙／歸納提煉工具
-├── plugins/
-│   ├── embodied.{h,c,lean}            # 具身物理、1kHz/10kHz 阻抗控制與 ZMP 穩定包絡外掛
-│   └── cryptanalysis.{h,c,lean}       # MT19937/PCG32 狀態反演、GF(2) 求解器、QMC 去隨機化與硬體 PUF 認證外掛
-├── tests/
-│   ├── test_cubical_hott.c            # Cubical HoTT 99 項同倫、Kan、單價 SOA64、同倫纖維與 J^4 E 測試
-│   ├── test_concurrency.c             # 259 項 QSBR RCU、熱重載與無鎖池併發測試
-│   ├── test_system.c                  # 270 項 Lean 4 編譯、見證型別、相空間注意力、歸納合成與密碼分析全鏈路測試
-│   └── hott_test_kit.h                # 輕量零依賴同倫測試套件
-└── Makefile                           # 純淨 C17 建置管道
-```
-
----
-
-## 📜 授權條款 (License)
-
-MIT License — 詳見 [LICENSE](LICENSE)。
+包含 3 個零磁碟 I/O 的全記憶體測試執行檔與 CLI 冒煙測試（總耗時 `< 0.5s`）：
+- `build/test-hott-jet`：2-Jet 前向自動微分、辛幾何流形、Cubical HoTT Topos 篩、Univalence $\mathcal{U}_0$ 同構、HoTT × 2-Jet 橋接與 QSBR 熱替換（201 項斷言）
+- `build/test-compiler-lifter`：Lean 4 歐幾里得整數與 `FlowU256` 蒙哥馬利模冪、Pure Lean 4 $\to$ Zero-GC C17 正向合成、LLVM SSA $\to$ Lean 4 逆向區間推導（254 項斷言）
+- `build/fuzz-test`：語法邊界語料庫與 1,000 次偽隨機 BMF 變異記憶體安全測試

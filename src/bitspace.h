@@ -1,7 +1,6 @@
 #ifndef FLOW_BITSPACE_H
 #define FLOW_BITSPACE_H
 #include "flow.h"
-#include "plugin.h"
 #include "reload.h"
 #include "cubical_hott.h"
 #include <stddef.h>
@@ -10,21 +9,7 @@
 #if !defined(__cplusplus)
 #include <stdatomic.h>
 #endif
-#define FLOW_GENOME_MASK(width)               ((width) >= 64 ? ~0ULL : ((1ULL << (width)) - 1ULL))
-#define FLOW_GENOME_FIELD_MASK(offset, width) (FLOW_GENOME_MASK(width) << (offset))
-#define FLOW_GENOME_GET(genome, offset, width) \
-    (((uint64_t)(genome) >> (offset)) & FLOW_GENOME_MASK(width))
-#define FLOW_GENOME_PACK(val, offset, width) \
-    (((uint64_t)(val) & FLOW_GENOME_MASK(width)) << (offset))
-static inline uint64_t flow_manifold_project(uint64_t genome, uint64_t hard_safety_mask,
-                                             uint64_t dynamic_bias) {
-    uint64_t projected = genome & hard_safety_mask;
-    uint64_t malleable_bits = hard_safety_mask & ~genome;
-    if (dynamic_bias != 0 && malleable_bits != 0) {
-        projected |= (dynamic_bias & malleable_bits);
-    }
-    return projected;
-}
+
 static inline uint64_t flow_manifold_transition(uint64_t genome, uint64_t mask, uint64_t *rng_state,
                                                 uint32_t *mutated_bit_out) {
     if (!mask) {
@@ -52,36 +37,7 @@ static inline uint64_t flow_manifold_transition(uint64_t genome, uint64_t mask, 
     }
     return genome ^ (1ULL << chosen_idx);
 }
-#define FLOW_BMF_SW_HARD_SAFETY         (1ULL << 0)
-#define FLOW_BMF_SW_CONTRACT_GATE       (1ULL << 1)
-#define FLOW_BMF_SW_RESOURCE_QUOTA      (1ULL << 2)
-#define FLOW_BMF_SW_POLYTOPE_FEASIBLE   (1ULL << 3)
-#define FLOW_BMF_SW_STICK_SLIP_MODE     (1ULL << 4)
-#define FLOW_BMF_SW_IMPACT_DAMPING      (1ULL << 5)
-#define FLOW_BMF_SW_COOP_SYNC_LOCK      (1ULL << 6)
-#define FLOW_BMF_SW_EMERGENCY_HALT      (1ULL << 7)
-#define FLOW_BMF_SW_THERMAL_THROTTLE    (1ULL << 8)
-#define FLOW_BMF_SW_ANTI_SPILL_TILT     (1ULL << 9)
-#define FLOW_BMF_SW_GRIPPER_FORCE_SAFE  (1ULL << 10)
-#define FLOW_BMF_SW_ZMP_BALANCE         (1ULL << 11)
-#define FLOW_BMF_SW_NUMA_FIRST_TOUCH    (1ULL << 12)
-#define FLOW_BMF_SW_SIMD_VECTORIZED     (1ULL << 13)
-#define FLOW_BMF_SW_QSBR_EPOCH_ADVANCE  (1ULL << 14)
-#define FLOW_BMF_SW_DETERMINISM_INVAR   (1ULL << 15)
-#define FLOW_BMF_SW_IMU_ZERO_SAT        (1ULL << 17)
-#define FLOW_BMF_SW_PREPLAY_CONE_SAFE   (1ULL << 22)
-#define FLOW_BMF_SW_SWARM_IMMUNITY      (1ULL << 23)
-#define FLOW_BMF_SW_TELEMETRY_BIAS_MASK (0xFFFFFFFF00000000ULL)
-#ifndef FLOW_BMF_1BIT_CANVAS_DEFINED
-#define FLOW_BMF_1BIT_CANVAS_DEFINED
-typedef struct __attribute__((aligned(64))) {
-    uint32_t subspace_id;
-    int32_t is_adjudicated_sound;
-    uint64_t switchboard_bits, invariant_mask, malleable_mask, dynamic_bias;
-    double energy;
-    uint8_t _cacheline_pad[16];
-} FlowBmf1BitCanvas;
-#endif
+
 typedef FlowBmf1BitCanvas FlowBmfCanvas;
 #define FLOW_ATOMIC_STAGE_SWAP(dst, src)                                                        \
     do {                                                                                        \
@@ -179,211 +135,6 @@ static inline uint64_t flow_bmf_canvas_flip_1bit(FlowBmf1BitCanvas *canvas, uint
     canvas->is_adjudicated_sound = 0;
     return canvas->switchboard_bits;
 }
-typedef uint64_t flow_v512_u64 __attribute__((vector_size(64)));
-typedef union {
-    flow_v512_u64 vec;
-    uint64_t u64[8];
-    uint32_t u32[16];
-    uint8_t u8[64];
-} FlowVector512;
-static inline FlowVector512 flow_v512_from_u64s(uint64_t w0, uint64_t w1, uint64_t w2, uint64_t w3,
-                                                uint64_t w4, uint64_t w5, uint64_t w6,
-                                                uint64_t w7) {
-    return (FlowVector512){.u64 = {w0, w1, w2, w3, w4, w5, w6, w7}};
-}
-static inline FlowVector512 flow_v512_broadcast(uint64_t s) {
-    return (FlowVector512){.u64 = {s, s, s, s, s, s, s, s}};
-}
-static inline FlowVector512 flow_v512_zero(void) {
-    return (FlowVector512){0};
-}
-static inline FlowVector512 flow_v512_all_ones(void) {
-    return flow_v512_broadcast(~0ULL);
-}
-static inline FlowVector512 flow_v512_project(FlowVector512 g, FlowVector512 h, FlowVector512 b) {
-    return (FlowVector512){.vec = (g.vec & h.vec) | (b.vec & h.vec)};
-}
-static inline FlowVector512 flow_v512_and(FlowVector512 a, FlowVector512 b) {
-    return (FlowVector512){.vec = a.vec & b.vec};
-}
-static inline uint32_t flow_v512_popcount(FlowVector512 v) {
-    uint32_t c = 0;
-    for (int i = 0; i < 8; ++i) {
-        c += (uint32_t)__builtin_popcountll(v.u64[i]);
-    }
-    return c;
-}
-static inline uint64_t flow_v512_horizontal_or(FlowVector512 v) {
-    return v.u64[0] | v.u64[1] | v.u64[2] | v.u64[3] | v.u64[4] | v.u64[5] | v.u64[6] | v.u64[7];
-}
-static inline uint64_t flow_v512_horizontal_and(FlowVector512 v) {
-    return v.u64[0] & v.u64[1] & v.u64[2] & v.u64[3] & v.u64[4] & v.u64[5] & v.u64[6] & v.u64[7];
-}
-#define FLOW_PARETO_MAX              16
-#define FLOW_BITSPACE_MAX_CANDIDATES 32
-typedef struct {
-    uint64_t hard_safety_mask, hard_contract_mask, hard_resource_mask, hard_plugin_mask,
-        hard_polytope_mask, hard_composite_mask;
-    uint64_t domain_preference_mask, dynamic_telemetry_bias, soft_composite_bias;
-} FlowMaskCanvas;
-typedef struct {
-    double energy, latency_score, throughput_score;
-    size_t memory_bytes, capacity;
-    uint64_t benchmark_ns;
-    int hard_gate_passed;
-    char message[128];
-} FlowEvaluation;
-#define FLOW_GENOME_MAX_WORDS 16
-typedef struct {
-    uint64_t words[FLOW_GENOME_MAX_WORDS];
-    uint32_t active_words, total_bits;
-} FlowGenome;
-void flow_genome_init(FlowGenome *g, uint32_t total_bits);
-void flow_genome_flip_bit(FlowGenome *g, uint32_t bit_idx);
-void flow_genome_mutate_1bit(FlowGenome *g, uint64_t *rng_state, uint32_t *mutated_bit_out);
-typedef struct {
-    const Component *component;
-    FlowPlanDimensionSet dimension_set;
-    FlowPlanAssignment assignment;
-    FlowEvaluation eval;
-    uint64_t genome, schema_hash, contract_hash;
-    uint32_t bit_count;
-} FlowPlan;
-typedef struct FlowBitSpace FlowBitSpace;
-struct FlowBitSpace {
-    const SemanticIR *ir;
-    const Component *candidates[FLOW_BITSPACE_MAX_CANDIDATES];
-    FlowPlanDimensionSet candidate_dims[FLOW_BITSPACE_MAX_CANDIDATES];
-    uint32_t candidate_bits[FLOW_BITSPACE_MAX_CANDIDATES];
-    uint64_t candidate_masks[FLOW_BITSPACE_MAX_CANDIDATES];
-    FlowMaskCanvas candidate_canvases[FLOW_BITSPACE_MAX_CANDIDATES];
-    FlowMaskCanvas global_canvas;
-    size_t candidate_count;
-    uint32_t selector_bits, bit_count;
-    uint64_t contract_hash, schema_hash, env_mask;
-    int (*decode)(const FlowBitSpace *space, uint64_t genome, FlowPlan *plan);
-    int (*evaluate)(const FlowBitSpace *space, const FlowPlan *plan, FlowEvaluation *result);
-    int (*hard_gate)(const FlowBitSpace *space, const FlowPlan *plan, const FlowEvaluation *result);
-};
-typedef struct FlowPlanArtifact {
-    char flow_name[64], module_name[64], module_version[32], component_id[64];
-    uint64_t contract_hash, plan_schema_hash, genome;
-    uint32_t seed, bit_count;
-    FlowPlanDimensionSet dimensions;
-    FlowPlanAssignment plan;
-    FlowEvaluation metrics;
-    char verification_status[32], attestation_msg[128];
-    double jet_omega, jet_barrier_mu, jet_q_saturation;
-} FlowPlanArtifact;
-uint64_t flow_compute_contract_hash(const SemanticIR *ir);
-uint64_t flow_bitspace_compute_schema_hash(const SemanticIR *ir, const Component *comp,
-                                           const FlowPlanDimensionSet *dims);
-int flow_bitspace_init_single(const SemanticIR *ir, const Component *comp, FlowBitSpace *space);
-int flow_bitspace_init_for_ir(const SemanticIR *ir, FlowBitSpace *space);
-uint64_t flow_bitspace_mutate_1bit(const FlowBitSpace *space, uint64_t genome, uint64_t *rng_state,
-                                   uint32_t *mutated_bit_out);
-uint64_t flow_bitspace_encode(const FlowBitSpace *space, size_t cand_idx,
-                              const FlowPlanAssignment *plan);
-uint64_t flow_bitspace_default_genome(const FlowBitSpace *space);
-typedef enum {
-    FLOW_GATE_PASS = 0,
-    FLOW_GATE_FAIL_MEMORY_LIMIT,
-    FLOW_GATE_FAIL_VERIFIER_UNPROVEN,
-    FLOW_GATE_FAIL_THREAD_AFFINITY,
-    FLOW_GATE_FAIL_QUOTA_EXCEEDED,
-    FLOW_GATE_FAIL_DIMENSION_BOUND,
-    FLOW_GATE_FAIL_REENTRANCY,
-    FLOW_GATE_FAIL_MUTATION_INVALID,
-    FLOW_GATE_CATEGORY_MAX
-} FlowGateFailureReason;
-typedef struct {
-    uint64_t total_mutations, total_failures, failure_counts[FLOW_GATE_CATEGORY_MAX];
-} FlowSearchHeatmap;
-typedef struct {
-    FlowPlan best_plan;
-    size_t pareto_count, iterations;
-    FlowPlan pareto_points[FLOW_PARETO_MAX];
-    double best_latency, best_memory, latency_regret_percent, memory_regret_percent;
-    uint32_t seed;
-    int measured;
-    FlowSearchHeatmap heatmap;
-    FlowMaskCanvas mask_canvas;
-} FlowBitSearchResult;
-int flow_mask_canvas_compose(const SemanticIR *ir, const Component *comp,
-                             const FlowPlanDimensionSet *dims, const FlowPMUTelemetry *pmu,
-                             FlowMaskCanvas *canvas_out);
-uint64_t flow_bitspace_mutate_1bit_superposed(const FlowBitSpace *space, uint64_t genome,
-                                              const FlowMaskCanvas *canvas, double bias_weight,
-                                              uint64_t *rng_state, uint32_t *mutated_bit_out);
-int flow_bitspace_search(const FlowBitSpace *space, size_t iterations, uint32_t seed, int measured,
-                         const FlowPlan *seed_plan, FlowBitSearchResult *result_out);
-typedef enum {
-    FLOW_TACTIC_SPEED = 0,
-    FLOW_TACTIC_BALANCED = 1,
-    FLOW_TACTIC_MEMORY = 2,
-    FLOW_TACTIC_COUNT = 3
-} FlowPlanTactic;
-typedef struct {
-    FlowPlan tactics[FLOW_TACTIC_COUNT];
-    int available[FLOW_TACTIC_COUNT];
-    size_t count;
-} FlowPlanEnsemble;
-const char *flow_plan_tactic_name(FlowPlanTactic tactic);
-int flow_plan_artifact_save(FILE *output, const FlowPlanArtifact *artifact);
-int flow_plan_artifact_load(FILE *input, FlowPlanArtifact *artifact);
-int flow_plan_to_artifact(const FlowPlan *plan, const SemanticIR *ir, uint32_t seed,
-                          FlowPlanArtifact *art);
-int flow_artifact_validate(const FlowPlanArtifact *art, const SemanticIR *ir,
-                           const FlowBitSpace *space, char *err_msg, size_t err_size);
-typedef struct {
-    size_t buffer_bytes, initial_capacity;
-    unsigned growth_percent;
-    size_t batch_size, arena_bytes;
-} FlowTuning;
-typedef struct {
-    const Component *component;
-    FlowPlanAssignment assignment;
-    FlowPlanMetrics metrics;
-    double energy;
-} FlowParetoPoint;
-typedef struct {
-    size_t count;
-    FlowParetoPoint points[FLOW_PARETO_MAX];
-    double best_latency, best_memory, latency_regret_percent, memory_regret_percent;
-} FlowParetoSummary;
-typedef struct FlowSearchResult {
-    const Component *component;
-    uint64_t genome;
-    FlowPlanDimensionSet dimension_set;
-    FlowPlanAssignment assignment;
-    FlowPlanMetrics metrics;
-    double capacity, threads, shards, energy;
-    uint64_t benchmark_ns;
-    int measured;
-    size_t iterations;
-    uint32_t seed;
-    FlowTuning tuning;
-    FlowParetoSummary pareto;
-    FlowSearchHeatmap heatmap;
-    FlowMaskCanvas mask_canvas;
-} SearchResult;
-typedef struct {
-    int available;
-    size_t component, capacity, threads, shards;
-    uint64_t benchmark_ns;
-    size_t workload_bytes;
-    FlowTuning tuning;
-    FlowPlanAssignment assignment;
-} ProfileSeed;
-uint64_t flow_plan_get_value(const FlowPlanDimensionSet *dims, const FlowPlanAssignment *plan,
-                             const char *name, uint64_t default_val);
-FlowTuning flow_default_tuning(const SemanticIR *ir, const Component *component);
-int flow_polyhedral_solve_plan(const SemanticIR *ir, const FlowBitSpace *space, FlowPlan *plan_out);
-SearchResult search_best(const SemanticIR *ir, size_t iterations, uint32_t seed, int measured,
-                         const ProfileSeed *profile);
-void flow_plan_to_search_result(const FlowPlan *plan, const SemanticIR *ir, uint32_t seed,
-                                SearchResult *out);
-int flow_artifact_to_profile_seed(const FlowPlanArtifact *art, ProfileSeed *seed_out);
 
 /* =========================================================================
  * FLOW Exact Numerics & IEEE-754 / 2-Jet / BigInt Engine
@@ -470,117 +221,96 @@ __extension__ typedef unsigned __int128 flow_u128_t;
         return 1;                                                                                \
     }
 
-#define FLOW_LEAN_NAT_OPS_C17                                                                  \
-    static inline __attribute__((unused)) uint64_t flow_nat_sub(uint64_t a, uint64_t b) {      \
-        return a >= b ? (a - b) : 0ULL;                                                        \
-    }                                                                                          \
-    static inline __attribute__((unused)) uint64_t flow_nat_div(uint64_t a, uint64_t b) {      \
-        return b == 0ULL ? 0ULL : (a / b);                                                     \
-    }                                                                                          \
-    static inline __attribute__((unused)) uint64_t flow_nat_mod(uint64_t a, uint64_t b) {      \
-        return b == 0ULL ? a : (a % b);                                                        \
-    }                                                                                          \
-    static inline __attribute__((unused)) uint64_t flow_nat_pow(uint64_t base, uint64_t exp) { \
-        uint64_t r = 1ULL;                                                                     \
-        while (exp > 0ULL) {                                                                   \
-            if (exp & 1ULL) {                                                                  \
-                r *= base;                                                                     \
-            }                                                                                  \
-            base *= base;                                                                      \
-            exp >>= 1U;                                                                        \
-        }                                                                                      \
-        return r;                                                                              \
-    }                                                                                          \
-    static inline __attribute__((unused)) uint64_t flow_nat_min(uint64_t a, uint64_t b) {      \
-        return a < b ? a : b;                                                                  \
-    }                                                                                          \
-    static inline __attribute__((unused)) uint64_t flow_nat_max(uint64_t a, uint64_t b) {      \
-        return a > b ? a : b;                                                                  \
-    }                                                                                          \
-    static inline __attribute__((unused)) int64_t flow_int_div(int64_t a, int64_t b) {         \
-        return b == 0 ? 0 : ((a == INT64_MIN && b == -1) ? INT64_MIN : (a / b));               \
-    }                                                                                          \
-    static inline __attribute__((unused)) int64_t flow_int_mod(int64_t a, int64_t b) {         \
-        return b == 0 ? a : ((a == INT64_MIN && b == -1) ? 0 : (a % b));                       \
-    }                                                                                          \
-    static inline __attribute__((unused)) int64_t flow_int_pow(int64_t base, int64_t exp) {    \
-        if (exp < 0) {                                                                         \
-            return 0;                                                                          \
-        }                                                                                      \
-        int64_t r = 1;                                                                         \
-        while (exp > 0) {                                                                      \
-            if (exp & 1) {                                                                     \
-                r *= base;                                                                     \
-            }                                                                                  \
-            base *= base;                                                                      \
-            exp >>= 1;                                                                         \
-        }                                                                                      \
-        return r;                                                                              \
-    }
-
-#define FLOW_LEAN_FLOAT_OPS_C17                                                                 \
-    static inline __attribute__((unused)) double flow_float_add(double a, double b) {           \
-        return a + b;                                                                           \
+#define FLOW_LEAN_NAT_OPS_C17                                                                   \
+    static inline __attribute__((unused)) uint64_t flow_nat_sub(uint64_t a, uint64_t b) {       \
+        return a >= b ? (a - b) : 0ULL;                                                         \
     }                                                                                           \
-    static inline __attribute__((unused)) double flow_float_sub(double a, double b) {           \
-        return a - b;                                                                           \
+    static inline __attribute__((unused)) uint64_t flow_nat_div(uint64_t a, uint64_t b) {       \
+        return b == 0ULL ? 0ULL : (a / b);                                                      \
     }                                                                                           \
-    static inline __attribute__((unused)) double flow_float_mul(double a, double b) {           \
-        return a * b;                                                                           \
+    static inline __attribute__((unused)) uint64_t flow_nat_mod(uint64_t a, uint64_t b) {       \
+        return b == 0ULL ? a : (a % b);                                                         \
     }                                                                                           \
-    static inline __attribute__((unused)) double flow_float_div(double a, double b) {           \
-        return b == 0.0 ? 0.0 : (a / b);                                                        \
+    static inline __attribute__((unused)) uint64_t flow_nat_pow(uint64_t base, uint64_t exp) {  \
+        uint64_t r = 1ULL;                                                                      \
+        while (exp > 0ULL) {                                                                    \
+            if (exp & 1ULL) {                                                                   \
+                r *= base;                                                                      \
+            }                                                                                   \
+            base *= base;                                                                       \
+            exp >>= 1U;                                                                         \
+        }                                                                                       \
+        return r;                                                                               \
     }                                                                                           \
-    static inline __attribute__((unused)) double flow_float_mod(double a, double b) {           \
-        return b == 0.0 ? 0.0 : __builtin_fmod(a, b);                                           \
+    static inline __attribute__((unused)) uint64_t flow_nat_min(uint64_t a, uint64_t b) {       \
+        return a < b ? a : b;                                                                   \
     }                                                                                           \
-    static inline __attribute__((unused)) double flow_float_neg(double x) {                     \
-        return -x;                                                                              \
+    static inline __attribute__((unused)) uint64_t flow_nat_max(uint64_t a, uint64_t b) {       \
+        return a > b ? a : b;                                                                   \
     }                                                                                           \
-    static inline __attribute__((unused)) double flow_float_pow(double base, double exp) {      \
-        return __builtin_pow(base, exp);                                                        \
+    static inline __attribute__((unused)) int64_t flow_int_div(int64_t a, int64_t b) {          \
+        if (b == 0)                                                                             \
+            return 0;                                                                           \
+        if (a == INT64_MIN && b == -1)                                                          \
+            return INT64_MIN;                                                                   \
+        int64_t q = a / b;                                                                      \
+        int64_t r = a % b;                                                                      \
+        if (r < 0) {                                                                            \
+            q = (b > 0) ? (q - 1) : (int64_t)((uint64_t)q + 1ULL);                              \
+        }                                                                                       \
+        return q;                                                                               \
     }                                                                                           \
-    static inline __attribute__((unused)) double flow_float_abs(double x) {                     \
-        return __builtin_fabs(x);                                                               \
+    static inline __attribute__((unused)) int64_t flow_int_mod(int64_t a, int64_t b) {          \
+        if (b == 0)                                                                             \
+            return a;                                                                           \
+        if (a == INT64_MIN && b == -1)                                                          \
+            return 0;                                                                           \
+        int64_t r = a % b;                                                                      \
+        if (r < 0) {                                                                            \
+            r = (b > 0) ? (int64_t)((uint64_t)r + (uint64_t)b)                                  \
+                        : (int64_t)((uint64_t)r - (uint64_t)b);                                 \
+        }                                                                                       \
+        return r;                                                                               \
     }                                                                                           \
-    static inline __attribute__((unused)) double flow_float_floor(double x) {                   \
-        return __builtin_floor(x);                                                              \
+    static inline __attribute__((unused)) int64_t flow_int_tdiv(int64_t a, int64_t b) {         \
+        if (b == 0)                                                                             \
+            return 0;                                                                           \
+        if (a == INT64_MIN && b == -1)                                                          \
+            return INT64_MIN;                                                                   \
+        return a / b;                                                                           \
     }                                                                                           \
-    static inline __attribute__((unused)) double flow_float_ceil(double x) {                    \
-        return __builtin_ceil(x);                                                               \
+    static inline __attribute__((unused)) int64_t flow_int_tmod(int64_t a, int64_t b) {         \
+        if (b == 0)                                                                             \
+            return a;                                                                           \
+        if (a == INT64_MIN && b == -1)                                                          \
+            return 0;                                                                           \
+        return a % b;                                                                           \
     }                                                                                           \
-    static inline __attribute__((unused)) double flow_float_round(double x) {                   \
-        return __builtin_round(x);                                                              \
+    static inline __attribute__((unused)) int64_t flow_int_pow(int64_t base, int64_t exp) {     \
+        if (exp < 0) {                                                                          \
+            return 0;                                                                           \
+        }                                                                                       \
+        int64_t r = 1;                                                                          \
+        while (exp > 0) {                                                                       \
+            if (exp & 1) {                                                                      \
+                r *= base;                                                                      \
+            }                                                                                   \
+            base *= base;                                                                       \
+            exp >>= 1;                                                                          \
+        }                                                                                       \
+        return r;                                                                               \
     }                                                                                           \
-    static inline __attribute__((unused)) double flow_float_sqrt(double x) {                    \
-        return x <= 0.0 ? 0.0 : __builtin_sqrt(x);                                              \
+    static inline __attribute__((unused)) int64_t flow_int_abs(int64_t x) {                     \
+        return x == INT64_MIN ? INT64_MAX : (x < 0 ? -x : x);                                   \
     }                                                                                           \
-    static inline __attribute__((unused)) double flow_float_exp(double x) {                     \
-        return __builtin_exp(x);                                                                \
+    static inline __attribute__((unused)) int64_t flow_int_min(int64_t a, int64_t b) {          \
+        return a < b ? a : b;                                                                   \
     }                                                                                           \
-    static inline __attribute__((unused)) double flow_float_log(double x) {                     \
-        return x <= 0.0 ? 0.0 : __builtin_log(x);                                               \
+    static inline __attribute__((unused)) int64_t flow_int_max(int64_t a, int64_t b) {          \
+        return a > b ? a : b;                                                                   \
     }                                                                                           \
-    static inline __attribute__((unused)) double flow_float_sin(double x) {                     \
-        return __builtin_sin(x);                                                                \
-    }                                                                                           \
-    static inline __attribute__((unused)) double flow_float_cos(double x) {                     \
-        return __builtin_cos(x);                                                                \
-    }                                                                                           \
-    static inline __attribute__((unused)) double flow_float_atan2(double y, double x) {         \
-        return __builtin_atan2(y, x);                                                           \
-    }                                                                                           \
-    static inline __attribute__((unused)) double flow_float_max(double a, double b) {           \
-        return __builtin_isnan(a) ? a : (__builtin_isnan(b) ? b : (a > b ? a : b));             \
-    }                                                                                           \
-    static inline __attribute__((unused)) double flow_float_min(double a, double b) {           \
-        return __builtin_isnan(a) ? a : (__builtin_isnan(b) ? b : (a < b ? a : b));             \
-    }                                                                                           \
-    static inline __attribute__((unused)) double flow_float_of_nat(uint64_t x) {                \
-        return (double)x;                                                                       \
-    }                                                                                           \
-    static inline __attribute__((unused)) double flow_float_of_int(int64_t x) {                 \
-        return (double)x;                                                                       \
+    static inline __attribute__((unused)) int64_t flow_int_of_nat(uint64_t x) {                 \
+        return (int64_t)x;                                                                      \
     }                                                                                           \
     static inline __attribute__((unused)) uint64_t flow_quantize(double val, double min_v,      \
                                                                  double max_v, uint32_t bits) { \
@@ -771,7 +501,6 @@ FLOW_EXACT_CODEC_C17
 #ifndef FLOW_LEAN_NAT_OPS_DEFINED
 #define FLOW_LEAN_NAT_OPS_DEFINED
 FLOW_LEAN_NAT_OPS_C17
-FLOW_LEAN_FLOAT_OPS_C17
 FLOW_JET2_OPS_C17
 #endif
 
@@ -800,18 +529,6 @@ FlowU256 flow_u256_mont_reduce(const uint64_t t_in[FLOW_U512_LIMBS], const FlowU
 FlowU256 flow_u256_mod_pow(FlowU256 base, FlowU256 exp, FlowU256 modulus);
 int flow_u256_is_probably_prime(const FlowU256 *n, const uint64_t *bases, size_t base_count);
 
-typedef struct {
-    uint64_t s[FLOW_U256_LIMBS];
-} FlowXoshiro256SS;
-
-void flow_xoshiro256ss_init(FlowXoshiro256SS *rng, uint64_t seed);
-uint64_t flow_xoshiro256ss_next_u64(FlowXoshiro256SS *rng);
-int flow_xoshiro256ss_next_bool(FlowXoshiro256SS *rng);
-
-void flow_mat_mul_ikj(size_t R, size_t K, size_t C, const double *a, const double *b, double *out);
-double flow_mse_loss(size_t N, size_t OUT, const double *predictions, const double *targets);
-void flow_gradient_descent_step(size_t N, size_t IN, size_t OUT, const double *inputs,
-                                double *weights, const double *predictions, const double *targets,
-                                double learning_rate);
 #endif /* FLOW_EXACT_NUMERICS_DEFINED */
+
 #endif /* FLOW_BITSPACE_H */

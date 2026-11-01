@@ -2,24 +2,30 @@
 -- FLOW Cryptanalysis, PRNG State Inversion & PUF/QMC Certification Core
 -- (plugins/cryptanalysis.lean)
 -- =============================================================================
--- Pure Zero-GC Lean 4 specification for:
+-- Pure Zero-GC Lean 4 integer specification for:
 -- 1. Mersenne Twister (MT19937) bijective F_2 tempering & untempering
 -- 2. Z_{2^32} modular recurrence inversion (recovering seed=42 from state)
 -- 3. Hardware PUF Min-Entropy (NIST SP 800-90B) & Lipschitz stability gate
--- 4. Certified Quasi-Monte Carlo (QMC) Star-Discrepancy bound gate
+-- 4. Certified Quasi-Monte Carlo (QMC) Star-Discrepancy integer PPM tolerance gate
 -- =============================================================================
+
+import Std.Tactic.BVDecide
 
 namespace Cryptanalysis.Engine
 
 structure CryptanalysisAuditFrame where
-  observedWord0    : UInt64
-  observedWord1    : UInt64
-  recoveredSeed    : UInt64
-  minEntropyMilli  : UInt64
+  observedWord0     : UInt64
+  observedWord1     : UInt64
+  recoveredSeed     : UInt64
+  minEntropyMilli   : UInt64
   interHammingMilli : UInt64
-  lipschitzMilli   : UInt64
-  qmcDiscrepancy   : Float
-  deriving Repr
+  lipschitzMilli    : UInt64
+  qmcDiscrepancyPpm : UInt64
+  h_entropy         : minEntropyMilli >= 700 && minEntropyMilli <= 1000
+  h_inter_hamming   : interHammingMilli >= 450 && interHammingMilli <= 550
+  h_lipschitz       : lipschitzMilli <= 1500
+  h_qmc_bound       : qmcDiscrepancyPpm > 0 && qmcDiscrepancyPpm < 1000000
+  deriving Repr, DecidableEq
 
 def mt19937_temper (x : UInt64) : UInt64 :=
   let v0 := x &&& 4294967295
@@ -53,8 +59,8 @@ def mt19937_invert_init_step (cur : UInt64) (idx : UInt64) : UInt64 :=
 def puf_min_entropy_gate (minEntropyMilli : UInt64) (interHdMilli : UInt64) (intraHdMilli : UInt64) (lipschitzMilli : UInt64) : UInt32 :=
   if minEntropyMilli >= 700 && interHdMilli >= 450 && interHdMilli <= 550 && intraHdMilli <= 50 && lipschitzMilli <= 1500 then 0 else 1
 
-def qmc_discrepancy_bound_ok (starDiscrepancy : Float) (mcError : Float) : Bool :=
-  starDiscrepancy > 0.0 && starDiscrepancy <= mcError
+def qmc_discrepancy_bound_ok (starDiscrepancyPpm : UInt64) (mcErrorPpm : UInt64) : Bool :=
+  starDiscrepancyPpm > 0 && starDiscrepancyPpm <= mcErrorPpm
 
 theorem mt19937_untemper_involutive : mt19937_untemper (mt19937_temper 305419896) = 305419896 := by decide
 
@@ -63,5 +69,17 @@ theorem mt19937_seed42_recovery_sound : mt19937_invert_init_step (mt19937_init_s
 theorem puf_silicon_entropy_certified : puf_min_entropy_gate 920 498 12 1100 = 0 := by decide
 
 theorem puf_silicon_rejects_low_entropy : puf_min_entropy_gate 350 498 12 1100 = 1 := by decide
+
+theorem qmc_discrepancy_ppm_certified : qmc_discrepancy_bound_ok 2180 15625 = true := by decide
+
+theorem mt19937_temper_32bit (x : UInt64) :
+  mt19937_temper x <= 4294967295 := by
+  unfold mt19937_temper
+  bv_decide
+
+theorem puf_gate_domain_bounded (minEntropyMilli : UInt64) (interHdMilli : UInt64) (intraHdMilli : UInt64) (lipschitzMilli : UInt64) :
+  puf_min_entropy_gate minEntropyMilli interHdMilli intraHdMilli lipschitzMilli <= 1 := by
+  unfold puf_min_entropy_gate
+  split <;> decide
 
 end Cryptanalysis.Engine
