@@ -2,7 +2,7 @@ export PATH := /opt/homebrew/opt/llvm/bin:/opt/homebrew/bin:/usr/local/bin:$(PAT
 
 CC ?= clang
 PREFIX ?= /usr/local
-FLOW_VERSION := $(shell tr -d '[:space:]' < VERSION 2>/dev/null || echo "4.0.0")
+FLOW_VERSION := $(shell tr -d '[:space:]' < VERSION 2>/dev/null || echo "4.0.1")
 GIT_BRANCH   := $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "detached")
 GIT_COMMIT   := $(shell git rev-parse --short=8 HEAD 2>/dev/null || echo "unknown")
 GIT_DIRTY    := $(shell git status --porcelain -uno 2>/dev/null | grep -q . && echo "dirty" || echo "clean")

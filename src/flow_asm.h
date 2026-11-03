@@ -46,9 +46,9 @@ extern "C" {
 
 #define FLOW_VERSION_MAJOR 4
 #define FLOW_VERSION_MINOR 0
-#define FLOW_VERSION_PATCH 0
+#define FLOW_VERSION_PATCH 1
 #ifndef FLOW_VERSION_STRING
-#define FLOW_VERSION_STRING "4.0.0"
+#define FLOW_VERSION_STRING "4.0.1"
 #endif
 #ifndef FLOW_GIT_BRANCH
 #define FLOW_GIT_BRANCH "main"
