@@ -174,9 +174,79 @@ int main(void) {
         FLOW_ASSERT_FLOAT_EQ(gx.d1, -0.0625, 1e-12);   /* -0.5 * 4^(-1.5) = -1/16 */
         FLOW_ASSERT_FLOAT_EQ(gx.d2, 0.0234375, 1e-12); /* 0.75 * 4^(-2.5) = 3/128 */
 
+        /* Additional smooth 2-Jet elementary operations: sub, neg, abs, cos, atan2, pow, min, max,
+         * eval_taylor */
+        FlowJetScalar2 diff_j = flow_jet2_sub(x2, x); /* x^2 - x at x=3 -> v=6, d1=5, d2=2 */
+        FLOW_ASSERT_FLOAT_EQ(diff_j.v, 6.0, 1e-12);
+        FLOW_ASSERT_FLOAT_EQ(diff_j.d1, 5.0, 1e-12);
+        FLOW_ASSERT_FLOAT_EQ(diff_j.d2, 2.0, 1e-12);
+        FLOW_ASSERT_FLOAT_EQ(flow_jet2_eval_taylor(diff_j, 0.5), 6.0 + 5.0 * 0.5 + 0.5 * 2.0 * 0.25,
+                             1e-12);
+
+        FlowJetScalar2 neg_j = flow_jet2_neg(diff_j);
+        FLOW_ASSERT_FLOAT_EQ(neg_j.v, -6.0, 1e-12);
+        FLOW_ASSERT_FLOAT_EQ(neg_j.d1, -5.0, 1e-12);
+        FLOW_ASSERT_FLOAT_EQ(neg_j.d2, -2.0, 1e-12);
+
+        FlowJetScalar2 abs_j = flow_jet2_abs(neg_j);
+        FLOW_ASSERT_FLOAT_EQ(abs_j.v, 6.0, 1e-12);
+        FLOW_ASSERT_FLOAT_EQ(abs_j.d1, 5.0, 1e-12);
+        FLOW_ASSERT_FLOAT_EQ(abs_j.d2, 2.0, 1e-12);
+
+        FlowJetScalar2 cos_t = flow_jet2_cos(t);
+        FLOW_ASSERT_FLOAT_EQ(cos_t.v, cos(t0), 1e-12);
+        FLOW_ASSERT_FLOAT_EQ(cos_t.d1, -sin(t0), 1e-12);
+        FLOW_ASSERT_FLOAT_EQ(cos_t.d2, -cos(t0), 1e-12);
+
+        /* atan2(sin(t), cos(t)) == t for t in (-pi/2, pi/2) -> d1 = 1, d2 = 0 */
+        FlowJetScalar2 theta_j = flow_jet2_atan2(flow_jet2_sin(t), cos_t);
+        FLOW_ASSERT_FLOAT_EQ(theta_j.v, t0, 1e-12);
+        FLOW_ASSERT_FLOAT_EQ(theta_j.d1, 1.0, 1e-12);
+        FLOW_ASSERT_FLOAT_EQ(theta_j.d2, 0.0, 1e-12);
+
+        FlowJetScalar2 pow_j = flow_jet2_pow(x, flow_jet2_const(3.0));
+        FLOW_ASSERT_FLOAT_EQ(pow_j.v, 27.0, 1e-12);
+        FLOW_ASSERT_FLOAT_EQ(pow_j.d1, 27.0, 1e-12);
+        FLOW_ASSERT_FLOAT_EQ(pow_j.d2, 18.0, 1e-12);
+
+        FlowJetScalar2 min_j = flow_jet2_min(x, x2);
+        FlowJetScalar2 max_j = flow_jet2_max(x, x2);
+        FLOW_ASSERT_FLOAT_EQ(min_j.v, 3.0, 1e-12);
+        FLOW_ASSERT_FLOAT_EQ(max_j.v, 9.0, 1e-12);
+
+        /* 2-Jet algebraic root solver: linear, dual-root quadratic, and 3D worldline anti-tunneling
+         */
+        double t_root = -1.0;
+        FlowJet2 j_lin = flow_jet2_make(10.0, -20.0, 0.0);
+        FLOW_ASSERT_TRUE(flow_jet2_solve_root(j_lin, 1.0, &t_root));
+        FLOW_ASSERT_FLOAT_EQ(t_root, 0.5, 1e-12);
+
+        /* P(t) = (t - 0.25)(t - 0.75) = 0.1875 - 1.0*t + 0.5*(2.0)*t^2 -> smallest root is 0.25 */
+        FlowJet2 j_quad = flow_jet2_make(0.1875, -1.0, 2.0);
+        FLOW_ASSERT_TRUE(flow_jet2_solve_root(j_quad, 1.0, &t_root));
+        FLOW_ASSERT_FLOAT_EQ(t_root, 0.25, 1e-12);
+
+        /* Worldline anti-tunneling through sphere f(p) = ||p||^2 - R^2 (R = 1.0):
+         * p(0) = (-2.0, 0.5, 0.0) [f = +3.25 > 0] and p(1) = (+2.0, 0.5, 0.0) [f = +3.25 > 0]
+         * Discrete endpoints miss the sphere completely, but 2-Jet composition catches impact! */
+        FlowJet2 px = flow_jet2_make(-2.0, 4.0, 0.0);
+        FlowJet2 py = flow_jet2_make(0.5, 0.0, 0.0);
+        FlowJet2 pz = flow_jet2_make(0.0, 0.0, 0.0);
+        FlowJet2 f_sphere =
+            flow_jet2_sub(flow_jet2_add(flow_jet2_add(flow_jet2_mul(px, px), flow_jet2_mul(py, py)),
+                                        flow_jet2_mul(pz, pz)),
+                          flow_jet2_const(1.0));
+        FLOW_ASSERT_FLOAT_EQ(f_sphere.v, 3.25, 1e-12);
+        FLOW_ASSERT_FLOAT_EQ(flow_jet2_eval_taylor(f_sphere, 1.0), 3.25, 1e-12);
+        double t_impact = -1.0;
+        FLOW_ASSERT_TRUE(flow_jet2_solve_root(f_sphere, 1.0, &t_impact));
+        FLOW_ASSERT_FLOAT_EQ(t_impact, (4.0 - sqrt(3.0)) / 8.0, 1e-12);
+        FLOW_ASSERT_FLOAT_EQ(flow_jet2_eval_taylor(f_sphere, t_impact), 0.0, 1e-12);
+
         /* Symplectic phase-space integration & energy boundedness */
         FlowJet jet;
         FLOW_ASSERT_EQ(flow_jet_init(&jet, "jet_harmonic", "2-Jet Symplectic Oscillator"), 1);
+        FLOW_ASSERT_STR_EQ(jet.header.invariant_signature, "INVARIANT:H_FINITE&&ROBUST>=0");
         jet.payload.q[0] = 1.0;
         jet.payload.p[0] = 0.0;
         double e0 = flow_jet_hamiltonian(&jet);
@@ -187,12 +257,11 @@ int main(void) {
         double e1 = flow_jet_hamiltonian(&jet);
         FLOW_ASSERT_FLOAT_EQ(e0, e1, 1e-4);
 
-        FlowSMTProofAttestation jet_proof = {0};
-        FLOW_ASSERT_EQ(flow_jet_verify_symplectic_soundness_smt(&jet, &jet_proof),
-                       FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(jet_proof);
+        FlowInvariantAttestation jet_proof = {0};
+        FLOW_ASSERT_EQ(flow_jet_verify_invariants(&jet, &jet_proof), FLOW_INVARIANT_VERIFIED);
+        FLOW_ASSERT_INVARIANT_SOUND(jet_proof);
 
-        /* Moreau envelope hysteresis & non-Zeno SMT verification */
+        /* Moreau envelope hysteresis & non-Zeno invariant verification */
         FlowMoreauHysteresis moreau;
         FLOW_ASSERT_EQ(flow_moreau_init(&moreau, -0.5, 0.5, 0), 1);
         FLOW_ASSERT_EQ(flow_moreau_step(&moreau, 0.0), 0);  /* dead-zone -> stays 0 */
@@ -200,15 +269,19 @@ int main(void) {
         FLOW_ASSERT_EQ(flow_moreau_step(&moreau, 0.0), 1);  /* dead-zone -> retains state 1 */
         FLOW_ASSERT_EQ(flow_moreau_step(&moreau, -0.8), 0); /* <= -0.5 -> flips to 0 */
         FLOW_ASSERT_EQ(moreau.flutters_suppressed, 2ULL);
-        FlowSMTProofAttestation moreau_proof = {0};
-        FLOW_ASSERT_EQ(flow_moreau_verify_smt(&moreau, &moreau_proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_SMT_SOUND(moreau_proof);
+        FlowInvariantAttestation moreau_proof = {0};
+        FLOW_ASSERT_EQ(flow_moreau_verify_invariants(&moreau, &moreau_proof),
+                       FLOW_INVARIANT_VERIFIED);
+        FLOW_ASSERT_INVARIANT_SOUND(moreau_proof);
 
-        /* Phase-space hyperplane attention router */
+        /* Phase-space hyperplane attention router (FlowQPoly Q32.16) */
         FlowPhaseAttentionRouter router;
         FLOW_ASSERT_EQ(flow_phase_attention_init(&router, 4U, 0U), 1);
-        const double coeffs[4] = {1.0, 0.0, 0.0, 0.0};
-        FLOW_ASSERT_EQ(flow_phase_attention_set_plane(&router, 0U, coeffs, 1.0, true, 0.8, 1.2), 1);
+        const int32_t coeffs_q[4] = {1 << FLOW_PHASE_ATTENTION_QSHIFT, 0, 0, 0};
+        FLOW_ASSERT_EQ(flow_phase_attention_set_plane(&router, 0U, coeffs_q,
+                                                      1LL << FLOW_PHASE_ATTENTION_QSHIFT, true, 0.8,
+                                                      1.2),
+                       1);
         FlowPhaseAttentionHead h0 = {.name = "nominal_regime",
                                      .key_mask = 1ULL,
                                      .key_polarity = 1ULL,
@@ -222,6 +295,86 @@ int main(void) {
         FLOW_ASSERT_EQ(h0_idx, 0U);
         const double q_vec[FLOW_PHASE_ATTENTION_DIM] = {0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
         FLOW_ASSERT_EQ(flow_phase_attention_project_query(&router, q_vec), 1ULL);
+
+        /* Register an emergency head (idx 1) and a Kan-incompatible head (idx 2) */
+        FlowPhaseAttentionHead h_emerg = {.name = "emergency_damping",
+                                          .key_mask = 0ULL,
+                                          .key_polarity = 0ULL,
+                                          .state_sieve = FLOW_SIEVE_SECURITY_CANONICAL_MASK,
+                                          .kan_boundary_filter = 0ULL,
+                                          .priority = 1U,
+                                          .kernel = NULL,
+                                          .user_unit = NULL};
+        uint32_t h_emerg_idx = 99U;
+        FLOW_ASSERT_EQ(flow_phase_attention_register_head(&router, &h_emerg, &h_emerg_idx), 1);
+        router.emergency_regime_idx = h_emerg_idx;
+
+        FlowPhaseAttentionHead h_bad_kan = {
+            .name = "kan_incompatible_regime",
+            .key_mask = 1ULL,
+            .key_polarity = 0ULL, /* matches when plane 0 violated */
+            .state_sieve = 0ULL,  /* ruptures canonical security sieve */
+            .kan_boundary_filter = FLOW_SIEVE_SECURITY_CANONICAL_MASK,
+            .priority = 20U,
+            .kernel = NULL,
+            .user_unit = NULL};
+        uint32_t h_bad_idx = 99U;
+        FLOW_ASSERT_EQ(flow_phase_attention_register_head(&router, &h_bad_kan, &h_bad_idx), 1);
+
+        uint32_t sel_regime = 99U;
+        FLOW_ASSERT_EQ(
+            flow_phase_attention_route_and_step(&router, &jet, q_vec, NULL, NULL, &sel_regime), 0);
+        FLOW_ASSERT_EQ(sel_regime, h0_idx);
+
+        /* Query violating plane 0 (q[0] = 2.0 > 1.2) attempts handover h0 -> h_bad_kan,
+         * which ruptures Kan boundary filter and falls back to h_emerg_idx! */
+        const double q_viol[FLOW_PHASE_ATTENTION_DIM] = {2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+        FLOW_ASSERT_EQ(
+            flow_phase_attention_route_and_step(&router, &jet, q_viol, NULL, NULL, &sel_regime), 0);
+        FLOW_ASSERT_EQ(router.kan_singularity_blocks, 1ULL);
+        FLOW_ASSERT_EQ(sel_regime, h_emerg_idx);
+
+        /* Symplectic integration with barrier + Moreau potential landscape */
+        FlowJetPotentialLandscape landscape;
+        FLOW_ASSERT_EQ(flow_jet_potential_init_default(&landscape, FLOW_JET_STANDARD_DIM), 1);
+        FLOW_ASSERT_EQ(flow_jet_symplectic_step_with_potential(&jet, &landscape, 0.005), 1);
+        FLOW_ASSERT_TRUE(isfinite(flow_jet_hamiltonian(&jet)));
+
+        /* Koopman operator prediction & Mori-Zwanzig memory kernel step */
+        double koopman_obs[FLOW_JET_MAX_KOOPMAN_DIM] = {0.0};
+        FLOW_ASSERT_EQ(flow_jet_koopman_predict(&jet, 0.01, koopman_obs), 1);
+        FLOW_ASSERT_TRUE(isfinite(koopman_obs[0]));
+        FLOW_ASSERT_EQ(flow_jet_mori_zwanzig_step(&jet, 0.01), 1);
+
+        /* Exact fixed-point numerics & 256-bit Montgomery Miller-Rabin primality */
+        int32_t exp_q16 = 0;
+        FLOW_ASSERT_EQ(flow_exp_approx_q16(0, &exp_q16), 1);
+        FLOW_ASSERT_EQ(exp_q16, FLOW_FX16_ONE);
+        uint32_t rsqrt_val = 0U;
+        FLOW_ASSERT_EQ(flow_rsqrt_approx_i32(4U, &rsqrt_val), 1);
+        FLOW_ASSERT_EQ(rsqrt_val, (uint32_t)(FLOW_FX16_ONE / 2));
+        int8_t silu_val = 0;
+        FLOW_ASSERT_EQ(flow_silu_approx_i8(0, &silu_val), 1);
+        FLOW_ASSERT_EQ(silu_val, 0);
+
+        FlowU256 p_prime = flow_u256_from_u64(65537ULL);
+        FlowU256 p_comp = flow_u256_from_u64(65535ULL);
+        const uint64_t mr_bases[3] = {2ULL, 3ULL, 5ULL};
+        FLOW_ASSERT_EQ(flow_u256_is_probably_prime(&p_prime, mr_bases, 3U), 1);
+        FLOW_ASSERT_EQ(flow_u256_is_probably_prime(&p_comp, mr_bases, 3U), 0);
+        /* Fermat's Little Theorem via 256-bit Montgomery reduction: 3^(65536) mod 65537 == 1 */
+        FlowU256 flt =
+            flow_u256_mod_pow(flow_u256_from_u64(3ULL), flow_u256_from_u64(65536ULL), p_prime);
+        FlowU256 one256 = flow_u256_one();
+        FLOW_ASSERT_EQ(flow_u256_cmp(&flt, &one256), 0);
+
+        /* U256 hex parsing & multiplication */
+        FlowU256 hex_a, hex_b;
+        FLOW_ASSERT_EQ(flow_u256_from_hex_str("0x100000001", &hex_a), 1);
+        FLOW_ASSERT_EQ(flow_u256_from_hex_str("0x2", &hex_b), 1);
+        FlowU256 prod256 = flow_u256_mul(hex_a, hex_b);
+        FlowU256 expected_prod = flow_u256_from_u64(0x200000002ULL);
+        FLOW_ASSERT_EQ(flow_u256_cmp(&prod256, &expected_prod), 0);
     }
 
     /* =====================================================================
@@ -232,17 +385,27 @@ int main(void) {
         /* De Morgan interval algebra */
         FLOW_ASSERT_EQ(flow_demorgan_not(FLOW_DEMORGAN_ZERO), FLOW_DEMORGAN_ONE);
         FLOW_ASSERT_EQ(flow_demorgan_not(FLOW_DEMORGAN_ONE), FLOW_DEMORGAN_ZERO);
+        FLOW_ASSERT_EQ(flow_demorgan_and(FLOW_DEMORGAN_ONE, FLOW_DEMORGAN_ZERO),
+                       FLOW_DEMORGAN_ZERO);
+        FLOW_ASSERT_EQ(flow_demorgan_and(FLOW_DEMORGAN_ONE, FLOW_DEMORGAN_ONE), FLOW_DEMORGAN_ONE);
+        FLOW_ASSERT_EQ(flow_demorgan_or(FLOW_DEMORGAN_ONE, FLOW_DEMORGAN_ZERO), FLOW_DEMORGAN_ONE);
+        FLOW_ASSERT_EQ(flow_demorgan_or(FLOW_DEMORGAN_ZERO, FLOW_DEMORGAN_ZERO),
+                       FLOW_DEMORGAN_ZERO);
         uint64_t a = 0xAA55AA5500FF00FFULL, b = 0x0F0F0F0FF0F0F0F0ULL;
         FLOW_ASSERT_EQ(flow_demorgan_word_not(flow_demorgan_word_and(a, b)),
                        flow_demorgan_word_or(flow_demorgan_word_not(a), flow_demorgan_word_not(b)));
 
-        /* Cubical face & degeneracy operators */
+        /* Cubical face, degeneracy & covering operators */
         uint64_t s0 = flow_cubical_face_proj(a, 5, 0);
         uint64_t s1 = flow_cubical_face_proj(a, 5, 1);
         FLOW_ASSERT_EQ((s0 >> 5) & 1ULL, 0ULL);
         FLOW_ASSERT_EQ((s1 >> 5) & 1ULL, 1ULL);
+        uint64_t deg = flow_cubical_degeneracy(0x0FULL, 2U);
+        FLOW_ASSERT_EQ(deg, 0x1BULL); /* lower 2 bits kept (0x3), bits >=2 shifted left (0x18) */
+        FLOW_ASSERT_TRUE(flow_cubical_sieve_is_covering(0xFF0FULL, 0x0F0FULL));
+        FLOW_ASSERT_FALSE(flow_cubical_sieve_is_covering(0x000FULL, 0x0F0FULL));
 
-        /* Kan Open-Box homotopy & Topos subobject classifier */
+        /* Kan Open-Box homotopy, type matching, transition decoding & invariant verification */
         uint64_t mismatch = 0ULL;
         FLOW_ASSERT_EQ(flow_kan_check_homotopy(0xFF0FULL, 0xFF00ULL, 0xFF00ULL, &mismatch),
                        FLOW_KAN_FILLED_HOMOTOPIC);
@@ -253,7 +416,31 @@ int main(void) {
         FLOW_ASSERT_EQ(flow_topos_classify_subobject(0x00F0ULL, 0x0FF0ULL), 1);
         FLOW_ASSERT_EQ(flow_topos_classify_subobject(0x10F0ULL, 0x0FF0ULL), 0);
 
-        /* Univalence Universe U_0 & AoS ~= SOA64 isomorphism */
+        FlowCubicalTypeSieve t_intent = {.mask = 0xFF0FULL, .boundary_filter = 0xFF00ULL};
+        FlowCubicalTypeSieve t_cand = {.mask = 0xFF00ULL, .boundary_filter = 0xFF00ULL};
+        FLOW_ASSERT_EQ(flow_cubical_match_types(t_intent, t_cand, &mismatch), 1);
+        FLOW_ASSERT_EQ(mismatch, 0ULL);
+
+        uint64_t v_pre = 0xFF0FULL, v_post = 0ULL;
+        FLOW_ASSERT_EQ(flow_cubical_step_neighbor(v_pre, 3U, 0xFF00ULL, &v_post),
+                       FLOW_KAN_FILLED_HOMOTOPIC);
+        FlowCubicalTransitionReport trans_rep;
+        FLOW_ASSERT_EQ(flow_cubical_decode_transition(v_pre, v_post, 64U, &trans_rep), 1);
+        FLOW_ASSERT_EQ(trans_rep.flipped_axis, 3U);
+        FLOW_ASSERT_EQ(trans_rep.is_kan_homotopic, 1);
+
+        FlowCubicalSieve csieve = {.arrows = ~0ULL, .dimension = 64U, .is_closed = 1U};
+        FlowInvariantAttestation cub_proof = {0};
+        FLOW_ASSERT_EQ(
+            flow_cubical_verify_invariants(&csieve, v_pre, v_post, 0xFF00ULL, &cub_proof),
+            FLOW_INVARIANT_VERIFIED);
+        FLOW_ASSERT_INVARIANT_SOUND(cub_proof);
+
+        /* Univalence Universe U_0 (global + local) & AoS ~= SOA64 isomorphism */
+        FlowHoTTUniverse *g_u0 = flow_hott_universe_global();
+        FLOW_ASSERT_TRUE(g_u0 != NULL);
+        FLOW_ASSERT_EQ(flow_hott_verify_universe_all(g_u0), 1);
+
         FlowHoTTUniverse u0;
         flow_hott_universe_reset(&u0);
         int id_lean = flow_hott_register_type(&u0, "PhaseVec", FLOW_HOTT_LANG_LEAN, 3, 24, 8, 0,
@@ -273,16 +460,25 @@ int main(void) {
         FLOW_ASSERT_EQ(flow_hott_verify_soa_univalence(&u0, "PhaseVec", "PhaseVec_SOA64",
                                                        FLOW_SIMD_SOA_LANES, &ua_hash),
                        FLOW_KAN_FILLED_HOMOTOPIC);
+        FLOW_ASSERT_EQ(flow_hott_verify_universe_all(&u0), 1);
 
-        /* HIT SpaceWithException quotient & IEEE-754 Quiet NaN boundary pullback */
+        /* HIT SpaceWithException quotient, FlowResultU64 & IEEE-754 Quiet NaN boundary pullback */
         FlowHITExceptionQuotient hit_q;
         FLOW_ASSERT_EQ(flow_hott_quotient_exception_zone(0xFFFFULL, 0x00F0ULL, 7U, &hit_q), 1);
         FLOW_ASSERT_EQ(hit_q.collapsed_boundary_points, 1U);
         FLOW_ASSERT_TRUE(flow_hott_is_boundary_tag(hit_q.canonical_boundary_tag));
 
+        FlowResultU64 r_int = flow_result_u64_interior(12345ULL);
+        FLOW_ASSERT_FALSE(flow_result_u64_is_boundary(r_int));
+        FLOW_ASSERT_EQ(r_int.value, 12345ULL);
+        FlowResultU64 r_bnd =
+            flow_result_u64_boundary(7U, 1U, (uint8_t)FLOW_BOUNDARY_HIT_COLLAPSE, 4U, 303U);
+        FLOW_ASSERT_TRUE(flow_result_u64_is_boundary(r_bnd));
+        FLOW_ASSERT_EQ(flow_hott_boundary_tag_code(r_bnd.boundary_tag), 303U);
+
         FlowBoundaryCertificateReport b_rep;
-        FLOW_ASSERT_EQ(
-            flow_hott_decode_boundary_exception(hit_q.canonical_boundary_tag, NULL, &b_rep), 1);
+        FLOW_ASSERT_EQ(flow_hott_decode_boundary_exception(hit_q.canonical_boundary_tag, &b_rep),
+                       1);
         FLOW_ASSERT_EQ(b_rep.is_on_boundary, 1);
         FLOW_ASSERT_EQ(b_rep.fn_id, 7U);
 
@@ -292,10 +488,52 @@ int main(void) {
         FLOW_ASSERT_EQ(flow_hott_is_boundary_nan(3.14159), 0);
         uint64_t extracted_tag = flow_hott_extract_boundary_tag(b_nan);
         FLOW_ASSERT_TRUE(flow_hott_is_boundary_tag(extracted_tag));
-        FLOW_ASSERT_EQ(flowc_boundary_code(b_nan), 42U);
-        double stamped_nan = flowc_stamp_boundary_fn_id(b_nan, 99U);
+        FLOW_ASSERT_EQ(flow_hott_boundary_code(b_nan), 42U);
+        double stamped_nan = flow_hott_stamp_boundary_fn_id(b_nan, 99U);
         uint64_t stamped_tag = flow_hott_extract_boundary_tag(stamped_nan);
         FLOW_ASSERT_EQ((uint32_t)((stamped_tag >> 32U) & 0x0FFFULL), 99U);
+
+        /* Differential Cohesive HoTT: Homotopy Fiber h-Level & Discrete 4-Jet Prolongation J^4 E */
+        FlowHomotopyFiberReport fib_rep;
+        FLOW_ASSERT_EQ(
+            flow_hott_analyze_homotopy_fiber(0x03ULL, 0x0FULL, 0x00ULL, 0x08ULL, &fib_rep), 1);
+        FLOW_ASSERT_EQ(fib_rep.h_level, FLOW_HLEVEL_GROUPOID_SYMMETRY);
+        FLOW_ASSERT_EQ(fib_rep.pi0_components, 2U);
+        FLOW_ASSERT_EQ(fib_rep.pi1_symmetry_generators, 1U);
+
+        uint64_t contracted_witness = 0ULL, pinned_mask = 0ULL;
+        FLOW_ASSERT_EQ(
+            flow_hott_collapse_fiber_contractible(&fib_rep, &contracted_witness, &pinned_mask), 1);
+        FlowHomotopyFiberReport fib_contracted;
+        FLOW_ASSERT_EQ(flow_hott_analyze_homotopy_fiber(0x03ULL, 0x0FULL, pinned_mask, 0x08ULL,
+                                                        &fib_contracted),
+                       1);
+        FLOW_ASSERT_EQ(fib_contracted.h_level, FLOW_HLEVEL_CONTRACTIBLE);
+        FLOW_ASSERT_EQ(fib_contracted.pi0_components, 1U);
+        FLOW_ASSERT_EQ(fib_contracted.pi1_symmetry_generators, 0U);
+
+        const double section_vals[8] = {1.0, 2.0, 3.0, 4.0, 3.0, 2.0, 1.0, 0.0};
+        const double rk_min[5] = {-10.0, -10.0, -10.0, -10.0, -10.0};
+        const double rk_max[5] = {10.0, 10.0, 10.0, 10.0, 10.0};
+        FlowDiscreteJetBundle j4_bundle;
+        FLOW_ASSERT_EQ(flow_jet_bundle_prolong_bmf(section_vals, 8U, rk_min, rk_max, &j4_bundle),
+                       1);
+        FLOW_ASSERT_EQ(j4_bundle.is_holonomic_section, 1);
+        FLOW_ASSERT_EQ(j4_bundle.holonomic_mask, 0xFFULL);
+        FLOW_ASSERT_FLOAT_EQ(j4_bundle.cartan_kahler_defect, 0.0, 1e-12);
+
+        /* Polyhedral schedule & Cubical polytope handover */
+        FlowPolyhedron poly;
+        FLOW_ASSERT_EQ(flow_polyhedral_init(&poly, 2U), 1);
+        FLOW_ASSERT_EQ(flow_polyhedral_set_box_bounds(&poly, 0U, 0, 63), 1);
+        FLOW_ASSERT_EQ(flow_polyhedral_set_box_bounds(&poly, 1U, 0, 63), 1);
+        FlowPolyhedralSchedule sched;
+        FLOW_ASSERT_EQ(flow_polyhedral_solve_schedule(&poly, &sched), 1);
+        FLOW_ASSERT_TRUE(sched.is_bounded && sched.is_parallelizable);
+        FLOW_ASSERT_EQ(sched.total_iterations, 4096);
+        int64_t poly_offset[FLOW_POLY_MAX_DIM] = {0};
+        FLOW_ASSERT_EQ(
+            flow_cubical_handover_polytope(0xFF0FULL, 0xFF00ULL, 0xFF00ULL, &poly, poly_offset), 1);
     }
 
     /* =====================================================================
@@ -385,6 +623,17 @@ int main(void) {
         FLOW_ASSERT_EQ(rc, FLOW_BRIDGE_ERR_POSTCONDITION);
         FLOW_ASSERT_TRUE(flow_hott_is_boundary_tag(btag));
         FLOW_ASSERT_FLOAT_EQ(act_cmd, 0.0, 1e-9);
+
+        /* 3e. 0-Jet discrete bridge step & status name helper */
+        FLOW_ASSERT_STR_EQ(flow_bridge_status_name(FLOW_BRIDGE_SUCCESS), "FLOW_BRIDGE_SUCCESS");
+        FLOW_ASSERT_STR_EQ(flow_bridge_status_name(FLOW_BRIDGE_ERR_ENVELOPE),
+                           "FLOW_BRIDGE_ERR_ENVELOPE");
+        rc = flow_bridge_execute_step(&bridge.transducer, &bridge.contract, &bridge.envelope,
+                                      test_primary_op, &obs, &act_cmd, FLOW_JET_SIEVE_CANONICAL_ALL,
+                                      &btag);
+        FLOW_ASSERT_EQ(rc, FLOW_BRIDGE_SUCCESS);
+        FLOW_ASSERT_EQ(btag, 0ULL);
+        FLOW_ASSERT_FLOAT_EQ(act_cmd, -0.5, 1e-9);
     }
 
     /* =====================================================================
@@ -436,11 +685,23 @@ int main(void) {
         u2.migrate = unit_v2_migrate;
 
         FLOW_ASSERT_EQ(flow_reload_activate(ctx, &u1), FLOW_RELOAD_OK);
+        FLOW_ASSERT_EQ(flow_reload_generation(ctx), 1ULL);
         int64_t in_val = 5, out_val = 0;
         FLOW_ASSERT_EQ(flow_reload_call(ctx, &reader, &in_val, &out_val), FLOW_RELOAD_OK);
         FLOW_ASSERT_EQ(out_val, 105); /* 100 + 5 */
 
+        /* QSBR offline/online resource sieve lifecycle */
+        FLOW_ASSERT_NE(flow_reload_resource_sieve(ctx, &reader) & (uint64_t)FLOW_RES_READER_ONLINE,
+                       0ULL);
+        flow_qsbr_offline(&reader);
+        FLOW_ASSERT_EQ(flow_reload_resource_sieve(ctx, &reader) & (uint64_t)FLOW_RES_READER_ONLINE,
+                       0ULL);
+        flow_qsbr_online(&reader);
+        FLOW_ASSERT_NE(flow_reload_resource_sieve(ctx, &reader) & (uint64_t)FLOW_RES_READER_ONLINE,
+                       0ULL);
+
         FLOW_ASSERT_EQ(flow_reload_activate(ctx, &u2), FLOW_RELOAD_OK);
+        FLOW_ASSERT_EQ(flow_reload_generation(ctx), 2ULL);
         flow_qsbr_checkpoint(&reader);
         (void)flow_reload_reclaim(ctx);
         FLOW_ASSERT_EQ(flow_reload_call(ctx, &reader, &in_val, &out_val), FLOW_RELOAD_OK);
@@ -559,9 +820,11 @@ int main(void) {
                                                2U, 0.001f, 0U),
                        0);
 
-        FlowSMTProofAttestation mesh_proof = {0};
-        FLOW_ASSERT_EQ(flow_gpu_meshlet_verify_smt(&meshlet_l, &mesh_proof), FLOW_SMT_PROVEN_UNSAT);
-        FLOW_ASSERT_EQ(flow_gpu_meshlet_verify_smt(&meshlet_r, &mesh_proof), FLOW_SMT_PROVEN_UNSAT);
+        FlowInvariantAttestation mesh_proof = {0};
+        FLOW_ASSERT_EQ(flow_gpu_verify_invariants(&meshlet_l, &mesh_proof),
+                       FLOW_INVARIANT_VERIFIED);
+        FLOW_ASSERT_EQ(flow_gpu_verify_invariants(&meshlet_r, &mesh_proof),
+                       FLOW_INVARIANT_VERIFIED);
 
         /* Prove Watertight Topological Fidelity (Zero T-Junctions / Cracks across seam) */
         size_t shared_seam_verts = 0;
@@ -629,6 +892,34 @@ int main(void) {
         FLOW_ASSERT_EQ(written, 2U);
         FLOW_ASSERT_EQ(visible_handles[0], 100U); /* base 100 + lane 0 */
         FLOW_ASSERT_EQ(visible_handles[1], 103U); /* base 100 + lane 3 */
+
+        /* 5f. Cubical Non-Degeneracy Wave64 Ballot & O(active) Stream Compaction */
+        FlowJet2 wave_jets[FLOW_BMF_WAVE_SIZE];
+        for (size_t i = 0; i < FLOW_BMF_WAVE_SIZE; ++i) {
+            wave_jets[i] = flow_jet2_const((double)i); /* Degenerate constant 0-Jets */
+        }
+        const uint32_t active_lanes[6] = {2U, 11U, 27U, 38U, 51U, 62U};
+        uint64_t expected_nondeg_mask = 0ULL;
+        for (size_t k = 0; k < 6U; ++k) {
+            uint32_t lane = active_lanes[k];
+            expected_nondeg_mask |= (1ULL << lane);
+            if (k % 2U == 0U) {
+                wave_jets[lane] = flow_jet2_make(1.0, 0.05, 0.0); /* |d1| > eps_d1 */
+            } else {
+                wave_jets[lane] = flow_jet2_make(1.0, 0.0, 0.05); /* |d2| > eps_d2 */
+            }
+        }
+        uint64_t nondeg_ballot =
+            flow_jet2_nondegenerate_ballot64(wave_jets, FLOW_BMF_WAVE_SIZE, 1e-4, 1e-4);
+        FLOW_ASSERT_EQ(nondeg_ballot, expected_nondeg_mask);
+        FLOW_ASSERT_EQ(flow_gpu_ballot_visible_count(nondeg_ballot), 6U);
+
+        uint32_t nondeg_handles[FLOW_BMF_WAVE_SIZE] = {0};
+        uint32_t nondeg_count = flow_gpu_ballot_compact_wave64(nondeg_ballot, 500U, nondeg_handles);
+        FLOW_ASSERT_EQ(nondeg_count, 6U);
+        for (size_t k = 0; k < 6U; ++k) {
+            FLOW_ASSERT_EQ(nondeg_handles[k], 500U + active_lanes[k]);
+        }
     }
 
     FLOW_TEST_SUITE_END();

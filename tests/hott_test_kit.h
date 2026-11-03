@@ -1,13 +1,13 @@
 #ifndef HOTT_TEST_KIT_H
 #define HOTT_TEST_KIT_H
 
-#include "flow.h"
+#include "flow_io.h"
+#include <math.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdint.h>
-#include <stdbool.h>
 #include <string.h>
-#include <math.h>
 
 typedef struct {
     const char *suite_name;
@@ -87,20 +87,6 @@ typedef struct {
         }                                                                                         \
     } while (0)
 
-#define FLOW_ASSERT_STR_EQ(a, b)                                                               \
-    do {                                                                                       \
-        const char *_flow_sa = (const char *)(a);                                              \
-        const char *_flow_sb = (const char *)(b);                                              \
-        _flow_test_state.total_tests++;                                                        \
-        if (!_flow_sa || !_flow_sb || strcmp(_flow_sa, _flow_sb) != 0) {                       \
-            _flow_test_state.failed_tests++;                                                   \
-            fprintf(stderr, "❌ ASSERT_STR_EQ FAILED [%s:%d]: \"%s\" != \"%s\"\n", __FILE__,   \
-                    __LINE__, _flow_sa ? _flow_sa : "(null)", _flow_sb ? _flow_sb : "(null)"); \
-        } else {                                                                               \
-            _flow_test_state.passed_tests++;                                                   \
-        }                                                                                      \
-    } while (0)
-
 #define FLOW_ASSERT_FLOAT_EQ(a, b, eps)                                                           \
     do {                                                                                          \
         double _flow_fa = (double)(a);                                                            \
@@ -117,44 +103,6 @@ typedef struct {
         }                                                                                         \
     } while (0)
 
-#define FLOW_ASSERT_SMT_SOUND(attestation)                                                        \
-    do {                                                                                          \
-        _flow_test_state.total_tests++;                                                           \
-        int _is_sound = ((attestation).buffer_bounds_safety == FLOW_SMT_PROVEN_UNSAT &&           \
-                         (attestation).memory_quota_bound == FLOW_SMT_PROVEN_UNSAT &&             \
-                         (attestation).shard_non_aliasing == FLOW_SMT_PROVEN_UNSAT &&             \
-                         (attestation).determinism_invariant == FLOW_SMT_PROVEN_UNSAT);           \
-        if (!_is_sound) {                                                                         \
-            _flow_test_state.failed_tests++;                                                      \
-            fprintf(stderr,                                                                       \
-                    "❌ ASSERT_SMT_SOUND FAILED [%s:%d]: SMT Invariants violated! Summary: %s\n", \
-                    __FILE__, __LINE__, (attestation).proof_summary);                             \
-        } else {                                                                                  \
-            _flow_test_state.passed_tests++;                                                      \
-            printf("  ✓ SMT Proof Sound: %s\n", (attestation).proof_summary);                     \
-        }                                                                                         \
-    } while (0)
-
-#define FLOW_ASSERT_SMT_VIOLATION(res, attestation)                                                        \
-    do {                                                                                                   \
-        _flow_test_state.total_tests++;                                                                    \
-        int _is_violation = ((res) == FLOW_SMT_VIOLATION_SAT) &&                                           \
-                            (((attestation).buffer_bounds_safety == FLOW_SMT_VIOLATION_SAT) ||             \
-                             ((attestation).memory_quota_bound == FLOW_SMT_VIOLATION_SAT) ||               \
-                             ((attestation).shard_non_aliasing == FLOW_SMT_VIOLATION_SAT) ||               \
-                             ((attestation).determinism_invariant == FLOW_SMT_VIOLATION_SAT));             \
-        if (!_is_violation) {                                                                              \
-            _flow_test_state.failed_tests++;                                                               \
-            fprintf(                                                                                       \
-                stderr,                                                                                    \
-                "❌ ASSERT_SMT_VIOLATION FAILED [%s:%d]: Expected SAT violation but got UNSAT/Unknown!\n", \
-                __FILE__, __LINE__);                                                                       \
-        } else {                                                                                           \
-            _flow_test_state.passed_tests++;                                                               \
-            printf("  ✓ SMT Violation Correctly Caught: %s\n", (attestation).proof_summary);               \
-        }                                                                                                  \
-    } while (0)
-
 #define FLOW_TEST_SUITE_END()                                                                                \
     do {                                                                                                     \
         printf(                                                                                              \
@@ -169,15 +117,6 @@ typedef struct {
         if (_flow_test_state.failed_tests > 0)                                                               \
             return 1;                                                                                        \
         return 0;                                                                                            \
-    } while (0)
-
-#define FLOW_SMT_PROOF_POISON(p)                             \
-    do {                                                     \
-        (p)->buffer_bounds_safety = FLOW_SMT_VIOLATION_SAT;  \
-        (p)->memory_quota_bound = FLOW_SMT_VIOLATION_SAT;    \
-        (p)->shard_non_aliasing = FLOW_SMT_VIOLATION_SAT;    \
-        (p)->determinism_invariant = FLOW_SMT_VIOLATION_SAT; \
-        (p)->proof_summary[0] = '\0';                        \
     } while (0)
 
 #endif /* HOTT_TEST_KIT_H */
