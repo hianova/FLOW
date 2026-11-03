@@ -4,7 +4,6 @@
 
 #include "hott_test_kit.h"
 
-#include <math.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -30,33 +29,33 @@ FLOW_QPOLY_DEFINE(FlowQPoly4D_S16, 4, 16)
 FLOW_SPSC_DEFINE(PocHotRing, uint64_t, 64)
 
 typedef struct __attribute__((aligned(FLOW_HW_CACHE_LINE_BYTES))) {
-    double coeffs[FLOW_QPOLY_PLANES][4];
-    _Atomic double b_constants[FLOW_QPOLY_PLANES];
+    int64_t coeffs[FLOW_QPOLY_PLANES][4];
+    _Atomic int64_t b_constants[FLOW_QPOLY_PLANES];
     _Atomic uint64_t active_mask;
-    _Atomic double translation[4];
-    _Atomic double scale[4];
-} LegacyDoublePoly4D;
+    _Atomic int64_t translation[4];
+    _Atomic int64_t scale[4];
+} NaiveUnpackedPoly4D;
 
-static __attribute__((noinline)) uint64_t legacy_double_eval_4d(const LegacyDoublePoly4D *tpl,
-                                                                const double x[4],
-                                                                double *max_viol_out) {
+static __attribute__((noinline)) uint64_t naive_unpacked_eval_4d(const NaiveUnpackedPoly4D *tpl,
+                                                                 const int64_t x[4],
+                                                                 int64_t *max_viol_out) {
     uint64_t mask = atomic_load_explicit(&tpl->active_mask, memory_order_acquire);
     uint64_t violated = 0ULL;
-    double local_x[4];
-    double max_viol = 0.0;
+    int64_t local_x[4];
+    int64_t max_viol = 0;
     for (size_t j = 0; j < 4; ++j) {
-        double tr = atomic_load_explicit(&tpl->translation[j], memory_order_relaxed);
-        double sc = atomic_load_explicit(&tpl->scale[j], memory_order_relaxed);
-        local_x[j] = (x[j] - tr) / sc;
+        int64_t tr = atomic_load_explicit(&tpl->translation[j], memory_order_relaxed);
+        int64_t sc = atomic_load_explicit(&tpl->scale[j], memory_order_relaxed);
+        local_x[j] = (sc != 0) ? ((x[j] - tr) / sc) : (x[j] - tr);
     }
     for (uint32_t i = 0; i < FLOW_QPOLY_PLANES; ++i) {
         if (!((mask >> i) & 1ULL))
             continue;
-        double dot = 0.0;
+        int64_t dot = 0;
         for (size_t j = 0; j < 4; ++j)
             dot += tpl->coeffs[i][j] * local_x[j];
-        double viol = dot - atomic_load_explicit(&tpl->b_constants[i], memory_order_relaxed);
-        if (viol > 0.0) {
+        int64_t viol = dot - atomic_load_explicit(&tpl->b_constants[i], memory_order_relaxed);
+        if (viol > 0) {
             violated |= (1ULL << i);
             if (viol > max_viol)
                 max_viol = viol;
@@ -259,13 +258,17 @@ int main(int argc, char **argv) {
         if (report_mode) {
             const int shifts[4] = {8, 12, 16, 20};
             for (int s = 0; s < 4; ++s) {
-                double loss2 = (double)(exact_2d - q2_in[s]) * 100.0 / (double)exact_2d;
-                double loss3 = (double)(exact_3d - q3_in[s]) * 100.0 / (double)exact_3d;
-                printf("  [PoC A] shift=%2d | 2D unsound=%llu, inside=%llu/%llu (loss=%.4f%%) | "
-                       "3D unsound=%llu, inside=%llu/%llu (loss=%.4f%%)\n",
-                       shifts[s], (unsigned long long)q2_unsound[s], (unsigned long long)q2_in[s],
-                       (unsigned long long)exact_2d, loss2, (unsigned long long)q3_unsound[s],
-                       (unsigned long long)q3_in[s], (unsigned long long)exact_3d, loss3);
+                uint64_t loss2_bps = ((exact_2d - q2_in[s]) * 10000ULL) / exact_2d;
+                uint64_t loss3_bps = ((exact_3d - q3_in[s]) * 10000ULL) / exact_3d;
+                printf(
+                    "  [PoC A] shift=%2d | 2D unsound=%llu, inside=%llu/%llu (loss=%llu.%02llu%%)"
+                    " | 3D unsound=%llu, inside=%llu/%llu (loss=%llu.%02llu%%)\n",
+                    shifts[s], (unsigned long long)q2_unsound[s], (unsigned long long)q2_in[s],
+                    (unsigned long long)exact_2d, (unsigned long long)(loss2_bps / 100ULL),
+                    (unsigned long long)(loss2_bps % 100ULL), (unsigned long long)q3_unsound[s],
+                    (unsigned long long)q3_in[s], (unsigned long long)exact_3d,
+                    (unsigned long long)(loss3_bps / 100ULL),
+                    (unsigned long long)(loss3_bps % 100ULL));
             }
         }
     }
@@ -273,15 +276,15 @@ int main(int argc, char **argv) {
     /* =====================================================================
      * PoC B: Evaluation Cost (10^7 runs) & Int64 Overflow Guard
      * ===================================================================== */
-    FLOW_STAGE_BEGIN(2, "PoC B: FlowQPoly_eval vs Legacy double Eval (10^7 Iterations)");
+    FLOW_STAGE_BEGIN(2, "PoC B: FlowQPoly_eval vs Unpacked 64-Plane Eval (10^7 Iterations)");
     {
         FlowQPoly4D_S16 qpoly4;
         FlowQPoly4D_S16_init(&qpoly4);
-        LegacyDoublePoly4D dpoly4;
-        memset(&dpoly4, 0, sizeof(dpoly4));
+        NaiveUnpackedPoly4D npoly4;
+        memset(&npoly4, 0, sizeof(npoly4));
         for (size_t j = 0; j < 4; ++j) {
-            atomic_init(&dpoly4.translation[j], 0.0);
-            atomic_init(&dpoly4.scale[j], 1.0);
+            atomic_init(&npoly4.translation[j], 0LL);
+            atomic_init(&npoly4.scale[j], 1LL);
         }
 
         for (uint32_t i = 0; i < 8; ++i) {
@@ -289,11 +292,11 @@ int main(int argc, char **argv) {
             int32_t sign = (i % 2U == 0U) ? 1 : -1;
             qpoly4.A[i][axis] = sign * (1 << 16);
             atomic_store_explicit(&qpoly4.b[i], 100LL << 16, memory_order_relaxed);
-            dpoly4.coeffs[i][axis] = (double)sign;
-            atomic_store_explicit(&dpoly4.b_constants[i], 100.0, memory_order_relaxed);
+            npoly4.coeffs[i][axis] = (int64_t)sign;
+            atomic_store_explicit(&npoly4.b_constants[i], 100LL, memory_order_relaxed);
         }
         atomic_store_explicit(&qpoly4.active_mask, 0xFFULL, memory_order_release);
-        atomic_store_explicit(&dpoly4.active_mask, 0xFFULL, memory_order_release);
+        atomic_store_explicit(&npoly4.active_mask, 0xFFULL, memory_order_release);
 
         const uint64_t iters = 10000000ULL;
         uint64_t sink_mask = 0ULL;
@@ -307,20 +310,20 @@ int main(int argc, char **argv) {
         }
         uint64_t t1_q = flow_clock_monotonic_ns();
 
-        double sink_viol = 0.0;
-        uint64_t t0_d = flow_clock_monotonic_ns();
+        int64_t sink_viol = 0;
+        uint64_t t0_n = flow_clock_monotonic_ns();
         for (uint64_t k = 0; k < iters; ++k) {
-            double x[4] = {(double)(k & 63U), (double)((k >> 2U) & 63U), (double)((k >> 4U) & 63U),
-                           (double)((k >> 6U) & 63U)};
-            double mv = 0.0;
-            sink_mask ^= legacy_double_eval_4d(&dpoly4, x, &mv);
+            int64_t x[4] = {(int64_t)(k & 63U), (int64_t)((k >> 2U) & 63U),
+                            (int64_t)((k >> 4U) & 63U), (int64_t)((k >> 6U) & 63U)};
+            int64_t mv = 0;
+            sink_mask ^= naive_unpacked_eval_4d(&npoly4, x, &mv);
             sink_viol += mv;
         }
-        uint64_t t1_d = flow_clock_monotonic_ns();
+        uint64_t t1_n = flow_clock_monotonic_ns();
 
-        double ns_per_q = (double)(t1_q - t0_q) / (double)iters;
-        double ns_per_d = (double)(t1_d - t0_d) / (double)iters;
-        FLOW_ASSERT_TRUE(ns_per_q > 0.0 && ns_per_d > 0.0);
+        uint64_t dt_q = (t1_q > t0_q) ? (t1_q - t0_q) : 1ULL;
+        uint64_t dt_n = (t1_n > t0_n) ? (t1_n - t0_n) : 1ULL;
+        FLOW_ASSERT_TRUE(dt_q > 0ULL && dt_n > 0ULL);
         (void)sink_mask;
         (void)sink_viol;
 
@@ -337,17 +340,23 @@ int main(int argc, char **argv) {
         FLOW_ASSERT_EQ(ovf_ev.worst_violation, INT64_MAX);
 
         if (report_mode) {
+            uint64_t q_ps = (dt_q * 1000ULL) / iters;
+            uint64_t n_ps = (dt_n * 1000ULL) / iters;
+            uint64_t speedup_x100 = (dt_n * 100ULL) / dt_q;
             printf(
-                "  [PoC B] 10^7 evals | FlowQPoly_eval=%.3f ns/call | Legacy double=%.3f ns/call "
-                "| speedup=%.2fx | ASM overflow safe=YES\n",
-                ns_per_q, ns_per_d, ns_per_d / ns_per_q);
+                "  [PoC B] 10^7 evals | FlowQPoly_eval=%llu.%03llu ns/call | Unpacked=%llu.%03llu"
+                " ns/call | speedup=%llu.%02llux | ASM overflow safe=YES\n",
+                (unsigned long long)(q_ps / 1000ULL), (unsigned long long)(q_ps % 1000ULL),
+                (unsigned long long)(n_ps / 1000ULL), (unsigned long long)(n_ps % 1000ULL),
+                (unsigned long long)(speedup_x100 / 100ULL),
+                (unsigned long long)(speedup_x100 % 100ULL));
         }
     }
 
     /* =====================================================================
      * PoC C: 2-Jet Next-Face Forecast (2D Square + 1000 Quadratic Trajectories)
      * ===================================================================== */
-    FLOW_STAGE_BEGIN(3, "PoC C: 2-Jet Quadratic Next-Face Forecast (1000 Trajectories)");
+    FLOW_STAGE_BEGIN(3, "PoC C: Pure Q16 2-Jet Quadratic Next-Face Forecast (1000 Trajectories)");
     {
         const int32_t A_sq[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
         const int64_t b_sq[4] = {1000, 1000, 1000, 1000};
@@ -355,8 +364,8 @@ int main(int argc, char **argv) {
 
         uint64_t seed = 0xC0FFEE123456789ULL;
         uint32_t matched_faces = 0U;
-        double sum_t_err = 0.0;
-        double max_t_err = 0.0;
+        uint64_t sum_t_err_q16 = 0ULL;
+        uint64_t max_t_err_q16 = 0ULL;
         const uint32_t total_traj = 1000U;
 
         for (uint32_t k = 0; k < total_traj; ++k) {
@@ -378,37 +387,39 @@ int main(int argc, char **argv) {
                 flow_qpoly_predict_next_face(&A_sq[0][0], b_sq, active_sq, 2, x, dx, ddx);
             FLOW_ASSERT_TRUE(fc.will_exit);
 
-            double best_true_t = 1e30;
+            int64_t best_true_t_q16 = INT64_MAX;
             uint32_t true_plane = 0U;
             for (uint32_t i = 0; i < 4U; ++i) {
-                double s = (double)(b_sq[i] - (A_sq[i][0] * x[0] + A_sq[i][1] * x[1]));
-                double r = (double)(A_sq[i][0] * dx[0] + A_sq[i][1] * dx[1]);
-                double c = (double)(A_sq[i][0] * ddx[0] + A_sq[i][1] * ddx[1]);
+                int64_t s = b_sq[i] - ((int64_t)A_sq[i][0] * x[0] + (int64_t)A_sq[i][1] * x[1]);
+                int64_t r = (int64_t)A_sq[i][0] * dx[0] + (int64_t)A_sq[i][1] * dx[1];
+                int64_t c = (int64_t)A_sq[i][0] * ddx[0] + (int64_t)A_sq[i][1] * ddx[1];
                 FlowJet2 sj = flow_jet2_make(s, -r, -c);
-                double t_i = -1.0;
-                if (flow_jet2_solve_root(sj, 1e12, &t_i) && t_i > 0.0 && t_i < best_true_t) {
-                    best_true_t = t_i;
+                int64_t t_i_q16 = 0;
+                if (flow_jet2_solve_root(sj, INT64_MAX, &t_i_q16) && t_i_q16 > 0 &&
+                    t_i_q16 < best_true_t_q16) {
+                    best_true_t_q16 = t_i_q16;
                     true_plane = i;
                 }
             }
 
             if (fc.plane == true_plane)
                 matched_faces++;
-            double pred_t = (double)fc.t_hit_q / 65536.0;
-            double err = fabs(pred_t - best_true_t);
-            sum_t_err += err;
-            if (err > max_t_err)
-                max_t_err = err;
+            uint64_t err_q16 = (fc.t_hit_q >= best_true_t_q16)
+                                   ? (uint64_t)(fc.t_hit_q - best_true_t_q16)
+                                   : (uint64_t)(best_true_t_q16 - fc.t_hit_q);
+            sum_t_err_q16 += err_q16;
+            if (err_q16 > max_t_err_q16)
+                max_t_err_q16 = err_q16;
         }
 
         FLOW_ASSERT_EQ(matched_faces, total_traj);
-        FLOW_ASSERT_TRUE(max_t_err < 1e-4);
+        FLOW_ASSERT_EQ(max_t_err_q16, 0ULL);
 
         if (report_mode) {
-            printf("  [PoC C] 1000 trajectories | face accuracy=%u/%u (%.2f%%) | mean |dt|=%.6e | "
-                   "max |dt|=%.6e\n",
-                   matched_faces, total_traj, (double)matched_faces * 100.0 / (double)total_traj,
-                   sum_t_err / (double)total_traj, max_t_err);
+            printf("  [PoC C] 1000 trajectories | face accuracy=%u/%u (100.00%%) | "
+                   "mean |dt_q16|=%llu LSB | max |dt_q16|=%llu LSB\n",
+                   matched_faces, total_traj, (unsigned long long)(sum_t_err_q16 / total_traj),
+                   (unsigned long long)max_t_err_q16);
         }
     }
 
@@ -546,10 +557,13 @@ int main(int argc, char **argv) {
         FLOW_ASSERT_EQ(d_nvcsw, 0L);
 
         if (report_mode) {
-            printf("  [PoC E] 10^6 hot-path steps (%.2f ns/step) | ru_minflt=+%ld | ru_majflt=+%ld "
-                   "| ru_nvcsw=+%ld | ru_nivcsw=+%ld\n",
-                   (double)(t1_ns - t0_ns) / (double)hot_iters, d_minflt, d_majflt, d_nvcsw,
-                   d_nivcsw);
+            uint64_t elapsed_ns = t1_ns - t0_ns;
+            uint64_t ns_int = elapsed_ns / hot_iters;
+            uint64_t ns_frac = ((elapsed_ns % hot_iters) * 100ULL) / hot_iters;
+            printf("  [PoC E] 10^6 hot-path steps (%llu.%02llu ns/step) | ru_minflt=+%ld | "
+                   "ru_majflt=+%ld | ru_nvcsw=+%ld | ru_nivcsw=+%ld\n",
+                   (unsigned long long)ns_int, (unsigned long long)ns_frac, d_minflt, d_majflt,
+                   d_nvcsw, d_nivcsw);
         }
 
         FLOW_ASSERT_EQ(flow_reload_reader_unregister(&reader), FLOW_RELOAD_OK);

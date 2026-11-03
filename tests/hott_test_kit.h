@@ -2,7 +2,6 @@
 #define HOTT_TEST_KIT_H
 
 #include "flow_io.h"
-#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -87,17 +86,17 @@ typedef struct {
         }                                                                                         \
     } while (0)
 
-#define FLOW_ASSERT_FLOAT_EQ(a, b, eps)                                                           \
+#define FLOW_ASSERT_NEAR(a, b, tol)                                                               \
     do {                                                                                          \
-        double _flow_fa = (double)(a);                                                            \
-        double _flow_fb = (double)(b);                                                            \
-        double _flow_eps = (double)(eps);                                                         \
+        long long _flow_a = (long long)(a);                                                       \
+        long long _flow_b = (long long)(b);                                                       \
+        long long _flow_tol = (long long)(tol);                                                   \
+        long long _diff = (_flow_a >= _flow_b) ? (_flow_a - _flow_b) : (_flow_b - _flow_a);       \
         _flow_test_state.total_tests++;                                                           \
-        double _diff = fabs(_flow_fa - _flow_fb);                                                 \
-        if (!(_diff <= _flow_eps)) {                                                              \
+        if (!(_diff <= _flow_tol)) {                                                              \
             _flow_test_state.failed_tests++;                                                      \
-            fprintf(stderr, "❌ ASSERT_FLOAT_EQ FAILED [%s:%d]: |%s - %s| = %g > %g\n", __FILE__, \
-                    __LINE__, #a, #b, _diff, _flow_eps);                                          \
+            fprintf(stderr, "❌ ASSERT_NEAR FAILED [%s:%d]: |%s - %s| = %lld > %lld\n", __FILE__, \
+                    __LINE__, #a, #b, _diff, _flow_tol);                                          \
         } else {                                                                                  \
             _flow_test_state.passed_tests++;                                                      \
         }                                                                                         \

@@ -5,7 +5,6 @@
 #include "hott_test_kit.h"
 
 #include <limits.h>
-#include <math.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -34,6 +33,10 @@ FLOW_STATIC_ASSERT_UNIVALENT(ExternalObservationABI, InternalStateRegisterFile);
 
 /* Universal External-Constraint Polyhedron (3D Q16) */
 FLOW_QPOLY_DEFINE(FlowExtPoly3D, 3, 16)
+
+/* High-Dimensional (16D) & Custom MAX_PLANES Polyhedra (4KB-Page Safe under L1D Bound) */
+FLOW_QPOLY_DEFINE(FlowExtPoly16D_Full, 16, 16)
+FLOW_QPOLY_DEFINE_EX(FlowExtPoly16D_P16, 16, 16, 16)
 
 /* External Constraint Packet for Lock-Free SPSC Streaming */
 typedef struct {
@@ -121,6 +124,8 @@ int main(void) {
         FLOW_ASSERT_EQ(sizeof(ExternalObservationABI), 64U);
         FLOW_ASSERT_EQ(sizeof(InternalStateRegisterFile), 64U);
         FLOW_ASSERT_EQ(_Alignof(ExternalObservationABI), 64U);
+        FLOW_ASSERT_EQ(sizeof(FlowJet2), 24U);
+        FLOW_ASSERT_EQ(sizeof(FlowQJet2), 24U);
 
         uint64_t ambient = 0xFFFFFFFFFFFFFFFFULL;
         uint64_t exc_mask = (1ULL << 3) | (1ULL << 17) | (1ULL << 42) | (1ULL << 61);
@@ -215,6 +220,26 @@ int main(void) {
         /* Both Plane 0 (2^63 + 100*2^31) and Plane 1 (3*2^62) overflow INT64_MAX */
         FLOW_ASSERT_EQ(ev_ovf3_all.violated_mask, 0x3ULL);
         FLOW_ASSERT_EQ(ev_ovf3_all.worst_violation, INT64_MAX);
+
+        /* Verify 16D high-dimensional polyhedra (FLOW_QPOLY_DEFINE & FLOW_QPOLY_DEFINE_EX) */
+        FLOW_ASSERT_TRUE(sizeof(FlowExtPoly16D_Full) > 4096U);
+        FLOW_ASSERT_TRUE(sizeof(FlowExtPoly16D_Full) <= FLOW_HW_L1D_BYTES);
+        FLOW_ASSERT_TRUE(sizeof(FlowExtPoly16D_P16) <= 4096U);
+        FlowExtPoly16D_P16 poly16;
+        FlowExtPoly16D_P16_init(&poly16);
+        int32_t x16[16];
+        for (int j = 0; j < 16; ++j) {
+            poly16.A[0][j] = 1;
+            x16[j] = 10;
+        }
+        int64_t b16[16] = {0};
+        b16[0] = 200;
+        /* Passing ~0ULL mask into 16-plane polyhedron masks safely to 0xFFFFULL */
+        FlowExtPoly16D_P16_update_external_bounds(&poly16, b16, 1ULL);
+        FlowQPolyEval ev16 = FlowExtPoly16D_P16_eval(&poly16, x16);
+        FLOW_ASSERT_EQ(ev16.violated_mask, 0ULL);
+        FLOW_ASSERT_EQ(ev16.min_slack, 40LL);
+        FLOW_ASSERT_EQ(FlowExtPoly16D_P16_quantize_scalar(3, 2), 98304);
     }
 
     /* =====================================================================
@@ -254,29 +279,30 @@ int main(void) {
     }
 
     /* =====================================================================
-     * Stage 4: 2-Jet Quadratic Root Solver & Worldline Anti-Tunneling
+     * Stage 4: Pure Q16 2-Jet Quadratic Root Solver & Worldline Anti-Tunneling
      * ===================================================================== */
-    FLOW_STAGE_BEGIN(4, "2-Jet Quadratic Root Solver & Worldline Anti-Tunneling");
+    FLOW_STAGE_BEGIN(4, "Pure Q16 2-Jet Quadratic Root Solver & Worldline Anti-Tunneling");
     {
         /*
-         * Suppose an external trajectory u(t) starts at x(0) = 0.8 (inside x <= 1.0)
-         * and ends at x(1.0) = 0.8 (still inside x <= 1.0!), but has initial velocity
-         * v_1 = +1.0 and acceleration a_1 = -2.0:
-         *   x(t) = 0.8 + 1.0*t - 1.0*t^2
-         * At t = 0.5, x(0.5) = 1.05 > 1.0 (tunnels through the wall x = 1.0 at t ≈ 0.2764!).
-         * Discrete endpoint sampling at t=0 and t=1 misses the collision completely,
-         * whereas 2-Jet slack root-solving catches the exact crossing time!
+         * Suppose an external trajectory u(t) starts at x(0) = 800 (inside x <= 1000)
+         * and ends at x(1.0) = 800 (still inside x <= 1000!), with initial velocity
+         * v_1 = +1000 and acceleration a_1 = -2000:
+         *   slack(t) = 200 - 1000*t + 1000*t^2  (v = 200, d1 = -1000, d2 = +2000)
+         * In Q16:
+         *   v_q16 = 200 << 16, d1_q16 = -(1000 << 16), d2_q16 = 2000 << 16
+         * At t = 0.5 (32768 in Q16), slack(0.5) = -50 < 0 (tunnels through wall x = 1000
+         * at t = (1 - sqrt(0.2)) / 2 * 65536 = 18114 in Q16!).
          */
-        FlowJet2 slack_worldline = flow_jet2_make(1.0 - 0.8, -1.0, 2.0);
-        FLOW_ASSERT_FLOAT_EQ(flow_jet2_eval_taylor(slack_worldline, 0.0), 0.2, 1e-9);
-        FLOW_ASSERT_FLOAT_EQ(flow_jet2_eval_taylor(slack_worldline, 1.0), 0.2, 1e-9);
-        FLOW_ASSERT_FLOAT_EQ(flow_jet2_eval_taylor(slack_worldline, 0.5), -0.05, 1e-9);
+        FlowJet2 slack_worldline = flow_jet2_make(200LL << 16, -(1000LL << 16), 2000LL << 16);
+        FLOW_ASSERT_EQ(flow_jet2_eval_taylor(slack_worldline, 0LL), 200LL << 16);
+        FLOW_ASSERT_EQ(flow_jet2_eval_taylor(slack_worldline, FLOW_Q16_ONE), 200LL << 16);
+        FLOW_ASSERT_EQ(flow_jet2_eval_taylor(slack_worldline, FLOW_Q16_ONE / 2LL), -(50LL << 16));
 
-        double t_hit = 0.0;
-        bool tunneled = flow_jet2_solve_root(slack_worldline, 1.0, &t_hit);
+        int64_t t_hit_q16 = 0;
+        bool tunneled = flow_jet2_solve_root(slack_worldline, FLOW_Q16_ONE, &t_hit_q16);
         FLOW_ASSERT_TRUE(tunneled);
-        /* Exact smallest root of 0.2 - t + t^2 = 0 is (1 - sqrt(1 - 0.8)) / 2 ≈ 0.2763932 */
-        FLOW_ASSERT_FLOAT_EQ(t_hit, (1.0 - sqrt(0.2)) * 0.5, 1e-6);
+        /* Exact Q16 integer root of 200 - 1000*t + 1000*t^2 = 0 is 18114 */
+        FLOW_ASSERT_EQ(t_hit_q16, 18114LL);
 
         /* Also verify via integer Q-Polyhedron 2-Jet face predictor */
         const int32_t A_wall[1][3] = {{1, 0, 0}};
@@ -288,10 +314,10 @@ int main(void) {
             flow_qpoly_predict_next_face(&A_wall[0][0], b_wall, 1ULL, 3U, x0, dx0, ddx0);
         FLOW_ASSERT_TRUE(fc.will_exit);
         FLOW_ASSERT_EQ(fc.plane, 0U);
-        FLOW_ASSERT_FLOAT_EQ((double)fc.t_hit_q / 65536.0, (1.0 - sqrt(0.2)) * 0.5, 1e-4);
+        FLOW_ASSERT_EQ(fc.t_hit_q, 18114LL);
 
         /* Boundary re-hit: starting at x=1000 (s=0), moving inward dx=-100, accelerating outward
-         * ddx=+200 */
+         * ddx=+200 -> rehits at t = 1.0 (65536 in Q16) */
         const int32_t x_on_wall[3] = {1000, 0, 0};
         const int32_t dx_inward[3] = {-100, 0, 0};
         const int32_t ddx_outward[3] = {200, 0, 0};
@@ -299,7 +325,35 @@ int main(void) {
             &A_wall[0][0], b_wall, 1ULL, 3U, x_on_wall, dx_inward, ddx_outward);
         FLOW_ASSERT_TRUE(fc_rehit.will_exit);
         FLOW_ASSERT_EQ(fc_rehit.plane, 0U);
-        FLOW_ASSERT_FLOAT_EQ((double)fc_rehit.t_hit_q / 65536.0, 1.0, 1e-4);
+        FLOW_ASSERT_EQ(fc_rehit.t_hit_q, FLOW_Q16_ONE);
+
+        /* Verify pure Q16 2-Jet sqrt and EMA operators */
+        FlowJet2 j_four = flow_jet2_make(4LL << 16, 8LL << 16, 0LL);
+        FlowJet2 j_sqrt = flow_jet2_sqrt(j_four);
+        FLOW_ASSERT_EQ(j_sqrt.v, 2LL << 16);
+        FLOW_ASSERT_EQ(j_sqrt.d1, 2LL << 16);
+
+        FlowJet2 j_ema = flow_jet2_ema_step(j_four, j_sqrt, FLOW_Q16_ONE / 2LL);
+        FLOW_ASSERT_EQ(j_ema.v, 3LL << 16);
+        FLOW_ASSERT_EQ(j_ema.d1, 5LL << 16);
+
+        /* Edge cases: linear (d2==0), degenerate (d1==0, d2==0), negative discriminant, huge >=2^50
+         */
+        int64_t t_lin = 0;
+        FLOW_ASSERT_TRUE(flow_jet2_solve_root(flow_jet2_make(100LL << 16, -(200LL << 16), 0LL),
+                                              FLOW_Q16_ONE, &t_lin));
+        FLOW_ASSERT_EQ(t_lin, FLOW_Q16_ONE / 2LL);
+        FLOW_ASSERT_FALSE(
+            flow_jet2_solve_root(flow_jet2_make(100LL << 16, 0LL, 0LL), FLOW_Q16_ONE, &t_lin));
+        FLOW_ASSERT_FALSE(flow_jet2_solve_root(flow_jet2_make(100LL << 16, -10LL, 100LL << 16),
+                                               FLOW_Q16_ONE, &t_lin));
+        int64_t t_huge = 0;
+        FLOW_ASSERT_TRUE(flow_jet2_solve_root(flow_jet2_make(1LL << 52, -(3LL << 52), 4LL << 52),
+                                              2LL * FLOW_Q16_ONE, &t_huge));
+        FLOW_ASSERT_EQ(t_huge, FLOW_Q16_ONE / 2LL);
+        FLOW_ASSERT_TRUE(flow_jet2_solve_root(flow_jet2_make(1LL << 52, -(3LL << 52), 2LL << 52),
+                                              2LL * FLOW_Q16_ONE, &t_huge));
+        FLOW_ASSERT_EQ(t_huge, 25033LL);
     }
 
     /* =====================================================================
@@ -403,15 +457,15 @@ int main(void) {
         FLOW_ASSERT_EQ(atomic_load_explicit(&sa.errors, memory_order_relaxed), 0ULL);
         FLOW_ASSERT_TRUE(atomic_load_explicit(&sa.reads_completed, memory_order_relaxed) >= 2ULL);
 
-        /* Verify 64-lane Wave64 non-degenerate 2-Jet ballot compaction */
+        /* Verify 64-lane Wave64 non-degenerate 2-Jet ballot compaction (Pure Q16) */
         FlowJet2 wave_jets[64];
         for (uint32_t i = 0; i < 64U; ++i) {
-            wave_jets[i] = flow_jet2_make((double)i, 0.0, 0.0);
+            wave_jets[i] = flow_jet2_make((int64_t)i << 16, 0LL, 0LL);
         }
-        wave_jets[7] = flow_jet2_make(1.0, 0.5, 0.0);
-        wave_jets[31] = flow_jet2_make(2.0, 0.0, -0.8);
-        wave_jets[60] = flow_jet2_make(3.0, 1.2, 0.4);
-        uint64_t nd_ballot = flow_jet2_nondegenerate_ballot64(wave_jets, 64U, 1e-4, 1e-4);
+        wave_jets[7] = flow_jet2_make(1LL << 16, 32768LL, 0LL);
+        wave_jets[31] = flow_jet2_make(2LL << 16, 0LL, -52428LL);
+        wave_jets[60] = flow_jet2_make(3LL << 16, 78643LL, 26214LL);
+        uint64_t nd_ballot = flow_jet2_nondegenerate_ballot64(wave_jets, 64U, 6LL, 6LL);
         FLOW_ASSERT_EQ(nd_ballot, (1ULL << 7) | (1ULL << 31) | (1ULL << 60));
 
         uint32_t compact_lanes[64] = {0};

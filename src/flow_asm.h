@@ -14,7 +14,6 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 
-#include <fenv.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -29,15 +28,16 @@ extern "C" {
 
 /*
  * ============================================================================
- * FLOW v4: Total ISA Substrate (90% ASM + Zero C Undefined Behavior)
+ * FLOW v4: Total ISA Substrate (Pure Q16 Integer + Zero Floating-Point Drift)
  * ============================================================================
- * Grounds all hot-path arithmetic, floating-point status inspection, cyclic
- * memory addressing, and Wave64 bit-algebra directly in total ISA instructions:
+ * Grounds all hot-path arithmetic, domain/overflow status inspection, cyclic
+ * memory addressing, and Wave64 bit-algebra directly in total integer ISA
+ * instructions with zero IEEE-754 floating-point types (`double`/`float`):
  *
- *   1. Flag-Setting Q-Arithmetic (`adds`/`subs`/`smull`/`mul`/`smulh` + `cset vs`)
+ *   1. Flag-Setting Q-Arithmetic (`adds`/`subs`/`mul`/`smulh`/`extr` + `cset`)
  *      -> projects hardware `NZCV.V` into `FlowResultU64` + 64-bit Hardware Sieve.
- *   2. Hardware FPU Status Register (`mrs fpsr` / `stmxcsr`) + Branchless IEEE-754
- *      Quiet NaN Boundary Tagging (`0x7FF8400000000000ULL`).
+ *   2. Exact 128-Bit Q16 Operators (`qdiv`, `isqrt_u128`, `qsqrt`, `qema_step`,
+ *      `solvency_check`) + Branchless Boundary Tagging (`0x7FF8400000000000ULL`).
  *   3. Masked Cyclic Memory Arena (`and` + `bic` + `ldr`/`str`) -> maps any 64-bit
  *      index into Z / 2^k Z prior to effective address generation (0 OOB UB).
  *   4. Wave64 Subgroup Ballot (`POPCNT` / `CTZ`) & 1.58-Bit Ternary Lattice.
@@ -68,6 +68,9 @@ extern "C" {
 #define FLOW_OS_PAGE_BYTES              FLOW_HW_PAGE_BYTES
 #define FLOW_WAVE64_SIZE                64U
 #define FLOW_BMF_WAVE_SIZE              64U
+
+#define FLOW_Q16_SHIFT                  16U
+#define FLOW_Q16_ONE                    INT64_C(65536)
 
 /* ============================================================================
  * Hardware Cycle, Monotonic Clock & Deterministic PRNG Probes
@@ -110,15 +113,18 @@ static inline uint64_t flow_prng_next(uint64_t *state) {
 }
 
 /* ============================================================================
- * 10-Bit Hardware Sieve & IEEE-754 Quiet NaN Boundary Pullback (dM)
+ * 10-Bit Hardware Sieve & Pure Integer HoTT Boundary Pullback (dM)
  * ============================================================================ */
 
 typedef enum {
     FLOW_ASM_SIEVE_INT_NO_OVERFLOW = (1ULL << 0),     /* Hardware NZCV.V == 0 on Q-arithmetic */
     FLOW_ASM_SIEVE_INT_NO_CARRY = (1ULL << 1),        /* Hardware NZCV.C unsigned bound valid */
-    FLOW_ASM_SIEVE_FPU_NO_INVALID = (1ULL << 2),      /* FPSR.IOC == 0 and no NaN payload */
-    FLOW_ASM_SIEVE_FPU_NO_DIVZERO = (1ULL << 3),      /* FPSR.DZC == 0 */
-    FLOW_ASM_SIEVE_FPU_NO_OVERFLOW = (1ULL << 4),     /* FPSR.OFC == 0 and no +/-Inf */
+    FLOW_ASM_SIEVE_DOMAIN_VALID = (1ULL << 2),        /* Q-domain valid (no neg radicand / tag) */
+    FLOW_ASM_SIEVE_INT_NO_DIVZERO = (1ULL << 3),      /* Non-zero divisor in Q-division */
+    FLOW_ASM_SIEVE_Q_NO_SATURATION = (1ULL << 4),     /* Q-shift / saturation within int64_t */
+    FLOW_ASM_SIEVE_FPU_NO_INVALID = (1ULL << 2),      /* Alias for FLOW_ASM_SIEVE_DOMAIN_VALID */
+    FLOW_ASM_SIEVE_FPU_NO_DIVZERO = (1ULL << 3),      /* Alias for FLOW_ASM_SIEVE_INT_NO_DIVZERO */
+    FLOW_ASM_SIEVE_FPU_NO_OVERFLOW = (1ULL << 4),     /* Alias for FLOW_ASM_SIEVE_Q_NO_SATURATION */
     FLOW_ASM_SIEVE_MEM_MASKED_INBOUNDS = (1ULL << 5), /* Arena index (raw_idx & ~mask) == 0 */
     FLOW_ASM_SIEVE_MEM_ALIGNED = (1ULL << 6),         /* Base pointer cache-line aligned */
     FLOW_ASM_SIEVE_QPOLY_INTERIOR = (1ULL << 7),      /* Q-Polyhedron slack s_min >= 0 */
@@ -127,8 +133,10 @@ typedef enum {
     FLOW_ASM_SIEVE_ALL_SOUND = 0x3FFULL
 } FlowAsmSieveAxis;
 
-#define FLOW_BOUNDARY_QNAN_MAGIC       UINT64_C(0x7FF8400000000000)
-#define FLOW_BOUNDARY_QNAN_PREFIX_MASK UINT64_C(0x7FFCF00000000000)
+#define FLOW_BOUNDARY_TAG_MAGIC        UINT64_C(0x7FF8400000000000)
+#define FLOW_BOUNDARY_TAG_PREFIX_MASK  UINT64_C(0x7FFCF00000000000)
+#define FLOW_BOUNDARY_QNAN_MAGIC       FLOW_BOUNDARY_TAG_MAGIC
+#define FLOW_BOUNDARY_QNAN_PREFIX_MASK FLOW_BOUNDARY_TAG_PREFIX_MASK
 #define FLOW_BOUNDARY_PAYLOAD_MASK     UINT64_C(0x00000FFFFFFFFFFF)
 #define FLOW_HOTT_BOUNDARY_OVERFLOW    UINT16_C(0x0E01)
 
@@ -150,70 +158,51 @@ typedef struct {
     uint64_t boundary_tag;
 } FlowResultU64;
 
+/*
+ * Pure Q48.16 Fixed-Point 2-Jet Fiber (24 Bytes, Zero Floating-Point):
+ *   v  : 0-Jet value (scaled by 2^16 = 65536, or raw integer lattice)
+ *   d1 : 1-Jet first derivative (scaled by 2^16)
+ *   d2 : 2-Jet second derivative (scaled by 2^16)
+ */
 #ifndef FLOW_JET_SCALAR2_DEFINED
 #define FLOW_JET_SCALAR2_DEFINED
 typedef struct {
-    double v;
-    double d1;
-    double d2;
+    int64_t v;
+    int64_t d1;
+    int64_t d2;
 } FlowJetScalar2;
 typedef FlowJetScalar2 FlowJet2;
+typedef FlowJetScalar2 FlowQJet2;
 #endif
-
-typedef struct {
-    int64_t q0;
-    int64_t q1;
-    int64_t q2;
-} FlowQJet2;
 
 static inline uint64_t flow_hott_make_boundary_tag(uint16_t fn_id, uint8_t guard_idx,
                                                    uint8_t violation_kind, uint8_t cubical_axis,
                                                    uint16_t user_code) {
     uint64_t k4 = (uint64_t)((violation_kind == 0U ? 1U : violation_kind) & 0x0FU);
-    return FLOW_BOUNDARY_QNAN_MAGIC | (((uint64_t)(fn_id & 0x0FFFU)) << 32U) |
+    return FLOW_BOUNDARY_TAG_MAGIC | (((uint64_t)(fn_id & 0x0FFFU)) << 32U) |
            (((uint64_t)guard_idx) << 24U) | (k4 << 20U) |
            (((uint64_t)(cubical_axis & 0x3FU)) << 12U) | ((uint64_t)(user_code & 0x0FFFU));
 }
 
 static inline bool flow_hott_is_boundary_tag(uint64_t raw_bits) {
-    return (raw_bits & FLOW_BOUNDARY_QNAN_PREFIX_MASK) == FLOW_BOUNDARY_QNAN_MAGIC;
+    return (raw_bits & FLOW_BOUNDARY_TAG_PREFIX_MASK) == FLOW_BOUNDARY_TAG_MAGIC;
 }
 
 static inline uint16_t flow_hott_boundary_tag_code(uint64_t bits) {
     return flow_hott_is_boundary_tag(bits) ? (uint16_t)(bits & 0x0FFFULL) : 0U;
 }
 
-static inline double flow_hott_make_boundary_nan(uint16_t fn_id, uint8_t guard_idx,
-                                                 uint8_t violation_kind, uint8_t cubical_axis,
-                                                 uint16_t user_code) {
-    uint64_t bits =
-        flow_hott_make_boundary_tag(fn_id, guard_idx, violation_kind, cubical_axis, user_code);
-    double out = 0.0;
-    __builtin_memcpy(&out, &bits, sizeof(out));
-    return out;
-}
-
-static inline bool flow_hott_is_boundary_nan(double val) {
-    uint64_t bits = 0ULL;
-    __builtin_memcpy(&bits, &val, sizeof(bits));
-    if (flow_hott_is_boundary_tag(bits))
-        return true;
-    return !__builtin_isfinite(val);
-}
-
-static inline uint64_t flow_hott_extract_boundary_tag(double val) {
-    uint64_t bits = 0ULL;
-    __builtin_memcpy(&bits, &val, sizeof(bits));
-    if (flow_hott_is_boundary_tag(bits))
-        return bits;
-    if (!__builtin_isfinite(val))
+static inline uint64_t flow_hott_extract_boundary_tag(uint64_t raw_bits) {
+    if (flow_hott_is_boundary_tag(raw_bits))
+        return raw_bits;
+    if (raw_bits == (uint64_t)INT64_MIN)
         return flow_hott_make_boundary_tag(0U, 0U, (uint8_t)FLOW_BOUNDARY_DOMAIN_SINGULARITY, 49U,
                                            0U);
     return 0ULL;
 }
 
-static inline uint16_t flow_hott_boundary_code(double val) {
-    return (uint16_t)(flow_hott_extract_boundary_tag(val) & 0x0FFFULL);
+static inline uint16_t flow_hott_boundary_code(uint64_t raw_bits) {
+    return (uint16_t)(flow_hott_extract_boundary_tag(raw_bits) & 0x0FFFULL);
 }
 
 static inline FlowResultU64 flow_result_u64_interior(uint64_t val) {
@@ -517,106 +506,142 @@ static inline int64_t flow_asm_qpoly4d_eval_plane(const int64_t a_q16[4], int64_
 }
 
 /* ============================================================================
- * Pillar B: Hardware FPU Status Register (FPSR) & Bitwise IEEE-754 Sieve
+ * Pillar B: Exact 128-Bit Q16 Division, ISQRT, EMA, Solvency & Domain Sieve
  * ============================================================================ */
 
-static inline uint64_t flow_asm_fpsr_read(void) {
-#if !defined(FLOW_FORCE_C17_FALLBACK) && (defined(__aarch64__) || defined(__arm64__))
-    uint64_t fpsr = 0;
-    __asm__ __volatile__("mrs %0, fpsr" : "=r"(fpsr));
-    return fpsr;
-#elif !defined(FLOW_FORCE_C17_FALLBACK) && (defined(__x86_64__) || defined(_M_X64))
-    /*
-     * Normalize x86_64 MXCSR exception flags into canonical FPSR bit positions:
-     *   MXCSR bit 0 (IE) -> bit 0 (IOC)
-     *   MXCSR bit 2 (ZE) -> bit 1 (DZC)
-     *   MXCSR bit 3 (OE) -> bit 2 (OFC)
-     *   MXCSR bit 4 (UE) -> bit 3 (UFC)
-     *   MXCSR bit 5 (PE) -> bit 4 (IXC)
-     *   MXCSR bit 1 (DE) -> bit 7 (IDC)
-     */
-    uint32_t mxcsr = 0;
-    __asm__ __volatile__("stmxcsr %0" : "=m"(mxcsr));
-    return (uint64_t)((mxcsr & 1U) | ((mxcsr >> 1U) & 0x1EU) | ((mxcsr & 2U) << 6U));
-#else
-    int exc = fetestexcept(FE_ALL_EXCEPT);
-    uint64_t fpsr = 0ULL;
-#ifdef FE_INVALID
-    if (exc & FE_INVALID)
-        fpsr |= (1ULL << 0);
-#endif
-#ifdef FE_DIVBYZERO
-    if (exc & FE_DIVBYZERO)
-        fpsr |= (1ULL << 1);
-#endif
-#ifdef FE_OVERFLOW
-    if (exc & FE_OVERFLOW)
-        fpsr |= (1ULL << 2);
-#endif
-#ifdef FE_UNDERFLOW
-    if (exc & FE_UNDERFLOW)
-        fpsr |= (1ULL << 3);
-#endif
-#ifdef FE_INEXACT
-    if (exc & FE_INEXACT)
-        fpsr |= (1ULL << 4);
-#endif
-    return fpsr;
-#endif
+static inline FlowResultU64 flow_asm_qdiv_shift16_i64(int64_t num_q16, int64_t den_q16,
+                                                      uint64_t *inout_sieve) {
+    if (__builtin_expect(den_q16 == 0, 0)) {
+        uint64_t clear_bits =
+            FLOW_ASM_SIEVE_INT_NO_DIVZERO |
+            ((num_q16 == 0) ? FLOW_ASM_SIEVE_DOMAIN_VALID : FLOW_ASM_SIEVE_Q_NO_SATURATION);
+        if (inout_sieve)
+            *inout_sieve &= ~clear_bits;
+        int64_t sat = (num_q16 > 0) ? INT64_MAX : INT64_MIN;
+        FlowResultU64 out = {(uint64_t)sat, flow_hott_make_boundary_tag(
+                                                FLOW_HOTT_BOUNDARY_OVERFLOW, 4U,
+                                                (uint8_t)FLOW_BOUNDARY_DOMAIN_SINGULARITY, 0U, 1U)};
+        return out;
+    }
+    __extension__ typedef __int128 i128;
+    i128 quot = ((i128)num_q16 * (i128)FLOW_Q16_ONE) / (i128)den_q16;
+    if (__builtin_expect(quot > (i128)INT64_MAX || quot < (i128)INT64_MIN, 0)) {
+        int64_t sat = (quot > 0) ? INT64_MAX : INT64_MIN;
+        if (inout_sieve)
+            *inout_sieve &= ~(FLOW_ASM_SIEVE_INT_NO_OVERFLOW | FLOW_ASM_SIEVE_Q_NO_SATURATION);
+        FlowResultU64 out = {(uint64_t)sat, flow_hott_make_boundary_tag(
+                                                FLOW_HOTT_BOUNDARY_OVERFLOW, 4U,
+                                                (uint8_t)FLOW_BOUNDARY_DOMAIN_SINGULARITY, 0U, 2U)};
+        return out;
+    }
+    FlowResultU64 out = {(uint64_t)(int64_t)quot, 0ULL};
+    return out;
 }
 
-static inline void flow_asm_fpsr_clear(void) {
-#if !defined(FLOW_FORCE_C17_FALLBACK) && (defined(__aarch64__) || defined(__arm64__))
-    uint64_t z = 0;
-    __asm__ __volatile__("msr fpsr, %0" : : "r"(z) : "memory");
-#elif !defined(FLOW_FORCE_C17_FALLBACK) && (defined(__x86_64__) || defined(_M_X64))
-    uint32_t mxcsr = 0;
-    __asm__ __volatile__("stmxcsr %0" : "=m"(mxcsr));
-    mxcsr &= ~0x3FU;
-    __asm__ __volatile__("ldmxcsr %0" : : "m"(mxcsr) : "memory");
-#else
-    feclearexcept(FE_ALL_EXCEPT);
-#endif
+/*
+ * Exact floor integer square root for 128-bit unsigned integers (`u128 -> uint64_t`),
+ * seeded via hardware CLZ (`__builtin_clzll`) and monotone integer Newton contraction.
+ * Zero floating-point instructions, zero ULP drift.
+ */
+__extension__ static inline uint64_t flow_asm_isqrt_u128(unsigned __int128 x) {
+    if (x == 0U)
+        return 0ULL;
+    __extension__ typedef unsigned __int128 u128;
+    uint64_t hi = (uint64_t)(x >> 64U);
+    uint64_t lo = (uint64_t)x;
+    uint32_t shift = (hi != 0ULL) ? ((127U - (uint32_t)__builtin_clzll(hi)) >> 1U)
+                                  : ((63U - (uint32_t)__builtin_clzll(lo)) >> 1U);
+    u128 r = ((u128)1U) << (shift + 1U);
+    for (;;) {
+        u128 next = (r + x / r) >> 1U;
+        if (next >= r)
+            break;
+        r = next;
+    }
+    return (uint64_t)r;
 }
 
-static inline double flow_asm_fdiv_f64(double a, double b) {
-    double res = 0.0;
-#if !defined(FLOW_FORCE_C17_FALLBACK) && (defined(__aarch64__) || defined(__arm64__))
-    __asm__ __volatile__("fdiv %d[res], %d[a], %d[b]" : [res] "=w"(res) : [a] "w"(a), [b] "w"(b));
-#elif !defined(FLOW_FORCE_C17_FALLBACK) && (defined(__x86_64__) || defined(_M_X64))
-    res = a;
-    __asm__ __volatile__("divsd %[b], %[res]" : [res] "+x"(res) : [b] "x"(b));
-#else
-    volatile double va = a, vb = b;
-    res = va / vb;
-#endif
-    return res;
+static inline uint64_t flow_asm_isqrt_u64(uint64_t x) {
+    __extension__ typedef unsigned __int128 u128;
+    return flow_asm_isqrt_u128((u128)x);
 }
 
-static inline uint64_t flow_asm_fpu_check_jet2(FlowJet2 j, uint64_t *inout_sieve) {
-    uint64_t bv = 0, bd1 = 0, bd2 = 0;
-    __builtin_memcpy(&bv, &j.v, sizeof(bv));
-    __builtin_memcpy(&bd1, &j.d1, sizeof(bd1));
-    __builtin_memcpy(&bd2, &j.d2, sizeof(bd2));
+static inline FlowResultU64 flow_asm_qsqrt_shift16_i64(int64_t x_q16, uint64_t *inout_sieve) {
+    if (__builtin_expect(x_q16 < 0, 0)) {
+        if (inout_sieve)
+            *inout_sieve &= ~FLOW_ASM_SIEVE_DOMAIN_VALID;
+        FlowResultU64 out = {(uint64_t)INT64_MIN,
+                             flow_hott_make_boundary_tag(FLOW_HOTT_BOUNDARY_OVERFLOW, 5U,
+                                                         (uint8_t)FLOW_BOUNDARY_DOMAIN_SINGULARITY,
+                                                         0U, 1U)};
+        return out;
+    }
+    __extension__ typedef unsigned __int128 u128;
+    uint64_t root_q16 = flow_asm_isqrt_u128(((u128)(uint64_t)x_q16) << FLOW_Q16_SHIFT);
+    return flow_result_u64_interior(root_q16);
+}
 
-    const uint64_t abs_mask = UINT64_C(0x7FFFFFFFFFFFFFFF);
-    const uint64_t inf_bits = UINT64_C(0x7FF0000000000000);
+/*
+ * Pure Q48.16 Exponential Moving Average step (`alpha_q16` in [0, 65536]):
+ * Accumulates `(1 - alpha) * prev + alpha * sample` in exact 128-bit integer
+ * arithmetic before shifting by 16, eliminating IEEE-754 mantissa absorption.
+ */
+static inline FlowResultU64 flow_asm_qema_step_q16(int64_t prev_ema_q16, int64_t sample_q16,
+                                                   int64_t alpha_q16, uint64_t *inout_sieve) {
+    if (__builtin_expect(alpha_q16 < 0 || alpha_q16 > FLOW_Q16_ONE, 0)) {
+        if (inout_sieve)
+            *inout_sieve &= ~FLOW_ASM_SIEVE_DOMAIN_VALID;
+        FlowResultU64 out = {(uint64_t)prev_ema_q16,
+                             flow_hott_make_boundary_tag(FLOW_HOTT_BOUNDARY_OVERFLOW, 6U,
+                                                         (uint8_t)FLOW_BOUNDARY_PRECOND, 0U, 1U)};
+        return out;
+    }
+    __extension__ typedef __int128 i128;
+    i128 w_prev = (i128)(FLOW_Q16_ONE - alpha_q16) * (i128)prev_ema_q16;
+    i128 w_samp = (i128)alpha_q16 * (i128)sample_q16;
+    i128 sum = w_prev + w_samp;
+    i128 res = sum >> FLOW_Q16_SHIFT;
+    if (__builtin_expect(res > (i128)INT64_MAX || res < (i128)INT64_MIN, 0)) {
+        if (inout_sieve)
+            *inout_sieve &= ~FLOW_ASM_SIEVE_INT_NO_OVERFLOW;
+        int64_t sat = (res > 0) ? INT64_MAX : INT64_MIN;
+        FlowResultU64 out = {(uint64_t)sat, flow_hott_make_boundary_tag(
+                                                FLOW_HOTT_BOUNDARY_OVERFLOW, 6U,
+                                                (uint8_t)FLOW_BOUNDARY_DOMAIN_SINGULARITY, 0U, 2U)};
+        return out;
+    }
+    return flow_result_u64_interior((uint64_t)(int64_t)res);
+}
 
-    uint64_t av = bv & abs_mask;
-    uint64_t ad1 = bd1 & abs_mask;
-    uint64_t ad2 = bd2 & abs_mask;
+/*
+ * Pure Q48.16 Solvency Check (`assets_q16 + buffer_q16 - liabilities_q16 >= 0`):
+ * Uses hardware flag-setting ASM Q-addition/subtraction (`adds`/`subs` + `cset vs`).
+ */
+static inline FlowResultU64 flow_asm_solvency_check_q16(int64_t assets_q16, int64_t liabilities_q16,
+                                                        int64_t buffer_q16, uint64_t *inout_sieve) {
+    FlowResultU64 cover = flow_asm_qadd_i64(assets_q16, buffer_q16, inout_sieve);
+    FlowResultU64 margin = flow_asm_qsub_i64((int64_t)cover.value, liabilities_q16, inout_sieve);
+    if (flow_result_u64_is_boundary(cover) && !flow_result_u64_is_boundary(margin)) {
+        margin.boundary_tag = cover.boundary_tag;
+    }
+    if (inout_sieve && (flow_result_u64_is_boundary(margin) || (int64_t)margin.value < 0)) {
+        *inout_sieve &= ~FLOW_ASM_SIEVE_QPOLY_INTERIOR;
+    }
+    return margin;
+}
 
-    uint64_t has_nan = (av > inf_bits) | (ad1 > inf_bits) | (ad2 > inf_bits);
-    uint64_t has_inf = (av == inf_bits) | (ad1 == inf_bits) | (ad2 == inf_bits);
+static inline uint64_t flow_asm_check_jet2(FlowJet2 j, uint64_t *inout_sieve) {
+    uint64_t uv = (uint64_t)j.v;
+    uint64_t ud1 = (uint64_t)j.d1;
+    uint64_t ud2 = (uint64_t)j.d2;
 
-    uint64_t fpsr = flow_asm_fpsr_read();
-    uint64_t ioc = (fpsr & 1ULL) | has_nan;
-    uint64_t dzc = (fpsr >> 1U) & 1ULL;
-    uint64_t ofc = ((fpsr >> 2U) & 1ULL) | has_inf;
+    bool has_tag = flow_hott_is_boundary_tag(uv) || flow_hott_is_boundary_tag(ud1) ||
+                   flow_hott_is_boundary_tag(ud2);
+    bool has_min = (j.v == INT64_MIN) || (j.d1 == INT64_MIN) || (j.d2 == INT64_MIN);
+    bool has_sat = (j.v == INT64_MAX) || (j.d1 == INT64_MAX) || (j.d2 == INT64_MAX);
 
-    uint64_t clear_bits = (ioc ? FLOW_ASM_SIEVE_FPU_NO_INVALID : 0ULL) |
-                          (dzc ? FLOW_ASM_SIEVE_FPU_NO_DIVZERO : 0ULL) |
-                          (ofc ? FLOW_ASM_SIEVE_FPU_NO_OVERFLOW : 0ULL);
+    uint64_t clear_bits = ((has_tag || has_min) ? FLOW_ASM_SIEVE_DOMAIN_VALID : 0ULL) |
+                          (has_sat ? FLOW_ASM_SIEVE_Q_NO_SATURATION : 0ULL);
 
     uint64_t s = inout_sieve ? *inout_sieve : FLOW_ASM_SIEVE_ALL_SOUND;
     s &= ~clear_bits;
@@ -625,6 +650,8 @@ static inline uint64_t flow_asm_fpu_check_jet2(FlowJet2 j, uint64_t *inout_sieve
     }
     return s;
 }
+
+#define flow_asm_fpu_check_jet2 flow_asm_check_jet2
 
 /* ============================================================================
  * Pillar C: ASM Masked Cyclic Memory Arena (Z / 2^k Z Total Indexing)

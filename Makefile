@@ -16,7 +16,7 @@ IS_GCC := $(shell $(CC) -dM -E - </dev/null 2>/dev/null | grep -q "__GNUC__" && 
 ifeq ($(IS_GCC),1)
 override CFLAGS += -Wno-format-truncation -Wno-stringop-truncation
 endif
-LDLIBS ?= -lm
+LDLIBS ?=
 THREAD_FLAGS ?= -pthread
 UNAME_S := $(shell uname -s 2>/dev/null || echo "Unknown")
 ifeq ($(UNAME_S),Darwin)

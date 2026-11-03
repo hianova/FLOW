@@ -1,6 +1,5 @@
 #include "flow_io.h"
 
-#include <math.h>
 #include <sched.h>
 #include <stdlib.h>
 #include <string.h>
@@ -89,7 +88,9 @@ FlowQPolyForecast flow_qpoly_predict_next_face(const int32_t *A_rows, const int6
     if (!A_rows || !b || !x || !dx || dim == 0 || active == 0ULL)
         return fc;
 
-    double best_t = 1e300;
+    __extension__ typedef __int128 i128;
+    __extension__ typedef unsigned __int128 u128;
+    int64_t best_t_q16 = INT64_MAX;
     uint64_t rem = active;
     while (rem != 0ULL) {
         uint32_t i = (uint32_t)__builtin_ctzll(rem);
@@ -110,12 +111,14 @@ FlowQPolyForecast flow_qpoly_predict_next_face(const int32_t *A_rows, const int6
                 return fc;
             }
             if (dot_x == b[i] && !dot_x_pos_ovf && r_i < 0 && c_i > 0) {
-                double t_rehit = (-2.0 * (double)r_i) / (double)c_i;
-                if (t_rehit > 0.0 && t_rehit <= 1e12 && t_rehit < best_t) {
-                    best_t = t_rehit;
-                    double scaled = t_rehit * (double)(1LL << 16);
-                    fc.t_hit_q =
-                        (scaled >= (double)INT64_MAX) ? INT64_MAX : (int64_t)llround(scaled);
+                u128 num_q16 = ((u128)(-(i128)r_i)) << (FLOW_Q16_SHIFT + 1U);
+                u128 den = (u128)c_i;
+                u128 t_rehit_u = (num_q16 + (den >> 1U)) / den;
+                int64_t t_rehit_q16 =
+                    (t_rehit_u >= (u128)INT64_MAX) ? INT64_MAX : (int64_t)t_rehit_u;
+                if (t_rehit_q16 > 0 && t_rehit_q16 < best_t_q16) {
+                    best_t_q16 = t_rehit_q16;
+                    fc.t_hit_q = t_rehit_q16;
                     fc.plane = i;
                     fc.will_exit = true;
                 }
@@ -126,15 +129,15 @@ FlowQPolyForecast flow_qpoly_predict_next_face(const int32_t *A_rows, const int6
         int64_t s_i = flow_asm_qsub_sat_pos_i64(b[i], dot_x);
 
         /*
-         * Solve slack(t) = s_i - r_i * t - 0.5 * c_i * t^2 = 0 via 2-Jet root primitive:
+         * Solve slack(t) = s_i - r_i * t - 0.5 * c_i * t^2 = 0 via pure Q16 2-Jet root primitive:
          * v = s_i, d1 = -r_i, d2 = -c_i
          */
-        FlowJet2 slack_jet = flow_jet2_make((double)s_i, -(double)r_i, -(double)c_i);
-        double t_cand = -1.0;
-        if (flow_jet2_solve_root(slack_jet, 1e12, &t_cand) && t_cand > 0.0 && t_cand < best_t) {
-            best_t = t_cand;
-            double scaled = t_cand * (double)(1LL << 16);
-            fc.t_hit_q = (scaled >= (double)INT64_MAX) ? INT64_MAX : (int64_t)llround(scaled);
+        FlowJet2 slack_jet = flow_jet2_make(s_i, flow_q16_neg_sat(r_i), flow_q16_neg_sat(c_i));
+        int64_t t_cand_q16 = 0;
+        if (flow_jet2_solve_root(slack_jet, best_t_q16, &t_cand_q16) && t_cand_q16 > 0 &&
+            t_cand_q16 < best_t_q16) {
+            best_t_q16 = t_cand_q16;
+            fc.t_hit_q = t_cand_q16;
             fc.plane = i;
             fc.will_exit = true;
         }

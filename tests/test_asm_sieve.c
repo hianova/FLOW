@@ -5,7 +5,6 @@
 #include "hott_test_kit.h"
 
 #include <limits.h>
-#include <math.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -17,14 +16,14 @@ FLOW_QPOLY_DEFINE(FlowQPoly4D_S16, 4, 16)
 
 static __attribute__((noinline)) uint64_t asm_hott_jet2_bootstrap_step(
     const int64_t a_q16[4], int64_t b_q16, const int64_t x_q16[4], FlowJet2 prev, FlowJet2 next,
-    double dt, int64_t a, int64_t b, const uint64_t *arena, uint64_t raw_idx, uint64_t mask,
+    int64_t dt_q16, int64_t a, int64_t b, const uint64_t *arena, uint64_t raw_idx, uint64_t mask,
     uint64_t *out_sieve) {
     uint64_t sieve = FLOW_ASM_SIEVE_ALL_SOUND;
 
     FlowResultU64 r_add = flow_asm_qadd_i64(a, b, &sieve);
     uint64_t loaded = flow_asm_arena_load_u64(arena, raw_idx, mask, &sieve);
     int64_t slack = flow_asm_qpoly4d_eval_plane(a_q16, b_q16, x_q16, &sieve);
-    uint64_t final_sieve = flow_asm_jet2_self_check_step(prev, next, dt, 32, 32, &sieve);
+    uint64_t final_sieve = flow_asm_jet2_self_check_step(prev, next, dt_q16, 32, 32, &sieve);
 
     *out_sieve = final_sieve;
     return r_add.value ^ loaded ^ (uint64_t)slack ^ final_sieve;
@@ -127,7 +126,6 @@ int main(int argc, char **argv) {
         const int32_t x_dim3[3] = {INT32_MIN, INT32_MIN, 1};
         uint64_t sieve_dim3 = FLOW_ASM_SIEVE_ALL_SOUND;
         FlowResultU64 r_dim3 = flow_asm_qdot_i32(a_dim3, x_dim3, 3U, &sieve_dim3);
-        /* 2^62 + 2^62 - 100 = 2^63 - 100 = INT64_MAX - 99 (fits in int64_t without overflow!) */
         FLOW_ASSERT_FALSE(flow_result_u64_is_boundary(r_dim3));
         FLOW_ASSERT_EQ((int64_t)r_dim3.value, INT64_MAX - 99LL);
         FLOW_ASSERT_EQ(sieve_dim3, FLOW_ASM_SIEVE_ALL_SOUND);
@@ -136,7 +134,6 @@ int main(int argc, char **argv) {
         const int32_t x_dim5_ovf[5] = {INT32_MIN, INT32_MIN, INT32_MIN, 1, 0};
         uint64_t sieve_dim5_ovf = FLOW_ASM_SIEVE_ALL_SOUND;
         FlowResultU64 r_dim5_ovf = flow_asm_qdot_i32(a_dim5_ovf, x_dim5_ovf, 5U, &sieve_dim5_ovf);
-        /* 3 * 2^62 - 100 > INT64_MAX: must stay saturated at INT64_MAX despite negative 4th term */
         FLOW_ASSERT_TRUE(flow_result_u64_is_boundary(r_dim5_ovf));
         FLOW_ASSERT_EQ((int64_t)r_dim5_ovf.value, INT64_MAX);
         FLOW_ASSERT_EQ(sieve_dim5_ovf & FLOW_ASM_SIEVE_INT_NO_OVERFLOW, 0ULL);
@@ -173,47 +170,83 @@ int main(int argc, char **argv) {
         int64_t sl_pos =
             flow_asm_qpoly4d_eval_plane(a_plane, (1LL << 62) + 100LL, x_plane_neg, &sv_plane_pos);
         FLOW_ASSERT_EQ(sl_pos, INT64_MAX);
+
+        /* 1j. Pure Q16 ISQRT, QSQRT, QEMA (Zero Mantissa Absorption) & Solvency Check */
+        FLOW_ASSERT_EQ(flow_asm_isqrt_u64(0ULL), 0ULL);
+        FLOW_ASSERT_EQ(flow_asm_isqrt_u64(1ULL), 1ULL);
+        FLOW_ASSERT_EQ(flow_asm_isqrt_u64(UINT64_MAX), 4294967295ULL);
+        __extension__ typedef unsigned __int128 u128;
+        FLOW_ASSERT_EQ(flow_asm_isqrt_u128(~(u128)0U), UINT64_MAX);
+        FLOW_ASSERT_EQ(flow_asm_isqrt_u128((u128)UINT64_MAX * (u128)UINT64_MAX), UINT64_MAX);
+        FLOW_ASSERT_EQ(flow_asm_isqrt_u128((u128)UINT64_MAX * (u128)UINT64_MAX - 1U),
+                       UINT64_MAX - 1ULL);
+
+        uint64_t sv_sqrt = FLOW_ASM_SIEVE_ALL_SOUND;
+        FlowResultU64 r_sqrt9 = flow_asm_qsqrt_shift16_i64(9LL << 16, &sv_sqrt);
+        FLOW_ASSERT_FALSE(flow_result_u64_is_boundary(r_sqrt9));
+        FLOW_ASSERT_EQ((int64_t)r_sqrt9.value, 3LL << 16);
+        FLOW_ASSERT_EQ(sv_sqrt, FLOW_ASM_SIEVE_ALL_SOUND);
+
+        /* Verify zero mantissa absorption on Q16 EMA step across huge scale difference */
+        uint64_t sv_ema = FLOW_ASM_SIEVE_ALL_SOUND;
+        int64_t big_ema_q16 = 1000000000LL << 16;
+        int64_t sample_q16 = big_ema_q16 + (1LL << 16);
+        FlowResultU64 r_ema = flow_asm_qema_step_q16(big_ema_q16, sample_q16, 1LL, &sv_ema);
+        FLOW_ASSERT_FALSE(flow_result_u64_is_boundary(r_ema));
+        FLOW_ASSERT_EQ((int64_t)r_ema.value, big_ema_q16 + 1LL);
+        FLOW_ASSERT_EQ(sv_ema, FLOW_ASM_SIEVE_ALL_SOUND);
+
+        /* Solvency check: interior vs insolvent vs overflow */
+        uint64_t sv_solv_ok = FLOW_ASM_SIEVE_ALL_SOUND;
+        FlowResultU64 r_solv_ok =
+            flow_asm_solvency_check_q16(500LL << 16, 800LL << 16, 400LL << 16, &sv_solv_ok);
+        FLOW_ASSERT_FALSE(flow_result_u64_is_boundary(r_solv_ok));
+        FLOW_ASSERT_EQ((int64_t)r_solv_ok.value, 100LL << 16);
+        FLOW_ASSERT_EQ(sv_solv_ok, FLOW_ASM_SIEVE_ALL_SOUND);
+
+        uint64_t sv_solv_bad = FLOW_ASM_SIEVE_ALL_SOUND;
+        FlowResultU64 r_solv_bad =
+            flow_asm_solvency_check_q16(500LL << 16, 1200LL << 16, 400LL << 16, &sv_solv_bad);
+        FLOW_ASSERT_EQ((int64_t)r_solv_bad.value, -(300LL << 16));
+        FLOW_ASSERT_EQ(sv_solv_bad & FLOW_ASM_SIEVE_QPOLY_INTERIOR, 0ULL);
     }
 
     /* =====================================================================
-     * Stage 2: Hardware FPU Exception Status Register (FPSR/MXCSR) -> Sieve
+     * Stage 2: Pure Q16 Domain, DivZero, Saturation & Boundary Tag Sieve
      * ===================================================================== */
-    FLOW_STAGE_BEGIN(2, "Hardware FPU Exception Status Register (FPSR/MXCSR -> HoTT Sieve)");
+    FLOW_STAGE_BEGIN(2, "Pure Q16 Domain, DivZero, Saturation & HoTT Boundary Tag Sieve");
     {
-        flow_asm_fpsr_clear();
         uint64_t sieve_clean = FLOW_ASM_SIEVE_ALL_SOUND;
-        FlowJet2 valid_jet = {1.25, -0.5, 2.0};
-        uint64_t res_clean = flow_asm_fpu_check_jet2(valid_jet, &sieve_clean);
+        FlowJet2 valid_jet = {81920LL, -32768LL, 131072LL};
+        uint64_t res_clean = flow_asm_check_jet2(valid_jet, &sieve_clean);
         FLOW_ASSERT_EQ(res_clean, FLOW_ASM_SIEVE_ALL_SOUND);
 
-        /* Hardware 1.0 / 0.0 triggers DZC / INF */
-        flow_asm_fpsr_clear();
+        /* Q16 1.0 / 0 triggers INT_NO_DIVZERO and Q_NO_SATURATION */
         uint64_t sieve_div0 = FLOW_ASM_SIEVE_ALL_SOUND;
-        double inf_val = flow_asm_fdiv_f64(1.0, 0.0);
-        FlowJet2 div0_jet = {inf_val, 0.0, 0.0};
-        (void)flow_asm_fpu_check_jet2(div0_jet, &sieve_div0);
-        FLOW_ASSERT_EQ(sieve_div0 & FLOW_ASM_SIEVE_FPU_NO_DIVZERO, 0ULL);
-        FLOW_ASSERT_EQ(sieve_div0 & FLOW_ASM_SIEVE_FPU_NO_OVERFLOW, 0ULL);
+        FlowResultU64 div0_res = flow_asm_qdiv_shift16_i64(FLOW_Q16_ONE, 0LL, &sieve_div0);
+        FLOW_ASSERT_TRUE(flow_result_u64_is_boundary(div0_res));
+        FlowJet2 div0_jet = {(int64_t)div0_res.value, 0LL, 0LL};
+        (void)flow_asm_check_jet2(div0_jet, &sieve_div0);
+        FLOW_ASSERT_EQ(sieve_div0 & FLOW_ASM_SIEVE_INT_NO_DIVZERO, 0ULL);
+        FLOW_ASSERT_EQ(sieve_div0 & FLOW_ASM_SIEVE_Q_NO_SATURATION, 0ULL);
 
-        /* Hardware 0.0 / 0.0 triggers IOC / NaN */
-        flow_asm_fpsr_clear();
-        uint64_t sieve_nan = FLOW_ASM_SIEVE_ALL_SOUND;
-        double nan_val = flow_asm_fdiv_f64(0.0, 0.0);
-        FlowJet2 nan_jet = {nan_val, 1.0, 0.0};
-        (void)flow_asm_fpu_check_jet2(nan_jet, &sieve_nan);
-        FLOW_ASSERT_EQ(sieve_nan & FLOW_ASM_SIEVE_FPU_NO_INVALID, 0ULL);
+        /* Q16 0 / 0 and sqrt(-1) trigger DOMAIN_VALID */
+        uint64_t sieve_dom = FLOW_ASM_SIEVE_ALL_SOUND;
+        FlowResultU64 neg_sqrt = flow_asm_qsqrt_shift16_i64(-FLOW_Q16_ONE, &sieve_dom);
+        FLOW_ASSERT_TRUE(flow_result_u64_is_boundary(neg_sqrt));
+        FlowJet2 dom_jet = {(int64_t)neg_sqrt.value, FLOW_Q16_ONE, 0LL};
+        (void)flow_asm_check_jet2(dom_jet, &sieve_dom);
+        FLOW_ASSERT_EQ(sieve_dom & FLOW_ASM_SIEVE_DOMAIN_VALID, 0ULL);
 
-        /* HoTT Quiet NaN payload injection */
-        flow_asm_fpsr_clear();
-        uint64_t sieve_hott_nan = FLOW_ASM_SIEVE_ALL_SOUND;
-        double qnan_v = flow_hott_make_boundary_nan(
+        /* HoTT boundary tag payload injection */
+        uint64_t sieve_hott_tag = FLOW_ASM_SIEVE_ALL_SOUND;
+        uint64_t btag = flow_hott_make_boundary_tag(
             FLOW_HOTT_BOUNDARY_OVERFLOW, 2U, (uint8_t)FLOW_BOUNDARY_DOMAIN_SINGULARITY, 0U, 0xCAFU);
-        FLOW_ASSERT_TRUE(flow_hott_is_boundary_nan(qnan_v));
-        FLOW_ASSERT_EQ((uint64_t)flow_hott_boundary_code(qnan_v), 0xCAFULL);
-        FlowJet2 hott_nan_jet = {qnan_v, 0.0, 0.0};
-        (void)flow_asm_fpu_check_jet2(hott_nan_jet, &sieve_hott_nan);
-        FLOW_ASSERT_EQ(sieve_hott_nan & FLOW_ASM_SIEVE_FPU_NO_INVALID, 0ULL);
-        flow_asm_fpsr_clear();
+        FLOW_ASSERT_TRUE(flow_hott_is_boundary_tag(btag));
+        FLOW_ASSERT_EQ((uint64_t)flow_hott_boundary_code(btag), 0xCAFULL);
+        FlowJet2 hott_tag_jet = {(int64_t)btag, 0LL, 0LL};
+        (void)flow_asm_check_jet2(hott_tag_jet, &sieve_hott_tag);
+        FLOW_ASSERT_EQ(sieve_hott_tag & FLOW_ASM_SIEVE_DOMAIN_VALID, 0ULL);
     }
 
     /* =====================================================================
@@ -309,33 +342,34 @@ int main(int argc, char **argv) {
      * ===================================================================== */
     FLOW_STAGE_BEGIN(5, "Self-Bootstrapping 2-Jet Taylor Consistency & QPoly Equivalence");
     {
-        const double omega = 1.0;
-        const double dt = 0.01;
-        flow_asm_fpsr_clear();
-
-        FlowJet2 prev = {1.0, 0.0, -omega * omega};
+        /*
+         * Exact Q48.16 quadratic trajectory:
+         *   dt_q16 = 1024 (1/64 in Q16), d2_q16 = -2 * 65536 = -131072
+         *   Every step has exact 0-ULP integer Taylor residual!
+         */
+        const int64_t dt_q16 = 1024LL;
+        const int64_t accel_q16 = -(2LL << 16);
+        FlowJet2 prev = {1000LL << 16, 100LL << 16, accel_q16};
         uint64_t running_sieve = FLOW_ASM_SIEVE_ALL_SOUND;
 
         for (int step = 1; step <= 100; ++step) {
-            double t = (double)step * dt;
-            FlowJet2 next = {cos(omega * t), -omega * sin(omega * t),
-                             -omega * omega * cos(omega * t)};
-            running_sieve = flow_asm_jet2_self_check_step(prev, next, dt, 2, 2, &running_sieve);
+            int64_t v_next = flow_jet2_eval_taylor(prev, dt_q16);
+            int64_t d1_next = prev.d1 + ((accel_q16 * dt_q16) >> 16);
+            FlowJet2 next = {v_next, d1_next, accel_q16};
+            running_sieve = flow_asm_jet2_self_check_step(prev, next, dt_q16, 0, 0, &running_sieve);
             prev = next;
         }
         FLOW_ASSERT_EQ(running_sieve, FLOW_ASM_SIEVE_ALL_SOUND);
 
-        /* Fault Injection 1: Silent Memory Bit-Flip in next.v (bit 50) */
-        double t_101 = 101.0 * dt;
-        FlowJet2 corrupted = {cos(omega * t_101), -omega * sin(omega * t_101),
-                              -omega * omega * cos(omega * t_101)};
-        uint64_t v_bits = 0;
-        memcpy(&v_bits, &corrupted.v, sizeof(v_bits));
-        v_bits ^= (1ULL << 50);
-        memcpy(&corrupted.v, &v_bits, sizeof(corrupted.v));
+        /* Fault Injection 1: Silent Memory Bit-Flip in next.v (bit 12) */
+        FlowJet2 corrupted = {
+            flow_jet2_eval_taylor(prev, dt_q16) ^ (1LL << 12),
+            prev.d1 + ((accel_q16 * dt_q16) >> 16),
+            accel_q16,
+        };
 
         uint64_t fault1_sieve = FLOW_ASM_SIEVE_ALL_SOUND;
-        (void)flow_asm_jet2_self_check_step(prev, corrupted, dt, 2, 2, &fault1_sieve);
+        (void)flow_asm_jet2_self_check_step(prev, corrupted, dt_q16, 2, 2, &fault1_sieve);
         FLOW_ASSERT_EQ(fault1_sieve & FLOW_ASM_SIEVE_JET2_TAYLOR_0, 0ULL);
 
         uint32_t broken_bit = (uint32_t)__builtin_ctzll(~fault1_sieve & FLOW_ASM_SIEVE_ALL_SOUND);
@@ -345,10 +379,9 @@ int main(int argc, char **argv) {
         FLOW_ASSERT_EQ((int64_t)kan, (int64_t)FLOW_KAN_FILLED_HOMOTOPIC);
         FLOW_ASSERT_EQ(next_mask, FLOW_ASM_SIEVE_ALL_SOUND);
 
-        /* Fault Injection 2: Discretization / Tunneling Step Breakdown (dt = 2.5) */
-        double huge_dt = 2.5;
-        FlowJet2 jump_next = {cos(omega * huge_dt), -omega * sin(omega * huge_dt),
-                              -omega * omega * cos(omega * huge_dt)};
+        /* Fault Injection 2: Discretization / Tunneling Step Breakdown */
+        int64_t huge_dt_q16 = 5LL << 15; /* 2.5 in Q16 */
+        FlowJet2 jump_next = {0LL, -(500LL << 16), accel_q16};
         int64_t barrier_a[4] = {1LL << 16, 0, 0, 0};
         int64_t barrier_b = -50000LL;
         int64_t jump_x[4] = {0, 0, 0, 0};
@@ -356,7 +389,7 @@ int main(int argc, char **argv) {
         int64_t jump_slack =
             flow_asm_qpoly4d_eval_plane(barrier_a, barrier_b, jump_x, &tunnel_sieve);
         FLOW_ASSERT_TRUE(jump_slack < 0);
-        (void)flow_asm_jet2_self_check_step(prev, jump_next, huge_dt, 2, 2, &tunnel_sieve);
+        (void)flow_asm_jet2_self_check_step(prev, jump_next, huge_dt_q16, 2, 2, &tunnel_sieve);
         FLOW_ASSERT_EQ(tunnel_sieve & FLOW_ASM_SIEVE_QPOLY_INTERIOR, 0ULL);
         FLOW_ASSERT_EQ(tunnel_sieve & FLOW_ASM_SIEVE_JET2_TAYLOR_0, 0ULL);
         FLOW_ASSERT_EQ(tunnel_sieve & FLOW_ASM_SIEVE_JET2_TAYLOR_1, 0ULL);
@@ -416,16 +449,15 @@ int main(int argc, char **argv) {
             arena[i] = i * 7ULL + 1ULL;
 
         int64_t x_bench[4] = {10, 20, 30, 40};
-        FlowJet2 b_prev = {1.0, 0.0, -1.0};
-        FlowJet2 b_next = {cos(0.001), -sin(0.001), -cos(0.001)};
+        FlowJet2 b_prev = {FLOW_Q16_ONE, 0LL, -FLOW_Q16_ONE};
+        FlowJet2 b_next = {FLOW_Q16_ONE, -64LL, -FLOW_Q16_ONE};
         uint64_t out_sieve = FLOW_ASM_SIEVE_ALL_SOUND;
         uint64_t asm_sink = 0ULL;
         const uint64_t iters = 1000000ULL;
 
-        flow_asm_fpsr_clear();
         uint64_t t0 = flow_clock_monotonic_ns();
         for (uint64_t i = 0; i < iters; ++i) {
-            asm_sink ^= asm_hott_jet2_bootstrap_step(a_q16, b_q16, x_bench, b_prev, b_next, 0.001,
+            asm_sink ^= asm_hott_jet2_bootstrap_step(a_q16, b_q16, x_bench, b_prev, b_next, 64LL,
                                                      (int64_t)i, 42LL, arena, i & 0xFFULL, 0xFFULL,
                                                      &out_sieve);
         }
@@ -435,8 +467,13 @@ int main(int argc, char **argv) {
         FLOW_ASSERT_NE(asm_sink, 0ULL);
         FLOW_ASSERT_EQ(out_sieve, FLOW_ASM_SIEVE_ALL_SOUND);
         if (report_mode) {
-            printf("  [ASM Bootstrap] 1,000,000 steps | %.2f ns/step | Sieve=0x%03llx (8 B)\n",
-                   (double)(t1 - t0) / (double)iters, (unsigned long long)out_sieve);
+            uint64_t elapsed_ns = t1 - t0;
+            uint64_t ns_int = elapsed_ns / iters;
+            uint64_t ns_frac = ((elapsed_ns % iters) * 100ULL) / iters;
+            printf(
+                "  [ASM Bootstrap] 1,000,000 steps | %llu.%02llu ns/step | Sieve=0x%03llx (8 B)\n",
+                (unsigned long long)ns_int, (unsigned long long)ns_frac,
+                (unsigned long long)out_sieve);
         }
     }
 
