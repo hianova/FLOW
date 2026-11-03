@@ -17,5 +17,5 @@ jobs:
         os: [ ubuntu-latest, macos-latest ]
     steps:
       - uses: actions/checkout@v4
-      - name: Build & Run All 4 Test Suites + CLI Smoke Tests (-Werror)
-        run: make clean && make test CC=clang
+      - name: Build & Run All FLOW v4 Test Suites (-Werror)
+        run: make clean && make all && make test CC=clang

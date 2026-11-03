@@ -11,10 +11,10 @@ PROVENANCE_DEFS := -DFLOW_VERSION_STRING=\"$(FLOW_VERSION)\" \
                    -DFLOW_GIT_COMMIT=\"$(GIT_COMMIT)\" \
                    -DFLOW_GIT_DIRTY=\"$(GIT_DIRTY)\"
 CFLAGS ?= -std=c17 -Wall -Wextra -Wpedantic -Wmissing-prototypes -Werror -O2 -Isrc -Itests
-CFLAGS += $(PROVENANCE_DEFS) -D_GNU_SOURCE -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L
+override CFLAGS += -Isrc -Itests $(PROVENANCE_DEFS) -D_GNU_SOURCE -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L
 IS_GCC := $(shell $(CC) -dM -E - </dev/null 2>/dev/null | grep -q "__GNUC__" && ! $(CC) -dM -E - </dev/null 2>/dev/null | grep -q "__clang__" && echo 1 || echo 0)
 ifeq ($(IS_GCC),1)
-CFLAGS += -Wno-format-truncation -Wno-stringop-truncation
+override CFLAGS += -Wno-format-truncation -Wno-stringop-truncation
 endif
 LDLIBS ?= -lm
 THREAD_FLAGS ?= -pthread
@@ -35,7 +35,7 @@ HW_SPEC_H := $(BUILD_DIR)/flow_hw_spec.h
 LIBFLOW_A := $(BUILD_DIR)/libflow.a
 LIBFLOW_RT_A := $(BUILD_DIR)/libflow_rt.a
 
-CFLAGS += -I$(BUILD_DIR)
+override CFLAGS += -I$(BUILD_DIR)
 
 SRC_FILES := $(wildcard src/*.c)
 RT_OBJS := $(patsubst src/%.c, $(BUILD_DIR)/obj/%.o, $(SRC_FILES))
