@@ -36,9 +36,11 @@ extern "C" {
  * 1. Compile-Time Univalence (A ~= B => A = U_0 B, 0 Runtime Bytes)
  * ============================================================================ */
 
+#ifndef FLOW_STATIC_ASSERT_UNIVALENT
 #define FLOW_STATIC_ASSERT_UNIVALENT(TypeA, TypeB)                                       \
     _Static_assert(sizeof(TypeA) == sizeof(TypeB) && _Alignof(TypeA) == _Alignof(TypeB), \
                    "HoTT Univalence violation: TypeA and TypeB are not layout-isomorphic")
+#endif
 
 FLOW_STATIC_ASSERT_UNIVALENT(FlowJet2, FlowQJet2);
 
