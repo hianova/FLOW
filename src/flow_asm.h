@@ -51,10 +51,10 @@ extern "C" {
  */
 
 #define FLOW_VERSION_MAJOR 4
-#define FLOW_VERSION_MINOR 0
-#define FLOW_VERSION_PATCH 1
+#define FLOW_VERSION_MINOR 1
+#define FLOW_VERSION_PATCH 0
 #ifndef FLOW_VERSION_STRING
-#define FLOW_VERSION_STRING "4.0.1"
+#define FLOW_VERSION_STRING "4.1.0"
 #endif
 #ifndef FLOW_GIT_BRANCH
 #define FLOW_GIT_BRANCH "main"
