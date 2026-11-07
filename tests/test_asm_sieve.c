@@ -335,6 +335,75 @@ int main(int argc, char **argv) {
         FLOW_ASSERT_EQ(handles[1], 119U);
         FLOW_ASSERT_EQ(handles[2], 141U);
         FLOW_ASSERT_EQ(handles[3], 163U);
+
+        /* 4b. Goldilocks Prime Field F_p (p = 2^64 - 2^32 + 1) division-free arithmetic */
+        const uint64_t p_gl = FLOW_GOLDILOCKS_PRIME;
+        FLOW_ASSERT_EQ(flow_asm_fp64_reduce(p_gl), 0ULL);
+        FLOW_ASSERT_EQ(flow_asm_fp64_add(p_gl - 1ULL, 1ULL), 0ULL);
+        FLOW_ASSERT_EQ(flow_asm_fp64_add(p_gl - 1ULL, 2ULL), 1ULL);
+        FLOW_ASSERT_EQ(flow_asm_fp64_sub(0ULL, 1ULL), p_gl - 1ULL);
+        /* (-1) * (-1) == +1 mod p */
+        FLOW_ASSERT_EQ(flow_asm_fp64_mul(p_gl - 1ULL, p_gl - 1ULL), 1ULL);
+        /* 2^32 * (2^32 - 1) = 2^64 - 2^32 = p - 1 */
+        FLOW_ASSERT_EQ(flow_asm_fp64_mul(1ULL << 32U, FLOW_GOLDILOCKS_EPS), p_gl - 1ULL);
+
+        uint64_t fp_seed = 0x123456789ABCDEF0ULL;
+        for (uint32_t i = 0; i < 256U; ++i) {
+            uint64_t a = flow_asm_fp64_reduce(flow_prng_next(&fp_seed));
+            uint64_t b = flow_asm_fp64_reduce(flow_prng_next(&fp_seed));
+            uint64_t c = flow_asm_fp64_reduce(flow_prng_next(&fp_seed));
+            uint64_t lhs = flow_asm_fp64_mul(flow_asm_fp64_add(a, b), c);
+            uint64_t rhs = flow_asm_fp64_add(flow_asm_fp64_mul(a, c), flow_asm_fp64_mul(b, c));
+            FLOW_ASSERT_EQ(lhs, rhs);
+        }
+
+        /* 4c. 1-Cycle Hardware Bit-Reversal (rbit) & QMC Radical Inverse */
+        FLOW_ASSERT_EQ(flow_asm_rbit64(1ULL), 1ULL << 63U);
+        FLOW_ASSERT_EQ(flow_asm_rbit64(flow_asm_rbit64(0xCAFEBABE13572468ULL)),
+                       0xCAFEBABE13572468ULL);
+        FLOW_ASSERT_EQ(flow_asm_radical_inverse_q16(0ULL), 0LL);
+        FLOW_ASSERT_EQ(flow_asm_radical_inverse_q16(1ULL), 32768LL); /* 1/2 in Q16 */
+        FLOW_ASSERT_EQ(flow_asm_radical_inverse_q16(2ULL), 16384LL); /* 1/4 in Q16 */
+        FLOW_ASSERT_EQ(flow_asm_radical_inverse_q16(3ULL), 49152LL); /* 3/4 in Q16 */
+        FLOW_ASSERT_EQ(flow_asm_radical_inverse_q16(4ULL), 8192LL);  /* 1/8 in Q16 */
+
+        /* 4d. Bijective F_2 Tempering Involution & GF(2) 64x64 Matrix-Vector Multiply */
+        FLOW_ASSERT_EQ(flow_asm_biject_untemper32(flow_asm_biject_temper32(0U)), 0U);
+        FLOW_ASSERT_EQ(flow_asm_biject_untemper32(flow_asm_biject_temper32(UINT32_MAX)),
+                       UINT32_MAX);
+        for (uint32_t i = 0; i < 256U; ++i) {
+            uint32_t x32 = (uint32_t)flow_prng_next(&fp_seed);
+            uint32_t y32 = flow_asm_biject_temper32(x32);
+            FLOW_ASSERT_EQ(flow_asm_biject_untemper32(y32), x32);
+            FLOW_ASSERT_EQ(flow_asm_biject_temper32(flow_asm_biject_untemper32(x32)), x32);
+        }
+
+        uint64_t gf2_ident[64];
+        for (uint32_t i = 0; i < 64U; ++i) {
+            gf2_ident[i] = 1ULL << i;
+        }
+        FLOW_ASSERT_EQ(flow_asm_gf2_matvec64(gf2_ident, 0xFEDCBA9876543210ULL),
+                       0xFEDCBA9876543210ULL);
+
+        /* 4e. Closed-Loop 2-Jet Impedance (Dual of EMA) & 2D Cross Product (ZMP) */
+        FlowJet2 cur_j = flow_jet2_make(2LL << 16, 1LL << 16, 1LL << 16);
+        FlowJet2 ref_j = flow_jet2_make(1LL << 16, 0LL, 0LL);
+        uint64_t sv_imp = FLOW_ASM_SIEVE_ALL_SOUND;
+        int64_t u_imp = flow_jet2_impedance_step_q16(cur_j, ref_j, 10LL << 16, 4LL << 16, 2LL << 16,
+                                                     100LL << 16, &sv_imp);
+        /* -(10*(2-1) + 4*(1-0) + 2*1) = -16.0 in Q16 */
+        FLOW_ASSERT_EQ(u_imp, -(16LL << 16));
+        FLOW_ASSERT_EQ(sv_imp, FLOW_ASM_SIEVE_ALL_SOUND);
+
+        uint64_t sv_imp_sat = FLOW_ASM_SIEVE_ALL_SOUND;
+        int64_t u_sat = flow_jet2_impedance_step_q16(cur_j, ref_j, 10LL << 16, 4LL << 16, 2LL << 16,
+                                                     5LL << 16, &sv_imp_sat);
+        FLOW_ASSERT_EQ(u_sat, -(5LL << 16));
+        FLOW_ASSERT_EQ(sv_imp_sat & FLOW_ASM_SIEVE_Q_NO_SATURATION, 0ULL);
+
+        FLOW_ASSERT_EQ(flow_q16_cross2d(0, 0, 1LL << 16, 0, 2LL << 16, 0), 0LL);
+        FLOW_ASSERT_EQ(flow_q16_cross2d(0, 0, 2LL << 16, 0, 0, 3LL << 16), 6LL << 16);
+        FLOW_ASSERT_EQ(flow_q16_cross2d(0, 0, 0, 3LL << 16, 2LL << 16, 0), -(6LL << 16));
     }
 
     /* =====================================================================

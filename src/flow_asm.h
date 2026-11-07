@@ -1040,6 +1040,104 @@ static inline uint32_t flow_ballot_compact_wave64(uint64_t ballot_mask, uint32_t
 #define flow_gpu_ballot_visible_count  flow_ballot_visible_count
 #define flow_gpu_ballot_compact_wave64 flow_ballot_compact_wave64
 
+/* ============================================================================
+ * Pillar E: Goldilocks Finite-Field F_p (p = 2^64 - 2^32 + 1), F_2 Bijection &
+ *           1-Cycle Hardware Bit-Reversal QMC (`rbit`)
+ * ============================================================================ */
+
+#define FLOW_GOLDILOCKS_PRIME UINT64_C(0xFFFFFFFF00000001)
+#define FLOW_GOLDILOCKS_EPS   UINT64_C(0xFFFFFFFF)
+
+static inline uint64_t flow_asm_fp64_reduce(uint64_t x) {
+    return (x >= FLOW_GOLDILOCKS_PRIME) ? (x - FLOW_GOLDILOCKS_PRIME) : x;
+}
+
+static inline uint64_t flow_asm_fp64_add(uint64_t a, uint64_t b) {
+    uint64_t ar = flow_asm_fp64_reduce(a);
+    uint64_t br = flow_asm_fp64_reduce(b);
+    uint64_t diff = FLOW_GOLDILOCKS_PRIME - br;
+    return (ar >= diff) ? (ar - diff) : (ar + br);
+}
+
+static inline uint64_t flow_asm_fp64_sub(uint64_t a, uint64_t b) {
+    uint64_t ar = flow_asm_fp64_reduce(a);
+    uint64_t br = flow_asm_fp64_reduce(b);
+    return (ar >= br) ? (ar - br) : (FLOW_GOLDILOCKS_PRIME - (br - ar));
+}
+
+static inline uint64_t flow_asm_fp64_mul(uint64_t a, uint64_t b) {
+    uint64_t ar = flow_asm_fp64_reduce(a);
+    uint64_t br = flow_asm_fp64_reduce(b);
+    uint64_t hi64 = 0ULL;
+    uint64_t lo64 = 0ULL;
+#if FLOW_HAS_INT128
+    __extension__ unsigned __int128 prod = (unsigned __int128)ar * (unsigned __int128)br;
+    lo64 = (uint64_t)prod;
+    hi64 = (uint64_t)(prod >> 64U);
+#else
+    flow_mul_u64_to_u128(ar, br, &hi64, &lo64);
+#endif
+    /* Identities mod p = 2^64 - 2^32 + 1: 2^64 == 2^32 - 1, and 2^96 == -1 */
+    uint64_t mid = hi64 & FLOW_GOLDILOCKS_EPS;
+    uint64_t hi = hi64 >> 32U;
+    uint64_t t0 = flow_asm_fp64_sub(flow_asm_fp64_reduce(lo64), hi);
+    uint64_t t1 = mid * FLOW_GOLDILOCKS_EPS;
+    return flow_asm_fp64_add(t0, t1);
+}
+
+static inline uint64_t flow_asm_rbit64(uint64_t x) {
+    uint64_t out = x;
+#if !defined(FLOW_FORCE_C17_FALLBACK) && (defined(__aarch64__) || defined(__arm64__))
+    __asm__("rbit %[out], %[in]" : [out] "=r"(out) : [in] "r"(x));
+#else
+    out =
+        ((out >> 1U) & UINT64_C(0x5555555555555555)) | ((out & UINT64_C(0x5555555555555555)) << 1U);
+    out =
+        ((out >> 2U) & UINT64_C(0x3333333333333333)) | ((out & UINT64_C(0x3333333333333333)) << 2U);
+    out =
+        ((out >> 4U) & UINT64_C(0x0F0F0F0F0F0F0F0F)) | ((out & UINT64_C(0x0F0F0F0F0F0F0F0F)) << 4U);
+    out = __builtin_bswap64(out);
+#endif
+    return out;
+}
+
+/* 1-Cycle Base-2 Van der Corput Quasi-Monte Carlo (QMC) Radical Inverse in Q16.16 [0..65535] */
+static inline int64_t flow_asm_radical_inverse_q16(uint64_t index) {
+    return (int64_t)(flow_asm_rbit64(index) >> 48U);
+}
+
+/* Bijective F_2 32-Bit Tempering & Exact Inverse Untempering */
+static inline uint32_t flow_asm_biject_temper32(uint32_t x) {
+    uint32_t y = x ^ (x >> 11U);
+    y ^= (y << 7U) & 0x9D2C5680U;
+    y ^= (y << 15U) & 0xEFC60000U;
+    y ^= (y >> 18U);
+    return y;
+}
+
+static inline uint32_t flow_asm_biject_untemper32(uint32_t y) {
+    uint32_t u = y ^ (y >> 18U);
+    u ^= (u << 15U) & 0xEFC60000U;
+    uint32_t s1 = u ^ ((u << 7U) & 0x9D2C5680U);
+    uint32_t s2 = u ^ ((s1 << 7U) & 0x9D2C5680U);
+    uint32_t s3 = u ^ ((s2 << 7U) & 0x9D2C5680U);
+    u ^= (s3 << 7U) & 0x9D2C5680U;
+    u ^= (u >> 11U) ^ (u >> 22U);
+    return u;
+}
+
+/* 64x64 Boolean Matrix-Vector Multiply over GF(2) via POPCNT Parity */
+static inline uint64_t flow_asm_gf2_matvec64(const uint64_t rows[64], uint64_t x) {
+    if (!rows)
+        return 0ULL;
+    uint64_t out = 0ULL;
+    for (uint32_t i = 0U; i < 64U; ++i) {
+        uint64_t parity = (uint64_t)__builtin_popcountll(rows[i] & x) & 1ULL;
+        out |= (parity << i);
+    }
+    return out;
+}
+
 #ifdef __cplusplus
 }
 #endif
