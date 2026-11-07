@@ -109,7 +109,20 @@ $(BUILD_DIR)/test-ext-constraint: tests/test_ext_constraint.c $(TEST_DEPS) | $(B
 $(BUILD_DIR)/test-qpoly-poc: tests/test_qpoly_poc.c $(TEST_DEPS) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(STACK_LDFLAGS) $(THREAD_FLAGS) -Isrc $< $(LIBFLOW_RT_A) -o $@ $(LDLIBS)
 
-test: $(TEST_BINARIES)
+FREESTANDING_CFLAGS := -std=c11 -ffreestanding -nostdlib -fno-builtin -DFLOW_FREESTANDING=1 \
+                       -Wall -Wextra -Wpedantic -Wmissing-prototypes -Werror -O2 -Isrc -I$(BUILD_DIR)
+
+$(BUILD_DIR)/test_freestanding_kernel.o: tests/test_freestanding_kernel.c src/flow_asm.h src/flow_hott_jet.h $(HW_SPEC_H) | $(BUILD_DIR)
+	$(CC) $(FREESTANDING_CFLAGS) -c $< -o $@
+	@test -z "$$(nm -u $@)" || (echo "ERROR: Undefined symbols in freestanding Ring-0 object:" && nm -u $@ && exit 1)
+
+$(BUILD_DIR)/test_freestanding_mcu32.o: tests/test_freestanding_kernel.c src/flow_asm.h src/flow_hott_jet.h $(HW_SPEC_H) | $(BUILD_DIR)
+	$(CC) $(FREESTANDING_CFLAGS) -DFLOW_FORCE_C17_FALLBACK=1 -DFLOW_FORCE_32BIT_FALLBACK=1 -c $< -o $@
+	@test -z "$$(nm -u $@)" || (echo "ERROR: Undefined symbols in 32-bit MCU freestanding object:" && nm -u $@ && exit 1)
+
+test: $(TEST_BINARIES) $(BUILD_DIR)/test_freestanding_kernel.o $(BUILD_DIR)/test_freestanding_mcu32.o
+	@echo "=== [0/3] Bare-Metal / Ring-0 Freestanding Verification (-ffreestanding -nostdlib, 0 undefined symbols) ==="
+	@echo "  [PASS] test_freestanding_kernel.o & test_freestanding_mcu32.o (__STDC_HOSTED__ == 0, nm -u == empty)"
 	@echo "=== [1/3] Total ASM Substrate, Hardware Sieve & 2-Jet Self-Bootstrapping ==="
 	@$(BUILD_DIR)/test-asm-sieve --report
 	@echo "=== [2/3] Universal External-Constraint ABI (b_ext, u_ext), Hysteresis & Anti-Tunneling ==="

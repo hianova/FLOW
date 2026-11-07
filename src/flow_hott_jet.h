@@ -200,9 +200,10 @@ static inline FlowJet2 flow_jet2_div(FlowJet2 a, FlowJet2 b) {
     }
     __extension__ typedef __int128 i128;
     i128 bv = (i128)b.v;
-    i128 v = ((i128)a.v * (i128)FLOW_Q16_ONE) / bv;
-    i128 d1 = ((i128)a.d1 * (i128)FLOW_Q16_ONE - v * (i128)b.d1) / bv;
-    i128 d2 = ((i128)a.d2 * (i128)FLOW_Q16_ONE - 2 * d1 * (i128)b.d1 - v * (i128)b.d2) / bv;
+    i128 v = flow_i128_div_i128((i128)a.v * (i128)FLOW_Q16_ONE, bv);
+    i128 d1 = flow_i128_div_i128((i128)a.d1 * (i128)FLOW_Q16_ONE - v * (i128)b.d1, bv);
+    i128 d2 = flow_i128_div_i128(
+        (i128)a.d2 * (i128)FLOW_Q16_ONE - 2 * d1 * (i128)b.d1 - v * (i128)b.d2, bv);
     return flow_jet2_make(flow_q16_clamp_i128(v), flow_q16_clamp_i128(d1), flow_q16_clamp_i128(d2));
 }
 
@@ -229,8 +230,8 @@ static inline FlowJet2 flow_jet2_sqrt(FlowJet2 x) {
         return flow_jet2_const(0);
     }
     i128 two_r = 2 * (i128)r;
-    i128 d1 = ((i128)x.d1 * (i128)FLOW_Q16_ONE) / two_r;
-    i128 d2 = ((i128)x.d2 * (i128)FLOW_Q16_ONE - 2 * d1 * d1) / two_r;
+    i128 d1 = flow_i128_div_i128((i128)x.d1 * (i128)FLOW_Q16_ONE, two_r);
+    i128 d2 = flow_i128_div_i128((i128)x.d2 * (i128)FLOW_Q16_ONE - 2 * d1 * d1, two_r);
     return flow_jet2_make(r, flow_q16_clamp_i128(d1), flow_q16_clamp_i128(d2));
 }
 
@@ -313,7 +314,7 @@ static inline bool flow_jet2_solve_root(FlowJet2 j, int64_t t_max_q16, int64_t *
         }
         u128 unum = (num < 0) ? (u128)(-num) : (u128)num;
         u128 uden = (den < 0) ? (u128)(-den) : (u128)den;
-        u128 t_u = (unum + (uden >> 1U)) / uden;
+        u128 t_u = flow_u128_div_u128(unum + (uden >> 1U), uden);
         if (t_u == 0U)
             t_u = 1U;
         if (t_u <= (u128)(uint64_t)t_max_q16) {
@@ -345,7 +346,7 @@ static inline bool flow_jet2_solve_root(FlowJet2 j, int64_t t_max_q16, int64_t *
             continue;
         }
         u128 unum = (num < 0) ? (u128)(-num) : (u128)num;
-        u128 t_u = (unum + (uden >> 1U)) / uden;
+        u128 t_u = flow_u128_div_u128(unum + (uden >> 1U), uden);
         if (t_u == 0U)
             t_u = 1U;
         if (t_u <= (u128)(uint64_t)t_max_q16) {
@@ -506,7 +507,10 @@ static inline int64_t flow_asm_select_i64(uint64_t cond_bit, int64_t if_true, in
     static inline __attribute__((unused)) void NAME##_init(NAME *p) {                              \
         if (!p)                                                                                    \
             return;                                                                                \
-        __builtin_memset(p, 0, sizeof(*p));                                                        \
+        uint8_t *raw_bytes = (uint8_t *)(void *)p;                                                 \
+        for (size_t z = 0U; z < sizeof(*p); ++z) {                                                 \
+            raw_bytes[z] = 0U;                                                                     \
+        }                                                                                          \
         atomic_init(&p->active_mask, 0ULL);                                                        \
         atomic_init(&p->hysteresis_mask, 0ULL);                                                    \
         atomic_init(&p->generation, 1ULL);                                                         \
@@ -519,7 +523,8 @@ static inline int64_t flow_asm_select_i64(uint64_t cond_bit, int64_t if_true, in
         __extension__ typedef __int128 i128;                                                       \
         i128 scaled = (i128)num * ((i128)1 << (SHIFT));                                            \
         i128 D = (i128)denom;                                                                      \
-        i128 q = (scaled >= 0) ? ((scaled + D / 2) / D) : -(((-scaled) + D / 2) / D);              \
+        i128 q = (scaled >= 0) ? flow_i128_div_i128(scaled + D / 2, D)                             \
+                               : -flow_i128_div_i128((-scaled) + D / 2, D);                        \
         if (q >= (i128)INT32_MAX)                                                                  \
             return INT32_MAX;                                                                      \
         if (q <= (i128)INT32_MIN)                                                                  \
@@ -623,7 +628,10 @@ static inline int64_t flow_asm_select_i64(uint64_t cond_bit, int64_t if_true, in
         if (!p || plane_count == 0 || plane_count > (size_t)(MAX_PLANES))                          \
             return 0;                                                                              \
         NAME##_init(p);                                                                            \
-        int64_t b_tmp[MAX_PLANES] = {0};                                                           \
+        int64_t b_tmp[MAX_PLANES];                                                                 \
+        for (size_t z = 0U; z < (size_t)(MAX_PLANES); ++z) {                                       \
+            b_tmp[z] = 0;                                                                          \
+        }                                                                                          \
         if (!flow_qpoly_quantize_inner(plane_count, (size_t)(DIM), (uint32_t)(SHIFT), a_num,       \
                                        b_num, denom, box_min, box_max, &p->A[0][0], b_tmp))        \
             return 0;                                                                              \
