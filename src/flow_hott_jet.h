@@ -235,66 +235,25 @@ static inline FlowJet2 flow_jet2_sqrt(FlowJet2 x) {
     return flow_jet2_make(r, flow_q16_clamp_i128(d1), flow_q16_clamp_i128(d2));
 }
 
-static inline FlowJet2 flow_jet2_ema_step(FlowJet2 prev_ema, FlowJet2 sample, int64_t alpha_q16) {
+/*
+ * Pure Q48.16 2-Jet Unit-Interval Convex Combination / Homotopy Lerp (`alpha_q16` in [0, 65536]):
+ *   lerp(j0, j1, alpha) = (1 - alpha) * j0 + alpha * j1
+ */
+static inline FlowJet2 flow_jet2_lerp(FlowJet2 j0, FlowJet2 j1, int64_t alpha_q16) {
     if (alpha_q16 <= 0)
-        return prev_ema;
+        return j0;
     if (alpha_q16 >= FLOW_Q16_ONE)
-        return sample;
+        return j1;
     __extension__ typedef __int128 i128;
-    i128 w_prev = (i128)(FLOW_Q16_ONE - alpha_q16);
-    i128 w_samp = (i128)alpha_q16;
-    i128 v = (w_prev * (i128)prev_ema.v + w_samp * (i128)sample.v) >> FLOW_Q16_SHIFT;
-    i128 d1 = (w_prev * (i128)prev_ema.d1 + w_samp * (i128)sample.d1) >> FLOW_Q16_SHIFT;
-    i128 d2 = (w_prev * (i128)prev_ema.d2 + w_samp * (i128)sample.d2) >> FLOW_Q16_SHIFT;
+    i128 w0 = (i128)(FLOW_Q16_ONE - alpha_q16);
+    i128 w1 = (i128)alpha_q16;
+    i128 v = (w0 * (i128)j0.v + w1 * (i128)j1.v) >> FLOW_Q16_SHIFT;
+    i128 d1 = (w0 * (i128)j0.d1 + w1 * (i128)j1.d1) >> FLOW_Q16_SHIFT;
+    i128 d2 = (w0 * (i128)j0.d2 + w1 * (i128)j1.d2) >> FLOW_Q16_SHIFT;
     return flow_jet2_make(flow_q16_clamp_i128(v), flow_q16_clamp_i128(d1), flow_q16_clamp_i128(d2));
 }
 
-/*
- * Closed-Loop 2-Jet Impedance & Non-Markovian Memory Damping Step (Dual of EMA):
- *   u = -(kp * (cur.v - ref.v) + kd * (cur.d1 - ref.d1) + km * cur.d2) >> 16
- * Clamped to [-max_effort_q16, +max_effort_q16] with hardware sieve tracking.
- */
-static inline int64_t flow_jet2_impedance_step_q16(FlowJet2 current, FlowJet2 target,
-                                                   int64_t kp_q16, int64_t kd_q16, int64_t km_q16,
-                                                   int64_t max_effort_q16, uint64_t *inout_sieve) {
-    if (max_effort_q16 <= 0) {
-        if (inout_sieve)
-            *inout_sieve &= ~FLOW_ASM_SIEVE_DOMAIN_VALID;
-        return 0;
-    }
-    __extension__ typedef __int128 i128;
-    i128 err_v = (i128)current.v - (i128)target.v;
-    i128 err_d1 = (i128)current.d1 - (i128)target.d1;
-    i128 raw_u =
-        -(err_v * (i128)kp_q16 + err_d1 * (i128)kd_q16 + (i128)current.d2 * (i128)km_q16) >>
-        FLOW_Q16_SHIFT;
-    i128 lim = (i128)max_effort_q16;
-    if (raw_u > lim) {
-        if (inout_sieve)
-            *inout_sieve &= ~FLOW_ASM_SIEVE_Q_NO_SATURATION;
-        return max_effort_q16;
-    }
-    if (raw_u < -lim) {
-        if (inout_sieve)
-            *inout_sieve &= ~FLOW_ASM_SIEVE_Q_NO_SATURATION;
-        return -max_effort_q16;
-    }
-    return (int64_t)raw_u;
-}
-
-/*
- * 128-Bit Overflow-Free 2D Cross Product in Q48.16 (ZMP Support Polygon & Orientation):
- *   ((ax - ox) * (by - oy) - (ay - oy) * (bx - ox)) >> 16
- */
-static inline int64_t flow_q16_cross2d(int64_t ox_q16, int64_t oy_q16, int64_t ax_q16,
-                                       int64_t ay_q16, int64_t bx_q16, int64_t by_q16) {
-    __extension__ typedef __int128 i128;
-    i128 ux = (i128)ax_q16 - (i128)ox_q16;
-    i128 uy = (i128)ay_q16 - (i128)oy_q16;
-    i128 vx = (i128)bx_q16 - (i128)ox_q16;
-    i128 vy = (i128)by_q16 - (i128)oy_q16;
-    return flow_q16_clamp_i128((ux * vy - uy * vx) >> FLOW_Q16_SHIFT);
-}
+#define flow_jet2_ema_step flow_jet2_lerp
 
 /*
  * Evaluate 2-Jet Taylor polynomial at `dt_q16` (where `1.0 == FLOW_Q16_ONE == 65536`):

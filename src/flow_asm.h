@@ -42,19 +42,20 @@ extern "C" {
  *
  *   1. Flag-Setting Q-Arithmetic (`adds`/`subs`/`mul`/`smulh`/`extr` + `cset`)
  *      -> projects hardware `NZCV.V` into `FlowResultU64` + 64-bit Hardware Sieve.
- *   2. Exact 128-Bit Q16 Operators (`qdiv`, `isqrt_u128`, `qsqrt`, `qema_step`,
- *      `solvency_check`) + Branchless Boundary Tagging (`0x7FF8400000000000ULL`).
+ *   2. Exact 128-Bit Q16 Operators (`qdiv`, `isqrt_u128`, `qsqrt`, `qlerp_q16`,
+ *      `qmargin3_i64`) + Branchless Boundary Tagging (`0x7FF8400000000000ULL`).
  *   3. Masked Cyclic Memory Arena (`and` + `bic` + `ldr`/`str`) -> maps any 64-bit
  *      index into Z / 2^k Z prior to effective address generation (0 OOB UB).
- *   4. Wave64 Subgroup Ballot (`POPCNT` / `CTZ`) & 1.58-Bit Ternary Lattice.
+ *   4. Wave64 Subgroup Ballot (`POPCNT` / `CTZ`), 1.58-Bit Ternary Lattice &
+ *      Goldilocks Prime Field F_p (p = 2^64 - 2^32 + 1) Division-Free Algebra.
  * ============================================================================
  */
 
 #define FLOW_VERSION_MAJOR 4
-#define FLOW_VERSION_MINOR 1
+#define FLOW_VERSION_MINOR 2
 #define FLOW_VERSION_PATCH 0
 #ifndef FLOW_VERSION_STRING
-#define FLOW_VERSION_STRING "4.1.0"
+#define FLOW_VERSION_STRING "4.2.0"
 #endif
 #ifndef FLOW_GIT_BRANCH
 #define FLOW_GIT_BRANCH "main"
@@ -802,25 +803,25 @@ static inline FlowResultU64 flow_asm_qsqrt_shift16_i64(int64_t x_q16, uint64_t *
 }
 
 /*
- * Pure Q48.16 Exponential Moving Average step (`alpha_q16` in [0, 65536]):
- * Accumulates `(1 - alpha) * prev + alpha * sample` in exact 128-bit integer
+ * Pure Q48.16 Unit-Interval Convex Combination / Geodesic Lerp (`alpha_q16` in [0, 65536]):
+ * Accumulates `(1 - alpha) * x0_q16 + alpha * x1_q16` in exact 128-bit integer
  * arithmetic before shifting by 16, eliminating IEEE-754 mantissa absorption.
  */
-static inline FlowResultU64 flow_asm_qema_step_q16(int64_t prev_ema_q16, int64_t sample_q16,
-                                                   int64_t alpha_q16, uint64_t *inout_sieve) {
+static inline FlowResultU64 flow_asm_qlerp_q16(int64_t x0_q16, int64_t x1_q16, int64_t alpha_q16,
+                                               uint64_t *inout_sieve) {
     if (__builtin_expect(alpha_q16 < 0 || alpha_q16 > FLOW_Q16_ONE, 0)) {
         if (inout_sieve)
             *inout_sieve &= ~FLOW_ASM_SIEVE_DOMAIN_VALID;
-        FlowResultU64 out = {(uint64_t)prev_ema_q16,
+        FlowResultU64 out = {(uint64_t)x0_q16,
                              flow_hott_make_boundary_tag(FLOW_HOTT_BOUNDARY_OVERFLOW, 6U,
                                                          (uint8_t)FLOW_BOUNDARY_PRECOND, 0U, 1U)};
         return out;
     }
 #if defined(__SIZEOF_INT128__) && !defined(FLOW_FORCE_32BIT_FALLBACK)
     __extension__ typedef __int128 i128;
-    i128 w_prev = (i128)(FLOW_Q16_ONE - alpha_q16) * (i128)prev_ema_q16;
-    i128 w_samp = (i128)alpha_q16 * (i128)sample_q16;
-    i128 sum = w_prev + w_samp;
+    i128 w0 = (i128)(FLOW_Q16_ONE - alpha_q16) * (i128)x0_q16;
+    i128 w1 = (i128)alpha_q16 * (i128)x1_q16;
+    i128 sum = w0 + w1;
     i128 res = sum >> FLOW_Q16_SHIFT;
     if (__builtin_expect(res > (i128)INT64_MAX || res < (i128)INT64_MIN, 0)) {
         if (inout_sieve)
@@ -835,8 +836,8 @@ static inline FlowResultU64 flow_asm_qema_step_q16(int64_t prev_ema_q16, int64_t
 #else
     int64_t p_hi = 0, s_hi = 0, sum_hi = 0, res = 0;
     uint64_t p_lo = 0ULL, s_lo = 0ULL, sum_lo = 0ULL, ovf = 0ULL;
-    flow_mul_i64_to_i128(FLOW_Q16_ONE - alpha_q16, prev_ema_q16, &p_hi, &p_lo);
-    flow_mul_i64_to_i128(alpha_q16, sample_q16, &s_hi, &s_lo);
+    flow_mul_i64_to_i128(FLOW_Q16_ONE - alpha_q16, x0_q16, &p_hi, &p_lo);
+    flow_mul_i64_to_i128(alpha_q16, x1_q16, &s_hi, &s_lo);
     flow_add_i128(p_hi, p_lo, s_hi, s_lo, &sum_hi, &sum_lo);
     flow_shr16_i128(sum_hi, sum_lo, &res, &ovf);
     if (__builtin_expect(ovf != 0ULL, 0)) {
@@ -852,14 +853,17 @@ static inline FlowResultU64 flow_asm_qema_step_q16(int64_t prev_ema_q16, int64_t
 #endif
 }
 
+#define flow_asm_qema_step_q16 flow_asm_qlerp_q16
+
 /*
- * Pure Q48.16 Solvency Check (`assets_q16 + buffer_q16 - liabilities_q16 >= 0`):
- * Uses hardware flag-setting ASM Q-addition/subtraction (`adds`/`subs` + `cset vs`).
+ * Pure Signed 3-Term Affine Barrier Margin (`pos_a + pos_c - neg_b >= 0`):
+ * Uses hardware flag-setting ASM Q-addition/subtraction (`adds`/`subs` + `cset vs`)
+ * and clears `FLOW_ASM_SIEVE_QPOLY_INTERIOR` on negative margin or overflow.
  */
-static inline FlowResultU64 flow_asm_solvency_check_q16(int64_t assets_q16, int64_t liabilities_q16,
-                                                        int64_t buffer_q16, uint64_t *inout_sieve) {
-    FlowResultU64 cover = flow_asm_qadd_i64(assets_q16, buffer_q16, inout_sieve);
-    FlowResultU64 margin = flow_asm_qsub_i64((int64_t)cover.value, liabilities_q16, inout_sieve);
+static inline FlowResultU64 flow_asm_qmargin3_i64(int64_t pos_a, int64_t neg_b, int64_t pos_c,
+                                                  uint64_t *inout_sieve) {
+    FlowResultU64 cover = flow_asm_qadd_i64(pos_a, pos_c, inout_sieve);
+    FlowResultU64 margin = flow_asm_qsub_i64((int64_t)cover.value, neg_b, inout_sieve);
     if (flow_result_u64_is_boundary(cover) && !flow_result_u64_is_boundary(margin)) {
         margin.boundary_tag = cover.boundary_tag;
     }
@@ -868,6 +872,8 @@ static inline FlowResultU64 flow_asm_solvency_check_q16(int64_t assets_q16, int6
     }
     return margin;
 }
+
+#define flow_asm_solvency_check_q16 flow_asm_qmargin3_i64
 
 static inline uint64_t flow_asm_check_jet2(FlowJet2 j, uint64_t *inout_sieve) {
     uint64_t uv = (uint64_t)j.v;
@@ -1041,8 +1047,7 @@ static inline uint32_t flow_ballot_compact_wave64(uint64_t ballot_mask, uint32_t
 #define flow_gpu_ballot_compact_wave64 flow_ballot_compact_wave64
 
 /* ============================================================================
- * Pillar E: Goldilocks Finite-Field F_p (p = 2^64 - 2^32 + 1), F_2 Bijection &
- *           1-Cycle Hardware Bit-Reversal QMC (`rbit`)
+ * Pillar E: Goldilocks Prime Field F_p (p = 2^64 - 2^32 + 1) & 1-Cycle `rbit`
  * ============================================================================ */
 
 #define FLOW_GOLDILOCKS_PRIME UINT64_C(0xFFFFFFFF00000001)
@@ -1085,6 +1090,18 @@ static inline uint64_t flow_asm_fp64_mul(uint64_t a, uint64_t b) {
     return flow_asm_fp64_add(t0, t1);
 }
 
+/*
+ * Bijective Monomial Automorphism x |-> x^7 (mod p) over Goldilocks F_p:
+ * Since gcd(7, p - 1) = gcd(7, 2^64 - 2^32) = 1, x^7 is a permutation polynomial
+ * over F_p evaluated in exactly 4 division-free field multiplications.
+ */
+static inline uint64_t flow_asm_fp64_pow7(uint64_t x) {
+    uint64_t x2 = flow_asm_fp64_mul(x, x);
+    uint64_t x4 = flow_asm_fp64_mul(x2, x2);
+    uint64_t x6 = flow_asm_fp64_mul(x4, x2);
+    return flow_asm_fp64_mul(x6, x);
+}
+
 static inline uint64_t flow_asm_rbit64(uint64_t x) {
     uint64_t out = x;
 #if !defined(FLOW_FORCE_C17_FALLBACK) && (defined(__aarch64__) || defined(__arm64__))
@@ -1098,43 +1115,6 @@ static inline uint64_t flow_asm_rbit64(uint64_t x) {
         ((out >> 4U) & UINT64_C(0x0F0F0F0F0F0F0F0F)) | ((out & UINT64_C(0x0F0F0F0F0F0F0F0F)) << 4U);
     out = __builtin_bswap64(out);
 #endif
-    return out;
-}
-
-/* 1-Cycle Base-2 Van der Corput Quasi-Monte Carlo (QMC) Radical Inverse in Q16.16 [0..65535] */
-static inline int64_t flow_asm_radical_inverse_q16(uint64_t index) {
-    return (int64_t)(flow_asm_rbit64(index) >> 48U);
-}
-
-/* Bijective F_2 32-Bit Tempering & Exact Inverse Untempering */
-static inline uint32_t flow_asm_biject_temper32(uint32_t x) {
-    uint32_t y = x ^ (x >> 11U);
-    y ^= (y << 7U) & 0x9D2C5680U;
-    y ^= (y << 15U) & 0xEFC60000U;
-    y ^= (y >> 18U);
-    return y;
-}
-
-static inline uint32_t flow_asm_biject_untemper32(uint32_t y) {
-    uint32_t u = y ^ (y >> 18U);
-    u ^= (u << 15U) & 0xEFC60000U;
-    uint32_t s1 = u ^ ((u << 7U) & 0x9D2C5680U);
-    uint32_t s2 = u ^ ((s1 << 7U) & 0x9D2C5680U);
-    uint32_t s3 = u ^ ((s2 << 7U) & 0x9D2C5680U);
-    u ^= (s3 << 7U) & 0x9D2C5680U;
-    u ^= (u >> 11U) ^ (u >> 22U);
-    return u;
-}
-
-/* 64x64 Boolean Matrix-Vector Multiply over GF(2) via POPCNT Parity */
-static inline uint64_t flow_asm_gf2_matvec64(const uint64_t rows[64], uint64_t x) {
-    if (!rows)
-        return 0ULL;
-    uint64_t out = 0ULL;
-    for (uint32_t i = 0U; i < 64U; ++i) {
-        uint64_t parity = (uint64_t)__builtin_popcountll(rows[i] & x) & 1ULL;
-        out |= (parity << i);
-    }
     return out;
 }
 

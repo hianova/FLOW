@@ -2,6 +2,7 @@
 #define FLOW_IO_H
 
 #include "flow_hott_jet.h"
+#include "flow_image64.h"
 
 #if !defined(__cplusplus)
 #include <stdatomic.h>

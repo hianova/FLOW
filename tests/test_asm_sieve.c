@@ -171,7 +171,7 @@ int main(int argc, char **argv) {
             flow_asm_qpoly4d_eval_plane(a_plane, (1LL << 62) + 100LL, x_plane_neg, &sv_plane_pos);
         FLOW_ASSERT_EQ(sl_pos, INT64_MAX);
 
-        /* 1j. Pure Q16 ISQRT, QSQRT, QEMA (Zero Mantissa Absorption) & Solvency Check */
+        /* 1j. Pure Q16 ISQRT, QSQRT, QLERP (Zero Mantissa Absorption) & QMARGIN3 */
         FLOW_ASSERT_EQ(flow_asm_isqrt_u64(0ULL), 0ULL);
         FLOW_ASSERT_EQ(flow_asm_isqrt_u64(1ULL), 1ULL);
         FLOW_ASSERT_EQ(flow_asm_isqrt_u64(UINT64_MAX), 4294967295ULL);
@@ -187,28 +187,28 @@ int main(int argc, char **argv) {
         FLOW_ASSERT_EQ((int64_t)r_sqrt9.value, 3LL << 16);
         FLOW_ASSERT_EQ(sv_sqrt, FLOW_ASM_SIEVE_ALL_SOUND);
 
-        /* Verify zero mantissa absorption on Q16 EMA step across huge scale difference */
-        uint64_t sv_ema = FLOW_ASM_SIEVE_ALL_SOUND;
-        int64_t big_ema_q16 = 1000000000LL << 16;
-        int64_t sample_q16 = big_ema_q16 + (1LL << 16);
-        FlowResultU64 r_ema = flow_asm_qema_step_q16(big_ema_q16, sample_q16, 1LL, &sv_ema);
-        FLOW_ASSERT_FALSE(flow_result_u64_is_boundary(r_ema));
-        FLOW_ASSERT_EQ((int64_t)r_ema.value, big_ema_q16 + 1LL);
-        FLOW_ASSERT_EQ(sv_ema, FLOW_ASM_SIEVE_ALL_SOUND);
+        /* Verify zero mantissa absorption on Q16 convex lerp across huge scale difference */
+        uint64_t sv_lerp = FLOW_ASM_SIEVE_ALL_SOUND;
+        int64_t big_x0_q16 = 1000000000LL << 16;
+        int64_t x1_q16 = big_x0_q16 + (1LL << 16);
+        FlowResultU64 r_lerp = flow_asm_qlerp_q16(big_x0_q16, x1_q16, 1LL, &sv_lerp);
+        FLOW_ASSERT_FALSE(flow_result_u64_is_boundary(r_lerp));
+        FLOW_ASSERT_EQ((int64_t)r_lerp.value, big_x0_q16 + 1LL);
+        FLOW_ASSERT_EQ(sv_lerp, FLOW_ASM_SIEVE_ALL_SOUND);
 
-        /* Solvency check: interior vs insolvent vs overflow */
-        uint64_t sv_solv_ok = FLOW_ASM_SIEVE_ALL_SOUND;
-        FlowResultU64 r_solv_ok =
-            flow_asm_solvency_check_q16(500LL << 16, 800LL << 16, 400LL << 16, &sv_solv_ok);
-        FLOW_ASSERT_FALSE(flow_result_u64_is_boundary(r_solv_ok));
-        FLOW_ASSERT_EQ((int64_t)r_solv_ok.value, 100LL << 16);
-        FLOW_ASSERT_EQ(sv_solv_ok, FLOW_ASM_SIEVE_ALL_SOUND);
+        /* 3-term affine barrier margin: interior vs violated vs overflow */
+        uint64_t sv_mrg_ok = FLOW_ASM_SIEVE_ALL_SOUND;
+        FlowResultU64 r_mrg_ok =
+            flow_asm_qmargin3_i64(500LL << 16, 800LL << 16, 400LL << 16, &sv_mrg_ok);
+        FLOW_ASSERT_FALSE(flow_result_u64_is_boundary(r_mrg_ok));
+        FLOW_ASSERT_EQ((int64_t)r_mrg_ok.value, 100LL << 16);
+        FLOW_ASSERT_EQ(sv_mrg_ok, FLOW_ASM_SIEVE_ALL_SOUND);
 
-        uint64_t sv_solv_bad = FLOW_ASM_SIEVE_ALL_SOUND;
-        FlowResultU64 r_solv_bad =
-            flow_asm_solvency_check_q16(500LL << 16, 1200LL << 16, 400LL << 16, &sv_solv_bad);
-        FLOW_ASSERT_EQ((int64_t)r_solv_bad.value, -(300LL << 16));
-        FLOW_ASSERT_EQ(sv_solv_bad & FLOW_ASM_SIEVE_QPOLY_INTERIOR, 0ULL);
+        uint64_t sv_mrg_bad = FLOW_ASM_SIEVE_ALL_SOUND;
+        FlowResultU64 r_mrg_bad =
+            flow_asm_qmargin3_i64(500LL << 16, 1200LL << 16, 400LL << 16, &sv_mrg_bad);
+        FLOW_ASSERT_EQ((int64_t)r_mrg_bad.value, -(300LL << 16));
+        FLOW_ASSERT_EQ(sv_mrg_bad & FLOW_ASM_SIEVE_QPOLY_INTERIOR, 0ULL);
     }
 
     /* =====================================================================
@@ -357,53 +357,20 @@ int main(int argc, char **argv) {
             FLOW_ASSERT_EQ(lhs, rhs);
         }
 
-        /* 4c. 1-Cycle Hardware Bit-Reversal (rbit) & QMC Radical Inverse */
+        /* 4c. Goldilocks F_p bijective automorphism x^7 (mod p) & 1-cycle hardware `rbit` */
+        FLOW_ASSERT_EQ(flow_asm_fp64_pow7(0ULL), 0ULL);
+        FLOW_ASSERT_EQ(flow_asm_fp64_pow7(1ULL), 1ULL);
+        FLOW_ASSERT_EQ(flow_asm_fp64_pow7(p_gl - 1ULL), p_gl - 1ULL); /* (-1)^7 == -1 mod p */
+        FLOW_ASSERT_EQ(flow_asm_fp64_pow7(2ULL), 128ULL);
+        for (uint32_t i = 0; i < 64U; ++i) {
+            uint64_t x1 = (uint64_t)(i + 1U) * UINT64_C(0x9E3779B97F4A7C15) % p_gl;
+            uint64_t x2 = (x1 + 1ULL) % p_gl;
+            FLOW_ASSERT_NE(flow_asm_fp64_pow7(x1), flow_asm_fp64_pow7(x2));
+        }
+
         FLOW_ASSERT_EQ(flow_asm_rbit64(1ULL), 1ULL << 63U);
         FLOW_ASSERT_EQ(flow_asm_rbit64(flow_asm_rbit64(0xCAFEBABE13572468ULL)),
                        0xCAFEBABE13572468ULL);
-        FLOW_ASSERT_EQ(flow_asm_radical_inverse_q16(0ULL), 0LL);
-        FLOW_ASSERT_EQ(flow_asm_radical_inverse_q16(1ULL), 32768LL); /* 1/2 in Q16 */
-        FLOW_ASSERT_EQ(flow_asm_radical_inverse_q16(2ULL), 16384LL); /* 1/4 in Q16 */
-        FLOW_ASSERT_EQ(flow_asm_radical_inverse_q16(3ULL), 49152LL); /* 3/4 in Q16 */
-        FLOW_ASSERT_EQ(flow_asm_radical_inverse_q16(4ULL), 8192LL);  /* 1/8 in Q16 */
-
-        /* 4d. Bijective F_2 Tempering Involution & GF(2) 64x64 Matrix-Vector Multiply */
-        FLOW_ASSERT_EQ(flow_asm_biject_untemper32(flow_asm_biject_temper32(0U)), 0U);
-        FLOW_ASSERT_EQ(flow_asm_biject_untemper32(flow_asm_biject_temper32(UINT32_MAX)),
-                       UINT32_MAX);
-        for (uint32_t i = 0; i < 256U; ++i) {
-            uint32_t x32 = (uint32_t)flow_prng_next(&fp_seed);
-            uint32_t y32 = flow_asm_biject_temper32(x32);
-            FLOW_ASSERT_EQ(flow_asm_biject_untemper32(y32), x32);
-            FLOW_ASSERT_EQ(flow_asm_biject_temper32(flow_asm_biject_untemper32(x32)), x32);
-        }
-
-        uint64_t gf2_ident[64];
-        for (uint32_t i = 0; i < 64U; ++i) {
-            gf2_ident[i] = 1ULL << i;
-        }
-        FLOW_ASSERT_EQ(flow_asm_gf2_matvec64(gf2_ident, 0xFEDCBA9876543210ULL),
-                       0xFEDCBA9876543210ULL);
-
-        /* 4e. Closed-Loop 2-Jet Impedance (Dual of EMA) & 2D Cross Product (ZMP) */
-        FlowJet2 cur_j = flow_jet2_make(2LL << 16, 1LL << 16, 1LL << 16);
-        FlowJet2 ref_j = flow_jet2_make(1LL << 16, 0LL, 0LL);
-        uint64_t sv_imp = FLOW_ASM_SIEVE_ALL_SOUND;
-        int64_t u_imp = flow_jet2_impedance_step_q16(cur_j, ref_j, 10LL << 16, 4LL << 16, 2LL << 16,
-                                                     100LL << 16, &sv_imp);
-        /* -(10*(2-1) + 4*(1-0) + 2*1) = -16.0 in Q16 */
-        FLOW_ASSERT_EQ(u_imp, -(16LL << 16));
-        FLOW_ASSERT_EQ(sv_imp, FLOW_ASM_SIEVE_ALL_SOUND);
-
-        uint64_t sv_imp_sat = FLOW_ASM_SIEVE_ALL_SOUND;
-        int64_t u_sat = flow_jet2_impedance_step_q16(cur_j, ref_j, 10LL << 16, 4LL << 16, 2LL << 16,
-                                                     5LL << 16, &sv_imp_sat);
-        FLOW_ASSERT_EQ(u_sat, -(5LL << 16));
-        FLOW_ASSERT_EQ(sv_imp_sat & FLOW_ASM_SIEVE_Q_NO_SATURATION, 0ULL);
-
-        FLOW_ASSERT_EQ(flow_q16_cross2d(0, 0, 1LL << 16, 0, 2LL << 16, 0), 0LL);
-        FLOW_ASSERT_EQ(flow_q16_cross2d(0, 0, 2LL << 16, 0, 0, 3LL << 16), 6LL << 16);
-        FLOW_ASSERT_EQ(flow_q16_cross2d(0, 0, 0, 3LL << 16, 2LL << 16, 0), -(6LL << 16));
     }
 
     /* =====================================================================

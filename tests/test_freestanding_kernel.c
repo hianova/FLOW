@@ -56,18 +56,17 @@ uint64_t flow_freestanding_ring0_step(uint64_t *arena_64, uint64_t raw_idx, int6
     FlowBmfTernary64 w = {UINT64_C(0x5555555555555555), UINT64_C(0xAAAAAAAAAAAAAAAA)};
     int32_t dot = flow_bmf_ternary64_dot(w, w);
 
-    /* 6. Goldilocks F_p field, F_2 bijection, QMC rbit & 2-Jet impedance / cross2d */
+    /* 6. Goldilocks F_p field (mul + pow7 bijection), 1-cycle rbit & Q16/2-Jet Lerp */
     uint64_t fp_prod = flow_asm_fp64_mul(loaded, (uint64_t)x_q16 + 1ULL);
-    int64_t qmc_q16 = flow_asm_radical_inverse_q16(raw_idx + 1ULL);
-    uint32_t untemp = flow_asm_biject_untemper32(flow_asm_biject_temper32((uint32_t)raw_idx));
-    int64_t imp_u = flow_jet2_impedance_step_q16(j1, j0, FLOW_Q16_ONE, FLOW_Q16_ONE >> 2U,
-                                                 FLOW_Q16_ONE >> 4U, FLOW_Q16_ONE * 10, &sieve);
-    int64_t cross_z = flow_q16_cross2d(0, 0, x_q16, 0, 0, v_q16);
+    uint64_t fp_p7 = flow_asm_fp64_pow7(fp_prod);
+    uint64_t rb = flow_asm_rbit64(raw_idx + 1ULL);
+    FlowResultU64 l_q16 = flow_asm_qlerp_q16(x_q16, v_q16, FLOW_Q16_ONE >> 1U, &sieve);
+    FlowJet2 j_mid = flow_jet2_lerp(j0, j1, FLOW_Q16_ONE >> 1U);
 
     uint64_t t1 = flow_hardware_cycles();
     if (out_sieve) {
         *out_sieve = sieve;
     }
-    return loaded ^ (uint64_t)slack ^ (uint64_t)dot ^ fp_prod ^ (uint64_t)qmc_q16 ^
-           (uint64_t)untemp ^ (uint64_t)imp_u ^ (uint64_t)cross_z ^ (t1 - t0);
+    return loaded ^ (uint64_t)slack ^ (uint64_t)dot ^ fp_p7 ^ rb ^ l_q16.value ^ (uint64_t)j_mid.v ^
+           (t1 - t0);
 }

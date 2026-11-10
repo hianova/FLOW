@@ -327,15 +327,15 @@ int main(void) {
         FLOW_ASSERT_EQ(fc_rehit.plane, 0U);
         FLOW_ASSERT_EQ(fc_rehit.t_hit_q, FLOW_Q16_ONE);
 
-        /* Verify pure Q16 2-Jet sqrt and EMA operators */
+        /* Verify pure Q16 2-Jet sqrt and convex lerp operators */
         FlowJet2 j_four = flow_jet2_make(4LL << 16, 8LL << 16, 0LL);
         FlowJet2 j_sqrt = flow_jet2_sqrt(j_four);
         FLOW_ASSERT_EQ(j_sqrt.v, 2LL << 16);
         FLOW_ASSERT_EQ(j_sqrt.d1, 2LL << 16);
 
-        FlowJet2 j_ema = flow_jet2_ema_step(j_four, j_sqrt, FLOW_Q16_ONE / 2LL);
-        FLOW_ASSERT_EQ(j_ema.v, 3LL << 16);
-        FLOW_ASSERT_EQ(j_ema.d1, 5LL << 16);
+        FlowJet2 j_lerp = flow_jet2_lerp(j_four, j_sqrt, FLOW_Q16_ONE / 2LL);
+        FLOW_ASSERT_EQ(j_lerp.v, 3LL << 16);
+        FLOW_ASSERT_EQ(j_lerp.d1, 5LL << 16);
 
         /* Edge cases: linear (d2==0), degenerate (d1==0, d2==0), negative discriminant, huge >=2^50
          */
