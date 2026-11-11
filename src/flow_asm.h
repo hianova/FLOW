@@ -52,10 +52,10 @@ extern "C" {
  */
 
 #define FLOW_VERSION_MAJOR 4
-#define FLOW_VERSION_MINOR 2
+#define FLOW_VERSION_MINOR 3
 #define FLOW_VERSION_PATCH 0
 #ifndef FLOW_VERSION_STRING
-#define FLOW_VERSION_STRING "4.2.0"
+#define FLOW_VERSION_STRING "4.3.0"
 #endif
 #ifndef FLOW_GIT_BRANCH
 #define FLOW_GIT_BRANCH "main"
@@ -773,13 +773,67 @@ __extension__ static inline uint64_t flow_asm_isqrt_u128(unsigned __int128 x) {
 }
 #endif
 
-static inline uint64_t flow_asm_isqrt_u64(uint64_t x) {
+/*
+ * Fast 64-Bit Single-`udiv` Chebyshev Piecewise-Linear Exact Integer Square Root:
+ * Normalizes `x` into `[2^62, 2^64)`, computes a 17-bit Chebyshev piecewise-linear seed
+ * across `[1.0, 4.0)` via a 192-entry table, and executes a SINGLE hardware `udiv` Heron
+ * step + overflow-safe floor fixup. Zero floating-point ops, exact floor(sqrt(x)) across
+ * all x in `[0, 2^64 - 1]`; falls back to division-free bit-pair root on 32-bit MCUs.
+ */
+static inline uint64_t flow_asm_isqrt_u64_fast(uint64_t x) {
 #if defined(__SIZEOF_INT128__) && !defined(FLOW_FORCE_32BIT_FALLBACK)
-    __extension__ typedef unsigned __int128 u128;
-    return flow_asm_isqrt_u128((u128)x);
+    if (x < 2ULL) {
+        return x;
+    }
+    static const uint32_t isqrt_lin_table[192] = {
+        0x0FF08000U, 0x0FD180FFU, 0x0FB281FCU, 0x0F9482F7U, 0x0F7783F1U, 0x0F5B84E8U, 0x0F3F85DEU,
+        0x0F2386D2U, 0x0F0887C4U, 0x0EEE88B4U, 0x0ED489A3U, 0x0EBB8A90U, 0x0EA28B7CU, 0x0E8A8C66U,
+        0x0E728D4FU, 0x0E5B8E36U, 0x0E448F1CU, 0x0E2E9000U, 0x0E1890E3U, 0x0E0291C4U, 0x0DED92A5U,
+        0x0DD89383U, 0x0DC39461U, 0x0DAF953DU, 0x0D9B9618U, 0x0D8896F2U, 0x0D7597CAU, 0x0D6298A1U,
+        0x0D4F9978U, 0x0D3D9A4CU, 0x0D2B9B20U, 0x0D199BF3U, 0x0D089CC5U, 0x0CF79D95U, 0x0CE69E64U,
+        0x0CD59F33U, 0x0CC5A000U, 0x0CB5A0CCU, 0x0CA5A198U, 0x0C95A262U, 0x0C85A32BU, 0x0C76A3F4U,
+        0x0C67A4BBU, 0x0C58A581U, 0x0C4AA647U, 0x0C3BA70CU, 0x0C2DA7CFU, 0x0C1FA892U, 0x0C11A954U,
+        0x0C04AA15U, 0x0BF6AAD5U, 0x0BE9AB95U, 0x0BDCAC53U, 0x0BCFAD11U, 0x0BC2ADCEU, 0x0BB6AE8AU,
+        0x0BA9AF45U, 0x0B9DB000U, 0x0B91B0BAU, 0x0B85B173U, 0x0B79B22BU, 0x0B6DB2E3U, 0x0B61B39AU,
+        0x0B56B450U, 0x0B4BB505U, 0x0B3FB5BAU, 0x0B34B66EU, 0x0B2AB721U, 0x0B1FB7D3U, 0x0B14B885U,
+        0x0B09B937U, 0x0AFFB9E7U, 0x0AF5BA97U, 0x0AEABB46U, 0x0AE0BBF5U, 0x0AD6BCA3U, 0x0ACCBD51U,
+        0x0AC3BDFDU, 0x0AB9BEAAU, 0x0AAFBF55U, 0x0AA6C000U, 0x0A9DC0AAU, 0x0A93C154U, 0x0A8AC1FDU,
+        0x0A81C2A6U, 0x0A78C34EU, 0x0A6FC3F6U, 0x0A66C49DU, 0x0A5DC543U, 0x0A55C5E9U, 0x0A4CC68EU,
+        0x0A44C733U, 0x0A3BC7D7U, 0x0A33C87BU, 0x0A2BC91EU, 0x0A23C9C1U, 0x0A1BCA63U, 0x0A12CB04U,
+        0x0A0BCBA6U, 0x0A03CC46U, 0x09FBCCE6U, 0x09F3CD86U, 0x09EBCE25U, 0x09E4CEC4U, 0x09DCCF62U,
+        0x09D5D000U, 0x09CED09DU, 0x09C6D13AU, 0x09BFD1D7U, 0x09B8D272U, 0x09B1D30EU, 0x09A9D3A9U,
+        0x09A2D444U, 0x099CD4DEU, 0x0995D577U, 0x098ED611U, 0x0987D6AAU, 0x0980D742U, 0x097AD7DAU,
+        0x0973D872U, 0x096CD909U, 0x0966D9A0U, 0x095FDA36U, 0x0959DACCU, 0x0953DB62U, 0x094CDBF7U,
+        0x0946DC8BU, 0x0940DD20U, 0x093ADDB4U, 0x0934DE47U, 0x092EDEDBU, 0x0928DF6EU, 0x0922E000U,
+        0x091CE092U, 0x0916E124U, 0x0910E1B5U, 0x090AE246U, 0x0904E2D7U, 0x08FFE367U, 0x08F9E3F7U,
+        0x08F3E487U, 0x08EEE516U, 0x08E8E5A5U, 0x08E3E633U, 0x08DDE6C1U, 0x08D8E74FU, 0x08D3E7DDU,
+        0x08CDE86AU, 0x08C8E8F7U, 0x08C3E983U, 0x08BDEA0FU, 0x08B8EA9BU, 0x08B3EB27U, 0x08AEEBB2U,
+        0x08A9EC3DU, 0x08A4ECC7U, 0x089FED52U, 0x089AEDDBU, 0x0895EE65U, 0x0890EEEEU, 0x088BEF77U,
+        0x0886F000U, 0x0881F088U, 0x087CF110U, 0x0878F198U, 0x0873F220U, 0x086EF2A7U, 0x086AF32EU,
+        0x0865F3B4U, 0x0860F43BU, 0x085CF4C1U, 0x0857F547U, 0x0853F5CCU, 0x084EF651U, 0x084AF6D6U,
+        0x0845F75BU, 0x0841F7DFU, 0x083DF863U, 0x0838F8E7U, 0x0834F96AU, 0x0830F9EEU, 0x082BFA71U,
+        0x0827FAF3U, 0x0823FB76U, 0x081FFBF8U, 0x081BFC7AU, 0x0816FCFBU, 0x0812FD7DU, 0x080EFDFEU,
+        0x080AFE7FU, 0x0806FF00U, 0x0802FF80U};
+
+    uint32_t even_lz = (uint32_t)__builtin_clzll(x) & ~1U;
+    uint64_t m = x << even_lz;
+    uint32_t entry = isqrt_lin_table[(uint32_t)(m >> 56U) - 64U];
+    uint32_t frac16 = (uint32_t)(m >> 40U) & 0xFFFFU;
+    uint64_t seed32 = (uint64_t)(((entry & 0xFFFFU) << 4U) + (((entry >> 16U) * frac16) >> 16U))
+                      << 12U;
+    uint64_t r = (seed32 >> (even_lz >> 1U)) | 1ULL;
+    r = (r + x / r) >> 1U;
+    if (__builtin_expect(r > UINT32_MAX, 0)) {
+        r = UINT32_MAX;
+    }
+    return r - (uint64_t)((r * r) > x);
 #else
     return flow_isqrt_u128_pair(0ULL, x);
 #endif
+}
+
+static inline uint64_t flow_asm_isqrt_u64(uint64_t x) {
+    return flow_asm_isqrt_u64_fast(x);
 }
 
 static inline FlowResultU64 flow_asm_qsqrt_shift16_i64(int64_t x_q16, uint64_t *inout_sieve) {
@@ -1100,6 +1154,21 @@ static inline uint64_t flow_asm_fp64_pow7(uint64_t x) {
     uint64_t x4 = flow_asm_fp64_mul(x2, x2);
     uint64_t x6 = flow_asm_fp64_mul(x4, x2);
     return flow_asm_fp64_mul(x6, x);
+}
+
+#define FLOW_FP64_SPONGE_ROUND_CONST UINT64_C(0x9E3779B97F4A7C15)
+
+/*
+ * Canonical Division-Free Goldilocks F_p Algebraic Sponge Step:
+ * Absorbs an arbitrary 64-bit word into canonical field state via round-constant
+ * injection and the bijective x |-> x^7 (mod p) permutation S-box.
+ * Unified L0 primitive shared across FLUX (Zero-Root Capability & Ephemeral Ratchet)
+ * and UNIT (Ingress Fabric Route Seal).
+ */
+static inline uint64_t flow_asm_fp64_sponge_step(uint64_t state, uint64_t word) {
+    uint64_t mixed =
+        flow_asm_fp64_add(state, flow_asm_fp64_add(word, FLOW_FP64_SPONGE_ROUND_CONST));
+    return flow_asm_fp64_pow7(mixed);
 }
 
 static inline uint64_t flow_asm_rbit64(uint64_t x) {

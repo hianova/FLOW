@@ -369,6 +369,112 @@ static inline bool flow_jet2_solve_root(FlowJet2 j, int64_t t_max_q16, int64_t *
     return found;
 }
 
+/*
+ * Non-Cancelling 64-Bit Hardware-Register 2-Jet Root Solver (`Citardauq` + Horizon Sieve):
+ * Solves `v + d1 * t + 0.5 * d2 * t^2 = 0` (for interior slack `v > 0`) for the first
+ * boundary impact time `t_q16` in `(0, t_max_q16]`:
+ *   - Keeps standard Q16 inputs in `[2^12, 2^30)` unshifted so `disc` executes the 1-`udiv`
+ *     `flow_asm_isqrt_u64_fast` path directly, normalizing tiny/huge inputs into `[2^21, 2^22)`.
+ *   - Applies an O(1) zero-division convex/concave horizon reachability sieve before `isqrt`.
+ *   - Branchlessly selects Citardauq `t = 2*v / (|r_i| + sq)` (`r_i >= 0`) vs `(|r_i| + sq) / c_i`
+ *     (`r_i < 0`) to guarantee zero catastrophic subtractive cancellation.
+ */
+static inline bool flow_jet2_solve_root_fast64(int64_t v, int64_t d1, int64_t d2, int64_t t_max_q16,
+                                               int64_t *out_t_q16) {
+    if (__builtin_expect(!out_t_q16 || v <= 0 || t_max_q16 <= 0, 0)) {
+        return false;
+    }
+    uint64_t mv = (uint64_t)v;
+    uint64_t mr = (d1 < 0) ? (0ULL - (uint64_t)d1) : (uint64_t)d1;
+    uint64_t mc = (d2 < 0) ? (0ULL - (uint64_t)d2) : (uint64_t)d2;
+    uint64_t or_m = mv | mr | mc;
+
+    int64_t r_i;
+    int64_t c_i;
+    if (__builtin_expect(or_m < (1ULL << 12U) || or_m >= (1ULL << 30U), 0)) {
+        if (d1 == INT64_MIN || d2 == INT64_MIN || flow_hott_is_boundary_tag((uint64_t)v) ||
+            flow_hott_is_boundary_tag((uint64_t)d1) || flow_hott_is_boundary_tag((uint64_t)d2)) {
+            return false;
+        }
+        r_i = -d1;
+        c_i = -d2;
+        if (r_i <= 0 && c_i <= 0) {
+            return false;
+        }
+        uint64_t max_m = (mv > mr) ? mv : mr;
+        if (mc > max_m) {
+            max_m = mc;
+        }
+        uint32_t lz = (uint32_t)__builtin_clzll(max_m);
+        if (lz < 42U) {
+            uint32_t shr = 42U - lz;
+            v >>= shr;
+            r_i >>= shr;
+            c_i >>= shr;
+        } else if (lz > 42U) {
+            uint32_t shl = lz - 42U;
+            v = (int64_t)((uint64_t)v << shl);
+            r_i = (int64_t)((uint64_t)r_i << shl);
+            c_i = (int64_t)((uint64_t)c_i << shl);
+        }
+        if (v <= 0 || (r_i <= 0 && c_i <= 0)) {
+            return false;
+        }
+        mr = (uint64_t)(r_i < 0 ? -r_i : r_i);
+        mc = (uint64_t)(c_i < 0 ? -c_i : c_i);
+    } else {
+        r_i = -d1;
+        c_i = -d2;
+        if (r_i <= 0 && c_i <= 0) {
+            return false;
+        }
+    }
+
+    if (c_i == 0) {
+        uint64_t t_u = (((uint64_t)v) << FLOW_Q16_SHIFT) / mr;
+        if (t_u > 0ULL && t_u <= (uint64_t)t_max_q16) {
+            *out_t_q16 = (int64_t)t_u;
+            return true;
+        }
+        return false;
+    }
+
+    if ((uint64_t)t_max_q16 < (1ULL << 30U)) {
+        __extension__ typedef __int128 i128;
+        i128 target = (i128)v << FLOW_Q16_SHIFT;
+        if (c_i < 0) {
+            if (r_i <= 0 || (i128)r_i * (i128)t_max_q16 < target) {
+                return false;
+            }
+        } else {
+            uint64_t t_ub = (uint64_t)t_max_q16 + 1ULL;
+            i128 f_ub = (i128)r_i * (i128)t_ub + (((i128)c_i * (i128)(t_ub * t_ub)) >> 17U);
+            if (f_ub < target) {
+                return false;
+            }
+        }
+    }
+
+    int64_t disc = r_i * r_i + 2LL * c_i * v;
+    if (disc < 0) {
+        return false;
+    }
+    uint64_t sq = flow_asm_isqrt_u64_fast((uint64_t)disc);
+    uint64_t q_sum = mr + sq;
+    uint64_t num =
+        (r_i >= 0) ? (((uint64_t)v) << (FLOW_Q16_SHIFT + 1U)) : (q_sum << FLOW_Q16_SHIFT);
+    uint64_t den = (r_i >= 0) ? q_sum : (uint64_t)c_i;
+    if (den == 0ULL) {
+        return false;
+    }
+    uint64_t t_u = num / den;
+    if (t_u > 0ULL && t_u <= (uint64_t)t_max_q16) {
+        *out_t_q16 = (int64_t)t_u;
+        return true;
+    }
+    return false;
+}
+
 static inline uint64_t flow_jet2_nondegenerate_ballot64(const FlowJet2 *jets, size_t count,
                                                         int64_t eps_d1_q16, int64_t eps_d2_q16) {
     if (!jets || count == 0U || eps_d1_q16 < 0 || eps_d2_q16 < 0) {

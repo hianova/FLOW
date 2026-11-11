@@ -46,19 +46,22 @@ uint64_t flow_freestanding_ring0_step(uint64_t *arena_64, uint64_t raw_idx, int6
 
     int64_t t_hit_q16 = 0;
     (void)flow_jet2_solve_root(j0, FLOW_Q16_ONE, &t_hit_q16);
+    int64_t t_fast_q16 = 0;
+    (void)flow_jet2_solve_root_fast64(x_q16 > 0 ? x_q16 : FLOW_Q16_ONE, -FLOW_Q16_ONE, 0,
+                                      FLOW_Q16_ONE * 4, &t_fast_q16);
 
     /* 4. 4D Q-Polyhedron evaluation */
     int64_t plane_a[4] = {FLOW_Q16_ONE, 0, 0, 0};
-    int64_t state_x[4] = {next_v, v_q16, a_q16, t_hit_q16};
+    int64_t state_x[4] = {next_v, v_q16, a_q16, t_hit_q16 ^ t_fast_q16};
     int64_t slack = flow_asm_qpoly4d_eval_plane(plane_a, FLOW_Q16_ONE * 100, state_x, &sieve);
 
     /* 5. Wave64 1.58-bit ternary dot product */
     FlowBmfTernary64 w = {UINT64_C(0x5555555555555555), UINT64_C(0xAAAAAAAAAAAAAAAA)};
     int32_t dot = flow_bmf_ternary64_dot(w, w);
 
-    /* 6. Goldilocks F_p field (mul + pow7 bijection), 1-cycle rbit & Q16/2-Jet Lerp */
+    /* 6. Goldilocks F_p field (mul + pow7 + canonical sponge), 1-cycle rbit & Q16/2-Jet Lerp */
     uint64_t fp_prod = flow_asm_fp64_mul(loaded, (uint64_t)x_q16 + 1ULL);
-    uint64_t fp_p7 = flow_asm_fp64_pow7(fp_prod);
+    uint64_t fp_p7 = flow_asm_fp64_sponge_step(fp_prod, flow_asm_isqrt_u64_fast(loaded));
     uint64_t rb = flow_asm_rbit64(raw_idx + 1ULL);
     FlowResultU64 l_q16 = flow_asm_qlerp_q16(x_q16, v_q16, FLOW_Q16_ONE >> 1U, &sieve);
     FlowJet2 j_mid = flow_jet2_lerp(j0, j1, FLOW_Q16_ONE >> 1U);
