@@ -100,7 +100,7 @@ int main(int argc, char **argv) {
     }
 
     FLOW_TEST_SUITE_BEGIN(
-        "FLOW v4: Q-Polyhedron Quantization, 2-Jet Forecast & Zero-Fault Hot Path (PoC A-E)");
+        "FLOW: Q-Polyhedron Quantization, 2-Jet Forecast & Zero-Fault Hot Path (PoC A-E)");
 
     if (report_mode) {
         printf("  [HW Spec] PAGE=%u B, CACHE_LINE=%u B, L1D=%u B, VECTOR=%u B, WAVE=%u lanes\n",
@@ -291,11 +291,11 @@ int main(int argc, char **argv) {
             uint32_t axis = i / 2U;
             int32_t sign = (i % 2U == 0U) ? 1 : -1;
             qpoly4.A[i][axis] = sign * (1 << 16);
-            atomic_store_explicit(&qpoly4.b[i], 100LL << 16, memory_order_relaxed);
+            qpoly4.b[i] = 100LL << 16;
             npoly4.coeffs[i][axis] = (int64_t)sign;
             atomic_store_explicit(&npoly4.b_constants[i], 100LL, memory_order_relaxed);
         }
-        atomic_store_explicit(&qpoly4.active_mask, 0xFFULL, memory_order_release);
+        qpoly4.active_mask = 0xFFULL;
         atomic_store_explicit(&npoly4.active_mask, 0xFFULL, memory_order_release);
 
         const uint64_t iters = 10000000ULL;
@@ -331,8 +331,8 @@ int main(int argc, char **argv) {
         FlowQPoly4D_S16_init(&q_ovf);
         for (size_t j = 0; j < 4; ++j)
             q_ovf.A[0][j] = INT32_MAX;
-        atomic_store_explicit(&q_ovf.b[0], INT64_MAX - 10, memory_order_relaxed);
-        atomic_store_explicit(&q_ovf.active_mask, 1ULL, memory_order_release);
+        q_ovf.b[0] = INT64_MAX - 10;
+        q_ovf.active_mask = 1ULL;
         const int32_t x_extreme[4] = {INT32_MAX, INT32_MAX, INT32_MAX, INT32_MAX};
         FlowQPolyEval ovf_ev = FlowQPoly4D_S16_eval(&q_ovf, x_extreme);
         FLOW_ASSERT_EQ(ovf_ev.violated_mask, 1ULL);
@@ -476,15 +476,16 @@ int main(int argc, char **argv) {
         FlowQPoly4D_S16_init(&hot_poly);
         for (uint32_t i = 0; i < 8U; ++i) {
             hot_poly.A[i][i % 4U] = (i % 2U == 0U) ? (1 << 16) : -(1 << 16);
-            atomic_store_explicit(&hot_poly.b[i], 1000LL << 16, memory_order_relaxed);
+            hot_poly.b[i] = 1000LL << 16;
         }
-        atomic_store_explicit(&hot_poly.active_mask, 0xFFULL, memory_order_release);
+        hot_poly.active_mask = 0xFFULL;
 
         PocHotRing ring;
         PocHotRing_init(&ring);
 
-        FlowReloadContext *ctx = flow_reload_create(NULL);
-        FLOW_ASSERT_TRUE(ctx != NULL);
+        FlowReloadContext ctx_storage;
+        FlowReloadContext *ctx = &ctx_storage;
+        FLOW_ASSERT_EQ(flow_reload_init(ctx, NULL), FLOW_RELOAD_OK);
         FlowReloadReader reader;
         memset(&reader, 0, sizeof(reader));
         FLOW_ASSERT_EQ(flow_reload_reader_register(ctx, &reader), FLOW_RELOAD_OK);
@@ -567,7 +568,7 @@ int main(int argc, char **argv) {
         }
 
         FLOW_ASSERT_EQ(flow_reload_reader_unregister(&reader), FLOW_RELOAD_OK);
-        FLOW_ASSERT_EQ(flow_reload_destroy(ctx), FLOW_RELOAD_OK);
+        FLOW_ASSERT_EQ(flow_reload_fini(ctx), FLOW_RELOAD_OK);
     }
 
     FLOW_TEST_SUITE_END();

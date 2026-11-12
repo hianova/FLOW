@@ -17,5 +17,11 @@ jobs:
         os: [ ubuntu-latest, macos-latest ]
     steps:
       - uses: actions/checkout@v4
-      - name: Build & Run All FLOW v4 Test Suites (-Werror)
-        run: make clean && make all && make test CC=clang
+      - name: Install Lean 4 Toolchain
+        run: |
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain leanprover/lean4:v4.35.0
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Build & Run All FLOW Test Suites (-Werror)
+        run: |
+          make fmt-check
+          make clean && make all && make test CC=clang

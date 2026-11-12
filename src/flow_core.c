@@ -1,7 +1,6 @@
 #include "flow_io.h"
 
 #include <sched.h>
-#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -23,130 +22,7 @@ uint64_t flow_hardware_timer_frequency_hz(void) {
 }
 
 /* ============================================================================
- * 2. Conservative Inner Quantization & 2-Jet Next-Face Forecast
- * ============================================================================ */
-
-int flow_qpoly_quantize_inner(size_t plane_count, size_t dim, uint32_t shift, const int64_t *a_num,
-                              const int64_t *b_num, int64_t denom, const int64_t *box_min,
-                              const int64_t *box_max, int32_t *a_q_out, int64_t *b_q_out) {
-    if (!a_num || !b_num || !box_min || !box_max || !a_q_out || !b_q_out || plane_count == 0 ||
-        plane_count > FLOW_QPOLY_PLANES || dim == 0 || shift > 30U || denom <= 0)
-        return 0;
-
-    __extension__ typedef __int128 i128;
-    __extension__ typedef unsigned __int128 u128;
-    i128 D = (i128)denom;
-    u128 uD = (u128)denom;
-    i128 scale = (i128)1 << shift;
-
-    for (size_t j = 0; j < dim; ++j) {
-        if (box_min[j] > box_max[j])
-            return 0;
-    }
-
-    for (size_t i = 0; i < plane_count; ++i) {
-        u128 err_num = 0;
-        for (size_t j = 0; j < dim; ++j) {
-            i128 lo_abs = (box_min[j] < 0) ? -(i128)box_min[j] : (i128)box_min[j];
-            i128 hi_abs = (box_max[j] < 0) ? -(i128)box_max[j] : (i128)box_max[j];
-            u128 max_x = (u128)((lo_abs > hi_abs) ? lo_abs : hi_abs);
-
-            i128 num = (i128)a_num[i * dim + j] * scale;
-            i128 a_hat = (num >= 0) ? ((num + D / 2) / D) : -(((-num) + D / 2) / D);
-            if (a_hat > (i128)INT32_MAX || a_hat < (i128)INT32_MIN)
-                return 0;
-            a_q_out[i * dim + j] = (int32_t)a_hat;
-
-            i128 rem = a_hat * D - num;
-            u128 urem = (rem < 0) ? (u128)(-rem) : (u128)rem;
-            u128 term = 0;
-            if (__builtin_mul_overflow(urem, max_x, &term) ||
-                __builtin_add_overflow(err_num, term, &err_num))
-                return 0;
-        }
-        u128 ceil_e_u = 0;
-        if (__builtin_add_overflow(err_num, uD - 1U, &ceil_e_u))
-            return 0;
-        ceil_e_u /= uD;
-        if (ceil_e_u > (u128)INT64_MAX)
-            return 0;
-        i128 ceil_e = (i128)ceil_e_u;
-        i128 b_scaled = (i128)b_num[i] * scale;
-        i128 floor_b = (b_scaled >= 0) ? (b_scaled / D) : -(((-b_scaled) + D - 1) / D);
-        i128 b_hat = floor_b - ceil_e;
-        if (b_hat > (i128)INT64_MAX || b_hat < (i128)INT64_MIN)
-            return 0;
-        b_q_out[i] = (int64_t)b_hat;
-    }
-    return 1;
-}
-
-FlowQPolyForecast flow_qpoly_predict_next_face(const int32_t *A_rows, const int64_t *b,
-                                               uint64_t active, size_t dim, const int32_t *x,
-                                               const int32_t *dx, const int32_t *ddx) {
-    FlowQPolyForecast fc = {0U, INT64_MAX, false};
-    if (!A_rows || !b || !x || !dx || dim == 0 || active == 0ULL)
-        return fc;
-
-    __extension__ typedef __int128 i128;
-    __extension__ typedef unsigned __int128 u128;
-    int64_t best_t_q16 = INT64_MAX;
-    uint64_t rem = active;
-    while (rem != 0ULL) {
-        uint32_t i = (uint32_t)__builtin_ctzll(rem);
-        rem &= (rem - 1ULL);
-
-        const int32_t *row = &A_rows[(size_t)i * dim];
-        FlowResultU64 dot_x_res = flow_asm_qdot_i32(row, x, dim, NULL);
-        int64_t dot_x = (int64_t)dot_x_res.value;
-        bool dot_x_pos_ovf = flow_result_u64_is_boundary(dot_x_res) && (dot_x == INT64_MAX);
-        int64_t r_i = (int64_t)flow_asm_qdot_i32(row, dx, dim, NULL).value;
-        int64_t c_i = ddx ? (int64_t)flow_asm_qdot_i32(row, ddx, dim, NULL).value : 0;
-
-        if (dot_x >= b[i] || dot_x_pos_ovf) {
-            if (r_i > 0 || (r_i == 0 && c_i > 0)) {
-                fc.plane = i;
-                fc.t_hit_q = 0;
-                fc.will_exit = true;
-                return fc;
-            }
-            if (dot_x == b[i] && !dot_x_pos_ovf && r_i < 0 && c_i > 0) {
-                u128 num_q16 = ((u128)(-(i128)r_i)) << (FLOW_Q16_SHIFT + 1U);
-                u128 den = (u128)c_i;
-                u128 t_rehit_u = (num_q16 + (den >> 1U)) / den;
-                int64_t t_rehit_q16 =
-                    (t_rehit_u >= (u128)INT64_MAX) ? INT64_MAX : (int64_t)t_rehit_u;
-                if (t_rehit_q16 > 0 && t_rehit_q16 < best_t_q16) {
-                    best_t_q16 = t_rehit_q16;
-                    fc.t_hit_q = t_rehit_q16;
-                    fc.plane = i;
-                    fc.will_exit = true;
-                }
-            }
-            continue;
-        }
-
-        int64_t s_i = flow_asm_qsub_sat_pos_i64(b[i], dot_x);
-
-        /*
-         * Solve slack(t) = s_i - r_i * t - 0.5 * c_i * t^2 = 0 via pure Q16 2-Jet root primitive:
-         * v = s_i, d1 = -r_i, d2 = -c_i
-         */
-        FlowJet2 slack_jet = flow_jet2_make(s_i, flow_q16_neg_sat(r_i), flow_q16_neg_sat(c_i));
-        int64_t t_cand_q16 = 0;
-        if (flow_jet2_solve_root(slack_jet, best_t_q16, &t_cand_q16) && t_cand_q16 > 0 &&
-            t_cand_q16 < best_t_q16) {
-            best_t_q16 = t_cand_q16;
-            fc.t_hit_q = t_cand_q16;
-            fc.plane = i;
-            fc.will_exit = true;
-        }
-    }
-    return fc;
-}
-
-/* ============================================================================
- * 3. Unified Memory Architecture (UMA) Page-Aligned Shared Pool
+ * 2. Unified Memory Architecture (UMA) Page-Aligned Shared Pool
  * ============================================================================ */
 
 int flow_uma_buffer_alloc(FlowUmaBuffer *buf, size_t capacity_bytes) {
@@ -188,31 +64,13 @@ void flow_uma_buffer_free(FlowUmaBuffer *buf) {
 }
 
 /* ============================================================================
- * 4. Lock-Free QSBR Epoch Swap & Resource Sieve (Zero Mutexes)
+ * 3. Lock-Free QSBR Epoch Swap & Resource Sieve (Zero Heap, Zero Mutexes)
  * ============================================================================ */
 
-#define FLOW_UNIT_SLOT_RING 4U
-
-typedef struct {
-    const FlowUnit *unit;
-    void *state;
-} FlowUnitSlot;
-
-struct FlowReloadContext {
-    void *host_context;
-    _Atomic uint64_t epoch;
-    _Atomic int stopping;
-    _Atomic(const void *) active_bank;
-    _Atomic(const FlowUnitSlot *) active_unit_slot;
-    _Atomic uint32_t next_slot_idx;
-    FlowUnitSlot unit_slots[FLOW_UNIT_SLOT_RING];
-    _Atomic(FlowReloadReader *) readers[FLOW_QSBR_MAX_READERS];
-};
-
-FlowReloadContext *flow_reload_create(void *host_context) {
-    FlowReloadContext *ctx = (FlowReloadContext *)calloc(1, sizeof(*ctx));
+int flow_reload_init(FlowReloadContext *ctx, void *host_context) {
     if (!ctx)
-        return NULL;
+        return FLOW_RELOAD_INVALID;
+    memset(ctx, 0, sizeof(*ctx));
     ctx->host_context = host_context;
     atomic_init(&ctx->epoch, 1ULL);
     atomic_init(&ctx->stopping, 0);
@@ -222,10 +80,10 @@ FlowReloadContext *flow_reload_create(void *host_context) {
     for (uint32_t i = 0; i < FLOW_QSBR_MAX_READERS; ++i) {
         atomic_init(&ctx->readers[i], NULL);
     }
-    return ctx;
+    return FLOW_RELOAD_OK;
 }
 
-int flow_reload_destroy(FlowReloadContext *ctx) {
+int flow_reload_fini(FlowReloadContext *ctx) {
     if (!ctx)
         return FLOW_RELOAD_INVALID;
     atomic_store_explicit(&ctx->stopping, 1, memory_order_release);
@@ -241,7 +99,8 @@ int flow_reload_destroy(FlowReloadContext *ctx) {
     if (slot && slot->unit && slot->unit->drop && slot->state) {
         slot->unit->drop(ctx->host_context, slot->state);
     }
-    free(ctx);
+    atomic_store_explicit(&ctx->active_bank, NULL, memory_order_release);
+    atomic_store_explicit(&ctx->active_unit_slot, NULL, memory_order_release);
     return FLOW_RELOAD_OK;
 }
 
@@ -371,10 +230,20 @@ int flow_qsbr_synchronize(FlowReloadContext *ctx, uint64_t timeout_ns) {
     uint64_t freq = flow_hardware_timer_frequency_hz();
     uint64_t start_cyc = flow_hardware_cycles();
     uint64_t eff_timeout_ns = timeout_ns ? timeout_ns : 10000000ULL;
-    __extension__ typedef __int128 i128;
-    uint64_t budget_cyc =
-        (freq > 0ULL) ? (uint64_t)(((i128)eff_timeout_ns * (i128)freq + 999999999) / 1000000000)
-                      : eff_timeout_ns;
+    uint64_t budget_cyc = eff_timeout_ns;
+    if (freq > 0ULL) {
+#if FLOW_HAS_INT128
+        __extension__ typedef unsigned __int128 u128;
+        budget_cyc = (uint64_t)flow_u128_div_u128(
+            (u128)eff_timeout_ns * (u128)freq + (u128)999999999ULL, (u128)1000000000ULL);
+#else
+        FlowU128Pair prod = {0ULL, 0ULL};
+        flow_mul_u64_to_u128(eff_timeout_ns, freq, &prod.hi, &prod.lo);
+        FlowU128Pair rounded = {0ULL, 0ULL};
+        (void)flow_u128_add_checked(prod, flow_u128_make(0ULL, 999999999ULL), &rounded);
+        budget_cyc = flow_u128_div_pair(rounded, flow_u128_make(0ULL, 1000000000ULL)).lo;
+#endif
+    }
 
     for (;;) {
         int ok = 1;

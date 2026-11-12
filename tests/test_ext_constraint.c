@@ -114,7 +114,7 @@ static int test_unit_run(void *host, void *state, const void *in, void *out) {
 
 int main(void) {
     FLOW_TEST_SUITE_BEGIN(
-        "FLOW v4: Universal External-Constraint ABI (b_ext, u_ext), Hysteresis & Anti-Tunneling");
+        "FLOW: Universal External-Constraint ABI (b_ext, u_ext), Hysteresis & Anti-Tunneling");
 
     /* =====================================================================
      * Stage 1: Compile-Time Univalence & Bitwise HIT Exception Quotient
@@ -165,7 +165,7 @@ int main(void) {
 
         const int64_t b_ext_initial[6] = {1000, 1000, 800, 800, 500, 1500};
         FlowExtPoly3D_update_external_bounds(&poly, b_ext_initial, 0x3FULL);
-        FLOW_ASSERT_EQ(atomic_load_explicit(&poly.generation, memory_order_acquire), 2ULL);
+        FLOW_ASSERT_EQ(poly.generation, 2ULL);
 
         /* Interior external observation u_ext = (400, 400, 400) -> x+y+z = 1200 <= 1500 */
         const int32_t u_in[3] = {400, 400, 400};
@@ -188,8 +188,8 @@ int main(void) {
         FlowExtPoly3D single_plane;
         FlowExtPoly3D_init(&single_plane);
         single_plane.A[5][0] = 1;
-        atomic_store_explicit(&single_plane.b[5], INT64_MAX, memory_order_relaxed);
-        atomic_store_explicit(&single_plane.active_mask, (1ULL << 5), memory_order_release);
+        single_plane.b[5] = INT64_MAX;
+        single_plane.active_mask = (1ULL << 5);
         const int32_t z_pt[3] = {0, 0, 0};
         FlowQPolyEval ev_sp = FlowExtPoly3D_eval(&single_plane, z_pt);
         FLOW_ASSERT_EQ(ev_sp.violated_mask, 0ULL);
@@ -206,9 +206,9 @@ int main(void) {
         ovf3_poly.A[1][0] = INT32_MIN;
         ovf3_poly.A[1][1] = INT32_MIN;
         ovf3_poly.A[1][2] = INT32_MIN;
-        atomic_store_explicit(&ovf3_poly.b[0], INT64_MAX - 100LL, memory_order_relaxed);
-        atomic_store_explicit(&ovf3_poly.b[1], INT64_MAX - 50LL, memory_order_relaxed);
-        atomic_store_explicit(&ovf3_poly.active_mask, 0x3ULL, memory_order_release);
+        ovf3_poly.b[0] = INT64_MAX - 100LL;
+        ovf3_poly.b[1] = INT64_MAX - 50LL;
+        ovf3_poly.active_mask = 0x3ULL;
         const int32_t x_ovf3[3] = {INT32_MIN, INT32_MIN, 1};
         FlowQPolyEval ev_ovf3 = FlowExtPoly3D_eval(&ovf3_poly, x_ovf3);
         /* Plane 0: dot = INT64_MAX - 99 > b[0] (INT64_MAX - 100), so violated by 1! */
@@ -390,9 +390,10 @@ int main(void) {
         FlowExtPoly3D_set_hysteresis(bank_b, popped.plane_idx, popped.b_enter_ext,
                                      popped.b_exit_ext);
 
-        /* Publish bank_a via lock-free QSBR epoch context */
-        FlowQsbrEpoch *qsbr = flow_reload_create(NULL);
-        FLOW_ASSERT_TRUE(qsbr != NULL);
+        /* Publish bank_a via zero-heap caller-allocated lock-free QSBR epoch context */
+        FlowQsbrEpoch qsbr_storage;
+        FlowQsbrEpoch *qsbr = &qsbr_storage;
+        FLOW_ASSERT_EQ(flow_reload_init(qsbr, NULL), FLOW_RELOAD_OK);
         FlowReloadReader reader;
         FLOW_ASSERT_EQ(flow_reload_reader_register(qsbr, &reader), FLOW_RELOAD_OK);
         FLOW_ASSERT_EQ(flow_qsbr_publish_ptr(qsbr, bank_a), FLOW_RELOAD_OK);
@@ -476,7 +477,7 @@ int main(void) {
         FLOW_ASSERT_EQ(compact_lanes[2], 60U);
 
         FLOW_ASSERT_EQ(flow_reload_reader_unregister(&reader), FLOW_RELOAD_OK);
-        FLOW_ASSERT_EQ(flow_reload_destroy(qsbr), FLOW_RELOAD_OK);
+        FLOW_ASSERT_EQ(flow_reload_fini(qsbr), FLOW_RELOAD_OK);
         FLOW_ASSERT_EQ(atomic_load_explicit(&g_unit_drops, memory_order_relaxed), 2U);
         flow_uma_buffer_free(&uma);
     }

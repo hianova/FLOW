@@ -2,7 +2,6 @@
 #define FLOW_IO_H
 
 #include "flow_hott_jet.h"
-#include "flow_image64.h"
 
 #if !defined(__cplusplus)
 #include <stdatomic.h>
@@ -17,7 +16,7 @@ extern "C" {
 
 /*
  * ============================================================================
- * FLOW v4: Lock-Free External Variable & Constraint Ingestion (flow_io.h)
+ * FLOW: Lock-Free External Variable & Constraint Ingestion (flow_io.h)
  * ============================================================================
  * Provides the zero-allocation, kernel-bypass external input channels for
  * streaming external observations u_ext and external constraint bounds b_ext:
@@ -149,6 +148,8 @@ typedef enum {
 typedef struct FlowReloadContext FlowReloadContext;
 typedef FlowReloadContext FlowQsbrEpoch;
 
+#define FLOW_UNIT_SLOT_RING 4U
+
 typedef struct {
     uint32_t abi_version;
     uint64_t semantic_schema_hash, constraint_hash, capability_hash;
@@ -158,6 +159,11 @@ typedef struct {
     int (*run)(void *host_context, void *state, const void *input, void *output);
     void (*drop)(void *host_context, void *state);
 } FlowUnit;
+
+typedef struct {
+    const FlowUnit *unit;
+    void *state;
+} FlowUnitSlot;
 
 typedef struct FlowReloadReader {
     FlowReloadContext *context;
@@ -170,8 +176,19 @@ typedef struct FlowReloadReader {
     uint8_t _cache_pad[24];
 } FLOW_CACHE_ALIGNED FlowReloadReader;
 
-FlowReloadContext *flow_reload_create(void *host_context);
-int flow_reload_destroy(FlowReloadContext *context);
+struct FlowReloadContext {
+    void *host_context;
+    _Atomic uint64_t epoch;
+    _Atomic int stopping;
+    _Atomic(const void *) active_bank;
+    _Atomic(const FlowUnitSlot *) active_unit_slot;
+    _Atomic uint32_t next_slot_idx;
+    FlowUnitSlot unit_slots[FLOW_UNIT_SLOT_RING];
+    _Atomic(FlowReloadReader *) readers[FLOW_QSBR_MAX_READERS];
+} FLOW_CACHE_ALIGNED;
+
+int flow_reload_init(FlowReloadContext *context, void *host_context);
+int flow_reload_fini(FlowReloadContext *context);
 int flow_reload_reader_register(FlowReloadContext *context, FlowReloadReader *reader);
 int flow_reload_reader_unregister(FlowReloadReader *reader);
 

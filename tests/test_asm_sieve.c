@@ -36,8 +36,7 @@ int main(int argc, char **argv) {
             report_mode = true;
     }
 
-    FLOW_TEST_SUITE_BEGIN(
-        "FLOW v4: Total ASM Substrate, Hardware Sieve & Self-Bootstrapping Suite");
+    FLOW_TEST_SUITE_BEGIN("FLOW: Total ASM Substrate, Hardware Sieve & Self-Bootstrapping Suite");
 
     /* =====================================================================
      * Stage 1: Zero-UB ASM Signed Q-Arithmetic (adds/subs/smull/smulh)
@@ -175,11 +174,16 @@ int main(int argc, char **argv) {
         FLOW_ASSERT_EQ(flow_asm_isqrt_u64(0ULL), 0ULL);
         FLOW_ASSERT_EQ(flow_asm_isqrt_u64(1ULL), 1ULL);
         FLOW_ASSERT_EQ(flow_asm_isqrt_u64(UINT64_MAX), 4294967295ULL);
+#if FLOW_HAS_INT128
         __extension__ typedef unsigned __int128 u128;
         FLOW_ASSERT_EQ(flow_asm_isqrt_u128(~(u128)0U), UINT64_MAX);
         FLOW_ASSERT_EQ(flow_asm_isqrt_u128((u128)UINT64_MAX * (u128)UINT64_MAX), UINT64_MAX);
         FLOW_ASSERT_EQ(flow_asm_isqrt_u128((u128)UINT64_MAX * (u128)UINT64_MAX - 1U),
                        UINT64_MAX - 1ULL);
+#endif
+        FLOW_ASSERT_EQ(flow_isqrt_u128_pair(UINT64_MAX, UINT64_MAX), UINT64_MAX);
+        FLOW_ASSERT_EQ(flow_isqrt_u128_pair(UINT64_MAX - 1ULL, 1ULL), UINT64_MAX);
+        FLOW_ASSERT_EQ(flow_isqrt_u128_pair(UINT64_MAX - 1ULL, 0ULL), UINT64_MAX - 1ULL);
 
         uint64_t sv_sqrt = FLOW_ASM_SIEVE_ALL_SOUND;
         FlowResultU64 r_sqrt9 = flow_asm_qsqrt_shift16_i64(9LL << 16, &sv_sqrt);
@@ -437,8 +441,8 @@ int main(int argc, char **argv) {
         poly.A[0][1] = -23456;
         poly.A[0][2] = 34567;
         poly.A[0][3] = -45678;
-        atomic_store_explicit(&poly.b[0], 50000000LL, memory_order_relaxed);
-        atomic_store_explicit(&poly.active_mask, 1ULL, memory_order_release);
+        poly.b[0] = 50000000LL;
+        poly.active_mask = 1ULL;
 
         int64_t a_q16[4] = {(int64_t)poly.A[0][0] * 65536LL, (int64_t)poly.A[0][1] * 65536LL,
                             (int64_t)poly.A[0][2] * 65536LL, (int64_t)poly.A[0][3] * 65536LL};
