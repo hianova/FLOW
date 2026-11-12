@@ -2,113 +2,153 @@
   <img src="./assets/banner.svg" alt="FLOW — Formally Verified L0 Integer, HoTT &amp; 2-Jet Substrate" width="100%" />
 </p>
 
-# FLOW — Object-Free HoTT & 2-Jet Register Calculus
+# FLOW — Object-Free HoTT & 2-Jet Manifold Execution Substrate
 
 > **Software Engineering as Mathematics.**  
-> Zero objects (`struct`-free core). Zero control-flow graphs (`0` conditional branches, `0` SSA `phi` nodes). Zero floating-point (`FloatOps == 0`). Zero heap (`HeapCalls == 0`).
+> **Zero C in Business Logic.** Zero objects (`struct`-free core). Zero control-flow graphs (`0` conditional branches, `0` SSA `phi` nodes, `0` VM opcodes). Zero floating-point (`FloatOps == 0`). Zero heap (`HeapCalls == 0`).
 
-`FLOW` does not execute domain code. Instead, `FLOW` models computation as a single, morphology-agnostic **branchless endomorphism** over **64-byte (`512-bit`) hardware register cells**:
+`FLOW` eliminates imperative application code. Downstream systems do **not** write `.c` files, do **not** invoke `lean -c`, and do **not** emit SSA control flow or bytecode instructions. Instead:
 
-$$\Phi : \mathcal{C}_{64}^{\text{state}} \times \mathcal{C}_{64}^{\text{bound}} \longrightarrow \mathcal{C}_{64}^{\text{state}}$$
+1. **Upstream (Pure Mathematics — `.lean` $\to$ `.flow`)**: Domain logic is authored and proved exclusively in **Lean 4** (`0 sorryAx`), where compile-time partial evaluation collapses multi-regime business rules, hysteresis deadbands, Cubical permission locks, and nonlinear equilibrium laws into a self-contained **`.flow` Manifold Atlas** (`1` initial `State` cell + $2^k$ `Chart` cells, `64 bytes` each).
+2. **Runtime (Immutable Silicon Physics — `flow` / `flow.h`)**: `FLOW` owns the **single precompiled C17 execution engine** (`build/flow` CLI & bare-metal [`flow.h`](flow.h)). External runtime observations $(u_{\text{ext}}, m_{\text{req}})$ stream directly through the `.flow` Atlas via one branchless 512-bit register-vector endomorphism:
 
-Domain semantics never enter the runtime as code, branches, C macros, `lean -c` C runtime objects, or structs. **Lean 4** is the sole upstream semantic gatekeeper: downstream applications prove domain invariants via `Flow.Boundary` (`0 sorryAx`) and emit **self-contained `.flow` binary bundles** (`State + 2^k Boundaries`) at build time (`lean --run`, zero C/IR codegen). **C17** enforces physical 64-byte cache-line alignment and lowers the `8 × u64` register vector directly onto hardware ALU, overflow-flag, and Acquire/Release atomic instructions across `ARM64`, `x86_64`, `RISC-V`, and `WebAssembly`.
+$$\Phi_{\text{atlas}} : \mathcal{C}_{64}^{\text{state}} \times \mathcal{A}_{2^k}^{\text{chart}} \times (u_{\text{ext}}, m_{\text{req}}) \longrightarrow \mathcal{C}_{64}^{\text{state}}$$
 
 ---
 
 ## 1. Architectural Axioms
 
 ```text
-  Domain Rules  ──►  [ Flow.lean ]  Proves Boundary α (0 sorryAx) & mints .flow bundles
-                           │        • SealedState ("FLOWSTA5") + 2^k SealedBound ("FLOWBND5")
-                           │        • Zero C/IR codegen, zero lean -c, zero C seal minting
-                           ▼
-                    [ flow_cell ]   8 × u64 (512-bit hardware vector register, align 64)
-                           │        lane[6] = [Epoch:32 | Sieve:32] (SPSC + QSBR + HoTT Ω)
-                           │        lane[7] = Domain-separated Goldilocks F_p MAC
-                           ▼
-                    [ flow_step ]   Immutable branchless HoTT × 2-Jet transition law Φ
+  Pure Domain Spec (.lean)
+        │  Proves Chart invariants (0 sorryAx, 0 lean -c):
+        │  • b_exit ≤ b_enter, dt_max > 0, NextLo/NextHi < 2^k, Ω safety
+        ▼
+  Manifold Atlas (.flow)    (1 + 2^k) × 64-byte cache-line cells
+        │  • Cell 0        : Sealed initial State ("FLOWSTA5")
+        │  • Cells 1..2^k  : Power-of-two Chart Arena ("FLOWBND5", epoch-invariant)
+        ▼
+  Universal Engine (flow)   Single fixed C17 binary (0 business C files downstream)
+        │  • Streams live external inputs (u_ext, m_req) + @swap hot-reloads
+        │  • Executes branchless HoTT chart gluing × 2-Jet solver in 8×u64 registers
+        ▼
+  Deterministic State Trajectory & Decisions
 ```
 
-1. **HoTT Erases the "Object"**:
-   By Univalence ($A \simeq B \implies A = B$), structs, queues, ring buffers, and hot-reloaders collapse into one canonical carrier: a 512-bit hardware register vector (`uint64_t __attribute__((vector_size(64), aligned(64)))`) addressed over $\mathbb{Z}/2^k\mathbb{Z}$ (`idx & cap_mask`, zero out-of-bounds UB).
-2. **Grothendieck Sieve ($\Omega$) & Epoch-Invariant Seals**:
-   Hardware signed-overflow capture, Cubical Kan homotopy checks, dual seal verification, SPSC stream handshakes, and lock-free QSBR boundary hot-swaps share `lane[6] = [Epoch:32 | Sieve:32]`. Boundary seals (`FLOW_BOUND_SEED`) cover `lanes[0..5]` and `[31:0] ReqSieve` while excluding `[63:32] Epoch`, allowing `flow_arena_publish_bound` to advance runtime epochs **without ever re-signing a Lean boundary in C**.
-3. **2-Jet ($J^2$) as a Universal Constraint / NP Solver**:
-   Regardless of external problem morphology, every trajectory carries an exact Q48.16 **2-Jet fiber** $(j_0, j_1, j_2)$ — residual $j_0$, tangent $j_1$, and curvature $j_2$. Where first-order gradient descent and optimization Newton methods stall at critical points ($j_1 = 0$), $\Phi$ resolves exact Citardauq roots when $\Delta = j_1^2 - 2 j_0 j_2 \ge 0$ and uses Wick-rotated curvature tunneling ($\sqrt{|\Delta|} / |j_2|$) when $\Delta < 0$ to escape local minima in a single branchless pass.
-4. **Hermetic Anti-Drift Gatekeeper**:
-   Both `SealedState` and `SealedBound` in [`Flow.lean`](Flow.lean) have `private` constructors with distinct cryptographic domain seeds, and `flow.h` exposes **zero seal-minting functions** (plus anti-laundering protection that keeps unsealed C cells permanently at `w7 == 0`). Downstream C hosts never duplicate domain tags, constants, or business logic.
+1. **Zero C in the Application Layer**:
+   A `.flow` file is **not** a passive config file read by handwritten C logic; it **is** the complete business system after Lean partial evaluation. Changing business behavior means proving and hot-swapping a new `.flow` Atlas — never writing or recompiling C.
+2. **HoTT Erases `if/else` State Machines & `struct` Objects**:
+   By Univalence ($A \simeq B \implies A = B$), every state and chart shares one canonical carrier: a 64-byte hardware vector (`uint64_t __attribute__((vector_size(64), aligned(64)))`). Conditional business branching is replaced by **Schmitt Hysteresis Chart Gluing** over $\mathbb{Z}/2^k\mathbb{Z}$ (`idx & cap_mask`, zero out-of-bounds UB) and **Cubical Kan Projection** over an orthogonal 16-bit discrete mode space.
+3. **2-Jet ($J^2$) Replaces Imperative Formula Trees**:
+   On each active chart, external runtime signal $u_{\text{ext}}$ pulls back into the local 2-Jet residual $R(x, u_{\text{ext}}) = (b_0 - u_{\text{gain}} \cdot u_{\text{ext}}) + b_1 x + \frac{1}{2} b_2 x^2$. In one branchless pass, $\Phi_{\text{atlas}}$ resolves exact **Citardauq** roots when $\Delta \ge 0$ (escaping $R' = 0$ critical/saddle points where first-order methods stall) and **Wick-rotated curvature tunneling** ($\sqrt{|\Delta|}/|b_2|$) when $\Delta < 0$. Setting $u_{\text{gain}} = 0$ creates shock-isolated circuit-breaker charts.
+4. **Dual-Seed Cryptographic Seals & Epoch-Invariant Hot-Swap**:
+   [`Flow.lean`](Flow.lean) is the sole seal issuer (`"FLOWSTA5"` for states, `"FLOWBND5"` for charts; [`flow.h`](flow.h) exposes zero seal-minting functions and blocks seal laundering). Chart seals exclude dynamic `[63:32] Epoch`, allowing `flow_arena_publish_bound` to hot-swap live charts across threads without C re-signing.
 
 ---
 
-## 2. Canonical 64-Byte Cell (`flow_cell`)
+## 2. Canonical 64-Byte Register Grading (`flow_cell`)
 
-State and Boundary share an identical, symmetric `8 × u64` (`64-byte` cache-line) register grading:
+Continuous Q48.16 coordinates (`lane[3]`) and discrete Cubical topology (`lane[5]`) occupy strictly orthogonal lanes so discrete flags never pollute fixed-point carries:
 
-| Lane | Offset | State Cell ($\mathcal{C}_{64}^{\text{state}}$ — `"FLOWSTA5"`) | Boundary Cell ($\mathcal{C}_{64}^{\text{bound}}$ — `"FLOWBND5"`) |
+| Lane | Bytes | State Cell ($\mathcal{C}_{64}^{\text{state}}$ — `"FLOWSTA5"`) | Chart Cell ($\mathcal{C}_{64}^{\text{chart}}$ — `"FLOWBND5"`) |
 | :--- | :--- | :--- | :--- |
-| `0` | `0..7` | `j0` — Q48.16 0-Jet (residual / energy) | `b0` — Target offset / barrier constant (Q48.16) |
-| `1` | `8..15` | `j1` — Q48.16 1-Jet (first-order tangent) | `b1` — First-order coupling weight (Q48.16) |
-| `2` | `16..23` | `j2` — Q48.16 2-Jet (second-order curvature) | `b2` — Second-order curvature / stiffness (Q48.16) |
-| `3` | `24..31` | `x` — HoTT coordinate / Cubical path | `kan_filter` — Immutable homotopy axis mask |
-| `4` | `32..39` | `dt` — Resolved step $\Delta t^* \ge 0$ (Q48.16) | `dt_max` — Admissible horizon $\Delta t_{\max} > 0$ (Q48.16) |
-| `5` | `40..47` | `[DomainTag:32 \| Momentum:32]` | `[DomainTag:32 \| AuxParam:32]` |
-| `6` | `48..55` | `[Epoch:32 \| Sieve:32]` — Live $\Omega$ state | `[Epoch:32 \| ReqSieve:32]` — Required $\Omega$ mask |
-| `7` | `56..63` | `seal` — $\mathbb{F}_p$ MAC over `lanes[0..6]` | `seal` — Epoch-invariant $\mathbb{F}_p$ MAC |
+| `0` | `0..7` | `j0` — Q48.16 0-Jet (post-step residual) | `b0` — Base offset / equilibrium constant (Q48.16 `i64`) |
+| `1` | `8..15` | `j1` — Q48.16 1-Jet (first-order tangent) | `b1` — First-order stiffness / slope (Q48.16 `i64`) |
+| `2` | `16..23` | `j2` — Q48.16 2-Jet (second-order curvature) | `b2` — Second-order curvature (Q48.16 `i64`) |
+| `3` | `24..31` | `x` — **Pure** Q48.16 continuous coordinate (`i64`) | `[b_exit:i32 \| b_enter:i32]` — Schmitt band (Q16.16, $b_{\text{exit}} \le b_{\text{enter}}$) |
+| `4` | `32..39` | `dt` — Resolved step $\Delta t^* \ge 0$ (Q48.16 `i64`) | `[dt_max:u32 \| u_gain:i32]` — Horizon $\Delta t_{\max} > 0$ & $u_{\text{ext}}$ gain (Q16.16) |
+| `5` | `40..47` | `[DomainTag:32 \| Chart:16 \| Mode:16]` | `[DomainTag:32 \| NextLo:8 \| NextHi:8 \| KanLock:16]` |
+| `6` | `48..55` | `[Epoch:32 \| LiveSieve:32]` — Live $\Omega$ state | `[Epoch:32 \| ReqSieve:32]` — Required $\Omega$ mask |
+| `7` | `56..63` | `seal` — Goldilocks $\mathbb{F}_p$ MAC (`lanes[0..6]`) | `seal` — Epoch-invariant Goldilocks $\mathbb{F}_p$ MAC |
 
-### Sieve ($\Omega$) Covering Axes (`lane[6][31:0]`)
+### Grothendieck Sieve ($\Omega$) Covering Axes (`lane[6][31:0]`)
 
 | Bit | Macro | Invariant |
 | :--- | :--- | :--- |
-| `0` | `FLOW_SIEVE_SEAL_VALID` | Both `state` (`FLOW_STATE_SEED`) and `bound` (`FLOW_BOUND_SEED`) pass Goldilocks $\mathbb{F}_p$ verification |
-| `1` | `FLOW_SIEVE_DOMAIN_MATCH` | State and boundary carry identical 32-bit Univalence `DomainTag` (`lane[5][63:32]`) |
-| `2` | `FLOW_SIEVE_NO_OVERFLOW` | Hardware ALU overflow flag == `0` across all Q48.16 / 128-bit intermediate ops |
-| `3` | `FLOW_SIEVE_KAN_HOMOTOPIC` | Candidate step preserves locked Cubical axes: `((x ^ x_cand) & kan_filter) == 0` |
-| `4` | `FLOW_SIEVE_HORIZON_VALID` | Boundary horizon satisfies $\Delta t_{\max} > 0$ and $0 \le \Delta t^* \le \Delta t_{\max}$ |
+| `0` | `FLOW_SIEVE_SEAL_VALID` | Both `state` (`FLOW_STATE_SEED`) and active `chart` (`FLOW_BOUND_SEED`) pass $\mathbb{F}_p$ verification |
+| `1` | `FLOW_SIEVE_DOMAIN_MATCH` | State and active chart carry identical 32-bit Univalence `DomainTag` |
+| `2` | `FLOW_SIEVE_NO_OVERFLOW` | Hardware ALU signed-overflow flag == `0` across all Q48.16 / 128-bit operations |
+| `3` | `FLOW_SIEVE_KAN_HOMOTOPIC` | Requested discrete `Mode` transition preserves locked Cubical axes: `((mode ^ m_req) & kan_lock) == 0` |
+| `4` | `FLOW_SIEVE_HORIZON_VALID` | Chart horizon satisfies $\Delta t_{\max} > 0$ and $0 \le \Delta t^* \le \Delta t_{\max}$ |
 | `5` | `FLOW_SIEVE_CONVERGED` | Post-step residual lies within zero-locus tolerance ($\|r_0'\| \le 4$ LSB in Q48.16) |
 
 ---
 
-## 3. Minimal End-to-End Usage (Zero Domain Code in C)
+## 3. Downstream Workflow (Zero C Files in Application)
 
-### Step 1 — Prove & Mint Self-Contained `.flow` Bundle in Lean 4
+A downstream project directory contains **only** `.lean` specification(s) and its build/test script — **never application `.c` files**.
+
+### Step 1 — Prove & Emit `.flow` Manifold Atlas in Lean 4
 
 ```lean
 import Flow
 
-structure MyRule where
-  targetQ16 : Int
-  hBound    : -Flow.maxSafeQ16 ≤ targetQ16 ∧ targetQ16 ≤ Flow.maxSafeQ16
+def tag : UInt32 := 0x52415445 -- "RATE"
 
-instance : Flow.Boundary MyRule where
-  b0 r        := r.targetQ16
-  b1 _        := 0
-  b2 _        := -2 * Flow.q16One
-  kanFilter _ := 0
-  dtMax _     := 4 * Flow.q16One
-  domainTag _ := 0x41505031 -- "APP1" stays solely in Lean
-  dtMax_valid _    := by decide
-  coeffs_bounded r := ⟨r.hBound.1, r.hBound.2, by decide, by decide, by decide, by decide⟩
-  sieve_guarded _  := by
-    unfold Flow.sieveSafetyGate Flow.sieveBaseGate Flow.sieveSealValid
-           Flow.sieveDomainMatch Flow.sieveNoOverflow Flow.sieveHorizonValid
-    bv_decide
+-- 2-Chart (2^1) Surge Controller:
+-- Chart 0 (Normal) : tracks u_ext linearly; jumps to Chart 1 if u_ext > 10.0
+-- Chart 1 (Surge)  : convex square-root damping + locked audit bit 0x0001; returns to Chart 0 if u_ext < 6.0
+def normalChart : Flow.Rule 1 where
+  b0       := 0
+  b1       := Flow.q16One
+  b2       := 0
+  bExit    := -100 * Flow.q16One
+  bEnter   := 10 * Flow.q16One
+  dtMax    := 4 * Flow.q16One
+  uGain    := Flow.q16One
+  domTag   := tag
+  nextLo   := 0
+  nextHi   := 1
+  kanLock  := 0
 
--- Build-time (`LEAN_PATH=build lean --run AppSpec.lean`): emits State + 2^0 Boundary
+def surgeChart : Flow.Rule 1 where
+  b0       := 0
+  b1       := 0
+  b2       := 2 * Flow.q16One
+  bExit    := 6 * Flow.q16One
+  bEnter   := 100 * Flow.q16One
+  dtMax    := 2 * Flow.q16One
+  uGain    := Flow.q16One
+  domTag   := tag
+  nextLo   := 0
+  nextHi   := 1
+  kanLock  := 0x0001
+
 def main : IO UInt32 := do
-  let r : MyRule := ⟨2 * Flow.q16One, by decide⟩
-  Flow.emitBundle "app.flow" 0 (Flow.mintState r 0) [r] r
+  let s0 := Flow.mintState normalChart 0 (initChart := 0) (initMode := 0x0001)
+  Flow.emitBundle "surge.flow" 1 s0 [normalChart, surgeChart] normalChart
   return 0
 ```
 
-### Step 2 — Generic 4-Line Host Execution in C17
+Compile and emit the binary `.flow` Atlas (zero `lean -c`):
+
+```bash
+LEAN_PATH=/path/to/FLOW/build lean -DwarningAsError=true --run SurgeSpec.lean
+```
+
+### Step 2 — Verify & Stream Live Events Through `FLOW`'s Fixed Engine
+
+```bash
+# Cryptographically verify seals, DomainTag univalence, and 2^k Atlas geometry
+/path/to/FLOW/build/flow verify surge.flow
+
+# Stream live (u_ext [mode_hex]) observations or @swap hot-reload directives via stdin
+printf "4.0\n12.0\n8.0 0x0000\n4.0\n" | /path/to/FLOW/build/flow run surge.flow
+```
+
+- `4.0`: Chart `0` moves $x \to 4.0$.
+- `12.0`: Exceeds `b_enter = 10.0` $\implies$ branchlessly transitions to Chart `1` (Surge convex damping).
+- `8.0 0x0000`: Inside `[6.0, 100.0]` Schmitt deadband $\implies$ stays on Chart `1` without flapping; `kan_lock = 0x0001` preserves locked audit bit `0x0001` despite `0x0000` request.
+- `4.0`: Drops below `b_exit = 6.0` $\implies$ branchlessly returns to Chart `0`.
+
+### Bare-Metal / Ring-0 Silicon Embedding (Driver / Kernel Plumbing Only)
+
+[`flow.h`](flow.h) is included directly **only** when wiring raw hardware registers, DMA rings, or kernel interrupts in `-ffreestanding -nostdlib` environments:
 
 ```c
 #include "flow.h"
 
-/* Slot 0 = Sealed State, Slot 1 = Sealed Boundary (0 domain constants in C) */
-flow_cell state = flow_cell_from_bytes(&bundle_bytes[0]);
-flow_cell bound = flow_cell_from_bytes(&bundle_bytes[64]);
-state = flow_step(state, bound);
+/* Pure physical transport: 0 domain constants, 0 structs, 0 conditional branches */
+state = flow_step_atlas(state, chart_arena, cap_mask, u_ext_q16, mode_req_u16);
 ```
 
 ---
@@ -117,10 +157,11 @@ state = flow_step(state, bound);
 
 | File | Responsibility |
 | :--- | :--- |
-| [`Flow.lean`](Flow.lean) | Pure library module (no `_root_.main` collision): `Boundary` typeclass, private `SealedState` / `SealedBound` gatekeepers, epoch-invariant $\mathbb{F}_p$ seals, machine-checked Kan / anti-laundering / stationary-trap escape theorems (`0 sorryAx`), and `.flow` bundle emitters. |
-| [`flow.h`](flow.h) | Complete freestanding (`-ffreestanding -nostdlib`) single-header substrate: `flow_cell` (`vector_size(64)`), unrolled 0-ULP `flow_isqrt_u64`, read-only `flow_verify_state` / `flow_verify_bound`, branchless `flow_step`, and `flow_arena_publish_bound` / `flow_arena_load_acq`. |
-| [`test_flow.c`](test_flow.c) | Bare-metal Ring-0 symbol probe (`FLOW_RING0_GATE`) and hosted verification suite consuming Lean-minted `.flow` bundles with zero C-side seal minting or domain macros. |
-| [`Makefile`](Makefile) | Zero-warning `-Werror` build pipeline without `lean -c` or `leanc`. |
+| [`Flow.lean`](Flow.lean) | Upstream formal gatekeeper (`0 sorryAx`, no `_root_.main` collision): `Chart` typeclass, parametric `Rule k` builder, dual-seed $\mathbb{F}_p$ seals, Kan / Schmitt / 2-Jet theorems, and `.flow` Atlas emitters. |
+| [`flow.h`](flow.h) | Freestanding (`-ffreestanding -nostdlib`) single-header substrate: `flow_cell` (`vector_size(64)`), 0-ULP `flow_isqrt_u64`, read-only seal verifiers, branchless `flow_step` & `flow_step_atlas`, and lock-free `flow_arena_publish_bound` / `flow_arena_load_acq`. |
+| [`flow.c`](flow.c) | Precompiled universal C17 execution engine (`build/flow`): `flow verify` and `flow run` (pure integer Q48.16 stream I/O and live `@swap` hot-reloading, zero floats). |
+| [`test_flow.c`](test_flow.c) | Ring-0 bare-metal symbol gate (`FLOW_RING0_GATE`) and HoTT $\times$ 2-Jet Atlas verification suite. |
+| [`Makefile`](Makefile) | Zero-warning `-Werror` build pipeline producing `build/Flow.olean`, `build/flow`, and verification gates without `lean -c`. |
 | [`VERSION`](VERSION) | Canonical release version (`5.0.0`). |
 
 ---
@@ -128,17 +169,18 @@ state = flow_step(state, bound);
 ## 5. Build & Verification Gates
 
 ```bash
-# Prove Lean 4 theorems (0 sorryAx) and mint sealed .flow bundles
-make capsules
+# Build Flow.olean, universal ./build/flow engine, and core .flow capsules
+make all
 
-# Execute formatting, formal proof, Ring-0 freestanding, and HoTT × 2-Jet gates
+# Execute formatting, formal proof, Ring-0 freestanding, engine, and CLI gates
 make clean && make test
 ```
 
-`make test` enforces three verification gates in sequence:
-1. **Gate 1 (`capsules`)**: Compiles `Flow.lean` under `lean -DwarningAsError=true` (`0 sorryAx`, `0` warnings) and mints self-contained `.flow` binary bundles.
-2. **Gate 2 (`ring0`)**: Compiles `flow.h` under `-ffreestanding -nostdlib -fno-builtin -Werror` and asserts `nm -u == empty` (`0` undefined symbols, `0` conditional branch instructions, `0` FPU instructions).
-3. **Gate 3 (`test-flow`)**: Verifies dual domain-separated seals, anti-laundering rejection, epoch-invariant hot-swaps, $R'(0)=0$ Citardauq root jumps, $\Delta < 0$ instanton tunneling, and Kan obstructions.
+`make test` enforces four verification gates in sequence:
+1. **Gate 1 (`capsules`)**: Compiles [`Flow.lean`](Flow.lean) under `lean -DwarningAsError=true` (`0 sorryAx`, `0` warnings) and mints sealed `.flow` Manifold Atlases.
+2. **Gate 2 (`ring0`)**: Compiles [`flow.h`](flow.h) under `-ffreestanding -nostdlib -fno-builtin -Werror` and asserts `nm -u == empty` (`0` undefined symbols, `0` conditional branches, `0` FPU instructions).
+3. **Gate 3 (`test-flow`)**: Verifies dual seals, anti-laundering, Schmitt chart gluing, orthogonal Kan mode locks, $R'=0$ Citardauq jumps, $\Delta < 0$ tunneling, and lock-free QSBR hot-swaps.
+4. **Gate 4 (`flow` CLI)**: End-to-end zero-C execution via `./build/flow verify` and `./build/flow run`.
 
 ---
 
