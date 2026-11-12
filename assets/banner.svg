@@ -1,32 +1,32 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 240" width="100%" height="100%">
   <defs>
     <style>
-      .glass-base { fill: #ffffff; fill-opacity: 0.14; stroke: #94a3b8; stroke-opacity: 0.34; }
+      .glass-base { fill: #ffffff; fill-opacity: 0.14; stroke: #a3a3a3; stroke-opacity: 0.34; }
       .glass-rim  { fill: none; stroke: #ffffff; stroke-opacity: 0.28; }
-      .divider    { stroke: #94a3b8; stroke-opacity: 0.28; }
-      .wave-1     { stroke: #1e293b; stroke-opacity: 0.90; }
-      .wave-2     { stroke: #475569; stroke-opacity: 0.65; }
-      .wave-3     { stroke: #64748b; stroke-opacity: 0.42; }
-      .title      { fill: #0f172a; }
-      .subtitle   { fill: #475569; }
-      .meta       { fill: #64748b; }
+      .divider    { stroke: #a3a3a3; stroke-opacity: 0.28; }
+      .wave-1     { stroke: #242424; stroke-opacity: 0.90; }
+      .wave-2     { stroke: #525252; stroke-opacity: 0.65; }
+      .wave-3     { stroke: #737373; stroke-opacity: 0.42; }
+      .title      { fill: #141414; }
+      .subtitle   { fill: #525252; }
+      .meta       { fill: #737373; }
       @media (prefers-color-scheme: dark) {
-        .glass-base { fill: #ffffff; fill-opacity: 0.06; stroke: #cbd5e1; stroke-opacity: 0.22; }
+        .glass-base { fill: #ffffff; fill-opacity: 0.06; stroke: #d4d4d4; stroke-opacity: 0.22; }
         .glass-rim  { stroke: #ffffff; stroke-opacity: 0.14; }
-        .divider    { stroke: #cbd5e1; stroke-opacity: 0.18; }
-        .wave-1     { stroke: #f8fafc; stroke-opacity: 0.92; }
-        .wave-2     { stroke: #cbd5e1; stroke-opacity: 0.66; }
-        .wave-3     { stroke: #94a3b8; stroke-opacity: 0.42; }
-        .title      { fill: #f8fafc; }
-        .subtitle   { fill: #cbd5e1; }
-        .meta       { fill: #94a3b8; }
+        .divider    { stroke: #d4d4d4; stroke-opacity: 0.18; }
+        .wave-1     { stroke: #fafafa; stroke-opacity: 0.92; }
+        .wave-2     { stroke: #d4d4d4; stroke-opacity: 0.66; }
+        .wave-3     { stroke: #a3a3a3; stroke-opacity: 0.42; }
+        .title      { fill: #fafafa; }
+        .subtitle   { fill: #d4d4d4; }
+        .meta       { fill: #a3a3a3; }
       }
     </style>
 
     <linearGradient id="banner-sheen" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#ffffff" stop-opacity="0.22" />
       <stop offset="50%" stop-color="#ffffff" stop-opacity="0.04" />
-      <stop offset="100%" stop-color="#94a3b8" stop-opacity="0.10" />
+      <stop offset="100%" stop-color="#a3a3a3" stop-opacity="0.10" />
     </linearGradient>
 
     <filter id="banner-grain" x="0%" y="0%" width="100%" height="100%">
