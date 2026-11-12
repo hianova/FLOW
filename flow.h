@@ -15,11 +15,11 @@ extern "C" {
 #endif
 
 /* ============================================================================
- * FLOW — Object-Free HoTT & 2-Jet Register Calculus
+ * FLOW — Object-Free HoTT & 2-Jet Manifold Execution Substrate
  * ============================================================================
  * Canonical 64-byte (512-bit, 8 x u64) register vector substrate.
  * Zero structs. Zero control-flow branches in kernel. Zero float. Zero heap.
- * Both State and Boundary cells are minted & sealed upstream by Flow.lean.
+ * Both State and Chart cells are minted & sealed upstream by Flow.lean.
  * ============================================================================ */
 
 __extension__ typedef uint64_t flow_cell __attribute__((vector_size(64), aligned(64)));
@@ -37,6 +37,7 @@ _Static_assert(_Alignof(flow_cell) == 64U, "flow_cell must be 64-byte cache-line
 #define FLOW_Q16_SHIFT           16U
 #define FLOW_Q16_ONE             INT64_C(65536)
 #define FLOW_CONVERGE_EPS_Q16    INT64_C(4)
+#define FLOW_ATLAS_MAX_CHARTS    256U
 
 #define FLOW_FP_MOD              UINT64_C(0xFFFFFFFF00000001)
 #define FLOW_GOLDEN_64           UINT64_C(0x9E3779B97F4A7C15)
@@ -190,7 +191,7 @@ static inline uint64_t flow__seal_lanes(uint64_t seed, uint64_t w0, uint64_t w1,
     return st | (uint64_t)(st == 0ULL);
 }
 
-/* Read-only seal verifiers: C never mints or re-signs Boundary or State seals */
+/* Read-only seal verifiers: C never mints or re-signs Chart or State seals */
 static inline bool flow_verify_bound(flow_cell b) {
     uint64_t exp = flow__seal_lanes(FLOW_BOUND_SEED, b[0], b[1], b[2], b[3], b[4], b[5],
                                     b[6] & UINT64_C(0xFFFFFFFF));
@@ -256,170 +257,6 @@ static inline int64_t flow_qdiv_i64(int64_t num_q16, int64_t den_q16, uint32_t *
     return (int64_t)((clamped ^ neg) - neg);
 }
 
-/* --- Universal Branchless HoTT x 2-Jet Transition Law Phi --- */
-
-static inline flow_cell flow_step(flow_cell state, flow_cell bound) {
-    uint32_t ovf = 0U;
-
-    /* 1. Dual Domain-Separated Seal & Univalence Gate */
-    bool state_seal_ok = flow_verify_state(state);
-    bool bound_seal_ok = flow_verify_bound(bound);
-    bool seal_ok = state_seal_ok & bound_seal_ok;
-    bool dom_ok = ((state[5] ^ bound[5]) >> 32U) == 0ULL;
-
-    int64_t b0 = (int64_t)bound[0];
-    int64_t b1 = (int64_t)bound[1];
-    int64_t b2 = (int64_t)bound[2];
-    uint64_t kan_filter = bound[3];
-    int64_t dt_max = (int64_t)bound[4];
-    uint32_t req_sieve = (uint32_t)(bound[6] & UINT64_C(0xFFFFFFFF));
-
-    bool horizon_ok = (dt_max > 0);
-    int64_t safe_dt_max = flow_mux_i64(flow_mask_bool(horizon_ok), dt_max, INT64_C(1));
-
-    /* 2. 2-Jet Fiber Pullback (Operator mode vs Autonomous fiber mode) */
-    int64_t x = (int64_t)state[3];
-    uint64_t op_mask = flow_mask_bool((b1 != 0) | (b2 != 0));
-
-    int64_t x_sq = flow_qmul_i64(x, x, &ovf);
-    int64_t quad_term = flow_qshr1_i64(flow_qmul_i64(b2, x_sq, &ovf));
-    int64_t lin_term = flow_qmul_i64(b1, x, &ovf);
-    int64_t g0 = flow_qadd_i64(b0, flow_qadd_i64(lin_term, quad_term, &ovf), &ovf);
-    int64_t g1 = flow_qadd_i64(b1, flow_qmul_i64(b2, x, &ovf), &ovf);
-
-    uint32_t auto_ovf = 0U;
-    int64_t f0 = flow_qsub_i64((int64_t)state[0], b0, &auto_ovf);
-    ovf = (uint32_t)flow_mux_u64(op_mask, ovf, auto_ovf);
-
-    int64_t r0 = flow_mux_i64(op_mask, g0, f0);
-    int64_t r1 = flow_mux_i64(op_mask, g1, (int64_t)state[1]);
-    int64_t r2 = flow_mux_i64(op_mask, b2, (int64_t)state[2]);
-
-    /* 3. Branchless 2-Jet Citardauq Root & Wick-Rotated Curvature Tunneling */
-    uint32_t disc_ovf = 0U;
-    int64_t r1_sq = flow_qmul_i64(r1, r1, &disc_ovf);
-    int64_t r0_r2 = flow_qmul_i64(r0, r2, &disc_ovf);
-    int64_t two_r0_r2 = flow_qadd_i64(r0_r2, r0_r2, &disc_ovf);
-    int64_t disc = flow_qsub_i64(r1_sq, two_r0_r2, &disc_ovf);
-
-    int64_t d_mag = (int64_t)flow_qsqrt_u64(flow_abs_i64(disc));
-    int64_t neg_d_mag = flow_qneg_i64(d_mag, &disc_ovf);
-    int64_t signed_d = flow_mux_i64(flow_mask_bool(r1 < 0), neg_d_mag, d_mag);
-    int64_t q_cit = flow_qadd_i64(r1, signed_d, &disc_ovf);
-
-    uint32_t div_ovf_a = 0U;
-    uint32_t div_ovf_b = 0U;
-    uint32_t div_ovf_l = 0U;
-    uint32_t div_ovf_t = 0U;
-    int64_t neg_two_r0 = flow_qneg_i64(flow_qadd_i64(r0, r0, &div_ovf_a), &div_ovf_a);
-    int64_t root_a = flow_qdiv_i64(neg_two_r0, q_cit, &div_ovf_a);
-    int64_t root_b = flow_qdiv_i64(flow_qneg_i64(q_cit, &div_ovf_b), r2, &div_ovf_b);
-    uint64_t pick_a = flow_mask_bool(flow_abs_i64(root_a) <= flow_abs_i64(root_b));
-    int64_t step_quad = flow_mux_i64(pick_a, root_a, root_b);
-
-    int64_t step_lin = flow_qdiv_i64(flow_qneg_i64(r0, &div_ovf_l), r1, &div_ovf_l);
-
-    int32_t mom_prev = (int32_t)(state[5] & UINT64_C(0xFFFFFFFF));
-    int64_t mom_dir = flow_mux_i64(flow_mask_bool(mom_prev < 0), -INT64_C(1), INT64_C(1));
-    int64_t grad_dir = flow_mux_i64(flow_mask_bool(r1 > 0), -INT64_C(1), INT64_C(1));
-    int64_t tun_dir = flow_mux_i64(flow_mask_bool(r1 == 0), mom_dir, grad_dir);
-    int64_t tun_d = flow_mux_i64(flow_mask_bool(tun_dir < 0), neg_d_mag, d_mag);
-    int64_t tun_num = flow_qadd_i64(flow_qneg_i64(r1, &div_ovf_t), tun_d, &div_ovf_t);
-    int64_t abs_r2_i64 =
-        (int64_t)flow_mux_u64(flow_mask_bool(flow_abs_i64(r2) > (uint64_t)INT64_MAX),
-                              (uint64_t)INT64_MAX, flow_abs_i64(r2));
-    int64_t step_tunnel = flow_qdiv_i64(tun_num, abs_r2_i64, &div_ovf_t);
-
-    uint64_t has_r2 = flow_mask_bool(r2 != 0);
-    uint64_t real_roots = flow_mask_bool(disc >= 0);
-    int64_t raw_step =
-        flow_mux_i64(has_r2, flow_mux_i64(real_roots, step_quad, step_tunnel), step_lin);
-
-    /* Non-zero progress (>= 1 LSB) whenever residual r0 != 0 and (r1, r2) != (0, 0) */
-    uint64_t active = flow_mask_bool((r0 != 0) & ((r1 != 0) | (r2 != 0)));
-    uint64_t zero_quant = active & flow_mask_bool(raw_step == 0);
-    int64_t nz_step =
-        flow_mux_i64(~active, INT64_C(0), flow_mux_i64(zero_quant, tun_dir, raw_step));
-
-    /* Clamp displacement magnitude to [0, safe_dt_max] */
-    uint64_t raw_abs = flow_abs_i64(nz_step);
-    uint64_t cap_mask = flow_mask_bool(raw_abs > (uint64_t)safe_dt_max);
-    int64_t neg_dt_max = flow_qneg_i64(safe_dt_max, &ovf);
-    int64_t signed_cap = flow_mux_i64(flow_mask_bool(nz_step < 0), neg_dt_max, safe_dt_max);
-    int64_t delta = flow_mux_i64(cap_mask, signed_cap, nz_step);
-    int64_t dt_resolved = (int64_t)flow_abs_i64(delta);
-
-    /* 4. HoTT Cubical Kan Transport, Taylor Pushforward & Sieve Commit */
-    int64_t x_cand_i64 = flow_qadd_i64(x, delta, &ovf);
-    uint64_t x_orig = state[3];
-    uint64_t x_cand = (uint64_t)x_cand_i64;
-    bool kan_ok = (((x_orig ^ x_cand) & kan_filter) == 0ULL);
-    uint64_t x_proj = (x_cand & ~kan_filter) | (x_orig & kan_filter);
-
-    int64_t xp = (int64_t)x_proj;
-    int64_t xp_sq = flow_qmul_i64(xp, xp, &ovf);
-    int64_t j0_op =
-        flow_qadd_i64(b0,
-                      flow_qadd_i64(flow_qmul_i64(b1, xp, &ovf),
-                                    flow_qshr1_i64(flow_qmul_i64(b2, xp_sq, &ovf)), &ovf),
-                      &ovf);
-    int64_t j1_op = flow_qadd_i64(b1, flow_qmul_i64(b2, xp, &ovf), &ovf);
-
-    uint32_t push_ovf = 0U;
-    int64_t d_sq = flow_qmul_i64(delta, delta, &push_ovf);
-    int64_t j0_au =
-        flow_qadd_i64((int64_t)state[0],
-                      flow_qadd_i64(flow_qmul_i64(r1, delta, &push_ovf),
-                                    flow_qshr1_i64(flow_qmul_i64(r2, d_sq, &push_ovf)), &push_ovf),
-                      &push_ovf);
-    int64_t j1_au =
-        flow_qadd_i64((int64_t)state[1], flow_qmul_i64(r2, delta, &push_ovf), &push_ovf);
-    ovf |= (uint32_t)flow_mux_u64(op_mask, 0ULL, push_ovf);
-
-    int64_t j0_next = flow_mux_i64(op_mask, j0_op, j0_au);
-    int64_t j1_next = flow_mux_i64(op_mask, j1_op, j1_au);
-    int64_t j2_next = r2;
-    uint32_t conv_ovf = 0U;
-    int64_t res_after = flow_mux_i64(op_mask, j0_next, flow_qsub_i64(j0_next, b0, &conv_ovf));
-    bool converged =
-        ((ovf | conv_ovf) == 0U) & (flow_abs_i64(res_after) <= (uint64_t)FLOW_CONVERGE_EPS_Q16);
-
-    uint32_t live_sieve = ((uint32_t)seal_ok * FLOW_SIEVE_SEAL_VALID) |
-                          ((uint32_t)dom_ok * FLOW_SIEVE_DOMAIN_MATCH) |
-                          ((uint32_t)(ovf == 0U) * FLOW_SIEVE_NO_OVERFLOW) |
-                          ((uint32_t)kan_ok * FLOW_SIEVE_KAN_HOMOTOPIC) |
-                          ((uint32_t)horizon_ok * FLOW_SIEVE_HORIZON_VALID) |
-                          ((uint32_t)converged * FLOW_SIEVE_CONVERGED);
-
-    uint32_t eff_req = req_sieve | FLOW_SIEVE_BASE_GATE;
-    uint64_t commit = flow_mask_bool((live_sieve & eff_req) == eff_req);
-
-    int32_t mom_next = (int32_t)flow_mux_i64(
-        flow_mask_bool(delta != 0),
-        flow_mux_i64(flow_mask_bool(delta < 0), -INT64_C(65536), INT64_C(65536)), mom_prev);
-    uint64_t aux_next = (state[5] & UINT64_C(0xFFFFFFFF00000000)) | ((uint64_t)(uint32_t)mom_next);
-
-    uint32_t epoch_next = (uint32_t)(state[6] >> 32U) + 1U;
-    uint64_t omega_next = ((uint64_t)epoch_next << 32U) | (uint64_t)live_sieve;
-
-    flow_cell out = {
-        flow_mux_u64(commit, (uint64_t)j0_next, state[0]),
-        flow_mux_u64(commit, (uint64_t)j1_next, state[1]),
-        flow_mux_u64(commit, (uint64_t)j2_next, state[2]),
-        flow_mux_u64(commit, x_proj, state[3]),
-        flow_mux_u64(commit, (uint64_t)dt_resolved, UINT64_C(0)),
-        flow_mux_u64(commit, aux_next, state[5]),
-        omega_next,
-        UINT64_C(0),
-    };
-
-    /* Anti-laundering: unsealed C-fabricated states never receive a valid state seal */
-    uint64_t out_seal =
-        flow__seal_lanes(FLOW_STATE_SEED, out[0], out[1], out[2], out[3], out[4], out[5], out[6]);
-    out[7] = flow_mux_u64(flow_mask_bool(state_seal_ok), out_seal, UINT64_C(0));
-    return out;
-}
-
 /* --- Little-Endian 64B Capsule Wire Serialization & Lock-Free Arena Transport --- */
 
 static inline uint64_t flow_load_le64(const uint8_t p[8]) {
@@ -449,7 +286,6 @@ static inline void flow_cell_to_bytes(flow_cell c, uint8_t out[64]) {
     }
 }
 
-/* Z / 2^k Z masked Acquire/Release cell transport (SPSC stream + QSBR hot-swap) */
 static inline void flow_arena_store_rel(flow_cell *arena, uint64_t idx, uint64_t cap_mask,
                                         flow_cell c) {
 #if defined(__SIZEOF_POINTER__) && (__SIZEOF_POINTER__ >= 8)
@@ -470,7 +306,7 @@ static inline void flow_arena_store_rel(flow_cell *arena, uint64_t idx, uint64_t
 #endif
 }
 
-/* Publishes a Lean-sealed boundary with a new runtime Epoch WITHOUT re-signing bound[7] */
+/* Publishes a Lean-sealed chart with a new runtime Epoch WITHOUT re-signing bound[7] */
 static inline void flow_arena_publish_bound(flow_cell *arena, uint64_t idx, uint64_t cap_mask,
                                             uint32_t epoch, flow_cell bound) {
     uint64_t req = bound[6] & UINT64_C(0xFFFFFFFF);
@@ -501,6 +337,192 @@ static inline flow_cell flow_arena_load_acq(const flow_cell *arena, uint64_t idx
     flow_cell c = {slot[0], slot[1], slot[2], slot[3], slot[4], slot[5], w6, slot[7]};
     return c;
 #endif
+}
+
+/* --- Universal Branchless HoTT x 2-Jet Manifold Atlas Endomorphism Phi --- */
+
+static inline flow_cell flow_step_chart(flow_cell state, flow_cell bound, uint64_t cap_mask,
+                                        int64_t u_ext, uint16_t mode_req) {
+    uint32_t ovf = 0U;
+
+    /* 1. Dual Domain-Separated Seal, Univalence & Chart Well-Formedness Gate */
+    bool state_seal_ok = flow_verify_state(state);
+    bool bound_seal_ok = flow_verify_bound(bound);
+    bool seal_ok = state_seal_ok & bound_seal_ok;
+    bool dom_ok = ((state[5] ^ bound[5]) >> 32U) == 0ULL;
+
+    int64_t b0 = (int64_t)bound[0];
+    int64_t b1 = (int64_t)bound[1];
+    int64_t b2 = (int64_t)bound[2];
+    int64_t b_exit = (int64_t)(int32_t)(uint32_t)(bound[3] >> 32U);
+    int64_t b_enter = (int64_t)(int32_t)(uint32_t)(bound[3] & UINT64_C(0xFFFFFFFF));
+    int64_t dt_max = (int64_t)(int32_t)(uint32_t)(bound[4] >> 32U);
+    int64_t u_gain = (int64_t)(int32_t)(uint32_t)(bound[4] & UINT64_C(0xFFFFFFFF));
+
+    uint16_t next_lo = (uint16_t)((bound[5] >> 24U) & UINT64_C(0xFF));
+    uint16_t next_hi = (uint16_t)((bound[5] >> 16U) & UINT64_C(0xFF));
+    uint16_t kan_lock = (uint16_t)(bound[5] & UINT64_C(0xFFFF));
+    uint32_t req_sieve = (uint32_t)(bound[6] & UINT64_C(0xFFFFFFFF));
+
+    bool horizon_ok = (dt_max > 0) & (b_exit <= b_enter);
+    int64_t safe_dt_max = flow_mux_i64(flow_mask_bool(dt_max > 0), dt_max, INT64_C(1));
+
+    /* 2. External Signal Pullback & 2-Jet Residual Evaluation */
+    int64_t u_scaled = flow_qmul_i64(u_gain, u_ext, &ovf);
+    int64_t b0_eff = flow_qsub_i64(b0, u_scaled, &ovf);
+
+    int64_t x = (int64_t)state[3];
+    uint64_t op_mask = flow_mask_bool((b1 != 0) | (b2 != 0));
+
+    uint32_t op_ovf = 0U;
+    int64_t x_sq = flow_qmul_i64(x, x, &op_ovf);
+    int64_t quad_term = flow_qshr1_i64(flow_qmul_i64(b2, x_sq, &op_ovf));
+    int64_t lin_term = flow_qmul_i64(b1, x, &op_ovf);
+    int64_t g0 = flow_qadd_i64(b0_eff, flow_qadd_i64(lin_term, quad_term, &op_ovf), &op_ovf);
+    int64_t g1 = flow_qadd_i64(b1, flow_qmul_i64(b2, x, &op_ovf), &op_ovf);
+
+    uint32_t auto_ovf = 0U;
+    int64_t f0 = flow_qsub_i64((int64_t)state[0], b0_eff, &auto_ovf);
+    ovf |= (uint32_t)flow_mux_u64(op_mask, op_ovf, auto_ovf);
+
+    int64_t r0 = flow_mux_i64(op_mask, g0, f0);
+    int64_t r1 = flow_mux_i64(op_mask, g1, (int64_t)state[1]);
+    int64_t r2 = flow_mux_i64(op_mask, b2, (int64_t)state[2]);
+
+    /* 3. Branchless 2-Jet Citardauq Root & Wick-Rotated Curvature Tunneling */
+    uint32_t disc_ovf = 0U;
+    int64_t r1_sq = flow_qmul_i64(r1, r1, &disc_ovf);
+    int64_t r0_r2 = flow_qmul_i64(r0, r2, &disc_ovf);
+    int64_t two_r0_r2 = flow_qadd_i64(r0_r2, r0_r2, &disc_ovf);
+    int64_t disc = flow_qsub_i64(r1_sq, two_r0_r2, &disc_ovf);
+
+    int64_t d_mag = (int64_t)flow_qsqrt_u64(flow_abs_i64(disc));
+    int64_t neg_d_mag = flow_qneg_i64(d_mag, &disc_ovf);
+    int64_t signed_d = flow_mux_i64(flow_mask_bool(r1 < 0), neg_d_mag, d_mag);
+    int64_t q_cit = flow_qadd_i64(r1, signed_d, &disc_ovf);
+
+    uint32_t div_ovf_a = 0U;
+    uint32_t div_ovf_b = 0U;
+    uint32_t div_ovf_l = 0U;
+    uint32_t div_ovf_t = 0U;
+    int64_t neg_two_r0 = flow_qneg_i64(flow_qadd_i64(r0, r0, &div_ovf_a), &div_ovf_a);
+    int64_t root_a = flow_qdiv_i64(neg_two_r0, q_cit, &div_ovf_a);
+    int64_t root_b = flow_qdiv_i64(flow_qneg_i64(q_cit, &div_ovf_b), r2, &div_ovf_b);
+    uint64_t pick_a = flow_mask_bool(flow_abs_i64(root_a) <= flow_abs_i64(root_b));
+    int64_t step_quad = flow_mux_i64(pick_a, root_a, root_b);
+
+    int64_t step_lin = flow_qdiv_i64(flow_qneg_i64(r0, &div_ovf_l), r1, &div_ovf_l);
+
+    int64_t grad_dir = flow_mux_i64(flow_mask_bool(r1 > 0), -INT64_C(1), INT64_C(1));
+    int64_t tun_d = flow_mux_i64(flow_mask_bool(grad_dir < 0), neg_d_mag, d_mag);
+    int64_t tun_num = flow_qadd_i64(flow_qneg_i64(r1, &div_ovf_t), tun_d, &div_ovf_t);
+    int64_t abs_r2_i64 =
+        (int64_t)flow_mux_u64(flow_mask_bool(flow_abs_i64(r2) > (uint64_t)INT64_MAX),
+                              (uint64_t)INT64_MAX, flow_abs_i64(r2));
+    int64_t step_tunnel = flow_qdiv_i64(tun_num, abs_r2_i64, &div_ovf_t);
+
+    uint64_t has_r2 = flow_mask_bool(r2 != 0);
+    uint64_t real_roots = flow_mask_bool(disc >= 0);
+    int64_t raw_step =
+        flow_mux_i64(has_r2, flow_mux_i64(real_roots, step_quad, step_tunnel), step_lin);
+
+    uint64_t active = flow_mask_bool((r0 != 0) & ((r1 != 0) | (r2 != 0)));
+    uint64_t zero_quant = active & flow_mask_bool(raw_step == 0);
+    int64_t nz_step =
+        flow_mux_i64(~active, INT64_C(0), flow_mux_i64(zero_quant, grad_dir, raw_step));
+
+    uint64_t raw_abs = flow_abs_i64(nz_step);
+    uint64_t clamp_mask = flow_mask_bool(raw_abs > (uint64_t)safe_dt_max);
+    int64_t neg_dt_max = flow_qneg_i64(safe_dt_max, &ovf);
+    int64_t signed_cap = flow_mux_i64(flow_mask_bool(nz_step < 0), neg_dt_max, safe_dt_max);
+    int64_t delta = flow_mux_i64(clamp_mask, signed_cap, nz_step);
+    int64_t dt_resolved = (int64_t)flow_abs_i64(delta);
+
+    /* 4. Pure Continuous Update, Orthogonal Kan Mode Projection & Schmitt Chart Gluing */
+    int64_t xp = flow_qadd_i64(x, delta, &ovf);
+
+    uint32_t post_op_ovf = 0U;
+    int64_t xp_sq = flow_qmul_i64(xp, xp, &post_op_ovf);
+    int64_t j0_op = flow_qadd_i64(
+        b0_eff,
+        flow_qadd_i64(flow_qmul_i64(b1, xp, &post_op_ovf),
+                      flow_qshr1_i64(flow_qmul_i64(b2, xp_sq, &post_op_ovf)), &post_op_ovf),
+        &post_op_ovf);
+    int64_t j1_op = flow_qadd_i64(b1, flow_qmul_i64(b2, xp, &post_op_ovf), &post_op_ovf);
+
+    uint32_t push_ovf = 0U;
+    int64_t d_sq = flow_qmul_i64(delta, delta, &push_ovf);
+    int64_t j0_au =
+        flow_qadd_i64((int64_t)state[0],
+                      flow_qadd_i64(flow_qmul_i64(r1, delta, &push_ovf),
+                                    flow_qshr1_i64(flow_qmul_i64(r2, d_sq, &push_ovf)), &push_ovf),
+                      &push_ovf);
+    int64_t j1_au =
+        flow_qadd_i64((int64_t)state[1], flow_qmul_i64(r2, delta, &push_ovf), &push_ovf);
+    ovf |= (uint32_t)flow_mux_u64(op_mask, post_op_ovf, push_ovf);
+
+    int64_t j0_next = flow_mux_i64(op_mask, j0_op, j0_au);
+    int64_t j1_next = flow_mux_i64(op_mask, j1_op, j1_au);
+    int64_t j2_next = r2;
+    uint32_t conv_ovf = 0U;
+    int64_t res_after = flow_mux_i64(op_mask, j0_next, flow_qsub_i64(j0_next, b0_eff, &conv_ovf));
+    bool converged =
+        ((ovf | conv_ovf) == 0U) & (flow_abs_i64(res_after) <= (uint64_t)FLOW_CONVERGE_EPS_Q16);
+
+    uint16_t chart_orig = (uint16_t)((state[5] >> 16U) & UINT64_C(0xFFFF));
+    uint16_t mode_orig = (uint16_t)(state[5] & UINT64_C(0xFFFF));
+    bool kan_ok = (((uint16_t)(mode_orig ^ mode_req) & kan_lock) == 0U);
+    uint16_t mode_proj = (uint16_t)((mode_req & (uint16_t)(~kan_lock)) | (mode_orig & kan_lock));
+
+    uint64_t go_lo = flow_mask_bool(u_ext < b_exit);
+    uint64_t go_hi = flow_mask_bool(u_ext > b_enter);
+    uint64_t raw_chart = flow_mux_u64(go_lo, (uint64_t)next_lo, (uint64_t)chart_orig);
+    raw_chart = flow_mux_u64(go_hi, (uint64_t)next_hi, raw_chart);
+    uint16_t chart_next = (uint16_t)(raw_chart & cap_mask & UINT64_C(0xFFFF));
+
+    uint32_t live_sieve = ((uint32_t)seal_ok * FLOW_SIEVE_SEAL_VALID) |
+                          ((uint32_t)dom_ok * FLOW_SIEVE_DOMAIN_MATCH) |
+                          ((uint32_t)(ovf == 0U) * FLOW_SIEVE_NO_OVERFLOW) |
+                          ((uint32_t)kan_ok * FLOW_SIEVE_KAN_HOMOTOPIC) |
+                          ((uint32_t)horizon_ok * FLOW_SIEVE_HORIZON_VALID) |
+                          ((uint32_t)converged * FLOW_SIEVE_CONVERGED);
+
+    uint32_t eff_req = req_sieve | FLOW_SIEVE_BASE_GATE;
+    uint64_t commit = flow_mask_bool((live_sieve & eff_req) == eff_req);
+
+    uint64_t aux_next = (state[5] & UINT64_C(0xFFFFFFFF00000000)) | ((uint64_t)chart_next << 16U) |
+                        (uint64_t)mode_proj;
+    uint32_t epoch_next = (uint32_t)(state[6] >> 32U) + 1U;
+    uint64_t omega_next = ((uint64_t)epoch_next << 32U) | (uint64_t)live_sieve;
+
+    flow_cell out = {
+        flow_mux_u64(commit, (uint64_t)j0_next, state[0]),
+        flow_mux_u64(commit, (uint64_t)j1_next, state[1]),
+        flow_mux_u64(commit, (uint64_t)j2_next, state[2]),
+        flow_mux_u64(commit, (uint64_t)xp, state[3]),
+        flow_mux_u64(commit, (uint64_t)dt_resolved, UINT64_C(0)),
+        flow_mux_u64(commit, aux_next, state[5]),
+        omega_next,
+        UINT64_C(0),
+    };
+
+    /* Anti-laundering: unsealed C-fabricated states never receive a valid state seal */
+    uint64_t out_seal =
+        flow__seal_lanes(FLOW_STATE_SEED, out[0], out[1], out[2], out[3], out[4], out[5], out[6]);
+    out[7] = flow_mux_u64(flow_mask_bool(state_seal_ok), out_seal, UINT64_C(0));
+    return out;
+}
+
+static inline flow_cell flow_step(flow_cell state, flow_cell bound) {
+    uint16_t cur_mode = (uint16_t)(state[5] & UINT64_C(0xFFFF));
+    return flow_step_chart(state, bound, UINT64_C(0xFFFF), INT64_C(0), cur_mode);
+}
+
+static inline flow_cell flow_step_atlas(flow_cell state, const flow_cell *arena, uint64_t cap_mask,
+                                        int64_t u_ext, uint16_t mode_req) {
+    uint64_t chart_idx = (state[5] >> 16U) & UINT64_C(0xFFFF);
+    flow_cell bound = flow_arena_load_acq(arena, chart_idx, cap_mask);
+    return flow_step_chart(state, bound, cap_mask, u_ext, mode_req);
 }
 
 #if defined(__GNUC__) || defined(__clang__)

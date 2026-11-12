@@ -1,24 +1,26 @@
 import Std.Tactic.BVDecide
 
 /-
-  FLOW — Upstream Semantic Boundary & Formal Proof Gatekeeper
-  ===========================================================
-  Pure library module (zero `_root_.main` collision, zero `lean -c` codegen).
-  Forces downstream domain specifications through proof-carrying `Boundary`
-  instances and mints domain-separated, epoch-invariant 64-byte `.flow` cells
-  and self-contained `State + Arena` bundles (`0 sorryAx`).
+  FLOW — Upstream Semantic Gatekeeper & Manifold Atlas Emitter
+  ============================================================
+  Pure Lean 4 library module (zero `_root_.main` collision, zero `lean -c` codegen).
+  Compiles multi-regime domain rules, Schmitt hysteresis deadbands, orthogonal
+  Cubical Kan mode locks, and 2-Jet equilibrium laws via partial evaluation into
+  self-contained `(1 + 2^k) × 64B` `.flow` Manifold Atlases (`0 sorryAx`).
 -/
 
 namespace Flow
 
 def version : String := "5.0.0"
 
-def q16Shift : Nat := 16
-def q16One : Int := 65536
+def q16Shift   : Nat := 16
+def q16One     : Int := 65536
 def maxSafeQ16 : Int := 70368744177664 -- 2^46
+def minI32     : Int := -2147483648
+def maxI32     : Int := 2147483647
 
-def fpMod : Nat := 0xFFFFFFFF00000001
-def golden64 : UInt64 := 0x9E3779B97F4A7C15
+def fpMod       : Nat    := 0xFFFFFFFF00000001
+def golden64    : UInt64 := 0x9E3779B97F4A7C15
 def boundSeed64 : UInt64 := 0x464C4F57424E4435 -- "FLOWBND5" (< fpMod)
 def stateSeed64 : UInt64 := 0x464C4F5753544135 -- "FLOWSTA5" (< fpMod)
 
@@ -89,14 +91,14 @@ def sealWithSeed (seed w0 w1 w2 w3 w4 w5 w6 : UInt64) : UInt64 :=
   nonZeroU64 (UInt64.ofNat (fpSbox7 s7))
 
 /--
-  Epoch-invariant Boundary Seal (`boundSeed64`):
-  Masks `w6` to `[31:0] reqSieve` so runtime QSBR/SPSC `Epoch` advances in C
-  NEVER require or allow re-sealing a Lean-minted boundary cell.
+  Epoch-invariant Chart (`Boundary`) seal (`boundSeed64`):
+  Masks `w6` to `[31:0] ReqSieve` so runtime QSBR / `@swap` `Epoch` advances in C
+  never require or allow re-signing a Lean-minted chart cell.
 -/
 def sealBoundLanes (w0 w1 w2 w3 w4 w5 w6 : UInt64) : UInt64 :=
   sealWithSeed boundSeed64 w0 w1 w2 w3 w4 w5 (w6 &&& 0xFFFFFFFF)
 
-/-- State Seal (`stateSeed64`): Covers full `w0..w6` including live `[Epoch:32 | Sieve:32]`. -/
+/-- State seal (`stateSeed64`): Covers full `w0..w6` including live `[Epoch:32 | Sieve:32]`. -/
 def sealStateLanes (w0 w1 w2 w3 w4 w5 w6 : UInt64) : UInt64 :=
   sealWithSeed stateSeed64 w0 w1 w2 w3 w4 w5 w6
 
@@ -116,7 +118,7 @@ theorem sealStateLanes_ne_zero (w0 w1 w2 w3 w4 w5 w6 : UInt64) :
   unfold sealStateLanes sealWithSeed
   exact nonZeroU64_ne_zero _
 
-/-- Epoch-Invariance Theorem: Updating `[63:32] Epoch` leaves the boundary seal unchanged. -/
+/-- Epoch-Invariance Theorem: Advancing a chart's runtime Epoch leaves its Lean seal unchanged. -/
 theorem sealBound_epoch_invariant
     (w0 w1 w2 w3 w4 w5 : UInt64) (ep1 ep2 req : UInt32) :
     let w6a := (ep1.toUInt64 <<< 32) ||| req.toUInt64
@@ -128,6 +130,12 @@ theorem sealBound_epoch_invariant
     bv_decide
   unfold sealBoundLanes
   rw [hMask]
+
+def verifyBoundCell (c : Cell64) : Bool :=
+  c.w7 == sealBoundCell c
+
+def verifyStateCell (c : Cell64) : Bool :=
+  c.w7 == sealStateCell c
 
 /-! ## 3. Little-Endian 64B Wire Serialization -/
 
@@ -153,15 +161,98 @@ def Cell64.toBytes (c : Cell64) : ByteArray :=
 theorem Cell64.toBytes_size (c : Cell64) : c.toBytes.size = 64 := by
   simp [Cell64.toBytes, pushLE64_size, ByteArray.size_empty]
 
-/-! ## 4. Sealed Boundary & State Gatekeepers (`class Boundary`) -/
+/-! ## 4. Upstream Chart Typeclass, `Rule k` Builder & Sealed Gatekeepers -/
 
-/-- Private constructor prevents forging unverified 64-byte boundary cells. -/
+/--
+  Proof-carrying Manifold Chart over a `2^k`-slot Atlas (`k ≤ 8`):
+  - `b0, b1, b2` : Local 2-Jet quadratic manifold coefficients (Q48.16)
+  - `bExit, bEnter` : Schmitt hysteresis deadband `[bExit, bEnter]` (Q16.16 `i32`)
+  - `dtMax` : Admissible per-step displacement horizon `> 0` (Q16.16 `i32`)
+  - `uGain` : External runtime input `u_ext` coupling gain (Q16.16 `i32`)
+  - `domainTag` : 32-bit Univalence domain identifier
+  - `nextLo, nextHi` : Branchless hysteresis target chart indices in `0 .. 2^k - 1`
+  - `kanLock` : Orthogonal 16-bit discrete Cubical mode lock mask
+-/
+class Chart (k : outParam Nat) (α : Type) where
+  b0        : α → Int
+  b1        : α → Int
+  b2        : α → Int
+  bExit     : α → Int := fun _ => minI32
+  bEnter    : α → Int := fun _ => maxI32
+  dtMax     : α → Int
+  uGain     : α → Int := fun _ => 0
+  domainTag : α → UInt32
+  nextLo    : α → UInt8 := fun _ => 0
+  nextHi    : α → UInt8 := fun _ => 0
+  kanLock   : α → UInt16 := fun _ => 0
+  reqSieve  : α → UInt32 := fun _ => sieveSafetyGate
+  atlas_pow2_valid : α → k ≤ 8
+  dtMax_valid      : ∀ s : α, 0 < dtMax s ∧ dtMax s ≤ maxI32
+  uGain_valid      : ∀ s : α, minI32 ≤ uGain s ∧ uGain s ≤ maxI32
+  hyst_valid       : ∀ s : α, minI32 ≤ bExit s ∧ bExit s ≤ bEnter s ∧ bEnter s ≤ maxI32
+  coeffs_bounded   : ∀ s : α,
+    -maxSafeQ16 ≤ b0 s ∧ b0 s ≤ maxSafeQ16 ∧
+    -maxSafeQ16 ≤ b1 s ∧ b1 s ≤ maxSafeQ16 ∧
+    -maxSafeQ16 ≤ b2 s ∧ b2 s ≤ maxSafeQ16
+  adj_valid        : ∀ s : α, (nextLo s).toNat < 2 ^ k ∧ (nextHi s).toNat < 2 ^ k
+  sieve_guarded    : ∀ s : α, (reqSieve s &&& sieveBaseGate) = sieveBaseGate
+
+/--
+  Ergonomic dependent chart specification for a `2^k`-chart Atlas (`k ≤ 8`).
+  All proof obligations default to `by decide` so concrete domain rules are
+  machine-checked at compile time with zero boilerplate.
+-/
+structure Rule (k : Nat) where
+  b0        : Int    := 0
+  b1        : Int    := 0
+  b2        : Int    := 0
+  bExit     : Int    := minI32
+  bEnter    : Int    := maxI32
+  dtMax     : Int    := q16One
+  uGain     : Int    := 0
+  domTag    : UInt32
+  nextLo    : UInt8  := 0
+  nextHi    : UInt8  := 0
+  kanLock   : UInt16 := 0
+  reqSieve  : UInt32 := sieveSafetyGate
+  hK        : k ≤ 8 := by decide
+  hHorizon  : 0 < dtMax ∧ dtMax ≤ maxI32 := by decide
+  hGain     : minI32 ≤ uGain ∧ uGain ≤ maxI32 := by decide
+  hHyst     : minI32 ≤ bExit ∧ bExit ≤ bEnter ∧ bEnter ≤ maxI32 := by decide
+  hBounded  : -maxSafeQ16 ≤ b0 ∧ b0 ≤ maxSafeQ16 ∧
+              -maxSafeQ16 ≤ b1 ∧ b1 ≤ maxSafeQ16 ∧
+              -maxSafeQ16 ≤ b2 ∧ b2 ≤ maxSafeQ16 := by decide
+  hAdj      : nextLo.toNat < 2 ^ k ∧ nextHi.toNat < 2 ^ k := by decide
+  hGuarded  : (reqSieve &&& sieveBaseGate) = sieveBaseGate := by decide
+
+instance {k : Nat} : Chart k (Rule k) where
+  b0 r               := r.b0
+  b1 r               := r.b1
+  b2 r               := r.b2
+  bExit r            := r.bExit
+  bEnter r           := r.bEnter
+  dtMax r            := r.dtMax
+  uGain r            := r.uGain
+  domainTag r        := r.domTag
+  nextLo r           := r.nextLo
+  nextHi r           := r.nextHi
+  kanLock r          := r.kanLock
+  reqSieve r         := r.reqSieve
+  atlas_pow2_valid r := r.hK
+  dtMax_valid r      := r.hHorizon
+  uGain_valid r      := r.hGain
+  hyst_valid r       := r.hHyst
+  coeffs_bounded r   := r.hBounded
+  adj_valid r        := r.hAdj
+  sieve_guarded r    := r.hGuarded
+
+/-- Private constructor prevents forging unverified 64-byte chart cells. -/
 structure SealedBound where
   private mk ::
   cell : Cell64
   seal_eq : cell.w7 = sealBoundCell cell
 
-/-- Private constructor prevents forging unsealed initial state cells in C. -/
+/-- Private constructor prevents forging unsealed initial state cells. -/
 structure SealedState where
   private mk ::
   cell : Cell64
@@ -190,56 +281,39 @@ def intToU64Twos (x : Int) : UInt64 :=
 def intToU32Twos (x : Int) : UInt32 :=
   UInt32.ofNat (BitVec.ofInt 32 x).toNat
 
-/--
-  Standard upstream interface for domain applications.
-  Downstream code implements `Boundary α` and emits `.flow` binary bundles
-  (`State + 2^k Boundaries`) at build time (`lean --run`), keeping domain tags,
-  initial states, and invariants 100% inside Lean (zero `lean -c`, zero C macros).
--/
-class Boundary (α : Type) where
-  b0        : α → Int
-  b1        : α → Int
-  b2        : α → Int
-  kanFilter : α → UInt64
-  dtMax     : α → Int
-  domainTag : α → UInt32
-  auxParam  : α → UInt32 := fun _ => 0
-  reqSieve  : α → UInt32 := fun _ => sieveSafetyGate
-  dtMax_valid :
-    ∀ a, 0 < dtMax a ∧ dtMax a ≤ maxSafeQ16
-  coeffs_bounded :
-    ∀ a, -maxSafeQ16 ≤ b0 a ∧ b0 a ≤ maxSafeQ16 ∧
-         -maxSafeQ16 ≤ b1 a ∧ b1 a ≤ maxSafeQ16 ∧
-         -maxSafeQ16 ≤ b2 a ∧ b2 a ≤ maxSafeQ16
-  sieve_guarded :
-    ∀ a, (reqSieve a &&& sieveBaseGate) = sieveBaseGate
-
-def mintCell [Boundary α] (spec : α) (epoch : UInt32 := 1) : SealedBound :=
+/-- Mints a 64-byte sealed Chart cell from any verified `Chart k` instance. -/
+def mintCell {k : Nat} {α : Type} [Chart k α] (spec : α) (epoch : UInt32 := 1) : SealedBound :=
+  let w3 := ((intToU32Twos (Chart.bExit spec)).toUInt64 <<< 32) |||
+            (intToU32Twos (Chart.bEnter spec)).toUInt64
+  let w4 := ((intToU32Twos (Chart.dtMax spec)).toUInt64 <<< 32) |||
+            (intToU32Twos (Chart.uGain spec)).toUInt64
+  let w5 := ((Chart.domainTag spec).toUInt64 <<< 32) |||
+            ((Chart.nextLo spec).toUInt64 <<< 24) |||
+            ((Chart.nextHi spec).toUInt64 <<< 16) |||
+            (Chart.kanLock spec).toUInt64
+  let w6 := (epoch.toUInt64 <<< 32) ||| (Chart.reqSieve spec).toUInt64
   packSealedBound
-    (intToU64Twos (Boundary.b0 spec))
-    (intToU64Twos (Boundary.b1 spec))
-    (intToU64Twos (Boundary.b2 spec))
-    (Boundary.kanFilter spec)
-    (intToU64Twos (Boundary.dtMax spec))
-    (((Boundary.domainTag spec).toUInt64 <<< 32) ||| (Boundary.auxParam spec).toUInt64)
-    ((epoch.toUInt64 <<< 32) ||| (Boundary.reqSieve spec).toUInt64)
+    (intToU64Twos (Chart.b0 spec))
+    (intToU64Twos (Chart.b1 spec))
+    (intToU64Twos (Chart.b2 spec))
+    w3 w4 w5 w6
 
-/--
-  Mints a domain-bound initial `State` cell directly from a `Boundary` anchor,
-  so C hosts never hardcode `DomainTag` or call any seal function.
--/
-def mintState [Boundary α] (anchor : α) (x0Q16 : Int)
-    (j0Q16 : Int := 0) (j1Q16 : Int := 0) (j2Q16 : Int := 0)
-    (momentumQ16 : Int := q16One) : SealedState :=
-  let dom := (Boundary.domainTag anchor).toUInt64 <<< 32
-  let mom := (intToU32Twos momentumQ16).toUInt64
+/-- Mints an initial domain-bound `State` cell directly from a verified `Chart k` anchor. -/
+def mintState {k : Nat} {α : Type} [Chart k α] (anchor : α) (x0Q16 : Int)
+    (initChart : UInt16 := 0) (initMode : UInt16 := 0)
+    (j0Q16 : Int := 0) (j1Q16 : Int := 0) (j2Q16 : Int := 0) : SealedState :=
+  let capMask : UInt16 := UInt16.ofNat ((2 ^ k) - 1)
+  let safeChart : UInt16 := initChart &&& capMask
+  let w5 := ((Chart.domainTag anchor).toUInt64 <<< 32) |||
+            (safeChart.toUInt64 <<< 16) |||
+            initMode.toUInt64
   packSealedState
     (intToU64Twos j0Q16)
     (intToU64Twos j1Q16)
     (intToU64Twos j2Q16)
     (intToU64Twos x0Q16)
     0
-    (dom ||| mom)
+    w5
     sieveSealValid.toUInt64
 
 def appendBounds (acc : ByteArray) : Nat → List SealedBound → SealedBound → ByteArray
@@ -251,7 +325,7 @@ theorem appendBounds_size (acc : ByteArray) (n : Nat) (cs : List SealedBound) (f
     (appendBounds acc n cs fb).size = acc.size + n * 64 := by
   induction n generalizing acc cs with
   | zero => simp [appendBounds]
-  | succ k ih =>
+  | succ m ih =>
     cases cs with
     | nil =>
       simp [appendBounds, ih, ByteArray.size_append, SealedBound.toBytes_size]
@@ -260,29 +334,30 @@ theorem appendBounds_size (acc : ByteArray) (n : Nat) (cs : List SealedBound) (f
       simp [appendBounds, ih, ByteArray.size_append, SealedBound.toBytes_size]
       omega
 
-/-- Emits a `2^k × 64B` power-of-two Boundary Arena (`idx & ((1 << k) - 1)`). -/
-def mintArena [Boundary α] (k : Nat) (specs : List α) (fallback : α) (epoch : UInt32 := 1) :
-    ByteArray :=
+/-- Emits a `2^k × 64B` power-of-two Chart Arena (`idx & ((1 << k) - 1)`). -/
+def mintArena {kOut : Nat} {α : Type} [Chart kOut α] (k : Nat) (specs : List α) (fallback : α)
+    (epoch : UInt32 := 1) : ByteArray :=
   let cells := specs.map (fun s => mintCell s epoch)
   let fb := mintCell fallback epoch
   appendBounds ByteArray.empty (2 ^ k) cells fb
 
-theorem mintArena_size [Boundary α] (k : Nat) (specs : List α) (fallback : α) (epoch : UInt32) :
+theorem mintArena_size {kOut : Nat} {α : Type} [Chart kOut α] (k : Nat) (specs : List α)
+    (fallback : α) (epoch : UInt32) :
     (mintArena k specs fallback epoch).size = (2 ^ k) * 64 := by
   simp [mintArena, appendBounds_size, ByteArray.size_empty]
 
 /--
-  Emits a self-contained `(1 + 2^k) × 64B` `.flow` Bundle:
-  - Cell `0` (`bytes [0..63]`): Sealed initial `State` cell
-  - Cells `1 .. 2^k`: Power-of-two `2^k` Sealed `Boundary` arena
+  Emits a self-contained `(1 + 2^k) × 64B` `.flow` Manifold Atlas Bundle:
+  - Cell `0` (`bytes [0..63]`): Sealed initial `State` cell (`"FLOWSTA5"`)
+  - Cells `1 .. 2^k`: Power-of-two `2^k` Sealed `Chart` Arena (`"FLOWBND5"`)
 -/
-def mintBundle [Boundary α] (k : Nat) (initState : SealedState)
+def mintBundle {kOut : Nat} {α : Type} [Chart kOut α] (k : Nat) (initState : SealedState)
     (specs : List α) (fallback : α) (epoch : UInt32 := 1) : ByteArray :=
   let cells := specs.map (fun s => mintCell s epoch)
   let fb := mintCell fallback epoch
   appendBounds initState.toBytes (2 ^ k) cells fb
 
-theorem mintBundle_size [Boundary α] (k : Nat) (initState : SealedState)
+theorem mintBundle_size {kOut : Nat} {α : Type} [Chart kOut α] (k : Nat) (initState : SealedState)
     (specs : List α) (fallback : α) (epoch : UInt32) :
     (mintBundle k initState specs fallback epoch).size = (1 + 2 ^ k) * 64 := by
   simp [mintBundle, appendBounds_size, SealedState.toBytes_size]
@@ -294,50 +369,77 @@ def emitCell (path : System.FilePath) (b : SealedBound) : IO Unit :=
 def emitState (path : System.FilePath) (s : SealedState) : IO Unit :=
   IO.FS.writeBinFile path s.toBytes
 
-def emitArena [Boundary α] (path : System.FilePath) (k : Nat) (specs : List α)
-    (fallback : α) (epoch : UInt32 := 1) : IO Unit :=
-  IO.FS.writeBinFile path (mintArena k specs fallback epoch)
+def emitArena {k : Nat} {α : Type} [Chart k α] (path : System.FilePath) (kExp : Nat)
+    (specs : List α) (fallback : α) (epoch : UInt32 := 1) (hEq : kExp = k := by rfl) : IO Unit :=
+  let _ := hEq
+  IO.FS.writeBinFile path (mintArena kExp specs fallback epoch)
 
-def emitBundle [Boundary α] (path : System.FilePath) (k : Nat) (initState : SealedState)
-    (specs : List α) (fallback : α) (epoch : UInt32 := 1) : IO Unit :=
-  IO.FS.writeBinFile path (mintBundle k initState specs fallback epoch)
+def emitBundle {k : Nat} {α : Type} [Chart k α] (path : System.FilePath) (kExp : Nat)
+    (initState : SealedState) (specs : List α) (fallback : α)
+    (epoch : UInt32 := 1) (hEq : kExp = k := by rfl) : IO Unit :=
+  let _ := hEq
+  IO.FS.writeBinFile path (mintBundle kExp initState specs fallback epoch)
 
-/-! ## 5. Formal Invariants of the HoTT × 2-Jet Transition Law (`0 sorryAx`) -/
+/-! ## 5. Formal Invariants of the HoTT × 2-Jet Atlas Transition Law (`0 sorryAx`) -/
 
-def kanProjectBV (x xCand filter : BitVec 64) : BitVec 64 :=
-  (xCand &&& ~~~filter) ||| (x &&& filter)
+def kanModeProjBV (mode mReq lock : BitVec 16) : BitVec 16 :=
+  (mReq &&& ~~~lock) ||| (mode &&& lock)
 
-/-- Kan Cubical Projection Theorem: Immutable homotopy axes never flip. -/
-theorem kanProject_preserves_filter (x xCand filter : BitVec 64) :
-    (((kanProjectBV x xCand filter) ^^^ x) &&& filter) = 0#64 := by
-  unfold kanProjectBV
+/-- Orthogonal Cubical Kan Mode Projection Theorem: Locked 16-bit mode axes never flip. -/
+theorem kanMode_preserves_locked (mode mReq lock : BitVec 16) :
+    (((kanModeProjBV mode mReq lock) ^^^ mode) &&& lock) = 0#16 := by
+  unfold kanModeProjBV
   bv_decide
 
-def muxBV (commit : Bool) (tr fa : BitVec 64) : BitVec 64 :=
+def muxBV {w : Nat} (commit : Bool) (tr fa : BitVec w) : BitVec w :=
   if commit then tr else fa
 
-/-- Unconditional Kan Homotopy Preservation across committed or rejected steps. -/
-theorem step_coord_preserves_kan_axes (commit : Bool) (x xCand filter : BitVec 64) :
-    (((muxBV commit (kanProjectBV x xCand filter) x) ^^^ x) &&& filter) = 0#64 := by
-  cases commit <;> simp [muxBV, kanProject_preserves_filter]
+/-- Unconditional Kan Mode Preservation across committed or rejected transitions. -/
+theorem step_mode_preserves_kan_lock (commit : Bool) (mode mReq lock : BitVec 16) :
+    (((muxBV commit (kanModeProjBV mode mReq lock) mode) ^^^ mode) &&& lock) = 0#16 := by
+  cases commit <;> simp [muxBV, kanMode_preserves_locked]
 
-/-- Dual-Seal & Univalence Firewall Theorem: Any state/bound seal or domain failure blocks commit. -/
+/-- Dual-Seal & Univalence Firewall Theorem: Any state/chart seal or domain failure blocks commit. -/
 theorem unsealed_or_foreign_blocks_commit
-    (stateSealOk boundSealOk domOk : Bool) (x xProj : BitVec 64)
+    (stateSealOk boundSealOk domOk : Bool) (x xNext : BitVec 64)
     (hFail : stateSealOk = false ∨ boundSealOk = false ∨ domOk = false) :
-    muxBV ((stateSealOk && boundSealOk) && domOk) xProj x = x := by
+    muxBV ((stateSealOk && boundSealOk) && domOk) xNext x = x := by
   rcases hFail with hs | hb | hd
   · simp [hs, muxBV]
   · simp [hb, muxBV]
   · simp [hd, muxBV]
 
-/-- Anti-Laundering Theorem: Unsealed C-fabricated states remain permanently unsealed (`w7 = 0`). -/
+/-- Anti-Laundering Theorem: Unsealed states remain permanently unsealed (`w7 = 0`). -/
 theorem unsealed_state_never_laundered (candSeal : BitVec 64) :
     muxBV false candSeal 0#64 = 0#64 := rfl
 
-def liftNonzeroStep (r0 r1 r2 rawStep : Int) (tunDir : Int) : Int :=
+/-- Branchless Schmitt Hysteresis Chart Selector over `Z / 2^k Z`. -/
+def schmittNextChart (k : Nat) (chart nextLo nextHi : Nat) (bExit bEnter uExt : Int) : Nat :=
+  let c1 := if uExt < bExit then nextLo else chart
+  let c2 := if uExt > bEnter then nextHi else c1
+  c2 % (2 ^ k)
+
+/-- Schmitt Deadband Anti-Flapping Theorem: Inside `[bExit, bEnter]`, active chart never flaps. -/
+theorem schmitt_deadband_holds_chart
+    (k chart nextLo nextHi : Nat) (bExit bEnter uExt : Int)
+    (hChart : chart < 2 ^ k) (hBand : bExit ≤ uExt ∧ uExt ≤ bEnter) :
+    schmittNextChart k chart nextLo nextHi bExit bEnter uExt = chart := by
+  unfold schmittNextChart
+  have hNotLo : ¬(uExt < bExit) := by omega
+  have hNotHi : ¬(uExt > bEnter) := by omega
+  simp [hNotLo, hNotHi, Nat.mod_eq_of_lt hChart]
+
+/-- Atlas Closure Theorem: Chart index is always strictly bounded in `0 .. 2^k - 1` (`0` OOB). -/
+theorem schmitt_chart_in_bounds
+    (k chart nextLo nextHi : Nat) (bExit bEnter uExt : Int) :
+    schmittNextChart k chart nextLo nextHi bExit bEnter uExt < 2 ^ k := by
+  unfold schmittNextChart
+  have hPos : 0 < 2 ^ k := Nat.two_pow_pos k
+  exact Nat.mod_lt _ hPos
+
+def liftNonzeroStep (r0 r1 r2 rawStep : Int) (gradDir : Int) : Int :=
   if r0 ≠ 0 ∧ (r1 ≠ 0 ∨ r2 ≠ 0) then
-    if rawStep = 0 then (if tunDir < 0 then -1 else 1) else rawStep
+    if rawStep = 0 then (if gradDir < 0 then -1 else 1) else rawStep
   else
     0
 
@@ -355,9 +457,9 @@ theorem clampStep_horizon_bounded (nzStep dtMax : Int) (hPos : 0 < dtMax) :
   · omega
   · split <;> omega
 
-theorem liftNonzeroStep_ne_zero (r0 r2 rawStep tunDir : Int)
+theorem liftNonzeroStep_ne_zero (r0 r2 rawStep gradDir : Int)
     (hRes : r0 ≠ 0) (hCurv : r2 ≠ 0) :
-    liftNonzeroStep r0 0 r2 rawStep tunDir ≠ 0 := by
+    liftNonzeroStep r0 0 r2 rawStep gradDir ≠ 0 := by
   unfold liftNonzeroStep
   split
   · split
@@ -379,142 +481,108 @@ theorem clampStep_ne_zero (s dtMax : Int) (hs : s ≠ 0) (hPos : 0 < dtMax) :
   the 2-Jet step magnitude is strictly positive (`0 < |Δt*| ≤ dtMax`).
 -/
 theorem stationary_trap_escapes
-    (r0 r2 rawStep tunDir dtMax : Int)
+    (r0 r2 rawStep gradDir dtMax : Int)
     (hResidual : r0 ≠ 0) (hCurv : r2 ≠ 0) (hHorizon : 0 < dtMax) :
-    let step := clampStep (liftNonzeroStep r0 0 r2 rawStep tunDir) dtMax
+    let step := clampStep (liftNonzeroStep r0 0 r2 rawStep gradDir) dtMax
     0 < (Int.natAbs step : Int) ∧ (Int.natAbs step : Int) ≤ dtMax := by
   intro step
   have hNz : step ≠ 0 :=
-    clampStep_ne_zero _ dtMax (liftNonzeroStep_ne_zero r0 r2 rawStep tunDir hResidual hCurv) hHorizon
-  have hBnd := clampStep_horizon_bounded (liftNonzeroStep r0 0 r2 rawStep tunDir) dtMax hHorizon
+    clampStep_ne_zero _ dtMax (liftNonzeroStep_ne_zero r0 r2 rawStep gradDir hResidual hCurv) hHorizon
+  have hBnd := clampStep_horizon_bounded (liftNonzeroStep r0 0 r2 rawStep gradDir) dtMax hHorizon
   exact ⟨by omega, hBnd.2⟩
 
-/-! ## 6. Core Verification Fixtures (No Top-Level `_root_.main`) -/
-
-structure QuadraticRule where
-  b0Val      : Int
-  b1Val      : Int
-  b2Val      : Int
-  kanMask    : UInt64
-  horizon    : Int
-  domTag     : UInt32
-  reqMask    : UInt32
-  hHorizon   : 0 < horizon ∧ horizon ≤ maxSafeQ16
-  hBounded   : -maxSafeQ16 ≤ b0Val ∧ b0Val ≤ maxSafeQ16 ∧
-               -maxSafeQ16 ≤ b1Val ∧ b1Val ≤ maxSafeQ16 ∧
-               -maxSafeQ16 ≤ b2Val ∧ b2Val ≤ maxSafeQ16
-  hGuarded   : (reqMask &&& sieveBaseGate) = sieveBaseGate
-
-instance : Boundary QuadraticRule where
-  b0 r := r.b0Val
-  b1 r := r.b1Val
-  b2 r := r.b2Val
-  kanFilter r := r.kanMask
-  dtMax r := r.horizon
-  domainTag r := r.domTag
-  reqSieve r := r.reqMask
-  dtMax_valid r := r.hHorizon
-  coeffs_bounded r := r.hBounded
-  sieve_guarded r := r.hGuarded
+/-! ## 6. Core Verification Atlas Fixtures (Invoked by FLOW's `Makefile`) -/
 
 def flowDomainTag : UInt32 := 0x464C4F57 -- "FLOW"
 
-private theorem mkSieveProof : (sieveSafetyGate &&& sieveBaseGate) = sieveBaseGate := by
-  unfold sieveSafetyGate sieveBaseGate sieveSealValid sieveDomainMatch
-         sieveNoOverflow sieveHorizonValid
-  bv_decide
+/-- Chart 0: Instanton / Barrier Well (`1 + x^2`, `Δ = -4 < 0`, curvature tunneling `dt = 1.0`). -/
+def chartInstanton : Rule 2 where
+  b0     := 1 * q16One
+  b1     := 0
+  b2     := 2 * q16One
+  bExit  := -100 * q16One
+  bEnter := 100 * q16One
+  dtMax  := 2 * q16One
+  uGain  := 0
+  domTag := flowDomainTag
+  nextLo := 0
+  nextHi := 0
 
-def ruleQuadraticTrap : QuadraticRule where
-  b0Val    := 2 * q16One
-  b1Val    := 0
-  b2Val    := -2 * q16One
-  kanMask  := 0
-  horizon  := 4 * q16One
+/-- Chart 1: Normal Linear Tracking + Hysteresis (`x* = u_ext`, jumps to Chart 2 if `u_ext > 10`). -/
+def chartNormalTrack : Rule 2 where
+  b0     := 0
+  b1     := q16One
+  b2     := 0
+  bExit  := -100 * q16One
+  bEnter := 10 * q16One
+  dtMax  := 4 * q16One
+  uGain  := q16One
+  domTag := flowDomainTag
+  nextLo := 1
+  nextHi := 2
+
+/-- Chart 2: Saddle / Convex Surge (`-4 - u_ext + x^2 = 0`, `b1 = 0`, Kan lock `0x0003`, `[6, 50]`). -/
+def chartConvexSurge : Rule 2 where
+  b0      := -4 * q16One
+  b1      := 0
+  b2      := 2 * q16One
+  bExit   := 6 * q16One
+  bEnter  := 50 * q16One
+  dtMax   := 4 * q16One
+  uGain   := q16One
+  domTag  := flowDomainTag
+  nextLo  := 1
+  nextHi  := 3
+  kanLock := 0x0003
+
+/-- Chart 3: Circuit-Breaker Safe Harbor (`uGain = 0` isolates shock, pulls `x -> 1.0`, Kan gated). -/
+def chartSafeHarbor : Rule 2 where
+  b0       := -1 * q16One
+  b1       := q16One
+  b2       := 0
+  bExit    := 2 * q16One
+  bEnter   := 500 * q16One
+  dtMax    := 8 * q16One
+  uGain    := 0
   domTag   := flowDomainTag
-  reqMask  := sieveSafetyGate
-  hHorizon := by decide
-  hBounded := by decide
-  hGuarded := mkSieveProof
+  nextLo   := 1
+  nextHi   := 3
+  kanLock  := 0x0003
+  reqSieve := sieveSafetyGate ||| sieveKanHomotopic
 
-def ruleInstantonWell : QuadraticRule where
-  b0Val    := 2 * q16One
-  b1Val    := 0
-  b2Val    := 2 * q16One
-  kanMask  := 0
-  horizon  := 4 * q16One
-  domTag   := flowDomainTag
-  reqMask  := sieveSafetyGate
-  hHorizon := by decide
-  hBounded := by decide
-  hGuarded := mkSieveProof
+def chartZeroTarget : Rule 2 where
+  b0     := 0
+  b1     := 0
+  b2     := 0
+  dtMax  := 4 * q16One
+  uGain  := 0
+  domTag := flowDomainTag
 
-def ruleKanGuarded : QuadraticRule where
-  b0Val    := 3 * q16One
-  b1Val    := 1 * q16One
-  b2Val    := 0
-  kanMask  := 0xFFFF000000000000
-  horizon  := 8 * q16One
-  domTag   := flowDomainTag
-  reqMask  := sieveSafetyGate ||| sieveKanHomotopic
-  hHorizon := by decide
-  hBounded := by decide
-  hGuarded := by
-    unfold sieveSafetyGate sieveBaseGate sieveSealValid sieveDomainMatch
-           sieveNoOverflow sieveHorizonValid sieveKanHomotopic
-    bv_decide
+def chartForeign : Rule 2 where
+  b0     := 2 * q16One
+  b1     := 0
+  b2     := -2 * q16One
+  dtMax  := 4 * q16One
+  domTag := 0x4F544852 -- "OTHR"
 
-def ruleGlobalBasin : QuadraticRule where
-  b0Val    := -9 * (q16One / 2)
-  b1Val    := 0
-  b2Val    := 1 * q16One
-  kanMask  := 0
-  horizon  := 4 * q16One
-  domTag   := flowDomainTag
-  reqMask  := sieveSafetyGate
-  hHorizon := by decide
-  hBounded := by decide
-  hGuarded := mkSieveProof
-
-def ruleZeroTarget : QuadraticRule where
-  b0Val    := 0
-  b1Val    := 0
-  b2Val    := 0
-  kanMask  := 0
-  horizon  := 4 * q16One
-  domTag   := flowDomainTag
-  reqMask  := sieveSafetyGate
-  hHorizon := by decide
-  hBounded := by decide
-  hGuarded := mkSieveProof
-
-def ruleForeignDomain : QuadraticRule where
-  b0Val    := 2 * q16One
-  b1Val    := 0
-  b2Val    := -2 * q16One
-  kanMask  := 0
-  horizon  := 4 * q16One
-  domTag   := 0x4F544852 -- "OTHR"
-  reqMask  := sieveSafetyGate
-  hHorizon := by decide
-  hBounded := by decide
-  hGuarded := mkSieveProof
-
-/-- Emits self-contained `.flow` test bundles & states (invoked by FLOW's own `Makefile`). -/
+/-- Emits core `.flow` Atlas & probe cells for `make test` (`Gate 1..4`). -/
 def emitCoreTestFixtures (dirPath : String := "build/capsules") : IO Unit := do
   let outDir := System.FilePath.mk dirPath
   IO.FS.createDirAll outDir
-  -- Self-contained bundle: Slot 0 = x0=0 State, Slots 1..4 = [Instanton, Basin, QuadTrap, Kan]
-  emitBundle (outDir / "core_bundle4.flow") 2
-    (mintState ruleQuadraticTrap 0)
-    [ruleInstantonWell, ruleGlobalBasin, ruleQuadraticTrap, ruleKanGuarded]
-    ruleQuadraticTrap 1
-  -- Additional Lean-minted initial states & probes (zero manual sealing in C!)
-  emitState (outDir / "state_pos1.flow")     (mintState ruleQuadraticTrap (1 * q16One))
-  emitState (outDir / "state_overflow.flow") (mintState ruleQuadraticTrap ((1 <<< 61) : Int))
-  emitState (outDir / "state_foreign.flow")  (mintState ruleForeignDomain 0)
+  -- 4-Chart Atlas (`k = 2`), starting on Chart 1 (`chartNormalTrack`), `x0 = 0`, `mode = 0x0003`
+  let sInit := mintState chartNormalTrack 0 (initChart := 1) (initMode := 0x0003)
+  emitBundle (outDir / "core_atlas4.flow") 2 sInit
+    [chartInstanton, chartNormalTrack, chartConvexSurge, chartSafeHarbor]
+    chartNormalTrack 1
+  -- Additional Lean-minted states & cells for engine unit tests
+  emitState (outDir / "state_chart0.flow")   (mintState chartInstanton 0 (initChart := 0))
+  emitState (outDir / "state_chart2.flow")   (mintState chartConvexSurge 0 (initChart := 2) (initMode := 0x0003))
+  emitState (outDir / "state_overflow.flow") (mintState chartConvexSurge ((1 <<< 61) : Int) (initChart := 2))
+  emitState (outDir / "state_foreign.flow")  (mintState chartForeign 0)
   emitState (outDir / "state_fiber.flow")
-    (mintState ruleZeroTarget 0 (2 * q16One) (-3 * q16One) (2 * q16One))
-  emitCell  (outDir / "zero_target.flow")    (mintCell ruleZeroTarget 1)
-  IO.println s!"  [PASS] Minted sealed .flow bundle & states in {outDir}"
+    (mintState chartZeroTarget 0 (initChart := 0) (initMode := 0) (2 * q16One) (-3 * q16One) (2 * q16One))
+  emitCell  (outDir / "zero_target.flow")    (mintCell chartZeroTarget 1)
+  emitCell  (outDir / "swap_harbor.flow")    (mintCell chartSafeHarbor 1)
+  IO.println s!"  [PASS] Minted sealed .flow Manifold Atlas & probes in {outDir}"
 
 end Flow
