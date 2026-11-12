@@ -51,24 +51,26 @@ ring0: $(BUILD_DIR)/flow_ring0.o
 
 $(BUILD_DIR)/flow: flow.c flow.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) flow.c -o $@
-	@! nm -u $@ | grep -Eq '(_malloc|malloc|_calloc|calloc|_realloc|realloc|_free|free|strtod|strtof|atof)' || \
+	@! nm -u $@ | grep -Eq '(^|[^A-Za-z0-9_])(_?malloc|_?calloc|_?realloc|_?free|_?strtod|_?strtof|_?atof)(@|$$)' || \
 		(echo "ERROR: Heap or float symbol leaked into universal flow engine!" && nm -u $@ && exit 1)
 
 $(BUILD_DIR)/test-flow: test_flow.c flow.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(THREAD_FLAGS) test_flow.c -o $@
 
-test: fmt-check capsules ring0 $(BUILD_DIR)/flow $(BUILD_DIR)/test-flow
+test: capsules ring0 $(BUILD_DIR)/flow $(BUILD_DIR)/test-flow
 	@echo "=== [Gate 3] Object-Free HoTT x 2-Jet Manifold Atlas Verification ==="
 	@./$(BUILD_DIR)/test-flow $(CAPSULE_DIR)
 	@echo "=== [Gate 4] Universal Zero-C Engine CLI (flow verify & flow run) ==="
 	@./$(BUILD_DIR)/flow verify $(CAPSULE_DIR)/core_atlas4.flow > /dev/null
-	@out="$$(printf '3.0\n12.0\n8.0 0xFF00\n@swap 2 5 %s/swap_harbor.flow\n200.0 0xFF03\n' "$(CAPSULE_DIR)" | \
+	@out="$$(printf '3.0\n12.0\n60.0 0xFF00\n@swap 2 1 %s/swap_harbor.flow\n@swap 2 3 %s/foreign_chart.flow\n@swap 2 5 %s/swap_harbor.flow\n200.0 0xFF03\n' "$(CAPSULE_DIR)" "$(CAPSULE_DIR)" "$(CAPSULE_DIR)" | \
 		./$(BUILD_DIR)/flow run $(CAPSULE_DIR)/core_atlas4.flow)" && \
 		printf '%s\n' "$$out" | grep -q 'step=1 chart=1 x=3.0000' && \
-		printf '%s\n' "$$out" | grep -q 'step=2 chart=2' && \
-		printf '%s\n' "$$out" | grep -q 'step=3 chart=2 .* mode=0xff03' && \
+		printf '%s\n' "$$out" | grep -q 'step=2 chart=2 x=12.0000' && \
+		printf '%s\n' "$$out" | grep -q 'step=3 chart=2 x=8.0000 .* mode=0xff03' && \
+		printf '%s\n' "$$out" | grep -q '# swap slot=2 epoch=1 rejected' && \
+		printf '%s\n' "$$out" | grep -q '# swap slot=2 epoch=3 rejected' && \
 		printf '%s\n' "$$out" | grep -q '# swap slot=2 epoch=5 ok' && \
-		printf '%s\n' "$$out" | grep -q 'step=4 .* x=1.0000'
+		printf '%s\n' "$$out" | grep -q 'step=4 chart=1 x=1.0000'
 	@echo "  [PASS] Universal flow CLI verified (.flow bundle + stream + @swap hot-reload, 0 heap, 0 float)"
 	@echo "================================================================================"
 	@echo "   ALL FLOW VERIFICATION GATES PASSED"

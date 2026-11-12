@@ -413,29 +413,41 @@ theorem unsealed_or_foreign_blocks_commit
 theorem unsealed_state_never_laundered (candSeal : BitVec 64) :
     muxBV false candSeal 0#64 = 0#64 := rfl
 
-/-- Branchless Schmitt Hysteresis Chart Selector over `Z / 2^k Z`. -/
-def schmittNextChart (k : Nat) (chart nextLo nextHi : Nat) (bExit bEnter uExt : Int) : Nat :=
-  let c1 := if uExt < bExit then nextLo else chart
-  let c2 := if uExt > bEnter then nextHi else c1
+/-- Branchless Schmitt Hysteresis Chart Selector on the post-step manifold coordinate `xNext`. -/
+def schmittNextChart (k : Nat) (chart nextLo nextHi : Nat) (bExit bEnter xNext : Int) : Nat :=
+  let c1 := if xNext < bExit then nextLo else chart
+  let c2 := if xNext > bEnter then nextHi else c1
   c2 % (2 ^ k)
 
 /-- Schmitt Deadband Anti-Flapping Theorem: Inside `[bExit, bEnter]`, active chart never flaps. -/
 theorem schmitt_deadband_holds_chart
-    (k chart nextLo nextHi : Nat) (bExit bEnter uExt : Int)
-    (hChart : chart < 2 ^ k) (hBand : bExit ≤ uExt ∧ uExt ≤ bEnter) :
-    schmittNextChart k chart nextLo nextHi bExit bEnter uExt = chart := by
+    (k chart nextLo nextHi : Nat) (bExit bEnter xNext : Int)
+    (hChart : chart < 2 ^ k) (hBand : bExit ≤ xNext ∧ xNext ≤ bEnter) :
+    schmittNextChart k chart nextLo nextHi bExit bEnter xNext = chart := by
   unfold schmittNextChart
-  have hNotLo : ¬(uExt < bExit) := by omega
-  have hNotHi : ¬(uExt > bEnter) := by omega
+  have hNotLo : ¬(xNext < bExit) := by omega
+  have hNotHi : ¬(xNext > bEnter) := by omega
   simp [hNotLo, hNotHi, Nat.mod_eq_of_lt hChart]
 
 /-- Atlas Closure Theorem: Chart index is always strictly bounded in `0 .. 2^k - 1` (`0` OOB). -/
 theorem schmitt_chart_in_bounds
-    (k chart nextLo nextHi : Nat) (bExit bEnter uExt : Int) :
-    schmittNextChart k chart nextLo nextHi bExit bEnter uExt < 2 ^ k := by
+    (k chart nextLo nextHi : Nat) (bExit bEnter xNext : Int) :
+    schmittNextChart k chart nextLo nextHi bExit bEnter xNext < 2 ^ k := by
   unfold schmittNextChart
   have hPos : 0 < 2 ^ k := Nat.two_pow_pos k
   exact Nat.mod_lt _ hPos
+
+/-- Monotonic & Univalent Hot-Swap Firewall Theorem: Stale, unsealed, or foreign swaps preserve active chart. -/
+theorem hot_swap_monotonic_and_guarded
+    (sealOk domOk adjOk : Bool) (curEpoch newEpoch : Nat) (cand cur : Cell64)
+    (hReject : sealOk = false ∨ domOk = false ∨ adjOk = false ∨ newEpoch ≤ curEpoch) :
+    (if (sealOk && domOk && adjOk && decide (curEpoch < newEpoch)) then cand else cur) = cur := by
+  rcases hReject with hs | hd | ha | he
+  · simp [hs]
+  · simp [hd]
+  · simp [ha]
+  · have hNotGt : decide (curEpoch < newEpoch) = false := decide_eq_false (by omega)
+    simp [hNotGt]
 
 def liftNonzeroStep (r0 r1 r2 rawStep : Int) (gradDir : Int) : Int :=
   if r0 ≠ 0 ∧ (r1 ≠ 0 ∨ r2 ≠ 0) then
@@ -508,27 +520,27 @@ def chartInstanton : Rule 2 where
   nextLo := 0
   nextHi := 0
 
-/-- Chart 1: Normal Linear Tracking + Hysteresis (`x* = u_ext`, jumps to Chart 2 if `u_ext > 10`). -/
+/-- Chart 1: Normal Linear Tracking + Hysteresis (`x* = u_ext`, jumps to Chart 2 if `x' > 10`). -/
 def chartNormalTrack : Rule 2 where
   b0     := 0
   b1     := q16One
   b2     := 0
   bExit  := -100 * q16One
   bEnter := 10 * q16One
-  dtMax  := 4 * q16One
+  dtMax  := 10 * q16One
   uGain  := q16One
   domTag := flowDomainTag
   nextLo := 1
   nextHi := 2
 
-/-- Chart 2: Saddle / Convex Surge (`-4 - u_ext + x^2 = 0`, `b1 = 0`, Kan lock `0x0003`, `[6, 50]`). -/
+/-- Chart 2: Saddle / Convex Surge (`-4 - u_ext + x^2 = 0`, `b1 = 0`, Kan lock `0x0003`, `[6, 14]`). -/
 def chartConvexSurge : Rule 2 where
   b0      := -4 * q16One
   b1      := 0
   b2      := 2 * q16One
   bExit   := 6 * q16One
-  bEnter  := 50 * q16One
-  dtMax   := 4 * q16One
+  bEnter  := 14 * q16One
+  dtMax   := 8 * q16One
   uGain   := q16One
   domTag  := flowDomainTag
   nextLo  := 1
@@ -583,6 +595,7 @@ def emitCoreTestFixtures (dirPath : String := "build/capsules") : IO Unit := do
     (mintState chartZeroTarget 0 (initChart := 0) (initMode := 0) (2 * q16One) (-3 * q16One) (2 * q16One))
   emitCell  (outDir / "zero_target.flow")    (mintCell chartZeroTarget 1)
   emitCell  (outDir / "swap_harbor.flow")    (mintCell chartSafeHarbor 1)
+  emitCell  (outDir / "foreign_chart.flow")  (mintCell chartForeign 1)
   IO.println s!"  [PASS] Minted sealed .flow Manifold Atlas & probes in {outDir}"
 
 end Flow

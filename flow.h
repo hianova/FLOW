@@ -339,6 +339,39 @@ static inline flow_cell flow_arena_load_acq(const flow_cell *arena, uint64_t idx
 #endif
 }
 
+/*
+ * Branchless verified hot-swap: commits `cand` iff its Lean FLOW_BOUND_SEED seal is valid,
+ * its Univalence DomainTag matches `expected_dom`, its adjacency indices fit `cap_mask`,
+ * its horizon/deadband are well-formed, and `new_epoch` strictly exceeds active `cur_epoch`.
+ */
+static inline bool flow_arena_try_swap(flow_cell *arena, uint64_t idx, uint64_t cap_mask,
+                                       uint32_t expected_dom, uint32_t new_epoch, flow_cell cand) {
+    flow_cell cur = flow_arena_load_acq(arena, idx, cap_mask);
+    uint32_t cur_ep = (uint32_t)(cur[6] >> 32U);
+    uint32_t cand_dom = (uint32_t)(cand[5] >> 32U);
+    uint64_t n_lo = (cand[5] >> 24U) & UINT64_C(0xFF);
+    uint64_t n_hi = (cand[5] >> 16U) & UINT64_C(0xFF);
+    int32_t b_exit32 = (int32_t)(uint32_t)(cand[3] >> 32U);
+    int32_t b_enter32 = (int32_t)(uint32_t)(cand[3] & UINT64_C(0xFFFFFFFF));
+    int32_t dt_max32 = (int32_t)(uint32_t)(cand[4] >> 32U);
+    uint32_t req_sv = (uint32_t)(cand[6] & UINT64_C(0xFFFFFFFF));
+
+    bool ok = flow_verify_bound(cand) & (cand_dom == expected_dom) & (new_epoch > cur_ep) &
+              (n_lo <= cap_mask) & (n_hi <= cap_mask) & (dt_max32 > 0) & (b_exit32 <= b_enter32) &
+              ((req_sv & FLOW_SIEVE_BASE_GATE) == FLOW_SIEVE_BASE_GATE);
+    uint64_t m = flow_mask_bool(ok);
+
+    uint64_t cand_w6 = ((uint64_t)new_epoch << 32U) | (uint64_t)req_sv;
+    flow_cell next_c = {
+        flow_mux_u64(m, cand[0], cur[0]), flow_mux_u64(m, cand[1], cur[1]),
+        flow_mux_u64(m, cand[2], cur[2]), flow_mux_u64(m, cand[3], cur[3]),
+        flow_mux_u64(m, cand[4], cur[4]), flow_mux_u64(m, cand[5], cur[5]),
+        flow_mux_u64(m, cand_w6, cur[6]), flow_mux_u64(m, cand[7], cur[7]),
+    };
+    flow_arena_store_rel(arena, idx, cap_mask, next_c);
+    return ok;
+}
+
 /* --- Universal Branchless HoTT x 2-Jet Manifold Atlas Endomorphism Phi --- */
 
 static inline flow_cell flow_step_chart(flow_cell state, flow_cell bound, uint64_t cap_mask,
@@ -474,8 +507,8 @@ static inline flow_cell flow_step_chart(flow_cell state, flow_cell bound, uint64
     bool kan_ok = (((uint16_t)(mode_orig ^ mode_req) & kan_lock) == 0U);
     uint16_t mode_proj = (uint16_t)((mode_req & (uint16_t)(~kan_lock)) | (mode_orig & kan_lock));
 
-    uint64_t go_lo = flow_mask_bool(u_ext < b_exit);
-    uint64_t go_hi = flow_mask_bool(u_ext > b_enter);
+    uint64_t go_lo = flow_mask_bool(xp < b_exit);
+    uint64_t go_hi = flow_mask_bool(xp > b_enter);
     uint64_t raw_chart = flow_mux_u64(go_lo, (uint64_t)next_lo, (uint64_t)chart_orig);
     raw_chart = flow_mux_u64(go_hi, (uint64_t)next_hi, raw_chart);
     uint16_t chart_next = (uint16_t)(raw_chart & cap_mask & UINT64_C(0xFFFF));

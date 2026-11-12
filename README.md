@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/banner.svg" alt="FLOW — Formally Verified L0 Integer, HoTT &amp; 2-Jet Substrate" width="100%" />
+  <img src="./assets/logo.svg?cb=20261112v5" alt="FLOW — Formally Verified L0 Integer, HoTT &amp; 2-Jet Substrate" width="100%" />
 </p>
 
 # FLOW — Object-Free HoTT & 2-Jet Manifold Execution Substrate
@@ -85,15 +85,15 @@ import Flow
 def tag : UInt32 := 0x52415445 -- "RATE"
 
 -- 2-Chart (2^1) Surge Controller:
--- Chart 0 (Normal) : tracks u_ext linearly; jumps to Chart 1 if u_ext > 10.0
--- Chart 1 (Surge)  : convex square-root damping + locked audit bit 0x0001; returns to Chart 0 if u_ext < 6.0
+-- Chart 0 (Normal) : tracks u_ext linearly; jumps to Chart 1 if x' > 10.0
+-- Chart 1 (Surge)  : convex square-root damping + locked audit bit 0x0001; returns to Chart 0 if x' < 2.0
 def normalChart : Flow.Rule 1 where
   b0       := 0
   b1       := Flow.q16One
   b2       := 0
   bExit    := -100 * Flow.q16One
   bEnter   := 10 * Flow.q16One
-  dtMax    := 4 * Flow.q16One
+  dtMax    := 10 * Flow.q16One
   uGain    := Flow.q16One
   domTag   := tag
   nextLo   := 0
@@ -104,9 +104,9 @@ def surgeChart : Flow.Rule 1 where
   b0       := 0
   b1       := 0
   b2       := 2 * Flow.q16One
-  bExit    := 6 * Flow.q16One
-  bEnter   := 100 * Flow.q16One
-  dtMax    := 2 * Flow.q16One
+  bExit    := 2 * Flow.q16One
+  bEnter   := 50 * Flow.q16One
+  dtMax    := 10 * Flow.q16One
   uGain    := Flow.q16One
   domTag   := tag
   nextLo   := 0
@@ -132,13 +132,13 @@ LEAN_PATH=/path/to/FLOW/build lean -DwarningAsError=true --run SurgeSpec.lean
 /path/to/FLOW/build/flow verify surge.flow
 
 # Stream live (u_ext [mode_hex]) observations or @swap hot-reload directives via stdin
-printf "4.0\n12.0\n8.0 0x0000\n4.0\n" | /path/to/FLOW/build/flow run surge.flow
+printf "4.0\n12.0\n9.0 0x0000\n1.0\n" | /path/to/FLOW/build/flow run surge.flow
 ```
 
 - `4.0`: Chart `0` moves $x \to 4.0$.
-- `12.0`: Exceeds `b_enter = 10.0` $\implies$ branchlessly transitions to Chart `1` (Surge convex damping).
-- `8.0 0x0000`: Inside `[6.0, 100.0]` Schmitt deadband $\implies$ stays on Chart `1` without flapping; `kan_lock = 0x0001` preserves locked audit bit `0x0001` despite `0x0000` request.
-- `4.0`: Drops below `b_exit = 6.0` $\implies$ branchlessly returns to Chart `0`.
+- `12.0`: Moves $x \to 12.0 > b_{\text{enter}} = 10.0 \implies$ branchlessly transitions to Chart `1` (Surge convex damping).
+- `9.0 0x0000`: Settles $x \to \sqrt{9} = 3.0 \in [2.0, 50.0]$ Schmitt deadband $\implies$ stays on Chart `1` without flapping; `kan_lock = 0x0001` preserves locked audit bit `0x0001` despite `0x0000` request.
+- `1.0`: Settles $x \to \sqrt{1} = 1.0 < b_{\text{exit}} = 2.0 \implies$ branchlessly returns to Chart `0`.
 
 ### Bare-Metal / Ring-0 Silicon Embedding (Driver / Kernel Plumbing Only)
 
@@ -158,8 +158,8 @@ state = flow_step_atlas(state, chart_arena, cap_mask, u_ext_q16, mode_req_u16);
 | File | Responsibility |
 | :--- | :--- |
 | [`Flow.lean`](Flow.lean) | Upstream formal gatekeeper (`0 sorryAx`, no `_root_.main` collision): `Chart` typeclass, parametric `Rule k` builder, dual-seed $\mathbb{F}_p$ seals, Kan / Schmitt / 2-Jet theorems, and `.flow` Atlas emitters. |
-| [`flow.h`](flow.h) | Freestanding (`-ffreestanding -nostdlib`) single-header substrate: `flow_cell` (`vector_size(64)`), 0-ULP `flow_isqrt_u64`, read-only seal verifiers, branchless `flow_step` & `flow_step_atlas`, and lock-free `flow_arena_publish_bound` / `flow_arena_load_acq`. |
-| [`flow.c`](flow.c) | Precompiled universal C17 execution engine (`build/flow`): `flow verify` and `flow run` (pure integer Q48.16 stream I/O and live `@swap` hot-reloading, zero floats). |
+| [`flow.h`](flow.h) | Freestanding (`-ffreestanding -nostdlib`) single-header substrate: `flow_cell` (`vector_size(64)`), 0-ULP `flow_isqrt_u64`, read-only seal verifiers, branchless `flow_step` & `flow_step_atlas`, and lock-free `flow_arena_publish_bound` / `flow_arena_try_swap` / `flow_arena_load_acq`. |
+| [`flow.c`](flow.c) | Precompiled universal C17 execution engine (`build/flow`): `flow verify` and `flow run` (pure integer Q48.16 stream I/O and zero-downtime monotonic `@swap` hot-reloading, zero floats). |
 | [`test_flow.c`](test_flow.c) | Ring-0 bare-metal symbol gate (`FLOW_RING0_GATE`) and HoTT $\times$ 2-Jet Atlas verification suite. |
 | [`Makefile`](Makefile) | Zero-warning `-Werror` build pipeline producing `build/Flow.olean`, `build/flow`, and verification gates without `lean -c`. |
 | [`VERSION`](VERSION) | Canonical release version (`5.0.0`). |

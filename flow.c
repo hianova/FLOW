@@ -296,17 +296,18 @@ static int cmd_run(const char *bundle_path) {
             uint64_t slot = 0ULL;
             uint64_t ep = 0ULL;
             flow_cell new_b;
-            if (slot_s == NULL || ep_s == NULL || cell_path == NULL ||
-                !parse_u64_token(slot_s, (uint64_t)(count - 1U), &slot) ||
-                !parse_u64_token(ep_s, UINT64_C(0xFFFFFFFF), &ep) ||
-                !load_single_chart(cell_path, &new_b) ||
-                !verify_chart_against_atlas(new_b, dom, count)) {
-                fprintf(stderr, "flow: rejected invalid or unauthenticated @swap directive\n");
-                return 1;
+            bool swapped = (slot_s != NULL && ep_s != NULL && cell_path != NULL &&
+                            parse_u64_token(slot_s, (uint64_t)(count - 1U), &slot) &&
+                            parse_u64_token(ep_s, UINT64_C(0xFFFFFFFF), &ep) &&
+                            load_single_chart(cell_path, &new_b) &&
+                            flow_arena_try_swap(g_arena, slot, cap_mask, dom, (uint32_t)ep, new_b));
+            if (swapped) {
+                printf("# swap slot=%llu epoch=%llu ok\n", (unsigned long long)slot,
+                       (unsigned long long)ep);
+            } else {
+                printf("# swap slot=%s epoch=%s rejected\n", slot_s != NULL ? slot_s : "?",
+                       ep_s != NULL ? ep_s : "?");
             }
-            flow_arena_publish_bound(g_arena, slot, cap_mask, (uint32_t)ep, new_b);
-            printf("# swap slot=%llu epoch=%llu ok\n", (unsigned long long)slot,
-                   (unsigned long long)ep);
             continue;
         }
 
