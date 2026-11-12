@@ -19,6 +19,7 @@ extern "C" {
  * ============================================================================
  * Canonical 64-byte (512-bit, 8 x u64) register vector substrate.
  * Zero structs. Zero control-flow branches in kernel. Zero float. Zero heap.
+ * Both State and Boundary cells are minted & sealed upstream by Flow.lean.
  * ============================================================================ */
 
 __extension__ typedef uint64_t flow_cell __attribute__((vector_size(64), aligned(64)));
@@ -39,6 +40,8 @@ _Static_assert(_Alignof(flow_cell) == 64U, "flow_cell must be 64-byte cache-line
 
 #define FLOW_FP_MOD              UINT64_C(0xFFFFFFFF00000001)
 #define FLOW_GOLDEN_64           UINT64_C(0x9E3779B97F4A7C15)
+#define FLOW_BOUND_SEED          UINT64_C(0x464C4F57424E4435) /* "FLOWBND5" */
+#define FLOW_STATE_SEED          UINT64_C(0x464C4F5753544135) /* "FLOWSTA5" */
 
 #define FLOW_SIEVE_SEAL_VALID    (1U << 0)
 #define FLOW_SIEVE_DOMAIN_MATCH  (1U << 1)
@@ -122,7 +125,6 @@ static inline uint64_t flow_isqrt_u64(uint64_t x) {
     return root;
 }
 
-/* Exact Q48.16 square root without 128-bit runtime helpers */
 static inline uint64_t flow_qsqrt_u64(uint64_t x_q16) {
     uint64_t hi_range = flow_mask_bool((x_q16 >> 48U) != 0ULL);
     uint64_t arg = flow_mux_u64(hi_range, x_q16, x_q16 << FLOW_Q16_SHIFT);
@@ -130,61 +132,74 @@ static inline uint64_t flow_qsqrt_u64(uint64_t x_q16) {
     return flow_mux_u64(hi_range, r << (FLOW_Q16_SHIFT / 2U), r);
 }
 
-/* --- Division-Free Goldilocks F_p (p = 2^64 - 2^32 + 1) Sponge Seal --- */
+/* --- Internal Division-Free Goldilocks F_p Sponge & Read-Only Seal Verifiers --- */
 
-static inline uint64_t flow_fp_reduce64(uint64_t x) {
+static inline uint64_t flow__fp_reduce64(uint64_t x) {
     uint64_t ge = flow_mask_bool(x >= FLOW_FP_MOD);
     return x - (FLOW_FP_MOD & ge);
 }
 
-static inline uint64_t flow_fp_add(uint64_t a, uint64_t b) {
+static inline uint64_t flow__fp_add(uint64_t a, uint64_t b) {
     uint64_t s = 0ULL;
     uint64_t c = (uint64_t)__builtin_add_overflow(a, b, &s);
     uint64_t folded = s + (UINT64_C(0xFFFFFFFF) & (UINT64_C(0) - c));
-    return flow_fp_reduce64(folded);
+    return flow__fp_reduce64(folded);
 }
 
-static inline uint64_t flow_fp_sub(uint64_t a, uint64_t b) {
+static inline uint64_t flow__fp_sub(uint64_t a, uint64_t b) {
     uint64_t lt = flow_mask_bool(a < b);
     return (a - b) + (FLOW_FP_MOD & lt);
 }
 
-static inline uint64_t flow_fp_mul(uint64_t a, uint64_t b) {
+static inline uint64_t flow__fp_mul(uint64_t a, uint64_t b) {
     uint64_t z_hi = 0ULL;
     uint64_t z_lo = flow_umul128(a, b, &z_hi);
     uint64_t h0 = z_hi & UINT64_C(0xFFFFFFFF);
     uint64_t h1 = z_hi >> 32U;
-    uint64_t t0 = flow_fp_reduce64(z_lo);
-    uint64_t t1 = flow_fp_sub(t0, h1);
+    uint64_t t0 = flow__fp_reduce64(z_lo);
+    uint64_t t1 = flow__fp_sub(t0, h1);
     uint64_t v = h0 * UINT64_C(0xFFFFFFFF);
-    return flow_fp_add(t1, v);
+    return flow__fp_add(t1, v);
 }
 
-static inline uint64_t flow_fp_sbox7(uint64_t x) {
-    uint64_t x2 = flow_fp_mul(x, x);
-    uint64_t x3 = flow_fp_mul(x2, x);
-    uint64_t x6 = flow_fp_mul(x3, x3);
-    return flow_fp_mul(x6, x);
+static inline uint64_t flow__fp_sbox7(uint64_t x) {
+    uint64_t x2 = flow__fp_mul(x, x);
+    uint64_t x3 = flow__fp_mul(x2, x);
+    uint64_t x6 = flow__fp_mul(x3, x3);
+    return flow__fp_mul(x6, x);
 }
 
-static inline uint64_t flow_fp_absorb(uint64_t st, uint64_t w, uint64_t idx1) {
-    uint64_t w_lo = flow_fp_reduce64(w);
+static inline uint64_t flow__fp_absorb(uint64_t st, uint64_t w, uint64_t idx1) {
+    uint64_t w_lo = flow__fp_reduce64(w);
     uint64_t w_hi = (uint64_t)(w >= FLOW_FP_MOD);
-    uint64_t s1 = flow_fp_sbox7(flow_fp_add(st, w_lo));
-    return flow_fp_add(flow_fp_mul(s1, FLOW_GOLDEN_64), w_hi + idx1);
+    uint64_t s1 = flow__fp_sbox7(flow__fp_add(st, w_lo));
+    return flow__fp_add(flow__fp_mul(s1, FLOW_GOLDEN_64), w_hi + idx1);
 }
 
-static inline uint64_t flow_seal_cell(flow_cell c) {
-    uint64_t st = FLOW_GOLDEN_64;
-    st = flow_fp_absorb(st, c[0], 1ULL);
-    st = flow_fp_absorb(st, c[1], 2ULL);
-    st = flow_fp_absorb(st, c[2], 3ULL);
-    st = flow_fp_absorb(st, c[3], 4ULL);
-    st = flow_fp_absorb(st, c[4], 5ULL);
-    st = flow_fp_absorb(st, c[5], 6ULL);
-    st = flow_fp_absorb(st, c[6], 7ULL);
-    st = flow_fp_sbox7(st);
+static inline uint64_t flow__seal_lanes(uint64_t seed, uint64_t w0, uint64_t w1, uint64_t w2,
+                                        uint64_t w3, uint64_t w4, uint64_t w5, uint64_t w6) {
+    uint64_t st = seed;
+    st = flow__fp_absorb(st, w0, 1ULL);
+    st = flow__fp_absorb(st, w1, 2ULL);
+    st = flow__fp_absorb(st, w2, 3ULL);
+    st = flow__fp_absorb(st, w3, 4ULL);
+    st = flow__fp_absorb(st, w4, 5ULL);
+    st = flow__fp_absorb(st, w5, 6ULL);
+    st = flow__fp_absorb(st, w6, 7ULL);
+    st = flow__fp_sbox7(st);
     return st | (uint64_t)(st == 0ULL);
+}
+
+/* Read-only seal verifiers: C never mints or re-signs Boundary or State seals */
+static inline bool flow_verify_bound(flow_cell b) {
+    uint64_t exp = flow__seal_lanes(FLOW_BOUND_SEED, b[0], b[1], b[2], b[3], b[4], b[5],
+                                    b[6] & UINT64_C(0xFFFFFFFF));
+    return (b[7] != 0ULL) & (b[7] == exp);
+}
+
+static inline bool flow_verify_state(flow_cell s) {
+    uint64_t exp = flow__seal_lanes(FLOW_STATE_SEED, s[0], s[1], s[2], s[3], s[4], s[5], s[6]);
+    return (s[7] != 0ULL) & (s[7] == exp);
 }
 
 /* --- Overflow-Capturing Q48.16 Fixed-Point Algebra --- */
@@ -246,9 +261,10 @@ static inline int64_t flow_qdiv_i64(int64_t num_q16, int64_t den_q16, uint32_t *
 static inline flow_cell flow_step(flow_cell state, flow_cell bound) {
     uint32_t ovf = 0U;
 
-    /* 1. Seal & Univalence Domain Gate */
-    uint64_t exp_seal = flow_seal_cell(bound);
-    bool seal_ok = (bound[7] != 0ULL) & (bound[7] == exp_seal);
+    /* 1. Dual Domain-Separated Seal & Univalence Gate */
+    bool state_seal_ok = flow_verify_state(state);
+    bool bound_seal_ok = flow_verify_bound(bound);
+    bool seal_ok = state_seal_ok & bound_seal_ok;
     bool dom_ok = ((state[5] ^ bound[5]) >> 32U) == 0ULL;
 
     int64_t b0 = (int64_t)bound[0];
@@ -396,7 +412,11 @@ static inline flow_cell flow_step(flow_cell state, flow_cell bound) {
         omega_next,
         UINT64_C(0),
     };
-    out[7] = flow_seal_cell(out);
+
+    /* Anti-laundering: unsealed C-fabricated states never receive a valid state seal */
+    uint64_t out_seal =
+        flow__seal_lanes(FLOW_STATE_SEED, out[0], out[1], out[2], out[3], out[4], out[5], out[6]);
+    out[7] = flow_mux_u64(flow_mask_bool(state_seal_ok), out_seal, UINT64_C(0));
     return out;
 }
 
@@ -448,6 +468,14 @@ static inline void flow_arena_store_rel(flow_cell *arena, uint64_t idx, uint64_t
     __atomic_thread_fence(__ATOMIC_RELEASE);
     slot[6] = c[6];
 #endif
+}
+
+/* Publishes a Lean-sealed boundary with a new runtime Epoch WITHOUT re-signing bound[7] */
+static inline void flow_arena_publish_bound(flow_cell *arena, uint64_t idx, uint64_t cap_mask,
+                                            uint32_t epoch, flow_cell bound) {
+    uint64_t req = bound[6] & UINT64_C(0xFFFFFFFF);
+    bound[6] = ((uint64_t)epoch << 32U) | req;
+    flow_arena_store_rel(arena, idx, cap_mask, bound);
 }
 
 static inline flow_cell flow_arena_load_acq(const flow_cell *arena, uint64_t idx,

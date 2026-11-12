@@ -31,10 +31,13 @@ fmt:
 fmt-check:
 	$(CLANG_FORMAT) --dry-run --Werror flow.h test_flow.c
 
-capsules: Flow.lean | $(BUILD_DIR)
-	@echo "=== [Gate 1] Lean 4 Formal Proof Check (0 sorryAx, 0 lean -c) & 64B .flow Minting ==="
-	$(LEAN) -DwarningAsError=true Flow.lean
-	$(LEAN) --run Flow.lean $(CAPSULE_DIR)
+$(BUILD_DIR)/Flow.olean: Flow.lean | $(BUILD_DIR)
+	$(LEAN) -DwarningAsError=true -o $@ Flow.lean
+
+capsules: $(BUILD_DIR)/Flow.olean
+	@echo "=== [Gate 1] Lean 4 Formal Proof Check (0 sorryAx, 0 lean -c) & .flow Bundle Minting ==="
+	@printf 'import Flow\n#eval Flow.emitCoreTestFixtures "%s"\n' "$(CAPSULE_DIR)" | \
+		LEAN_PATH=$(BUILD_DIR) $(LEAN) -DwarningAsError=true --stdin
 
 $(BUILD_DIR)/flow_ring0.o: test_flow.c flow.h | $(BUILD_DIR)
 	$(CC) $(FREESTANDING_CFLAGS) -c test_flow.c -o $@
@@ -54,13 +57,14 @@ test: fmt-check capsules ring0 $(BUILD_DIR)/test-flow
 	@echo "   ALL FLOW VERIFICATION GATES PASSED"
 	@echo "================================================================================"
 
-install:
-	mkdir -p $(DESTDIR)$(PREFIX)/include/flow
+install: $(BUILD_DIR)/Flow.olean
+	mkdir -p $(DESTDIR)$(PREFIX)/include/flow $(DESTDIR)$(PREFIX)/lib/flow
 	install -m 644 flow.h $(DESTDIR)$(PREFIX)/include/flow/flow.h
-	install -m 644 Flow.lean $(DESTDIR)$(PREFIX)/include/flow/Flow.lean
+	install -m 644 Flow.lean $(DESTDIR)$(PREFIX)/lib/flow/Flow.lean
+	install -m 644 $(BUILD_DIR)/Flow.olean $(DESTDIR)$(PREFIX)/lib/flow/Flow.olean
 
 uninstall:
-	rm -rf $(DESTDIR)$(PREFIX)/include/flow
+	rm -rf $(DESTDIR)$(PREFIX)/include/flow $(DESTDIR)$(PREFIX)/lib/flow
 
 clean:
 	rm -rf $(BUILD_DIR)
