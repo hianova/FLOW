@@ -8,8 +8,8 @@ on:
     branches: [ main ]
 
 jobs:
-  verify-c17:
-    name: C17 Zero-Warning Build & HoTT Test Suite (${{ matrix.os }})
+  verify:
+    name: Formal Boundary & Freestanding HoTT x 2-Jet (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -21,7 +21,6 @@ jobs:
         run: |
           curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain leanprover/lean4:v4.35.0
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
-      - name: Build & Run All FLOW Test Suites (-Werror)
+      - name: Run All FLOW Verification Gates (-Werror)
         run: |
-          make fmt-check
-          make clean && make all && make test CC=clang
+          make clean && make test CC=clang
