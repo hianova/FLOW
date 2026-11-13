@@ -3,10 +3,9 @@
 #include <ctype.h>
 #include <limits.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
-static flow_cell g_arena[FLOW_ATLAS_MAX_CHARTS];
+static FLOW_ALIGN64 flow_cell g_arena[FLOW_ATLAS_MAX_CHARTS];
 
 static void fmt_q16(int64_t v, char out[32]) {
     bool neg = (v < 0);
@@ -69,12 +68,11 @@ static bool parse_q16_token(const char *s, int64_t *out) {
             neg = (*p == '-');
             ++p;
         }
-        uint64_t limit = neg ? ((uint64_t)INT64_MAX + 1ULL) : (uint64_t)INT64_MAX;
         uint64_t mag = 0ULL;
-        if (!parse_u64_token(p, limit, &mag)) {
+        if (!parse_u64_token(p, (uint64_t)FLOW_MAX_Q16, &mag)) {
             return false;
         }
-        *out = neg ? (int64_t)(UINT64_C(0) - mag) : (int64_t)mag;
+        *out = neg ? -(int64_t)mag : (int64_t)mag;
         return true;
     }
 
@@ -89,7 +87,7 @@ static bool parse_q16_token(const char *s, int64_t *out) {
     }
 
     uint64_t whole = 0ULL;
-    uint64_t max_whole = ((uint64_t)INT64_MAX) >> FLOW_Q16_SHIFT;
+    uint64_t max_whole = ((uint64_t)FLOW_MAX_Q16) >> FLOW_Q16_SHIFT;
     bool has_digit = false;
     while (*p >= '0' && *p <= '9') {
         has_digit = true;
@@ -122,32 +120,35 @@ static bool parse_q16_token(const char *s, int64_t *out) {
 
     uint64_t frac_q16 = (frac_num * UINT64_C(65536) + (frac_den >> 1U)) / frac_den;
     uint64_t mag_q16 = (whole << FLOW_Q16_SHIFT) + frac_q16;
-    uint64_t limit = neg ? ((uint64_t)INT64_MAX + 1ULL) : (uint64_t)INT64_MAX;
-    if (mag_q16 > limit) {
+    if (mag_q16 > (uint64_t)FLOW_MAX_Q16) {
         return false;
     }
-    *out = neg ? (int64_t)(UINT64_C(0) - mag_q16) : (int64_t)mag_q16;
+    *out = neg ? -(int64_t)mag_q16 : (int64_t)mag_q16;
     return true;
 }
 
-static bool verify_chart_against_atlas(flow_cell b, uint32_t dom_expected, size_t chart_count) {
-    if (!flow_verify_bound(b)) {
-        return false;
-    }
-    uint32_t dom = (uint32_t)(b[5] >> 32U);
+static bool verify_chart_geometry(const uint64_t b[8], size_t chart_count) {
+    int64_t b0 = (int64_t)b[0];
+    int64_t b1 = (int64_t)b[1];
+    int64_t b2 = (int64_t)b[2];
     int64_t b_exit = (int64_t)(int32_t)(uint32_t)(b[3] >> 32U);
     int64_t b_enter = (int64_t)(int32_t)(uint32_t)(b[3] & UINT64_C(0xFFFFFFFF));
     int64_t dt_max = (int64_t)(int32_t)(uint32_t)(b[4] >> 32U);
+    int64_t u_gain = (int64_t)(int32_t)(uint32_t)(b[4] & UINT64_C(0xFFFFFFFF));
     uint16_t next_lo = (uint16_t)((b[5] >> 24U) & UINT64_C(0xFF));
     uint16_t next_hi = (uint16_t)((b[5] >> 16U) & UINT64_C(0xFF));
-    uint32_t req = (uint32_t)(b[6] & UINT64_C(0xFFFFFFFF));
 
-    return (dom == dom_expected) && (dt_max > 0) && (b_exit <= b_enter) &&
-           ((size_t)next_lo < chart_count) && ((size_t)next_hi < chart_count) &&
-           ((req & FLOW_SIEVE_BASE_GATE) == FLOW_SIEVE_BASE_GATE);
+    return (flow_abs_i64(b0) <= (uint64_t)FLOW_MAX_Q16) &&
+           (flow_abs_i64(b1) <= (uint64_t)FLOW_MAX_Q16) &&
+           (flow_abs_i64(b2) <= (uint64_t)FLOW_MAX_Q16) &&
+           (flow_abs_i64(b_exit) <= (uint64_t)FLOW_MAX_Q16) &&
+           (flow_abs_i64(b_enter) <= (uint64_t)FLOW_MAX_Q16) &&
+           (flow_abs_i64(u_gain) <= (uint64_t)FLOW_MAX_Q16) && (dt_max >= 1) &&
+           (dt_max <= FLOW_MAX_Q16) && (b_exit <= b_enter) && ((size_t)next_lo < chart_count) &&
+           ((size_t)next_hi < chart_count);
 }
 
-static bool load_and_verify_bundle(const char *path, flow_cell *out_state, size_t *out_count) {
+static bool load_and_verify_bundle(const char *path, uint64_t out_state[8], size_t *out_count) {
     FILE *fp = fopen(path, "rb");
     if (fp == NULL) {
         fprintf(stderr, "flow: cannot open bundle '%s'\n", path);
@@ -160,14 +161,8 @@ static bool load_and_verify_bundle(const char *path, flow_cell *out_state, size_
         fclose(fp);
         return false;
     }
-    flow_cell st = flow_cell_from_bytes(raw);
-    if (!flow_verify_state(st)) {
-        fprintf(stderr, "flow: '%s' State cell failed FLOW_STATE_SEED seal verification\n", path);
-        fclose(fp);
-        return false;
-    }
+    flow_cell_from_bytes(out_state, raw);
 
-    uint32_t dom = (uint32_t)(st[5] >> 32U);
     size_t n = 0U;
     for (;;) {
         size_t got = fread(raw, 1U, 64U, fp);
@@ -184,7 +179,7 @@ static bool load_and_verify_bundle(const char *path, flow_cell *out_state, size_
             fclose(fp);
             return false;
         }
-        g_arena[n] = flow_cell_from_bytes(raw);
+        flow_cell_from_bytes(g_arena[n], raw);
         ++n;
     }
     fclose(fp);
@@ -193,27 +188,29 @@ static bool load_and_verify_bundle(const char *path, flow_cell *out_state, size_
         fprintf(stderr, "flow: '%s' chart count (%zu) is not a power of two\n", path, n);
         return false;
     }
-    uint16_t init_chart = (uint16_t)((st[5] >> 16U) & UINT64_C(0xFFFF));
+    uint16_t init_chart = (uint16_t)((out_state[5] >> 16U) & UINT64_C(0xFFFF));
     if ((size_t)init_chart >= n) {
         fprintf(stderr, "flow: '%s' initial chart (%u) out of range for %zu charts\n", path,
                 (unsigned)init_chart, n);
         return false;
     }
+    if (flow_abs_i64((int64_t)out_state[3]) > (uint64_t)FLOW_MAX_Q16) {
+        fprintf(stderr, "flow: '%s' initial x exceeds symmetric Q16.16 range\n", path);
+        return false;
+    }
 
     for (size_t i = 0U; i < n; ++i) {
-        if (!verify_chart_against_atlas(g_arena[i], dom, n)) {
-            fprintf(stderr, "flow: '%s' Chart[%zu] failed seal, domain, or Atlas invariant check\n",
-                    path, i);
+        if (!verify_chart_geometry(g_arena[i], n)) {
+            fprintf(stderr, "flow: '%s' Chart[%zu] failed Atlas geometry check\n", path, i);
             return false;
         }
     }
 
-    *out_state = st;
     *out_count = n;
     return true;
 }
 
-static bool load_single_chart(const char *path, flow_cell *out_bound) {
+static bool load_single_chart(const char *path, uint64_t out_bound[8]) {
     FILE *fp = fopen(path, "rb");
     if (fp == NULL) {
         return false;
@@ -225,26 +222,25 @@ static bool load_single_chart(const char *path, flow_cell *out_bound) {
     if (got != 64U || extra != EOF) {
         return false;
     }
-    *out_bound = flow_cell_from_bytes(raw);
+    flow_cell_from_bytes(out_bound, raw);
     return true;
 }
 
 static int cmd_verify(const char *bundle_path) {
-    flow_cell st;
+    FLOW_ALIGN64 flow_cell st;
     size_t count = 0U;
-    if (!load_and_verify_bundle(bundle_path, &st, &count)) {
+    if (!load_and_verify_bundle(bundle_path, st, &count)) {
         return 1;
     }
-    uint32_t dom = (uint32_t)(st[5] >> 32U);
     uint16_t init_chart = (uint16_t)((st[5] >> 16U) & UINT64_C(0xFFFF));
     uint16_t init_mode = (uint16_t)(st[5] & UINT64_C(0xFFFF));
     char x_buf[32];
     fmt_q16((int64_t)st[3], x_buf);
 
-    printf("[OK] %s: domain=0x%08x charts=%zu init_chart=%u init_x=%s init_mode=0x%04x\n",
-           bundle_path, (unsigned)dom, count, (unsigned)init_chart, x_buf, (unsigned)init_mode);
+    printf("[OK] %s: charts=%zu init_chart=%u init_x=%s init_mode=0x%04x\n", bundle_path, count,
+           (unsigned)init_chart, x_buf, (unsigned)init_mode);
     for (size_t i = 0U; i < count; ++i) {
-        flow_cell b = g_arena[i];
+        const uint64_t *b = g_arena[i];
         char lo_s[32];
         char hi_s[32];
         char dt_s[32];
@@ -263,14 +259,13 @@ static int cmd_verify(const char *bundle_path) {
 }
 
 static int cmd_run(const char *bundle_path) {
-    flow_cell state;
+    FLOW_ALIGN64 flow_cell state;
     size_t count = 0U;
-    if (!load_and_verify_bundle(bundle_path, &state, &count)) {
+    if (!load_and_verify_bundle(bundle_path, state, &count)) {
         return 1;
     }
 
     uint64_t cap_mask = (uint64_t)(count - 1U);
-    uint32_t dom = (uint32_t)(state[5] >> 32U);
     for (size_t i = 0U; i < count; ++i) {
         uint32_t ep = (uint32_t)(g_arena[i][6] >> 32U);
         flow_arena_publish_bound(g_arena, (uint64_t)i, cap_mask, ep, g_arena[i]);
@@ -319,13 +314,14 @@ static int cmd_run(const char *bundle_path) {
             char *extra_tok = strtok(NULL, " \t\r\n");
             uint64_t slot = 0ULL;
             uint64_t ep = 0ULL;
-            flow_cell new_b;
-            bool swapped = (slot_s != NULL && ep_s != NULL && cell_path != NULL &&
-                            (extra_tok == NULL || *extra_tok == '#') &&
-                            parse_u64_token(slot_s, (uint64_t)(count - 1U), &slot) &&
-                            parse_u64_token(ep_s, UINT64_C(0xFFFFFFFF), &ep) &&
-                            load_single_chart(cell_path, &new_b) &&
-                            flow_arena_try_swap(g_arena, slot, cap_mask, dom, (uint32_t)ep, new_b));
+            FLOW_ALIGN64 flow_cell new_b;
+            bool swapped =
+                (slot_s != NULL && ep_s != NULL && cell_path != NULL &&
+                 (extra_tok == NULL || *extra_tok == '#') &&
+                 parse_u64_token(slot_s, (uint64_t)(count - 1U), &slot) &&
+                 parse_u64_token(ep_s, UINT64_C(0xFFFFFFFF), &ep) &&
+                 load_single_chart(cell_path, new_b) && verify_chart_geometry(new_b, count) &&
+                 flow_arena_try_swap(g_arena, slot, cap_mask, (uint32_t)ep, new_b));
             if (swapped) {
                 printf("# swap slot=%llu epoch=%llu ok\n", (unsigned long long)slot,
                        (unsigned long long)ep);
@@ -338,7 +334,7 @@ static int cmd_run(const char *bundle_path) {
 
         int64_t u_ext = 0;
         if (!parse_q16_token(tok1, &u_ext)) {
-            fprintf(stderr, "flow: invalid Q48.16 input token '%s'\n", tok1);
+            fprintf(stderr, "flow: invalid Q16.16 input token '%s'\n", tok1);
             return 1;
         }
 
@@ -358,7 +354,7 @@ static int cmd_run(const char *bundle_path) {
             }
         }
 
-        state = flow_step_atlas(state, g_arena, cap_mask, u_ext, mode_req);
+        flow_step_atlas(state, state, g_arena, cap_mask, u_ext, mode_req);
         ++step_idx;
 
         char x_s[32];
@@ -371,11 +367,11 @@ static int cmd_run(const char *bundle_path) {
         uint16_t chart_now = (uint16_t)((state[5] >> 16U) & UINT64_C(0xFFFF));
         uint16_t mode_now = (uint16_t)(state[5] & UINT64_C(0xFFFF));
         uint32_t ep_now = (uint32_t)(state[6] >> 32U);
-        uint32_t sv_now = (uint32_t)(state[6] & UINT64_C(0xFFFFFFFF));
+        uint32_t st_now = (uint32_t)(state[6] & UINT64_C(0xFFFFFFFF));
 
-        printf("step=%llu chart=%u x=%s dt=%s r0=%s mode=0x%04x epoch=%u sieve=0x%02x\n",
+        printf("step=%llu chart=%u x=%s dt=%s r0=%s mode=0x%04x epoch=%u status=0x%02x\n",
                (unsigned long long)step_idx, (unsigned)chart_now, x_s, dt_s, r0_s,
-               (unsigned)mode_now, (unsigned)ep_now, (unsigned)sv_now);
+               (unsigned)mode_now, (unsigned)ep_now, (unsigned)st_now);
     }
     return 0;
 }
