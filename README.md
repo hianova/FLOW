@@ -109,7 +109,7 @@ flow_step_atlas(state, state, chart_arena, cap_mask, u_ext_q16, mode_req_u16);
 | [`Flow.lean`](Flow.lean) | Pure Lean 4 binary layout emitter (`Cell64`, `Rule`, `mintCell`, `mintState`, `mintArena`, `mintBundle`). |
 | [`flow.h`](flow.h) | Freestanding GPR-only single-header arithmetic substrate (`flow_step`, `flow_step_atlas`, `flow_arena_try_swap`). |
 | [`flow.c`](flow.c) | Universal zero-heap, zero-float C17 execution CLI (`flow verify`, `flow run`, `@swap`). |
-| [`Makefile`](Makefile) | `-Werror` build pipeline (`make all`, `make fmt`, `make install`). |
+| [`Makefile`](Makefile) | `-Werror` build & CI gate pipeline (`make all`, `make test`, `make fmt`, `make install`). |
 | [`VERSION`](VERSION) | Release version (`6.0.0`). |
 
 *(Hardware opcode decoding, 128-bit bit-lattice verification, gauge/mirror symmetry, Lyapunov monotonicity, and Conway toroidal cellular endurance are verified externally via `flow_inspect`.)*

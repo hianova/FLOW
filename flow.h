@@ -39,7 +39,11 @@ typedef uint64_t flow_cell[8];
 #define FLOW_INL       static inline
 #endif
 
+#ifdef __cplusplus
+static_assert(sizeof(flow_cell) == 64U, "flow_cell must occupy exactly 64 bytes");
+#else
 _Static_assert(sizeof(flow_cell) == 64U, "flow_cell must occupy exactly 64 bytes");
+#endif
 
 #define FLOW_VERSION_MAJOR 6
 #define FLOW_VERSION_MINOR 0
