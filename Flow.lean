@@ -11,11 +11,11 @@ import Std.Tactic.BVDecide
 
 namespace Flow
 
-def version : String := "5.0.0"
+def version : String := "5.0.1"
 
 def q16Shift   : Nat := 16
 def q16One     : Int := 65536
-def maxSafeQ16 : Int := 70368744177664 -- 2^46
+def maxSafeQ16 : Int := 274877906944 -- 2^38 (±4,194,304.0; keeps b1^2 ± 2*b0*b2 < 2^62)
 def minI32     : Int := -2147483648
 def maxI32     : Int := 2147483647
 
@@ -335,15 +335,16 @@ theorem appendBounds_size (acc : ByteArray) (n : Nat) (cs : List SealedBound) (f
       omega
 
 /-- Emits a `2^k × 64B` power-of-two Chart Arena (`idx & ((1 << k) - 1)`). -/
-def mintArena {kOut : Nat} {α : Type} [Chart kOut α] (k : Nat) (specs : List α) (fallback : α)
-    (epoch : UInt32 := 1) : ByteArray :=
+def mintArena {k : Nat} {α : Type} [Chart k α] (kExp : Nat) (specs : List α) (fallback : α)
+    (epoch : UInt32 := 1) (hEq : kExp = k := by rfl) : ByteArray :=
+  let _ := hEq
   let cells := specs.map (fun s => mintCell s epoch)
   let fb := mintCell fallback epoch
-  appendBounds ByteArray.empty (2 ^ k) cells fb
+  appendBounds ByteArray.empty (2 ^ kExp) cells fb
 
-theorem mintArena_size {kOut : Nat} {α : Type} [Chart kOut α] (k : Nat) (specs : List α)
-    (fallback : α) (epoch : UInt32) :
-    (mintArena k specs fallback epoch).size = (2 ^ k) * 64 := by
+theorem mintArena_size {k : Nat} {α : Type} [Chart k α] (kExp : Nat) (specs : List α)
+    (fallback : α) (epoch : UInt32) (hEq : kExp = k := by rfl) :
+    (mintArena kExp specs fallback epoch hEq).size = (2 ^ kExp) * 64 := by
   simp [mintArena, appendBounds_size, ByteArray.size_empty]
 
 /--
@@ -351,15 +352,16 @@ theorem mintArena_size {kOut : Nat} {α : Type} [Chart kOut α] (k : Nat) (specs
   - Cell `0` (`bytes [0..63]`): Sealed initial `State` cell (`"FLOWSTA5"`)
   - Cells `1 .. 2^k`: Power-of-two `2^k` Sealed `Chart` Arena (`"FLOWBND5"`)
 -/
-def mintBundle {kOut : Nat} {α : Type} [Chart kOut α] (k : Nat) (initState : SealedState)
-    (specs : List α) (fallback : α) (epoch : UInt32 := 1) : ByteArray :=
+def mintBundle {k : Nat} {α : Type} [Chart k α] (kExp : Nat) (initState : SealedState)
+    (specs : List α) (fallback : α) (epoch : UInt32 := 1) (hEq : kExp = k := by rfl) : ByteArray :=
+  let _ := hEq
   let cells := specs.map (fun s => mintCell s epoch)
   let fb := mintCell fallback epoch
-  appendBounds initState.toBytes (2 ^ k) cells fb
+  appendBounds initState.toBytes (2 ^ kExp) cells fb
 
-theorem mintBundle_size {kOut : Nat} {α : Type} [Chart kOut α] (k : Nat) (initState : SealedState)
-    (specs : List α) (fallback : α) (epoch : UInt32) :
-    (mintBundle k initState specs fallback epoch).size = (1 + 2 ^ k) * 64 := by
+theorem mintBundle_size {k : Nat} {α : Type} [Chart k α] (kExp : Nat) (initState : SealedState)
+    (specs : List α) (fallback : α) (epoch : UInt32) (hEq : kExp = k := by rfl) :
+    (mintBundle kExp initState specs fallback epoch hEq).size = (1 + 2 ^ kExp) * 64 := by
   simp [mintBundle, appendBounds_size, SealedState.toBytes_size]
   omega
 
@@ -371,14 +373,12 @@ def emitState (path : System.FilePath) (s : SealedState) : IO Unit :=
 
 def emitArena {k : Nat} {α : Type} [Chart k α] (path : System.FilePath) (kExp : Nat)
     (specs : List α) (fallback : α) (epoch : UInt32 := 1) (hEq : kExp = k := by rfl) : IO Unit :=
-  let _ := hEq
-  IO.FS.writeBinFile path (mintArena kExp specs fallback epoch)
+  IO.FS.writeBinFile path (mintArena kExp specs fallback epoch hEq)
 
 def emitBundle {k : Nat} {α : Type} [Chart k α] (path : System.FilePath) (kExp : Nat)
     (initState : SealedState) (specs : List α) (fallback : α)
     (epoch : UInt32 := 1) (hEq : kExp = k := by rfl) : IO Unit :=
-  let _ := hEq
-  IO.FS.writeBinFile path (mintBundle kExp initState specs fallback epoch)
+  IO.FS.writeBinFile path (mintBundle kExp initState specs fallback epoch hEq)
 
 /-! ## 5. Formal Invariants of the HoTT × 2-Jet Atlas Transition Law (`0 sorryAx`) -/
 
@@ -570,6 +570,22 @@ def chartZeroTarget : Rule 2 where
   uGain  := 0
   domTag := flowDomainTag
 
+def chartConcaveBarrier : Rule 2 where
+  b0     := -1 * q16One
+  b1     := 0
+  b2     := -2 * q16One
+  dtMax  := 100 * q16One
+  uGain  := 0
+  domTag := flowDomainTag
+
+def chartSubLsb : Rule 2 where
+  b0     := -6
+  b1     := 10 * q16One
+  b2     := 0
+  dtMax  := q16One
+  uGain  := 0
+  domTag := flowDomainTag
+
 def chartForeign : Rule 2 where
   b0     := 2 * q16One
   b1     := 0
@@ -590,10 +606,16 @@ def emitCoreTestFixtures (dirPath : String := "build/capsules") : IO Unit := do
   emitState (outDir / "state_chart0.flow")   (mintState chartInstanton 0 (initChart := 0))
   emitState (outDir / "state_chart2.flow")   (mintState chartConvexSurge 0 (initChart := 2) (initMode := 0x0003))
   emitState (outDir / "state_overflow.flow") (mintState chartConvexSurge ((1 <<< 61) : Int) (initChart := 2))
+  emitState (outDir / "state_disc_ovf.flow")
+    (mintState chartZeroTarget 0 (initChart := 0) (initMode := 0) q16One ((1 <<< 46) : Int) q16One)
+  emitState (outDir / "state_concave.flow")  (mintState chartConcaveBarrier q16One (initChart := 0))
+  emitState (outDir / "state_sub_lsb.flow")  (mintState chartSubLsb 0 (initChart := 0))
   emitState (outDir / "state_foreign.flow")  (mintState chartForeign 0)
   emitState (outDir / "state_fiber.flow")
     (mintState chartZeroTarget 0 (initChart := 0) (initMode := 0) (2 * q16One) (-3 * q16One) (2 * q16One))
   emitCell  (outDir / "zero_target.flow")    (mintCell chartZeroTarget 1)
+  emitCell  (outDir / "concave_barrier.flow") (mintCell chartConcaveBarrier 1)
+  emitCell  (outDir / "sub_lsb.flow")        (mintCell chartSubLsb 1)
   emitCell  (outDir / "swap_harbor.flow")    (mintCell chartSafeHarbor 1)
   emitCell  (outDir / "foreign_chart.flow")  (mintCell chartForeign 1)
   IO.println s!"  [PASS] Minted sealed .flow Manifold Atlas & probes in {outDir}"

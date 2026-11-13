@@ -18,6 +18,9 @@ static void fmt_q16(int64_t v, char out[32]) {
         ++whole;
         frac = 0ULL;
     }
+    if (whole == 0ULL && frac == 0ULL) {
+        neg = false;
+    }
     snprintf(out, 32U, "%s%llu.%04llu", neg ? "-" : "", (unsigned long long)whole,
              (unsigned long long)frac);
 }
@@ -159,7 +162,7 @@ static bool load_and_verify_bundle(const char *path, flow_cell *out_state, size_
     }
     flow_cell st = flow_cell_from_bytes(raw);
     if (!flow_verify_state(st)) {
-        fprintf(stderr, "flow: '%s' State cell failed FLOW_STATE_SEED MAC verification\n", path);
+        fprintf(stderr, "flow: '%s' State cell failed FLOW_STATE_SEED seal verification\n", path);
         fclose(fp);
         return false;
     }
@@ -276,11 +279,31 @@ static int cmd_run(const char *bundle_path) {
     char line[1024];
     uint64_t step_idx = 0ULL;
     while (fgets(line, (int)sizeof(line), stdin) != NULL) {
+        size_t len = strlen(line);
+        bool has_nl = (len > 0U && line[len - 1U] == '\n');
         char *p = line;
         while (*p != '\0' && isspace((unsigned char)*p)) {
             ++p;
         }
-        if (*p == '\0' || *p == '#') {
+        if (*p == '#') {
+            if (!has_nl) {
+                int ch = 0;
+                while ((ch = fgetc(stdin)) != EOF && ch != '\n') {
+                }
+            }
+            continue;
+        }
+        if (!has_nl) {
+            int ch = fgetc(stdin);
+            if (ch != EOF) {
+                while (ch != EOF && ch != '\n') {
+                    ch = fgetc(stdin);
+                }
+                fprintf(stderr, "flow: input line exceeds %zu-byte limit\n", sizeof(line) - 1U);
+                return 1;
+            }
+        }
+        if (*p == '\0') {
             continue;
         }
 
@@ -293,10 +316,12 @@ static int cmd_run(const char *bundle_path) {
             char *slot_s = strtok(NULL, " \t\r\n");
             char *ep_s = strtok(NULL, " \t\r\n");
             char *cell_path = strtok(NULL, " \t\r\n");
+            char *extra_tok = strtok(NULL, " \t\r\n");
             uint64_t slot = 0ULL;
             uint64_t ep = 0ULL;
             flow_cell new_b;
             bool swapped = (slot_s != NULL && ep_s != NULL && cell_path != NULL &&
+                            (extra_tok == NULL || *extra_tok == '#') &&
                             parse_u64_token(slot_s, (uint64_t)(count - 1U), &slot) &&
                             parse_u64_token(ep_s, UINT64_C(0xFFFFFFFF), &ep) &&
                             load_single_chart(cell_path, &new_b) &&
@@ -326,6 +351,11 @@ static int cmd_run(const char *bundle_path) {
                 return 1;
             }
             mode_req = (uint16_t)m_val;
+            char *tok3 = strtok(NULL, " \t\r\n");
+            if (tok3 != NULL && *tok3 != '#') {
+                fprintf(stderr, "flow: unexpected trailing token '%s'\n", tok3);
+                return 1;
+            }
         }
 
         state = flow_step_atlas(state, g_arena, cap_mask, u_ext, mode_req);

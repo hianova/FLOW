@@ -40,8 +40,8 @@ $$\Phi_{\text{atlas}} : \mathcal{C}_{64}^{\text{state}} \times \mathcal{A}_{2^k}
    By Univalence ($A \simeq B \implies A = B$), every state and chart shares one canonical carrier: a 64-byte hardware vector (`uint64_t __attribute__((vector_size(64), aligned(64)))`). Conditional business branching is replaced by **Schmitt Hysteresis Chart Gluing** over $\mathbb{Z}/2^k\mathbb{Z}$ (`idx & cap_mask`, zero out-of-bounds UB) and **Cubical Kan Projection** over an orthogonal 16-bit discrete mode space.
 3. **2-Jet ($J^2$) Replaces Imperative Formula Trees**:
    On each active chart, external runtime signal $u_{\text{ext}}$ pulls back into the local 2-Jet residual $R(x, u_{\text{ext}}) = (b_0 - u_{\text{gain}} \cdot u_{\text{ext}}) + b_1 x + \frac{1}{2} b_2 x^2$. In one branchless pass, $\Phi_{\text{atlas}}$ resolves exact **Citardauq** roots when $\Delta \ge 0$ (escaping $R' = 0$ critical/saddle points where first-order methods stall) and **Wick-rotated curvature tunneling** ($\sqrt{|\Delta|}/|b_2|$) when $\Delta < 0$. Setting $u_{\text{gain}} = 0$ creates shock-isolated circuit-breaker charts.
-4. **Dual-Seed Cryptographic Seals & Epoch-Invariant Hot-Swap**:
-   [`Flow.lean`](Flow.lean) is the sole seal issuer (`"FLOWSTA5"` for states, `"FLOWBND5"` for charts; [`flow.h`](flow.h) exposes zero seal-minting functions and blocks seal laundering). Chart seals exclude dynamic `[63:32] Epoch`, allowing `flow_arena_publish_bound` to hot-swap live charts across threads without C re-signing.
+4. **Dual-Seed Algebraic Integrity Seals & Epoch-Invariant Hot-Swap**:
+   [`Flow.lean`](Flow.lean) is the sole seal issuer (`"FLOWSTA5"` for states, `"FLOWBND5"` for charts; [`flow.h`](flow.h) exposes zero seal-minting functions and blocks seal laundering). These domain-separated Goldilocks $\mathbb{F}_p$ seals guard against torn reads, uninitialized fabrication, and cross-domain type confusion in registers. Chart seals exclude dynamic `[63:32] Epoch`, allowing `flow_arena_publish_bound` to hot-swap live charts without C re-signing.
 
 ---
 
@@ -55,10 +55,12 @@ Continuous Q48.16 coordinates (`lane[3]`) and discrete Cubical topology (`lane[5
 | `1` | `8..15` | `j1` — Q48.16 1-Jet (first-order tangent) | `b1` — First-order stiffness / slope (Q48.16 `i64`) |
 | `2` | `16..23` | `j2` — Q48.16 2-Jet (second-order curvature) | `b2` — Second-order curvature (Q48.16 `i64`) |
 | `3` | `24..31` | `x` — **Pure** Q48.16 continuous coordinate (`i64`) | `[b_exit:i32 \| b_enter:i32]` — Schmitt band (Q16.16, $b_{\text{exit}} \le b_{\text{enter}}$) |
-| `4` | `32..39` | `dt` — Resolved step $\Delta t^* \ge 0$ (Q48.16 `i64`) | `[dt_max:u32 \| u_gain:i32]` — Horizon $\Delta t_{\max} > 0$ & $u_{\text{ext}}$ gain (Q16.16) |
+| `4` | `32..39` | `dt` — Resolved step $\Delta t^* \ge 0$ (Q48.16 `i64`) | `[dt_max:i32 \| u_gain:i32]` — Horizon $\Delta t_{\max} > 0$ & $u_{\text{ext}}$ gain (Q16.16) |
 | `5` | `40..47` | `[DomainTag:32 \| Chart:16 \| Mode:16]` | `[DomainTag:32 \| NextLo:8 \| NextHi:8 \| KanLock:16]` |
 | `6` | `48..55` | `[Epoch:32 \| LiveSieve:32]` — Live $\Omega$ state | `[Epoch:32 \| ReqSieve:32]` — Required $\Omega$ mask |
-| `7` | `56..63` | `seal` — Goldilocks $\mathbb{F}_p$ MAC (`lanes[0..6]`) | `seal` — Epoch-invariant Goldilocks $\mathbb{F}_p$ MAC |
+| `7` | `56..63` | `seal` — Goldilocks $\mathbb{F}_p$ seal (`lanes[0..6]`) | `seal` — Epoch-invariant Goldilocks $\mathbb{F}_p$ seal |
+
+*(When `b1 == 0` and `b2 == 0`, `flow_step_chart` evaluates autonomous 2-Jet fiber pushforward directly on `state[0..2]` against target `b0`.)*
 
 ### Grothendieck Sieve ($\Omega$) Covering Axes (`lane[6][31:0]`)
 
@@ -128,7 +130,7 @@ LEAN_PATH=/path/to/FLOW/build lean -DwarningAsError=true --run SurgeSpec.lean
 ### Step 2 — Verify & Stream Live Events Through `FLOW`'s Fixed Engine
 
 ```bash
-# Cryptographically verify seals, DomainTag univalence, and 2^k Atlas geometry
+# Verify algebraic seals, DomainTag univalence, and 2^k Atlas geometry
 /path/to/FLOW/build/flow verify surge.flow
 
 # Stream live (u_ext [mode_hex]) observations or @swap hot-reload directives via stdin
@@ -142,7 +144,7 @@ printf "4.0\n12.0\n9.0 0x0000\n1.0\n" | /path/to/FLOW/build/flow run surge.flow
 
 ### Bare-Metal / Ring-0 Silicon Embedding (Driver / Kernel Plumbing Only)
 
-[`flow.h`](flow.h) is included directly **only** when wiring raw hardware registers, DMA rings, or kernel interrupts in `-ffreestanding -nostdlib` environments:
+[`flow.h`](flow.h) is included directly **only** when wiring raw hardware registers, DMA rings, or kernel contexts with 512-bit SIMD register access enabled (`-ffreestanding -nostdlib`):
 
 ```c
 #include "flow.h"
@@ -162,7 +164,7 @@ state = flow_step_atlas(state, chart_arena, cap_mask, u_ext_q16, mode_req_u16);
 | [`flow.c`](flow.c) | Precompiled universal C17 execution engine (`build/flow`): `flow verify` and `flow run` (pure integer Q48.16 stream I/O and zero-downtime monotonic `@swap` hot-reloading, zero floats). |
 | [`test_flow.c`](test_flow.c) | Ring-0 bare-metal symbol gate (`FLOW_RING0_GATE`) and HoTT $\times$ 2-Jet Atlas verification suite. |
 | [`Makefile`](Makefile) | Zero-warning `-Werror` build pipeline producing `build/Flow.olean`, `build/flow`, and verification gates without `lean -c`. |
-| [`VERSION`](VERSION) | Canonical release version (`5.0.0`). |
+| [`VERSION`](VERSION) | Canonical release version (`5.0.1`). |
 
 ---
 
@@ -172,13 +174,13 @@ state = flow_step_atlas(state, chart_arena, cap_mask, u_ext_q16, mode_req_u16);
 # Build Flow.olean, universal ./build/flow engine, and core .flow capsules
 make all
 
-# Execute formatting, formal proof, Ring-0 freestanding, engine, and CLI gates
+# Execute all formal, Ring-0 freestanding, engine, and CLI verification gates
 make clean && make test
 ```
 
 `make test` enforces four verification gates in sequence:
 1. **Gate 1 (`capsules`)**: Compiles [`Flow.lean`](Flow.lean) under `lean -DwarningAsError=true` (`0 sorryAx`, `0` warnings) and mints sealed `.flow` Manifold Atlases.
-2. **Gate 2 (`ring0`)**: Compiles [`flow.h`](flow.h) under `-ffreestanding -nostdlib -fno-builtin -Werror` and asserts `nm -u == empty` (`0` undefined symbols, `0` conditional branches, `0` FPU instructions).
+2. **Gate 2 (`ring0`)**: Compiles [`flow.h`](flow.h) under `-ffreestanding -nostdlib -fno-builtin -Werror` and asserts `nm -u == empty` (`0` undefined symbols, `0` conditional branches, `0` scalar FPU arithmetic ops).
 3. **Gate 3 (`test-flow`)**: Verifies dual seals, anti-laundering, Schmitt chart gluing, orthogonal Kan mode locks, $R'=0$ Citardauq jumps, $\Delta < 0$ tunneling, and lock-free QSBR hot-swaps.
 4. **Gate 4 (`flow` CLI)**: End-to-end zero-C execution via `./build/flow verify` and `./build/flow run`.
 

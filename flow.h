@@ -17,9 +17,11 @@ extern "C" {
 /* ============================================================================
  * FLOW — Object-Free HoTT & 2-Jet Manifold Execution Substrate
  * ============================================================================
- * Canonical 64-byte (512-bit, 8 x u64) register vector substrate.
+ * Canonical 64-byte (512-bit, 8 x u64) SIMD register vector substrate.
  * Zero structs. Zero control-flow branches in kernel. Zero float. Zero heap.
  * Both State and Chart cells are minted & sealed upstream by Flow.lean.
+ * Bare-metal / kernel callers must execute with SIMD register access enabled
+ * (e.g., CPACR_EL1.FPEN / kernel_neon_begin on ARM64, kernel_fpu_begin on x86).
  * ============================================================================ */
 
 __extension__ typedef uint64_t flow_cell __attribute__((vector_size(64), aligned(64)));
@@ -29,9 +31,9 @@ _Static_assert(_Alignof(flow_cell) == 64U, "flow_cell must be 64-byte cache-line
 
 #define FLOW_VERSION_MAJOR 5
 #define FLOW_VERSION_MINOR 0
-#define FLOW_VERSION_PATCH 0
+#define FLOW_VERSION_PATCH 1
 #ifndef FLOW_VERSION_STRING
-#define FLOW_VERSION_STRING "5.0.0"
+#define FLOW_VERSION_STRING "5.0.1"
 #endif
 
 #define FLOW_Q16_SHIFT           16U
@@ -133,7 +135,11 @@ static inline uint64_t flow_qsqrt_u64(uint64_t x_q16) {
     return flow_mux_u64(hi_range, r << (FLOW_Q16_SHIFT / 2U), r);
 }
 
-/* --- Internal Division-Free Goldilocks F_p Sponge & Read-Only Seal Verifiers --- */
+/* --- Domain-Separated Goldilocks F_p Sponge & Algebraic Integrity Seal Verifiers ---
+ * Non-keyed algebraic integrity tags ("FLOWBND5" / "FLOWSTA5") detect torn memory,
+ * uninitialized fabrication, and cross-domain State/Chart confusion in registers.
+ * Not a secret-keyed MAC against active adversaries who can recompute public seeds.
+ * --- */
 
 static inline uint64_t flow__fp_reduce64(uint64_t x) {
     uint64_t ge = flow_mask_bool(x >= FLOW_FP_MOD);
@@ -240,19 +246,44 @@ static inline int64_t flow_qshr1_i64(int64_t x) {
     return (int64_t)((ux >> 1U) | sign_bit);
 }
 
+static inline void flow_udiv_step(uint64_t *rem, uint64_t *lo, uint64_t den) {
+    uint64_t r = (*rem << 1U) | (*lo >> 63U);
+    uint64_t ge = flow_mask_bool(r >= den);
+    *rem = r - (den & ge);
+    *lo = (*lo << 1U) | (ge & 1ULL);
+}
+
+/* Exact 0-ULP branchless Q48.16 signed division (0 branches, 0 hardware udiv, 0 __udivdi3) */
 static inline int64_t flow_qdiv_i64(int64_t num_q16, int64_t den_q16, uint32_t *ovf) {
     uint64_t anum = flow_abs_i64(num_q16);
     uint64_t aden = flow_abs_i64(den_q16);
     uint64_t den_zero = flow_mask_bool(aden == 0ULL);
     uint64_t safe_den = aden | (den_zero & 1ULL);
-    uint64_t hi_num = flow_mask_bool((anum >> 47U) != 0ULL);
-    uint64_t q_lo = (anum << FLOW_Q16_SHIFT) / safe_den;
-    uint64_t safe_den_hi = (safe_den >> FLOW_Q16_SHIFT) | 1ULL;
-    uint64_t q_hi = anum / safe_den_hi;
-    uint64_t q_mag = flow_mux_u64(hi_num, q_hi, q_lo);
-    uint64_t mag_ovf = flow_mask_bool(q_mag > (uint64_t)INT64_MAX);
-    *ovf |= (uint32_t)((mag_ovf | den_zero) != 0ULL);
-    uint64_t clamped = flow_mux_u64(mag_ovf, (uint64_t)INT64_MAX, q_mag);
+    uint64_t hi = anum >> (64U - FLOW_Q16_SHIFT);
+    uint64_t pre_ovf = den_zero | flow_mask_bool(hi >= safe_den);
+    uint64_t rem = flow_mux_u64(pre_ovf, 0ULL, hi);
+    uint64_t quot = anum << FLOW_Q16_SHIFT;
+#define FLOW_UDIV_8(r, q, d)       \
+    flow_udiv_step((r), (q), (d)); \
+    flow_udiv_step((r), (q), (d)); \
+    flow_udiv_step((r), (q), (d)); \
+    flow_udiv_step((r), (q), (d)); \
+    flow_udiv_step((r), (q), (d)); \
+    flow_udiv_step((r), (q), (d)); \
+    flow_udiv_step((r), (q), (d)); \
+    flow_udiv_step((r), (q), (d))
+    FLOW_UDIV_8(&rem, &quot, safe_den);
+    FLOW_UDIV_8(&rem, &quot, safe_den);
+    FLOW_UDIV_8(&rem, &quot, safe_den);
+    FLOW_UDIV_8(&rem, &quot, safe_den);
+    FLOW_UDIV_8(&rem, &quot, safe_den);
+    FLOW_UDIV_8(&rem, &quot, safe_den);
+    FLOW_UDIV_8(&rem, &quot, safe_den);
+    FLOW_UDIV_8(&rem, &quot, safe_den);
+#undef FLOW_UDIV_8
+    uint64_t mag_ovf = pre_ovf | flow_mask_bool(quot > (uint64_t)INT64_MAX);
+    *ovf |= (uint32_t)(mag_ovf != 0ULL);
+    uint64_t clamped = flow_mux_u64(mag_ovf, (uint64_t)INT64_MAX, quot);
     uint64_t neg = flow_mask_bool((num_q16 < 0) != (den_q16 < 0));
     return (int64_t)((clamped ^ neg) - neg);
 }
@@ -286,6 +317,11 @@ static inline void flow_cell_to_bytes(flow_cell c, uint8_t out[64]) {
     }
 }
 
+/*
+ * Single-slot arena store/load primitives (disjoint-slot SPSC rings or quiesced single-writer
+ * updates; for concurrent multi-reader zero-tear swaps, publish double-buffered `const flow_cell *`
+ * bank pointers to `flow_step_atlas`).
+ */
 static inline void flow_arena_store_rel(flow_cell *arena, uint64_t idx, uint64_t cap_mask,
                                         flow_cell c) {
 #if defined(__SIZEOF_POINTER__) && (__SIZEOF_POINTER__ >= 8)
@@ -430,36 +466,49 @@ static inline flow_cell flow_step_chart(flow_cell state, flow_cell bound, uint64
     int64_t disc = flow_qsub_i64(r1_sq, two_r0_r2, &disc_ovf);
 
     int64_t d_mag = (int64_t)flow_qsqrt_u64(flow_abs_i64(disc));
-    int64_t neg_d_mag = flow_qneg_i64(d_mag, &disc_ovf);
+    int64_t neg_d_mag = -d_mag;
     int64_t signed_d = flow_mux_i64(flow_mask_bool(r1 < 0), neg_d_mag, d_mag);
-    int64_t q_cit = flow_qadd_i64(r1, signed_d, &disc_ovf);
+    uint32_t qcit_ovf = 0U;
+    int64_t q_cit = flow_qadd_i64(r1, signed_d, &qcit_ovf);
 
-    uint32_t div_ovf_a = 0U;
-    uint32_t div_ovf_b = 0U;
-    uint32_t div_ovf_l = 0U;
-    uint32_t div_ovf_t = 0U;
-    int64_t neg_two_r0 = flow_qneg_i64(flow_qadd_i64(r0, r0, &div_ovf_a), &div_ovf_a);
-    int64_t root_a = flow_qdiv_i64(neg_two_r0, q_cit, &div_ovf_a);
-    int64_t root_b = flow_qdiv_i64(flow_qneg_i64(q_cit, &div_ovf_b), r2, &div_ovf_b);
+    uint32_t num_ovf_a = qcit_ovf;
+    uint32_t num_ovf_b = qcit_ovf;
+    uint32_t num_ovf_l = 0U;
+    uint32_t num_ovf_t = 0U;
+    uint32_t ign_div_ovf = 0U;
+    int64_t neg_two_r0 = flow_qneg_i64(flow_qadd_i64(r0, r0, &num_ovf_a), &num_ovf_a);
+    int64_t root_a = flow_qdiv_i64(neg_two_r0, q_cit, &ign_div_ovf);
+    int64_t root_b = flow_qdiv_i64(flow_qneg_i64(q_cit, &num_ovf_b), r2, &ign_div_ovf);
     uint64_t pick_a = flow_mask_bool(flow_abs_i64(root_a) <= flow_abs_i64(root_b));
     int64_t step_quad = flow_mux_i64(pick_a, root_a, root_b);
+    uint64_t quad_ovf = (uint64_t)(num_ovf_a | num_ovf_b);
 
-    int64_t step_lin = flow_qdiv_i64(flow_qneg_i64(r0, &div_ovf_l), r1, &div_ovf_l);
+    int64_t step_lin = flow_qdiv_i64(flow_qneg_i64(r0, &num_ovf_l), r1, &ign_div_ovf);
 
-    int64_t grad_dir = flow_mux_i64(flow_mask_bool(r1 > 0), -INT64_C(1), INT64_C(1));
-    int64_t tun_d = flow_mux_i64(flow_mask_bool(grad_dir < 0), neg_d_mag, d_mag);
-    int64_t tun_num = flow_qadd_i64(flow_qneg_i64(r1, &div_ovf_t), tun_d, &div_ovf_t);
+    uint64_t descend_neg = flow_mask_bool((r1 != 0) & ((r0 > 0) == (r1 > 0)));
+    int64_t grad_dir = flow_mux_i64(descend_neg, -INT64_C(1), INT64_C(1));
+
+    uint32_t neg_r1_ovf = 0U;
+    int64_t neg_r1 = flow_qneg_i64(r1, &neg_r1_ovf);
+    uint64_t r2_neg = flow_mask_bool(r2 < 0);
+    num_ovf_t |= (uint32_t)flow_mux_u64(r2_neg, 0ULL, neg_r1_ovf);
+    int64_t v_num = flow_mux_i64(r2_neg, r1, neg_r1);
+    int64_t tun_d = flow_mux_i64(flow_mask_bool(v_num < 0), neg_d_mag, d_mag);
+    int64_t tun_num = flow_qadd_i64(v_num, tun_d, &num_ovf_t);
     int64_t abs_r2_i64 =
         (int64_t)flow_mux_u64(flow_mask_bool(flow_abs_i64(r2) > (uint64_t)INT64_MAX),
                               (uint64_t)INT64_MAX, flow_abs_i64(r2));
-    int64_t step_tunnel = flow_qdiv_i64(tun_num, abs_r2_i64, &div_ovf_t);
+    int64_t step_tunnel = flow_qdiv_i64(tun_num, abs_r2_i64, &ign_div_ovf);
 
     uint64_t has_r2 = flow_mask_bool(r2 != 0);
     uint64_t real_roots = flow_mask_bool(disc >= 0);
     int64_t raw_step =
         flow_mux_i64(has_r2, flow_mux_i64(real_roots, step_quad, step_tunnel), step_lin);
+    uint64_t solver_ovf = flow_mux_u64(
+        has_r2, (uint64_t)disc_ovf | flow_mux_u64(real_roots, quad_ovf, num_ovf_t), num_ovf_l);
 
     uint64_t active = flow_mask_bool((r0 != 0) & ((r1 != 0) | (r2 != 0)));
+    ovf |= (uint32_t)(active & solver_ovf);
     uint64_t zero_quant = active & flow_mask_bool(raw_step == 0);
     int64_t nz_step =
         flow_mux_i64(~active, INT64_C(0), flow_mux_i64(zero_quant, grad_dir, raw_step));
@@ -499,8 +548,9 @@ static inline flow_cell flow_step_chart(flow_cell state, flow_cell bound, uint64
     int64_t j2_next = r2;
     uint32_t conv_ovf = 0U;
     int64_t res_after = flow_mux_i64(op_mask, j0_next, flow_qsub_i64(j0_next, b0_eff, &conv_ovf));
-    bool converged =
-        ((ovf | conv_ovf) == 0U) & (flow_abs_i64(res_after) <= (uint64_t)FLOW_CONVERGE_EPS_Q16);
+    uint32_t auto_conv_ovf = (uint32_t)((~op_mask) & (uint64_t)conv_ovf);
+    bool converged = ((ovf | auto_conv_ovf) == 0U) &
+                     (flow_abs_i64(res_after) <= (uint64_t)FLOW_CONVERGE_EPS_Q16);
 
     uint16_t chart_orig = (uint16_t)((state[5] >> 16U) & UINT64_C(0xFFFF));
     uint16_t mode_orig = (uint16_t)(state[5] & UINT64_C(0xFFFF));

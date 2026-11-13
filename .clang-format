@@ -1,6 +1,6 @@
 BasedOnStyle: LLVM
+# LLVM clang-format uses 'Cpp' as the unified C/C++ language selector
 Language: Cpp
-Standard: c++17
 ColumnLimit: 100
 IndentWidth: 4
 TabWidth: 4
