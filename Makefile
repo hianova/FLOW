@@ -106,6 +106,8 @@ test: $(BUILD_DIR)/Flow.olean ring0 $(BUILD_DIR)/flow
 		printf '%s\n' "$$out" | grep -q 'step=6 chart=1 x=1.0000 dt=10.0000 r0=2.0000 mode=0x0003 epoch=6 status=0x00'
 	@echo "=== [Gate 3] SEARU x FLOW 2-Jet Symbiotic NP Co-Solver & Ablation Gate ==="
 	@./$(BUILD_DIR)/flow searu-verify
+	@echo "=== [Gate 4] Lean 4 Formal Proof of 2-Jet x SEARU Symbiotic Duality ==="
+	@$(LEAN) -DwarningAsError=true --run docs/SymbioticDuality.lean
 	@echo "================================================================================"
 	@echo "   ALL FLOW v$(FLOW_VERSION) + SEARU VERIFICATION GATES PASSED"
 	@echo "================================================================================"

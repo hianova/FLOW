@@ -131,6 +131,7 @@ SEARU_SOLVE_INLINE(&res, num_vars, init_canvas, kan_pin, seed, max_iters,
 | [`searu.h`](searu.h) | Freestanding GPR-only 1-bit Chaos, `CLZ` Zipf Lévy-flight & symbiotic `SEARU × FLOW 2-Jet` NP co-solver (`searu_heal_and_swap`, `SEARU_SOLVE_INLINE`, `3-SAT`, `GraphColor`, `Bilevel 2-Jet + @swap`). |
 | [`flow.c`](flow.c) | Universal zero-heap, zero-float C17 CLI & self-optimizing synthesizer (`flow verify`, `flow run`, `flow searu-verify`, `flow self-opt`, `@swap`). |
 | [`Makefile`](Makefile) | Self-contained `-Werror` build, freestanding ISA/ABI audit (`0` branches, `0` `udiv`, `0` `blr`, `0` FPU/SIMD), and autonomous synthesis (`make all`, `make test`, `make self-opt`, `make fmt`). |
+| [`docs/`](docs/) | Machine-checked Lean 4 duality proof ([`SymbioticDuality.lean`](docs/SymbioticDuality.lean)), formal paper ([`Symbiotic_Duality_Paper.md`](docs/Symbiotic_Duality_Paper.md)), and Traditional Chinese guide ([`Symbiotic_Duality_Guide_zh-TW.md`](docs/Symbiotic_Duality_Guide_zh-TW.md)). |
 | [`VERSION`](VERSION) | Release version (`7.0.1`). |
 
 *(Silicon-level bit-blasted SAT/temporal-induction proofs (`9x QED`) and `0-ULP` X-poisoned RTL co-simulation are paired in the companion `ELE` hardware repository.)*
