@@ -76,7 +76,7 @@ ring0: $(BUILD_DIR)/flow_ring0.o $(BUILD_DIR)/searu_ring0.o $(BUILD_DIR)/libsear
 	@echo "=== [Gate 1] Freestanding Pure-GPR Ring-0 & Binary ISA Gate (0 undef, 0 branches, 0 udiv, 0 BLR, 0 FPU/SIMD) ==="
 
 $(BUILD_DIR)/flow: flow.c flow.h searu.h flow_opt_params.h $(BUILD_DIR)/libsearu.a | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -mgeneral-regs-only -DSEARU_EXPORT_RING0=1 -DSEARU_EXPORT_SOLVERS=1 flow.c $(BUILD_DIR)/libsearu.a -o $@
+	$(CC) $(CFLAGS) -mgeneral-regs-only -fsanitize=signed-integer-overflow,shift-exponent,bounds,null,return,unreachable -fsanitize-trap=all -DSEARU_EXPORT_RING0=1 -DSEARU_EXPORT_SOLVERS=1 flow.c $(BUILD_DIR)/libsearu.a -o $@
 	@! nm -u $@ | grep -Eq '(^|[^A-Za-z0-9_])(_?malloc|_?calloc|_?realloc|_?free|_?strtod|_?strtof|_?atof)(@|$$)' || \
 		(echo "ERROR: Heap or float symbol leaked into universal flow engine!" && nm -u $@ && exit 1)
 

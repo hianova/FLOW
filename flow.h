@@ -20,7 +20,7 @@ extern "C" {
 #endif
 
 /* ============================================================================
- * FLOW — Zero-Risk 2-Jet & HoTT Manifold Arithmetic Substrate (v7.0.0)
+ * FLOW — Zero-Risk 2-Jet & HoTT Manifold Arithmetic Substrate (v7.0.1)
  * ============================================================================
  * Canonical 64-byte (8 x u64) General-Purpose Register (GPR) substrate.
  * - Zero structs. Zero SIMD/FPU instructions (-mgeneral-regs-only clean).
@@ -54,9 +54,9 @@ _Static_assert(sizeof(flow_cell) == 64U, "flow_cell must occupy exactly 64 bytes
 
 #define FLOW_VERSION_MAJOR 7
 #define FLOW_VERSION_MINOR 0
-#define FLOW_VERSION_PATCH 0
+#define FLOW_VERSION_PATCH 1
 #ifndef FLOW_VERSION_STRING
-#define FLOW_VERSION_STRING "7.0.0"
+#define FLOW_VERSION_STRING "7.0.1"
 #endif
 
 #define FLOW_Q16_SHIFT        16U
@@ -271,10 +271,9 @@ FLOW_FORCE_INL uint64_t flow_isqrt_round_u128(flow_u128 x) {
     uint64_t y0 = (uint64_t)(((flow_u128)w * (flow_u128)z_m) >> 63U);
 
     flow_u128 wf = ((flow_u128)w << 64U) | (flow_u128)f;
-    flow_i128 rem = (flow_i128)wf - (flow_i128)((flow_u128)y0 * (flow_u128)y0);
-    bool r_neg = flow_neg_i128(rem);
-    uint64_t rem_abs_hi =
-        (uint64_t)((r_neg ? ((flow_u128)0ULL - (flow_u128)rem) : (flow_u128)rem) >> 32U);
+    flow_u128 rem_u = wf - ((flow_u128)y0 * (flow_u128)y0);
+    bool r_neg = flow_neg_i128((flow_i128)rem_u);
+    uint64_t rem_abs_hi = (uint64_t)((r_neg ? ((flow_u128)0ULL - rem_u) : rem_u) >> 32U);
     uint64_t corr = (uint64_t)(((flow_u128)rem_abs_hi * (flow_u128)z_m) >> 96U);
     uint64_t y = r_neg ? (y0 - corr) : (y0 + corr);
 
@@ -342,16 +341,16 @@ FLOW_FORCE_INL int64_t flow_sym_div128_clamped(flow_i128 num, flow_i128 den, int
     uint64_t q = (uint64_t)(q_scaled >> 63U);
 
     flow_u128 u_norm = ((flow_u128)u1 << 64U) | (flow_u128)u0;
-    flow_i128 rem128 = (flow_i128)u_norm - (flow_i128)((flow_u128)q * (flow_u128)d);
-    bool neg1 = flow_neg_i128(rem128);
+    flow_u128 rem128_u = u_norm - ((flow_u128)q * (flow_u128)d);
+    bool neg1 = flow_neg_i128((flow_i128)rem128_u);
     q -= (uint64_t)neg1;
-    rem128 += neg1 ? (flow_i128)d : (flow_i128)0;
+    rem128_u += neg1 ? (flow_u128)d : (flow_u128)0ULL;
 
-    bool ge1 = (rem128 >= (flow_i128)d);
+    bool ge1 = (rem128_u >= (flow_u128)d);
     q += (uint64_t)ge1;
-    rem128 -= ge1 ? (flow_i128)d : (flow_i128)0;
+    rem128_u -= ge1 ? (flow_u128)d : (flow_u128)0ULL;
 
-    uint64_t rem = (uint64_t)rem128;
+    uint64_t rem = (uint64_t)rem128_u;
     uint64_t round_up = (uint64_t)(rem >= (d - rem));
     uint64_t mag = flow_sel_u64(q >= cap, cap, q + round_up);
     return neg ? -(int64_t)mag : (int64_t)mag;

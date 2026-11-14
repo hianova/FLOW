@@ -1,5 +1,5 @@
 /-
-  FLOW — Manifold Atlas Binary Emitter (v7.0.0)
+  FLOW — Manifold Atlas Binary Emitter (v7.0.1)
   =============================================
   Pure Lean 4 data-layout emitter (zero external imports, zero `lean -c`).
   Compiles 2-Jet manifold charts, Schmitt hysteresis bands, and orthogonal
@@ -8,7 +8,7 @@
 
 namespace Flow
 
-def version  : String := "7.0.0"
+def version  : String := "7.0.1"
 def q16Shift : Nat    := 16
 def q16One   : Int    := 65536
 def maxQ16   : Int    := 0x7FFFFFFF -- Symmetric Q16.16 bound (±32,767.99998)
