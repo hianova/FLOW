@@ -15,12 +15,17 @@ FREESTANDING_CFLAGS := -std=c17 -ffreestanding -nostdlib -fno-builtin -fno-stack
                        -mgeneral-regs-only -DFLOW_EXPORT_KERNEL=1 \
                        -Wall -Wextra -Wpedantic -Wundef -Wmissing-prototypes -Werror -O2
 
-C_SOURCES := flow.h flow.c
+SEARU_LIB_CFLAGS := -std=c17 -mgeneral-regs-only \
+                    -fsanitize=signed-integer-overflow,shift-exponent,bounds,null,return,unreachable \
+                    -fsanitize-trap=all \
+                    -Wall -Wextra -Wpedantic -Wundef -Wmissing-prototypes -Werror -O2
+
+C_SOURCES := flow_opt_params.h flow.h searu.h flow.c
 
 .DEFAULT_GOAL := all
-.PHONY: all ring0 test fmt fmt-check install uninstall clean
+.PHONY: all ring0 self-opt test fmt fmt-check install uninstall clean
 
-all: $(BUILD_DIR)/Flow.olean $(BUILD_DIR)/flow
+all: $(BUILD_DIR)/Flow.olean $(BUILD_DIR)/libsearu.a $(BUILD_DIR)/flow
 
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
@@ -34,21 +39,51 @@ fmt-check:
 $(BUILD_DIR)/Flow.olean: Flow.lean | $(BUILD_DIR)
 	$(LEAN) -DwarningAsError=true -o $@ Flow.lean
 
-$(BUILD_DIR)/flow_ring0.o: flow.h | $(BUILD_DIR)
+$(BUILD_DIR)/flow_ring0.o: flow.h flow_opt_params.h | $(BUILD_DIR)
 	printf '#include "flow.h"\n' | $(CC) $(FREESTANDING_CFLAGS) -x c -I. -c - -o $@
 	@test -z "$$(nm -u $@)" || (echo "ERROR: Undefined symbols in freestanding Ring-0 object:" && nm -u $@ && exit 1)
 	@! objdump -d $@ | grep -Eq '[[:space:]](b\.(eq|ne|cs|hs|cc|lo|mi|pl|vs|vc|hi|ls|ge|lt|gt|le)|cbn?z|tbn?z|j(e|ne|z|nz|g|ge|l|le|a|ae|b|be|s|ns|o|no))[[:space:]]' || \
 		(echo "ERROR: Conditional branch instruction emitted in Ring-0 kernel!" && objdump -d $@ && exit 1)
+	@! objdump -d $@ | grep -Eq '[[:space:]](udiv|sdiv|divq?|idivq?|blr|br)[[:space:]]' || \
+		(echo "ERROR: Division or indirect jump/call emitted in Ring-0 kernel!" && objdump -d $@ && exit 1)
 	@! objdump -d $@ | grep -Eq '([[:space:]]|%)(fadd|fsub|fmul|fdiv|scvtf|ucvtf|fcvtzs|fcvtzu|fcmp|fmov|addsd|subsd|mulsd|divsd|cvtsi2sd|cvttsd2si|xmm[0-9]|ymm[0-9]|zmm[0-9])' || \
 		(echo "ERROR: FPU/SIMD instruction emitted in Ring-0 kernel!" && objdump -d $@ && exit 1)
 
-ring0: $(BUILD_DIR)/flow_ring0.o
-	@echo "=== [Gate 1] Freestanding Pure-GPR Ring-0 Gate (0 undef, 0 branches, 0 FPU/SIMD) ==="
+$(BUILD_DIR)/searu_ring0.o: searu.h flow.h flow_opt_params.h | $(BUILD_DIR)
+	printf '#include "searu.h"\n' | $(CC) $(FREESTANDING_CFLAGS) -UFLOW_EXPORT_KERNEL -DSEARU_EXPORT_RING0=1 -x c -I. -c - -o $@
+	@test -z "$$(nm -u $@)" || (echo "ERROR: Undefined symbols in freestanding SEARU Ring-0 object:" && nm -u $@ && exit 1)
+	@! objdump -d $@ | grep -Eq '[[:space:]](b\.(eq|ne|cs|hs|cc|lo|mi|pl|vs|vc|hi|ls|ge|lt|gt|le)|cbn?z|tbn?z|j(e|ne|z|nz|g|ge|l|le|a|ae|b|be|s|ns|o|no))[[:space:]]' || \
+		(echo "ERROR: Conditional branch instruction emitted in SEARU Ring-0 kernel!" && objdump -d $@ && exit 1)
+	@! objdump -d $@ | grep -Eq '[[:space:]](udiv|sdiv|divq?|idivq?|blr|br)[[:space:]]' || \
+		(echo "ERROR: Division or indirect jump/call emitted in SEARU Ring-0 kernel!" && objdump -d $@ && exit 1)
+	@! objdump -d $@ | grep -Eq '([[:space:]]|%)(fadd|fsub|fmul|fdiv|scvtf|ucvtf|fcvtzs|fcvtzu|fcmp|fmov|addsd|subsd|mulsd|divsd|cvtsi2sd|cvttsd2si|xmm[0-9]|ymm[0-9]|zmm[0-9])' || \
+		(echo "ERROR: FPU/SIMD instruction emitted in SEARU Ring-0 kernel!" && objdump -d $@ && exit 1)
 
-$(BUILD_DIR)/flow: flow.c flow.h | $(BUILD_DIR)
-	$(CC) $(CFLAGS) flow.c -o $@
+$(BUILD_DIR)/searu_solvers.o: searu.h flow.h flow_opt_params.h | $(BUILD_DIR)
+	printf '#include "searu.h"\n' | $(CC) $(SEARU_LIB_CFLAGS) -DSEARU_EXPORT_SOLVERS=1 -x c -I. -c - -o $@
+
+$(BUILD_DIR)/libsearu.a: $(BUILD_DIR)/searu_ring0.o $(BUILD_DIR)/searu_solvers.o
+	rm -f $@
+	ar rcs $@ $(BUILD_DIR)/searu_ring0.o $(BUILD_DIR)/searu_solvers.o
+	@! nm -u $@ | grep -Eq '(^|[^A-Za-z0-9_])(_?malloc|_?calloc|_?realloc|_?free|_?strtod|_?strtof|_?atof|__u?divti3|__u?modti3)(@|$$)' || \
+		(echo "ERROR: Forbidden runtime/heap/float symbol in libsearu.a!" && nm -u $@ && exit 1)
+	@! objdump -d $@ | grep -Eq '[[:space:]](udiv|sdiv|divq?|idivq?|blr|br)[[:space:]]' || \
+		(echo "ERROR: Division or indirect jump/call emitted in libsearu.a!" && objdump -d $@ && exit 1)
+	@! objdump -d $@ | grep -Eq '([[:space:]]|%)(fadd|fsub|fmul|fdiv|scvtf|ucvtf|fcvtzs|fcvtzu|fcmp|fmov|addsd|subsd|mulsd|divsd|cvtsi2sd|cvttsd2si|xmm[0-9]|ymm[0-9]|zmm[0-9])' || \
+		(echo "ERROR: FPU/SIMD instruction emitted in libsearu.a!" && objdump -d $@ && exit 1)
+
+ring0: $(BUILD_DIR)/flow_ring0.o $(BUILD_DIR)/searu_ring0.o $(BUILD_DIR)/libsearu.a
+	@echo "=== [Gate 1] Freestanding Pure-GPR Ring-0 & Binary ISA Gate (0 undef, 0 branches, 0 udiv, 0 BLR, 0 FPU/SIMD) ==="
+
+$(BUILD_DIR)/flow: flow.c flow.h searu.h flow_opt_params.h $(BUILD_DIR)/libsearu.a | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -mgeneral-regs-only -DSEARU_EXPORT_RING0=1 -DSEARU_EXPORT_SOLVERS=1 flow.c $(BUILD_DIR)/libsearu.a -o $@
 	@! nm -u $@ | grep -Eq '(^|[^A-Za-z0-9_])(_?malloc|_?calloc|_?realloc|_?free|_?strtod|_?strtof|_?atof)(@|$$)' || \
 		(echo "ERROR: Heap or float symbol leaked into universal flow engine!" && nm -u $@ && exit 1)
+
+self-opt: $(BUILD_DIR)/flow
+	./$(BUILD_DIR)/flow self-opt flow_opt_params.h
+	$(CLANG_FORMAT) -i flow_opt_params.h
+	$(MAKE) test
 
 test: $(BUILD_DIR)/Flow.olean ring0 $(BUILD_DIR)/flow
 	@echo "=== [Gate 2] Lean 4 .flow Atlas Emission & Universal CLI (@swap + KanLock + Schmitt) ==="
@@ -69,14 +104,19 @@ test: $(BUILD_DIR)/Flow.olean ring0 $(BUILD_DIR)/flow
 		printf '%s\n' "$$out" | grep -q '# swap slot=1 epoch=5 ok' && \
 		printf '%s\n' "$$out" | grep -q 'step=5 chart=1 x=11.0000 dt=10.0000 r0=-1.0000 mode=0x0003 epoch=5 status=0x00' && \
 		printf '%s\n' "$$out" | grep -q 'step=6 chart=1 x=1.0000 dt=10.0000 r0=2.0000 mode=0x0003 epoch=6 status=0x00'
+	@echo "=== [Gate 3] SEARU x FLOW 2-Jet Symbiotic NP Co-Solver & Ablation Gate ==="
+	@./$(BUILD_DIR)/flow searu-verify
 	@echo "================================================================================"
-	@echo "   ALL FLOW v$(FLOW_VERSION) VERIFICATION GATES PASSED"
+	@echo "   ALL FLOW v$(FLOW_VERSION) + SEARU VERIFICATION GATES PASSED"
 	@echo "================================================================================"
 
-install: $(BUILD_DIR)/Flow.olean $(BUILD_DIR)/flow
+install: $(BUILD_DIR)/Flow.olean $(BUILD_DIR)/libsearu.a $(BUILD_DIR)/flow
 	mkdir -p $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/include/flow $(DESTDIR)$(PREFIX)/lib/flow
 	install -m 755 $(BUILD_DIR)/flow $(DESTDIR)$(PREFIX)/bin/flow
+	install -m 644 flow_opt_params.h $(DESTDIR)$(PREFIX)/include/flow/flow_opt_params.h
 	install -m 644 flow.h $(DESTDIR)$(PREFIX)/include/flow/flow.h
+	install -m 644 searu.h $(DESTDIR)$(PREFIX)/include/flow/searu.h
+	install -m 644 $(BUILD_DIR)/libsearu.a $(DESTDIR)$(PREFIX)/lib/flow/libsearu.a
 	install -m 644 Flow.lean $(DESTDIR)$(PREFIX)/lib/flow/Flow.lean
 	install -m 644 $(BUILD_DIR)/Flow.olean $(DESTDIR)$(PREFIX)/lib/flow/Flow.olean
 
