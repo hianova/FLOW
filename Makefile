@@ -16,11 +16,11 @@ FREESTANDING_CFLAGS := -std=c17 -ffreestanding -nostdlib -fno-builtin -fno-stack
                        -Wall -Wextra -Wpedantic -Wundef -Wmissing-prototypes -Werror -O2
 
 SEARU_LIB_CFLAGS := -std=c17 -mgeneral-regs-only \
-                    -fsanitize=signed-integer-overflow,shift-exponent,bounds,null,return,unreachable \
+                    -fsanitize=signed-integer-overflow,shift,bounds,null,return,unreachable \
                     -fsanitize-trap=all \
                     -Wall -Wextra -Wpedantic -Wundef -Wmissing-prototypes -Werror -O2
 
-C_SOURCES := flow_opt_params.h flow.h searu.h flow.c
+C_SOURCES := flow_opt_params.h flow.h searu.h flow_synth.h flow.c
 
 .DEFAULT_GOAL := all
 .PHONY: all ring0 self-opt test fmt fmt-check install uninstall clean
@@ -75,8 +75,8 @@ $(BUILD_DIR)/libsearu.a: $(BUILD_DIR)/searu_ring0.o $(BUILD_DIR)/searu_solvers.o
 ring0: $(BUILD_DIR)/flow_ring0.o $(BUILD_DIR)/searu_ring0.o $(BUILD_DIR)/libsearu.a
 	@echo "=== [Gate 1] Freestanding Pure-GPR Ring-0 & Binary ISA Gate (0 undef, 0 branches, 0 udiv, 0 BLR, 0 FPU/SIMD) ==="
 
-$(BUILD_DIR)/flow: flow.c flow.h searu.h flow_opt_params.h $(BUILD_DIR)/libsearu.a | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -mgeneral-regs-only -fsanitize=signed-integer-overflow,shift-exponent,bounds,null,return,unreachable -fsanitize-trap=all -DSEARU_EXPORT_RING0=1 -DSEARU_EXPORT_SOLVERS=1 flow.c $(BUILD_DIR)/libsearu.a -o $@
+$(BUILD_DIR)/flow: flow.c flow.h searu.h flow_synth.h flow_opt_params.h $(BUILD_DIR)/libsearu.a | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -mgeneral-regs-only -fsanitize=signed-integer-overflow,shift,bounds,null,return,unreachable -fsanitize-trap=all -DSEARU_EXPORT_RING0=1 -DSEARU_EXPORT_SOLVERS=1 flow.c $(BUILD_DIR)/libsearu.a -o $@
 	@! nm -u $@ | grep -Eq '(^|[^A-Za-z0-9_])(_?malloc|_?calloc|_?realloc|_?free|_?strtod|_?strtof|_?atof)(@|$$)' || \
 		(echo "ERROR: Heap or float symbol leaked into universal flow engine!" && nm -u $@ && exit 1)
 
@@ -108,6 +108,24 @@ test: $(BUILD_DIR)/Flow.olean ring0 $(BUILD_DIR)/flow
 	@./$(BUILD_DIR)/flow searu-verify
 	@echo "=== [Gate 4] Lean 4 Formal Proof of 2-Jet x SEARU Symbiotic Duality ==="
 	@$(LEAN) -DwarningAsError=true --run docs/SymbioticDuality.lean
+	@echo "=== [Gate 5] Symbiotic .lean Law Discovery & Multi-Chart .flow Synthesis Gate ==="
+	@mkdir -p $(BUILD_DIR)/synth
+	@./$(BUILD_DIR)/flow synth-verify $(BUILD_DIR)/synth
+	@./$(BUILD_DIR)/flow verify $(BUILD_DIR)/synth/approx_invsqrt.flow > /dev/null
+	@./$(BUILD_DIR)/flow verify $(BUILD_DIR)/synth/market_sniper.flow > /dev/null
+	@LEAN_PATH=$(BUILD_DIR) $(LEAN) -DwarningAsError=true --run $(BUILD_DIR)/synth/approx_invsqrt.lean $(BUILD_DIR)/synth/approx_lean.flow
+	@LEAN_PATH=$(BUILD_DIR) $(LEAN) -DwarningAsError=true --run $(BUILD_DIR)/synth/market_sniper.lean $(BUILD_DIR)/synth/market_lean.flow
+	@cmp -s $(BUILD_DIR)/synth/approx_invsqrt.flow $(BUILD_DIR)/synth/approx_lean.flow
+	@cmp -s $(BUILD_DIR)/synth/market_sniper.flow $(BUILD_DIR)/synth/market_lean.flow
+	@! grep -q 'sorry' $(BUILD_DIR)/synth/approx_invsqrt.lean $(BUILD_DIR)/synth/market_sniper.lean
+	@thms_a="$$(awk '/^theorem /{print $$2}' $(BUILD_DIR)/synth/approx_invsqrt.lean)" && \
+		{ cat $(BUILD_DIR)/synth/approx_invsqrt.lean; echo ""; for t in $$thms_a; do printf '#print axioms ApproxInvSqrt.%s\n' "$$t"; done; } > $(BUILD_DIR)/synth/AxiomAuditApprox.lean && \
+		ax_a="$$(LEAN_PATH=$(BUILD_DIR) $(LEAN) -DwarningAsError=true $(BUILD_DIR)/synth/AxiomAuditApprox.lean)" && \
+		! printf '%s\n' "$$ax_a" | grep -q 'sorryAx'
+	@thms="$$(awk '/^theorem /{print $$2}' $(BUILD_DIR)/synth/market_sniper.lean)" && \
+		{ cat $(BUILD_DIR)/synth/market_sniper.lean; echo ""; for t in $$thms; do printf '#print axioms MarketSniper.%s\n' "$$t"; done; } > $(BUILD_DIR)/synth/AxiomAudit.lean && \
+		ax="$$(LEAN_PATH=$(BUILD_DIR) $(LEAN) -DwarningAsError=true $(BUILD_DIR)/synth/AxiomAudit.lean)" && \
+		! printf '%s\n' "$$ax" | grep -q 'sorryAx'
 	@echo "================================================================================"
 	@echo "   ALL FLOW v$(FLOW_VERSION) + SEARU VERIFICATION GATES PASSED"
 	@echo "================================================================================"
@@ -118,6 +136,7 @@ install: $(BUILD_DIR)/Flow.olean $(BUILD_DIR)/libsearu.a $(BUILD_DIR)/flow
 	install -m 644 flow_opt_params.h $(DESTDIR)$(PREFIX)/include/flow/flow_opt_params.h
 	install -m 644 flow.h $(DESTDIR)$(PREFIX)/include/flow/flow.h
 	install -m 644 searu.h $(DESTDIR)$(PREFIX)/include/flow/searu.h
+	install -m 644 flow_synth.h $(DESTDIR)$(PREFIX)/include/flow/flow_synth.h
 	install -m 644 $(BUILD_DIR)/libsearu.a $(DESTDIR)$(PREFIX)/lib/flow/libsearu.a
 	install -m 644 Flow.lean $(DESTDIR)$(PREFIX)/lib/flow/Flow.lean
 	install -m 644 $(BUILD_DIR)/Flow.olean $(DESTDIR)$(PREFIX)/lib/flow/Flow.olean

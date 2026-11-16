@@ -1,5 +1,6 @@
 #include "flow.h"
 #include "searu.h"
+#include "flow_synth.h"
 
 #include <ctype.h>
 #include <limits.h>
@@ -8,6 +9,7 @@
 #include <time.h>
 
 static FLOW_ALIGN64 flow_cell g_arena[FLOW_ATLAS_MAX_CHARTS];
+static FLOW_ALIGN64 flow_synth_ws g_synth_ws;
 
 static void fmt_q16(int64_t v, char out[32]) {
     bool neg = (v < 0);
@@ -421,7 +423,8 @@ static uint64_t blind_searu_only_ablation(const uint64_t base_bound[8],
         b1 = flow_clamp_sym(b1, FLOW_MAX_Q16);
         b2 = flow_clamp_sym(b2, FLOW_MAX_Q16);
 
-        flow_i128 g0 = ((flow_i128)b0 << 33U) + ((flow_i128)(b1 * cand_x) << 17U) +
+        flow_i128 g0 = flow_shl_i128((flow_i128)b0, 33U) +
+                       flow_shl_i128((flow_i128)(b1 * cand_x), 17U) +
                        (flow_i128)b2 * (flow_i128)(cand_x * cand_x);
         int64_t j0_q16 = flow_sym_shr_i128(g0, 33U);
         bool conv = flow_abs_i128(g0) <= ((flow_u128)(uint64_t)FLOW_CONVERGE_EPS_Q16 << 33U);
@@ -1743,6 +1746,189 @@ static int cmd_self_opt(const char *out_path) {
     return 0;
 }
 
+static int cmd_synth(const char *spec_path, const char *lean_out, const char *flow_out) {
+    if (!flow_synth_parse_file(spec_path, &g_synth_ws.spec)) {
+        return 1;
+    }
+    memset(&g_synth_ws.res, 0, sizeof(g_synth_ws.res));
+    flow_synth_discover_laws(&g_synth_ws);
+    for (uint32_t i = 0U; i < g_synth_ws.res.num_laws; ++i) {
+        if (!g_synth_ws.res.laws[i].valid) {
+            fprintf(stderr, "synth: failed law discovery goal %u in '%s'\n", (unsigned)i,
+                    spec_path);
+            return 1;
+        }
+    }
+    flow_synth_optimize_atlas(&g_synth_ws);
+    if (!g_synth_ws.res.generalized) {
+        fprintf(stderr, "synth: generalization gate failed for '%s'\n", spec_path);
+        return 1;
+    }
+    if (!flow_synth_emit_bundle(&g_synth_ws.res, flow_out) ||
+        !flow_synth_emit_lean(&g_synth_ws, lean_out)) {
+        fprintf(stderr, "synth: failed to emit '%s' / '%s'\n", lean_out, flow_out);
+        return 1;
+    }
+    return 0;
+}
+
+static int cmd_synth_verify(const char *out_dir) {
+    char approx_spec[256];
+    char approx_lean[256];
+    char approx_flow[256];
+    char mkt_spec[256];
+    char mkt_lean[256];
+    char mkt_flow[256];
+    snprintf(approx_spec, sizeof(approx_spec), "%s/approx_invsqrt.fsyn", out_dir);
+    snprintf(approx_lean, sizeof(approx_lean), "%s/approx_invsqrt.lean", out_dir);
+    snprintf(approx_flow, sizeof(approx_flow), "%s/approx_invsqrt.flow", out_dir);
+    snprintf(mkt_spec, sizeof(mkt_spec), "%s/market_sniper.fsyn", out_dir);
+    snprintf(mkt_lean, sizeof(mkt_lean), "%s/market_sniper.lean", out_dir);
+    snprintf(mkt_flow, sizeof(mkt_flow), "%s/market_sniper.flow", out_dir);
+
+    /* Spec A: Nonlinear y(u) = 8 / sqrt(u) manifold approximation across u in [1.0, 16.0] */
+    FILE *fa = fopen(approx_spec, "wb");
+    if (fa == NULL) {
+        fprintf(stderr, "synth-verify: cannot write '%s'\n", approx_spec);
+        return 1;
+    }
+    fprintf(fa, "domain ApproxInvSqrt\ncharts 4\nobjective approx\nlocks 0x0001 0x0003\n");
+    uint64_t rng = UINT64_C(0x5EED10A87F);
+    for (uint32_t split = 0U; split < 2U; ++split) {
+        for (uint32_t i = 0U; i < 48U; ++i) {
+            uint64_t u_q16 = (split == 0U)
+                                 ? (UINT64_C(65536) + ((uint64_t)i * UINT64_C(983040)) / 47ULL)
+                                 : (UINT64_C(70000) + (searu_rng_next(&rng) % UINT64_C(970000)));
+            /* Exact integer floor/round of (8 * 2^16) / sqrt(u_q16 / 2^16) = 2^27 / sqrt(u_q16) */
+            flow_u128 num = (flow_u128)UINT64_C(8) << 40U;
+            uint64_t sq_u = flow_isqrt_round_u128((flow_u128)u_q16 << 32U);
+            uint64_t y_q16 = (sq_u != 0ULL) ? (uint64_t)(num / (flow_u128)sq_u) : UINT64_C(0);
+            fprintf(fa, "%s q16:%llu q16:%llu\n", (split == 0U) ? "train" : "val",
+                    (unsigned long long)u_q16, (unsigned long long)y_q16);
+        }
+    }
+    fclose(fa);
+
+    if (cmd_synth(approx_spec, approx_lean, approx_flow) != 0 ||
+        g_synth_ws.res.synth_val_score * UINT64_C(4) >= g_synth_ws.res.base_val_score) {
+        fprintf(stderr, "synth-verify: ApproxInvSqrt gate failed (base_val=%llu, synth_val=%llu)\n",
+                (unsigned long long)g_synth_ws.res.base_val_score,
+                (unsigned long long)g_synth_ws.res.synth_val_score);
+        return 1;
+    }
+    char a_bm_s[32];
+    char a_sm_s[32];
+    flow_synth__fmt_q16((int64_t)g_synth_ws.res.base_val_score, a_bm_s);
+    flow_synth__fmt_q16((int64_t)g_synth_ws.res.synth_val_score, a_sm_s);
+
+    /* Spec B: Market Microstructure Law Discovery + Noisy Friction Policy Synthesis */
+    FILE *fm = fopen(mkt_spec, "wb");
+    if (fm == NULL) {
+        fprintf(stderr, "synth-verify: cannot write '%s'\n", mkt_spec);
+        return 1;
+    }
+    fprintf(fm, "domain MarketSniper\n"
+                "charts 4\n"
+                "objective policy\n"
+                "friction 2.5000\n"
+                "locks 0x0001 0x0003\n"
+                "var k free\n"
+                "var s free\n"
+                "var h free\n"
+                "var cb free\n"
+                "var ca free\n"
+                "var pb free\n"
+                "var pa free\n"
+                "var fut_eq free\n"
+                "var km sub k h\n"
+                "var kp add k h\n"
+                "var call_intr relu_sub s k\n"
+                "var put_intr relu_sub k s\n"
+                "var c_left relu_sub s km\n"
+                "var c_mid relu_sub s k\n"
+                "var c_right relu_sub s kp\n"
+                "var c_qmid qmid cb ca\n"
+                "var p_qmid qmid pb pa\n"
+                "var k_plus_c add k c_qmid\n"
+                "var parity_fut sub k_plus_c p_qmid\n"
+                "assume_pos h\n"
+                "assume_le cb ca\n"
+                "assume_le pb pa\n"
+                "assume_bal ca cb pa pb\n"
+                "assume_eq fut_eq parity_fut\n"
+                "disturb pull_ca ca +\n"
+                "disturb pull_cb cb -\n"
+                "disturb pull_pa pa +\n"
+                "disturb pull_pb pb -\n"
+                "find_identity s k call_intr put_intr h\n"
+                "find_nonneg c_left c_mid c_right\n"
+                "find_invariant c_qmid fut_eq k p_qmid pb pa\n");
+
+    for (uint32_t split = 0U; split < 2U; ++split) {
+        uint64_t srng = (split == 0U) ? UINT64_C(0x1111AAAA2222) : UINT64_C(0x9999BBBB4444);
+        int64_t regime = 0;
+        for (uint32_t t = 0U; t < 128U; ++t) {
+            uint64_t r = searu_rng_next(&srng);
+            if ((t % 16U) == 0U) {
+                uint32_t ph = (uint32_t)(r % 5ULL);
+                if (ph == 0U) {
+                    regime = INT64_C(8) * FLOW_Q16_ONE;
+                } else if (ph == 1U) {
+                    regime = -INT64_C(8) * FLOW_Q16_ONE;
+                } else {
+                    regime = INT64_C(0);
+                }
+            }
+            int64_t noise = (int64_t)((r >> 8U) % UINT64_C(229376)) - INT64_C(114688);
+            int64_t u_val = regime + noise;
+            /* Sub-friction micro-chatter fails mean-reversion; sustained |regime| reverts */
+            int64_t y_next = INT64_C(0);
+            uint16_t mode = 0x0003U;
+            if ((t % 31U) == 29U) {
+                /* Corrupt surface glitch with exogenous shock spike */
+                u_val = INT64_C(220) * FLOW_Q16_ONE;
+                y_next = -INT64_C(60) * FLOW_Q16_ONE;
+                mode = 0x0000U;
+            } else if (regime > INT64_C(0)) {
+                y_next = ((t % 16U) < 8U) ? (INT64_C(3) * FLOW_Q16_ONE) : -INT64_C(65536);
+            } else if (regime < INT64_C(0)) {
+                y_next = ((t % 16U) < 8U) ? (-INT64_C(3) * FLOW_Q16_ONE) : INT64_C(65536);
+            }
+            char u_s[32];
+            char y_s[32];
+            flow_synth__fmt_q16(u_val, u_s);
+            flow_synth__fmt_q16(y_next, y_s);
+            fprintf(fm, "%s %s %s 0x%04x\n", (split == 0U) ? "train" : "val", u_s, y_s,
+                    (unsigned)mode);
+        }
+    }
+    fclose(fm);
+
+    if (cmd_synth(mkt_spec, mkt_lean, mkt_flow) != 0 || g_synth_ws.res.num_laws != 3U) {
+        fprintf(stderr, "synth-verify: MarketSniper synthesis gate failed\n");
+        return 1;
+    }
+
+    char bp_s[32];
+    char sp_s[32];
+    char ent_s[32];
+    char ex_s[32];
+    flow_synth__fmt_q16(g_synth_ws.res.base_val_pnl, bp_s);
+    flow_synth__fmt_q16(g_synth_ws.res.synth_val_pnl, sp_s);
+    flow_synth__fmt_q16(g_synth_ws.res.rules[0].b_enter, ent_s);
+    flow_synth__fmt_q16(g_synth_ws.res.rules[1].b_exit, ex_s);
+
+    printf("[PASS] Symbiotic .lean Law Discovery & Multi-Chart .flow Synthesis Gate:\n");
+    printf("  1. ApproxInvSqrt (4 charts) : val_MAE %s -> %s (0-sorryAx .lean + .flow)\n", a_bm_s,
+           a_sm_s);
+    printf("  2. MarketSniper (3 laws)    : identity=QED, nonneg=QED, pull_drift=%llu->%llu\n",
+           (unsigned long long)g_synth_ws.res.laws[2].naive_drift,
+           (unsigned long long)g_synth_ws.res.laws[2].guarded_drift);
+    printf("  3. MarketSniper Policy Gate : band=[%s, %s], val_PnL %s -> %s (0 shock leaks)\n",
+           ex_s, ent_s, bp_s, sp_s);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc == 2 && (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-v") == 0)) {
         printf("FLOW %s\n", FLOW_VERSION_STRING);
@@ -1760,7 +1946,14 @@ int main(int argc, char **argv) {
     if (argc == 3 && strcmp(argv[1], "run") == 0) {
         return cmd_run(argv[2]);
     }
+    if (argc == 5 && strcmp(argv[1], "synth") == 0) {
+        return cmd_synth(argv[2], argv[3], argv[4]);
+    }
+    if (argc == 3 && strcmp(argv[1], "synth-verify") == 0) {
+        return cmd_synth_verify(argv[2]);
+    }
     fprintf(stderr, "Usage:\n  flow verify <bundle.flow>\n  flow run <bundle.flow>\n  flow "
-                    "searu-verify\n  flow self-opt [out_params.h]\n");
+                    "searu-verify\n  flow self-opt [out_params.h]\n  flow synth <spec.fsyn> "
+                    "<out.lean> <out.flow>\n  flow synth-verify <out_dir>\n");
     return 2;
 }

@@ -20,7 +20,7 @@ extern "C" {
 #endif
 
 /* ============================================================================
- * FLOW — Zero-Risk 2-Jet & HoTT Manifold Arithmetic Substrate (v7.0.1)
+ * FLOW — Zero-Risk 2-Jet & HoTT Manifold Arithmetic Substrate (v7.1.0)
  * ============================================================================
  * Canonical 64-byte (8 x u64) General-Purpose Register (GPR) substrate.
  * - Zero structs. Zero SIMD/FPU instructions (-mgeneral-regs-only clean).
@@ -53,10 +53,10 @@ _Static_assert(sizeof(flow_cell) == 64U, "flow_cell must occupy exactly 64 bytes
 #endif
 
 #define FLOW_VERSION_MAJOR 7
-#define FLOW_VERSION_MINOR 0
-#define FLOW_VERSION_PATCH 1
+#define FLOW_VERSION_MINOR 1
+#define FLOW_VERSION_PATCH 0
 #ifndef FLOW_VERSION_STRING
-#define FLOW_VERSION_STRING "7.0.1"
+#define FLOW_VERSION_STRING "7.1.0"
 #endif
 
 #define FLOW_Q16_SHIFT        16U
@@ -175,6 +175,14 @@ FLOW_FORCE_INL int64_t flow_ashr_i64(int64_t x, uint32_t sh) {
     uint64_t ux = (uint64_t)x;
     uint64_t fill = flow_mask_bool(x < 0) << (64U - sh);
     return (int64_t)((ux >> sh) | fill);
+}
+
+FLOW_FORCE_INL int64_t flow_shl_i64(int64_t x, uint32_t sh) {
+    return (int64_t)((uint64_t)x << sh);
+}
+
+FLOW_FORCE_INL flow_i128 flow_shl_i128(flow_i128 x, uint32_t sh) {
+    return (flow_i128)((flow_u128)x << sh);
 }
 
 /* Odd-symmetric nearest-integer right shift: sym_shr(-x, sh) == -sym_shr(x, sh) */
@@ -506,14 +514,15 @@ FLOW_FORCE_INL void flow__step_chart_core(uint64_t out[8], const uint64_t state[
         ((s6 & UINT64_C(0xFFFFFFFF00000000)) + (UINT64_C(1) << 32U)) | (uint64_t)(uint32_t)x;
 
     /* 2. Exact 2^-49 Guard-Bit Residual G0 & 2^-32 Tangent G1 */
-    int64_t b0_eff_q32 = (b0 << 16U) - u_gain * u_in;
-    flow_i128 b0_eff_q49 = (flow_i128)b0_eff_q32 << 17U;
+    int64_t b0_eff_q32 = flow_shl_i64(b0, 16U) - u_gain * u_in;
+    flow_i128 b0_eff_q49 = flow_shl_i128((flow_i128)b0_eff_q32, 17U);
 
     int64_t x0 = (int64_t)(int32_t)(uint32_t)ex_pack;
     int64_t b1_x = b1 * x0;
     int64_t x_sq = x0 * x0;
-    flow_i128 g0_op = b0_eff_q49 + ((flow_i128)b1_x << 17U) + (flow_i128)b2 * (flow_i128)x_sq;
-    int64_t g1_op = (b1 << 16U) + b2 * x0;
+    flow_i128 g0_op =
+        b0_eff_q49 + flow_shl_i128((flow_i128)b1_x, 17U) + (flow_i128)b2 * (flow_i128)x_sq;
+    int64_t g1_op = flow_shl_i64(b1, 16U) + b2 * x0;
 
     int64_t j0_in = flow_clamp_sym(raw_j0, FLOW_MAX_J0_Q16);
     int64_t j1_in = flow_clamp_sym(raw_j1, FLOW_MAX_J1_Q16);
@@ -522,8 +531,8 @@ FLOW_FORCE_INL void flow__step_chart_core(uint64_t out[8], const uint64_t state[
     uint64_t j0_sub_in = flow_sel_u64(sub_ok, s7 & UINT64_C(0x1FFFFFFFF), UINT64_C(0));
     uint64_t j1_sub_in = flow_sel_u64(sub_ok, s7 >> 48U, UINT64_C(0));
 
-    flow_i128 j0_q49 = ((flow_i128)j0_in << 33U) + (flow_i128)j0_sub_in;
-    int64_t j1_q32 = (j1_in << 16U) + (int64_t)j1_sub_in;
+    flow_i128 j0_q49 = flow_shl_i128((flow_i128)j0_in, 33U) + (flow_i128)j0_sub_in;
+    int64_t j1_q32 = flow_shl_i64(j1_in, 16U) + (int64_t)j1_sub_in;
     flow_i128 g0_au = j0_q49 - b0_eff_q49;
 
     flow_i128 G0 = flow_sel_i128(op_mode0, g0_op, g0_au);
@@ -544,8 +553,8 @@ FLOW_FORCE_INL void flow__step_chart_core(uint64_t out[8], const uint64_t state[
     bool has_r2 = (R2 != 0);
     flow_i128 neg_G0 = -G0;
     flow_i128 div_num = flow_sel_i128(has_r2 & (!real_roots), -(flow_i128)G1, neg_G0);
-    flow_i128 div_den =
-        flow_sel_i128(has_r2, flow_sel_i128(real_roots, Q_cit, (flow_i128)R2), (flow_i128)G1 << 1U);
+    flow_i128 div_den = flow_sel_i128(has_r2, flow_sel_i128(real_roots, Q_cit, (flow_i128)R2),
+                                      flow_shl_i128((flow_i128)G1, 1U));
 
     int64_t raw_step = flow_sym_div128_clamped(div_num, div_den, dt_max);
     bool active = (G0 != (flow_i128)0) & ((G1 != 0) | has_r2);
@@ -557,7 +566,7 @@ FLOW_FORCE_INL void flow__step_chart_core(uint64_t out[8], const uint64_t state[
     int64_t delta_cand = xp_cand - x_cur;
     int64_t d_sq = delta_cand * delta_cand;
     flow_i128 push_q49 =
-        (((flow_i128)G1 * (flow_i128)delta_cand) << 1U) + (flow_i128)R2 * (flow_i128)d_sq;
+        flow_shl_i128((flow_i128)G1 * (flow_i128)delta_cand, 1U) + (flow_i128)R2 * (flow_i128)d_sq;
     flow_i128 G0_cand = G0 + push_q49;
 
     bool lyap_ok = flow_abs_i128(G0_cand) <= flow_abs_i128(G0);
@@ -573,7 +582,7 @@ FLOW_FORCE_INL void flow__step_chart_core(uint64_t out[8], const uint64_t state[
     int64_t j0_op_out = flow_sym_shr_i128(G0_post, 33U);
     int64_t j1_op_out = flow_sym_shr_i64(G1_post, 16U);
 
-    flow_i128 J0_au_next = G0_post + ((flow_i128)b0_eff_q32 << 17U);
+    flow_i128 J0_au_next = G0_post + flow_shl_i128((flow_i128)b0_eff_q32, 17U);
     int64_t j0_au_out = flow_clamp_sym((int64_t)(((uint64_t)(flow_u128)J0_au_next >> 33U) |
                                                  ((uint64_t)((flow_u128)J0_au_next >> 64U) << 31U)),
                                        FLOW_MAX_J0_Q16);

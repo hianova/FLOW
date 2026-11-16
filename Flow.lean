@@ -1,14 +1,15 @@
 /-
-  FLOW — Manifold Atlas Binary Emitter (v7.0.1)
+  FLOW — Manifold Atlas Binary Emitter (v7.1.0)
   =============================================
   Pure Lean 4 data-layout emitter (zero external imports, zero `lean -c`).
   Compiles 2-Jet manifold charts, Schmitt hysteresis bands, and orthogonal
-  Cubical Kan mode locks directly into `(1 + 2^k) × 64B` `.flow` Atlases.
+  Cubical Kan mode locks directly into `(1 + 2^k) × 64B` `.flow` Atlases,
+  and provides machine-checked piecewise-linear primitives & Atlas invariants.
 -/
 
 namespace Flow
 
-def version  : String := "7.0.1"
+def version  : String := "7.1.0"
 def q16Shift : Nat    := 16
 def q16One   : Int    := 65536
 def maxQ16   : Int    := 0x7FFFFFFF -- Symmetric Q16.16 bound (±32,767.99998)
@@ -151,5 +152,51 @@ def emitArena (path : System.FilePath) (kExp : Nat) (specs : List Rule) (fallbac
 def emitBundle (path : System.FilePath) (kExp : Nat) (initState : Cell64) (specs : List Rule)
     (fallback : Rule) (epoch : UInt32 := 1) : IO Unit :=
   IO.FS.writeBinFile path (mintBundle kExp initState specs fallback epoch)
+
+/-! ## 3. Canonical Piecewise-Linear & Tropical Synthesis Primitives -/
+
+@[reducible] def relu (x : Int) : Int := if x > 0 then x else 0
+@[reducible] def imin (a b : Int) : Int := if a ≤ b then a else b
+@[reducible] def imax (a b : Int) : Int := if a ≥ b then a else b
+@[reducible] def iabs (x : Int) : Int := if x ≥ 0 then x else -x
+@[reducible] def qmid (a b : Int) : Int := (a + b) / 2
+
+/-! ## 4. Structural Well-Formedness, Schmitt Stability & Shock Isolation Theorems -/
+
+def Rule.wf (kExp : Nat) (r : Rule) : Bool :=
+  let kClamped := if kExp > 8 then 8 else kExp
+  let nCharts := 2 ^ kClamped
+  (-maxQ16 ≤ r.b0 && r.b0 ≤ maxQ16) &&
+  (-maxQ16 ≤ r.b1 && r.b1 ≤ maxQ16) &&
+  (-maxQ16 ≤ r.b2 && r.b2 ≤ maxQ16) &&
+  (-maxQ16 ≤ r.bExit && r.bExit ≤ maxQ16) &&
+  (-maxQ16 ≤ r.bEnter && r.bEnter ≤ maxQ16) &&
+  (-maxQ16 ≤ r.uGain && r.uGain ≤ maxQ16) &&
+  (r.bExit ≤ r.bEnter) &&
+  (1 ≤ r.dtMax && r.dtMax ≤ maxQ16) &&
+  (r.nextLo.toNat < nCharts) &&
+  (r.nextHi.toNat < nCharts)
+
+def schmittNext (kExp : Nat) (cur : UInt8) (r : Rule) (xNext : Int) : UInt8 :=
+  let kClamped := if kExp > 8 then 8 else kExp
+  let cap : UInt8 := UInt8.ofNat ((2 ^ kClamped) - 1)
+  let raw := if xNext < r.bExit then r.nextLo else cur
+  let nxt := if xNext > r.bEnter then r.nextHi else raw
+  nxt &&& cap
+
+def Rule.evalLinearResidual (r : Rule) (x uExt : Int) : Int :=
+  (r.b0 * q16One - r.uGain * uExt) + r.b1 * x
+
+theorem schmitt_deadband_holds (kExp : Nat) (cur : UInt8) (r : Rule) (xNext : Int)
+    (hCap : (cur &&& UInt8.ofNat ((2 ^ (if kExp > 8 then 8 else kExp)) - 1)) = cur)
+    (hBand : r.bExit ≤ xNext ∧ xNext ≤ r.bEnter) :
+    schmittNext kExp cur r xNext = cur := by
+  have h1 : ¬ (xNext < r.bExit) := by omega
+  have h2 : ¬ (xNext > r.bEnter) := by omega
+  simp [schmittNext, h1, h2, hCap]
+
+theorem zero_ugain_isolates_shocks (r : Rule) (hZero : r.uGain = 0) (x u1 u2 : Int) :
+    r.evalLinearResidual x u1 = r.evalLinearResidual x u2 := by
+  simp [Rule.evalLinearResidual, hZero]
 
 end Flow

@@ -2,19 +2,20 @@
   <img src="./assets/logo.svg?cb=20261114v7" alt="FLOW — Zero-Risk 2-Jet &amp; SEARU Symbiotic Manifold Substrate" width="100%" />
 </p>
 
-# FLOW — Zero-Risk 2-Jet & SEARU Symbiotic Manifold Substrate (`v7.0.1`)
+# FLOW — Zero-Risk 2-Jet & SEARU Symbiotic Manifold Substrate (`v7.1.0`)
 
 > **Software Engineering as Silicon Physics.**  
 > **Zero structs.** **Zero control-flow branches in Ring-0 kernels.** **Zero SIMD/FPU instructions (`-mgeneral-regs-only`).** **Zero indirect calls (`0` `blr`).** **Zero overflow/zombie traps.** **Zero heap.** **Zero hand-tuned magic constants.**
 
-`FLOW` is a Tape-Out-grade dual-operator arithmetic and combinatorial optimization substrate for multi-regime dynamical, hardware synthesis, and real-time control systems:
+`FLOW` is a Tape-Out-grade dual-operator arithmetic, combinatorial optimization, and automated Lean 4 / Atlas synthesis substrate for multi-regime dynamical, hardware synthesis, and real-time control systems:
 
-1. **Upstream (`.lean` $\to$ `.flow`)**: [`Flow.lean`](Flow.lean) compiles 2-Jet manifold charts, Schmitt hysteresis deadbands, and orthogonal Cubical Kan mode locks directly into a cache-line-aligned `(1 + 2^k) × 64B` **`.flow` Manifold Atlas** (`0` external imports, `0` `lean -c` codegen).
+1. **Upstream (`.lean` $\to$ `.flow`)**: [`Flow.lean`](Flow.lean) compiles 2-Jet manifold charts, Schmitt hysteresis deadbands, and orthogonal Cubical Kan mode locks directly into a cache-line-aligned `(1 + 2^k) × 64B` **`.flow` Manifold Atlas** (`0` external imports, `0` `lean -c` codegen), alongside `@[reducible]` piecewise-linear primitives and verified hysteresis/shock-isolation lemmas.
 2. **Continuous Local Operator (`flow.h`)**: [`flow.h`](flow.h) executes one total, branchless `8 × u64` General-Purpose Register (GPR) endomorphism with a **128-bit Guard-Bit Wide-Accumulator**, **odd-symmetric nearest-integer rounding**, and **lossless $2^{-49}$ sub-LSB autonomous fiber conservation**:
 
 $$\Phi_{\text{atlas}} : \mathcal{C}_{64}^{\text{state}} \times \mathcal{A}_{2^k}^{\text{chart}} \times (u_{\text{ext}}, m_{\text{req}}) \longrightarrow \mathcal{C}_{64}^{\text{state}}$$
 
 3. **Discrete Global Operator & Meta-Synthesizer (`searu.h` / `flow self-opt`)**: [`searu.h`](searu.h) couples 1-bit Chaos and hardware `CLZ` Zipf/Pareto Lévy-flight (`0` `powf`, `0` `udiv`, `0` `blr`) symbiotically with `flow.h` — waking only at `!CONVERGED && dt == 0` barriers to heal discrete topologies via lock-free `@swap`, and autonomously synthesizing `flow.h`'s `0-ULP` Horner seeds and its own Crucible schedules into [`flow_opt_params.h`](flow_opt_params.h) (`make self-opt`).
+4. **Domain-Agnostic Two-Stage Lean 4 & Atlas Synthesizer (`flow_synth.h` / `flow synth`)**: [`flow_synth.h`](flow_synth.h) eliminates manual `.lean` heuristic theorem authoring and chart hand-tuning via `SEARU`-driven symbolic gauge/cone/disturbance-invariant discovery (discharged automatically in Lean 4 via `omega` with `0 sorryAx`) paired with Train / Held-Out Validation `SEARU × 2-Jet` multi-chart `Flow.Rule` optimization.
 
 ---
 
@@ -32,6 +33,10 @@ $$\Phi_{\text{atlas}} : \mathcal{C}_{64}^{\text{state}} \times \mathcal{A}_{2^k}
    `flow_arena_try_swap` executes branchless `LDAPR + Stack-Sink Pointer Mux + LSE CASAL + STLR` using the 32-bit lock sentinel `FLOW_SWAP_LOCK_TAG` (`0x464C4F57`), guaranteeing `0` shared-arena bytes written on rejected or contended swaps and strict dual-writer mutual exclusion. `flow_step_atlas` pairs `LDAPR` (`w6_pre`), payload snapshot (`0..5`), `DMB ISHLD`, and post-check (`w6_post`) to enforce a branchless Coordinate-Hold Stutter during active `@swap` windows (`0` torn chart snapshots).
 6. **Autonomous Dual-Operator Self-Synthesis (`make self-opt`, Idempotent Fixed Point)**:
    `flow self-opt` eliminates human magic constants by driving `SEARU × FLOW 2-Jet` in a closed 2-stage synthesis loop: Stage 1 synthesizes `0-ULP` degree-3 Minimax-Horner seeds for `isqrt` and `recip` verified exhaustively across all `65,536` bins (`0` LUT bytes), and Stage 2 meta-evolves decoupled per-solver `SEARU` schedules across 32 training + 32 held-out NP instances (`64 / 64 = 100%` convergence, `3.47×` speedup over baseline).
+7. **Domain-Agnostic Two-Stage Lean 4 & Multi-Chart Atlas Synthesis (`flow synth`)**:
+   `flow_synth.h` (`flow synth <spec.fsyn> <out.lean> <out.flow>` / `flow synth-verify <dir>`) replaces manual `.lean` theorem authoring and per-application chart tuning with a closed two-stage pipeline:
+   - **Stage A (Symbolic Law & Disturbance-Invariant Discovery)**: `SEARU_SOLVE_INLINE` synthesizes exact integer identities (`=`), convex/non-negative cones (`≥ 0`), and multi-way glitch-immune guarded estimators (`0-ULP` drift under single-sided disturbances) directly from `.fsyn` witness traces, emitting universally quantified Lean 4 theorems automatically proved via `omega` (`0 sorryAx`).
+   - **Stage B (`SEARU × 2-Jet` Atlas Co-Evolution with Held-Out Gate)**: Co-evolves multi-chart `Flow.Rule` Atlases across both nonlinear manifold approximation (`approx`, e.g., $8/\sqrt{u}$) and noisy hysteresis control (`policy`, e.g., transaction friction + shock isolation) against a strict Train / Held-Out Validation gate, guaranteeing byte-for-byte C17 $\leftrightarrow$ Lean 4 `.flow` bundle isomorphism (`cmp -s`).
 
 ---
 
@@ -91,12 +96,14 @@ def main : IO UInt32 := do
 LEAN_PATH=/path/to/FLOW/build lean -DwarningAsError=true --run SurgeSpec.lean
 ```
 
-### Step 2 — Verify, Stream, Co-Solve & Self-Synthesize
+### Step 2 — Verify, Stream, Synthesize & Self-Optimize
 
 ```bash
 /path/to/FLOW/build/flow verify surge.flow
 printf "4.0\n12.0\n9.0 0x0000\n1.0\n" | /path/to/FLOW/build/flow run surge.flow
 /path/to/FLOW/build/flow searu-verify
+/path/to/FLOW/build/flow synth spec.fsyn out.lean out.flow   # Two-stage Lean 4 law + Atlas synthesis
+/path/to/FLOW/build/flow synth-verify build/synth           # End-to-end Gate 5 approx + policy suite
 make -C /path/to/FLOW self-opt   # Autonomous SEARU x FLOW 2-Jet synthesis -> flow_opt_params.h
 ```
 
@@ -125,14 +132,15 @@ SEARU_SOLVE_INLINE(&res, num_vars, init_canvas, kan_pin, seed, max_iters,
 
 | File | Responsibility |
 | :--- | :--- |
-| [`Flow.lean`](Flow.lean) | Pure Lean 4 binary layout emitter (`Cell64`, `Rule`, `mintCell`, `mintState`, `mintArena`, `mintBundle`). |
+| [`Flow.lean`](Flow.lean) | Pure Lean 4 binary layout emitter (`Cell64`, `Rule`, `mintCell`, `mintState`, `mintArena`, `mintBundle`), piecewise-linear primitives (`relu`, `imin`, `imax`, `iabs`, `qmid`), and verified hysteresis/shock-isolation lemmas. |
 | [`flow_opt_params.h`](flow_opt_params.h) | Auto-synthesized `0-ULP` degree-3 Horner seeds (`flow.h`) & meta-evolved `SEARU` schedules (`searu.h`) emitted by `make self-opt`. |
 | [`flow.h`](flow.h) | Freestanding GPR-only single-header 2-Jet arithmetic substrate (`flow_step`, `flow_step_atlas`, `flow_arena_try_swap`). |
 | [`searu.h`](searu.h) | Freestanding GPR-only 1-bit Chaos, `CLZ` Zipf Lévy-flight & symbiotic `SEARU × FLOW 2-Jet` NP co-solver (`searu_heal_and_swap`, `SEARU_SOLVE_INLINE`, `3-SAT`, `GraphColor`, `Bilevel 2-Jet + @swap`). |
-| [`flow.c`](flow.c) | Universal zero-heap, zero-float C17 CLI & self-optimizing synthesizer (`flow verify`, `flow run`, `flow searu-verify`, `flow self-opt`, `@swap`). |
-| [`Makefile`](Makefile) | Self-contained `-Werror` build, freestanding ISA/ABI audit (`0` branches, `0` `udiv`, `0` `blr`, `0` FPU/SIMD), and autonomous synthesis (`make all`, `make test`, `make self-opt`, `make fmt`). |
+| [`flow_synth.h`](flow_synth.h) | Zero-heap, zero-float `.fsyn` two-stage domain-agnostic Lean 4 law discovery (`SEARU_SOLVE_INLINE` -> `omega`) & Train/Val `Flow.Rule` Atlas synthesizer (`flow synth`, `flow synth-verify`). |
+| [`flow.c`](flow.c) | Universal zero-heap, zero-float C17 CLI & self-optimizing synthesizer (`flow verify`, `flow run`, `flow searu-verify`, `flow synth`, `flow synth-verify`, `flow self-opt`, `@swap`). |
+| [`Makefile`](Makefile) | Self-contained `-Werror` build, freestanding ISA/ABI audit (`0` branches, `0` `udiv`, `0` `blr`, `0` FPU/SIMD), Gate 1–5 verification (including C17 $\leftrightarrow$ Lean `.flow` isomorphism & `0 sorryAx` audit), and autonomous synthesis. |
 | [`docs/`](docs/) | Machine-checked Lean 4 duality proof ([`SymbioticDuality.lean`](docs/SymbioticDuality.lean)), formal paper ([`Symbiotic_Duality_Paper.md`](docs/Symbiotic_Duality_Paper.md)), and Traditional Chinese guide ([`Symbiotic_Duality_Guide_zh-TW.md`](docs/Symbiotic_Duality_Guide_zh-TW.md)). |
-| [`VERSION`](VERSION) | Release version (`7.0.1`). |
+| [`VERSION`](VERSION) | Release version (`7.1.0`). |
 
 *(Silicon-level bit-blasted SAT/temporal-induction proofs (`9x QED`) and `0-ULP` X-poisoned RTL co-simulation are paired in the companion `ELE` hardware repository.)*
 
