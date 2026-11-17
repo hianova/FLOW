@@ -5,11 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#if defined(__has_include)
-#if __has_include("flow_opt_params.h")
 #include "flow_opt_params.h"
-#endif
-#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,7 +16,7 @@ extern "C" {
 #endif
 
 /* ============================================================================
- * FLOW — Zero-Risk 2-Jet & HoTT Manifold Arithmetic Substrate (v7.1.0)
+ * FLOW — Zero-Risk 2-Jet & HoTT Manifold Arithmetic Substrate (v8.0.0)
  * ============================================================================
  * Canonical 64-byte (8 x u64) General-Purpose Register (GPR) substrate.
  * - Zero structs. Zero SIMD/FPU instructions (-mgeneral-regs-only clean).
@@ -52,11 +48,11 @@ static_assert(sizeof(flow_cell) == 64U, "flow_cell must occupy exactly 64 bytes"
 _Static_assert(sizeof(flow_cell) == 64U, "flow_cell must occupy exactly 64 bytes");
 #endif
 
-#define FLOW_VERSION_MAJOR 7
-#define FLOW_VERSION_MINOR 1
+#define FLOW_VERSION_MAJOR 8
+#define FLOW_VERSION_MINOR 0
 #define FLOW_VERSION_PATCH 0
 #ifndef FLOW_VERSION_STRING
-#define FLOW_VERSION_STRING "7.1.0"
+#define FLOW_VERSION_STRING "8.0.0"
 #endif
 
 #define FLOW_Q16_SHIFT        16U
@@ -201,20 +197,6 @@ FLOW_FORCE_INL int64_t flow_sym_shr_i64(int64_t x, uint32_t sh) {
 }
 
 /* --- SEARU-Synthesized Degree-3 Minimax Horner Seeds (0 LUT, 0 Cache Side-Channel) --- */
-
-#ifndef FLOW_OPT_ISQRT_C0
-#define FLOW_OPT_ISQRT_C0 UINT64_C(3037237717)
-#define FLOW_OPT_ISQRT_C1 UINT64_C(1496413340)
-#define FLOW_OPT_ISQRT_C2 UINT64_C(895914507)
-#define FLOW_OPT_ISQRT_C3 UINT64_C(288003884)
-#endif
-
-#ifndef FLOW_OPT_RECIP_C0
-#define FLOW_OPT_RECIP_C0 UINT64_C(4286839701)
-#define FLOW_OPT_RECIP_C1 UINT64_C(4062939648)
-#define FLOW_OPT_RECIP_C2 UINT64_C(2905977288)
-#define FLOW_OPT_RECIP_C3 UINT64_C(981935668)
-#endif
 
 FLOW_FORCE_INL uint64_t flow__horner3_q32(uint64_t u16, uint64_t c0, uint64_t c1, uint64_t c2,
                                           uint64_t c3) {
