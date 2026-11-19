@@ -8,7 +8,7 @@ extern "C" {
 #endif
 
 /* ============================================================================
- * SEARU — Pure-GPR 1-Bit Chaos, CLZ Lévy-Flight & 2-Jet Symbiotic Co-Solver (v7.1.0)
+ * SEARU — Pure-GPR 1-Bit Chaos, CLZ Lévy-Flight & 2-Jet Symbiotic Co-Solver (v8.0.0)
  * ============================================================================
  * Zero-float, zero-heap, freestanding (-mgeneral-regs-only) combinatorial NP
  * engine paired symbiotically with FLOW's 128-bit 2-Jet manifold substrate:

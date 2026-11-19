@@ -133,7 +133,7 @@ $$
 $$
 *Consequently, under uniform $W$-bit entropy $u \sim \mathrm{Unif}(\{0, \dots, 2^W - 1\})$, the octave index $k = \mathrm{clz}_W(u) \in \{0, \dots, W - 1\}$ satisfies $\mathbb{P}(k = r) = 2^{-(r+1)}$, generating an exact scale-free dyadic power law.* Verified in [`SymbioticDuality.lean`](SymbioticDuality.lean#L220-L235). $\square$
 
-In [`searu.h`](../searu.h), bit-slicing `k = clz64(u)` with sub-octave mantissa bits synthesizes heavy-tailed Zipf/Pareto Lévy jumps $P(\Delta = \ell) \propto \ell^{-s}$ across tunable critical exponents $s \in [1.67, 3.00]$ in pure GPR instructions, driving non-perturbative multi-variable flips (`sparse-k` Coleman–De Luccia instanton transitions [3]) across arbitrary `KanLock` barriers.
+In [`core/searu.h`](../core/searu.h), bit-slicing `k = clz64(u)` with sub-octave mantissa bits synthesizes heavy-tailed Zipf/Pareto Lévy jumps $P(\Delta = \ell) \propto \ell^{-s}$ across tunable critical exponents $s \in [1.67, 3.00]$ in pure GPR instructions, driving non-perturbative multi-variable flips (`sparse-k` Coleman–De Luccia instanton transitions [3]) across arbitrary `KanLock` barriers.
 
 ### 4.2 The Ultraviolet Moduli Catastrophe and False Vacuum Rejection
 
@@ -237,7 +237,7 @@ Notice the stark manifestation of **Corollary 2B**: when pure `SEARU` jumps dire
 
 ### 6.2 Autonomous Ring-0 Silicon Meta-Synthesis (`FLOW v7.0.1`)
 
-In `make self-opt` ([`flow.c`](../flow.c), [`flow_opt_params.h`](../flow_opt_params.h)), `FLOW` uses its own `SEARU × 2-Jet` engine to synthesize both continuous minimax polynomial seeds and discrete meta-solver schedules:
+In `make self-opt` ([`sdk/flow_cli.c`](../sdk/flow_cli.c), [`core/flow_opt_params.h`](../core/flow_opt_params.h)), `FLOW` uses its own `SEARU × 2-Jet` engine to synthesize both continuous minimax polynomial seeds and discrete meta-solver schedules:
 - **Continuous Fiber Precision:** Synthesizes `0-ULP` degree-3 Minimax-Horner reciprocal-sqrt seeds verified exhaustively across all `65,536` `Q16.16` bins.
 - **Frustrated Discrete-Continuous Benchmarks (`flow searu-verify`):** Achieves **`64 / 64` (`100%`) global convergence** across planted `3-SAT`, frustrated `GraphColor`, and bilevel `2-Jet + @swap` barriers with a **`3.47×` step reduction** over uncoupled baselines, audited by `objdump`/`nm` to contain `0` branches, `0` divisions, and `0` floating-point instructions in Ring-0 objects. In particular, Gate 3's $2^{56}$-state bilevel ablation test directly exhibits Theorems 1, 2, and 4 on live silicon:
   - `FLOW_only` (pure `2-Jet`): residual `2,890,240` (**trapped** in false vacuum);
