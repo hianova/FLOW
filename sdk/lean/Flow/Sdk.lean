@@ -4,9 +4,11 @@
   Combines pure mathematics (`Flow.Math`) with engineering emitters & IR builders:
     - `Flow.Emit`     : File IO emitters for `.flow` cells, arenas, and bundles
     - `Flow.Schema`   : Full-512-bit C17/WGSL ABI generator + `.flow` bundle metadata
-    - `Flow.Morphism` : QTT resource-typed (`linear` | `cartesian`) SSA `.fir` builder
+    - `Flow.Morphism`  : QTT resource-typed (`linear` | `cartesian`) SSA `.fir` builder
+    - `Flow.Canonical` : Shared algebraic `.linear` morphisms for scalar/lattice/unitary projection
 -/
 import Flow.Math
 import Flow.Emit
 import Flow.Schema
 import Flow.Morphism
+import Flow.Canonical

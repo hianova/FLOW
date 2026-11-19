@@ -2,6 +2,7 @@
 #define FLOW_IR_H
 
 #include "flow.h"
+#include "flow_ir_wire.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -21,47 +22,6 @@ extern "C" {
  *   - Multiplicity 1 (`LINEAR`): reversible / non-duplicating -> scalar, lattice, unitary
  *   - Multiplicity 2 (`CARTESIAN`): dissipative fan-out / cone -> scalar, lattice only
  * ============================================================================ */
-
-#define FLOW_IR_MAGIC        UINT32_C(0x31524946) /* "FIR1" */
-#define FLOW_IR_VERSION      UINT32_C(1)
-#define FLOW_IR_HEADER_BYTES 64U
-#define FLOW_IR_VAL_WIRE_B   32U
-#define FLOW_IR_OP_WIRE_B    72U
-#define FLOW_IR_MAX_VALS     512U
-#define FLOW_IR_MAX_OPS      512U
-#define FLOW_IR_MAX_IO       32U
-#define FLOW_IR_MAX_INS      6U
-#define FLOW_IR_MAX_LUT_U64  4096U
-#define FLOW_IR_FLAG_CLEAN   UINT32_C(1)
-
-typedef enum {
-    FLOW_IR_MULT_LINEAR = 1U,
-    FLOW_IR_MULT_CARTESIAN = 2U
-} flow_ir_mult_t;
-
-typedef enum {
-    FLOW_IR_OP_CONST_U64 = 1U,
-    FLOW_IR_OP_SLICE = 2U,
-    FLOW_IR_OP_CONCAT = 3U,
-    FLOW_IR_OP_XOR_VEC = 4U,
-    FLOW_IR_OP_AND_VEC = 5U,
-    FLOW_IR_OP_NOT_VEC = 6U,
-    FLOW_IR_OP_OR_REDUCE = 7U,
-    FLOW_IR_OP_ADD = 8U,
-    FLOW_IR_OP_SUB = 9U,
-    FLOW_IR_OP_MUL_FXP = 10U,
-    FLOW_IR_OP_SQR_FXP = 11U,
-    FLOW_IR_OP_GF2M_MUL = 12U,
-    FLOW_IR_OP_GF2M_INV = 13U,
-    FLOW_IR_OP_LUT_ROM = 14U,
-    FLOW_IR_OP_CTRL_SEL = 15U,
-    FLOW_IR_OP_SHL_VAR = 16U,
-    FLOW_IR_OP_SHR_VAR = 17U,
-    FLOW_IR_OP_EQ_ZERO = 18U,
-    FLOW_IR_OP_STAGE_PIPE = 19U
-} flow_ir_op_kind_t;
-
-#define FLOW_IR_OP_CONE_STAGE FLOW_IR_OP_STAGE_PIPE
 
 typedef struct {
     uint16_t width;
@@ -100,34 +60,23 @@ typedef struct {
 } flow_ir_prog_t;
 
 static inline uint16_t flow_ir__read_le16(const uint8_t *p) {
-    return (uint16_t)(((uint16_t)p[0]) | ((uint16_t)p[1] << 8U));
+    return flow_ir_wire_read_le16(p);
 }
 
 static inline uint32_t flow_ir__read_le32(const uint8_t *p) {
-    return ((uint32_t)p[0]) | ((uint32_t)p[1] << 8U) | ((uint32_t)p[2] << 16U) |
-           ((uint32_t)p[3] << 24U);
+    return flow_ir_wire_read_le32(p);
 }
 
 static inline uint64_t flow_ir__read_le64(const uint8_t *p) {
-    return ((uint64_t)p[0]) | ((uint64_t)p[1] << 8U) | ((uint64_t)p[2] << 16U) |
-           ((uint64_t)p[3] << 24U) | ((uint64_t)p[4] << 32U) | ((uint64_t)p[5] << 40U) |
-           ((uint64_t)p[6] << 48U) | ((uint64_t)p[7] << 56U);
+    return flow_ir_wire_read_le64(p);
 }
 
 static inline uint64_t flow_ir__fnv1a64(const uint8_t *buf, size_t len) {
-    uint64_t h = UINT64_C(0xCBF29CE484222325);
-    for (size_t i = 0U; i < len; ++i) {
-        h ^= (uint64_t)buf[i];
-        h *= UINT64_C(0x00000100000001B3);
-    }
-    return h;
+    return flow_ir_wire_fnv1a64(buf, len);
 }
 
 static inline void flow_ir__zero(void *dst, size_t n) {
-    volatile uint8_t *p = (volatile uint8_t *)dst;
-    for (size_t i = 0U; i < n; ++i) {
-        p[i] = UINT8_C(0);
-    }
+    flow_ir_wire_zero(dst, n);
 }
 
 static inline uint64_t flow_ir_mask_u64(uint16_t w) {
@@ -168,6 +117,8 @@ static inline void flow_ir__copy_name24(char dst[24], const uint8_t src[24]) {
     dst[23] = '\0';
 }
 
+static inline bool flow_ir_validate(const flow_ir_prog_t *p);
+
 static inline bool flow_ir_load_bytes(flow_ir_prog_t *out, const uint8_t *buf, size_t len) {
     if (!out || !buf || len < FLOW_IR_HEADER_BYTES + 8U) {
         return false;
@@ -202,12 +153,10 @@ static inline bool flow_ir_load_bytes(flow_ir_prog_t *out, const uint8_t *buf, s
         return false;
     }
 
-    size_t vals_b = (size_t)out->num_vals * FLOW_IR_VAL_WIRE_B;
-    size_t in_b = ((size_t)out->num_inputs + 1U) / 2U * 8U;
-    size_t out_b = ((size_t)out->num_outputs + 1U) / 2U * 8U;
-    size_t ops_b = (size_t)out->num_ops * FLOW_IR_OP_WIRE_B;
-    size_t lut_b = (size_t)out->num_lut_u64 * 8U;
-    size_t body_len = FLOW_IR_HEADER_BYTES + vals_b + in_b + out_b + ops_b + lut_b;
+    size_t in_b = FLOW_IR_WIRE_PAD8_U32_BYTES(out->num_inputs);
+    size_t out_b = FLOW_IR_WIRE_PAD8_U32_BYTES(out->num_outputs);
+    size_t body_len = FLOW_IR_WIRE_BODY_BYTES(out->num_vals, out->num_inputs, out->num_outputs,
+                                              out->num_ops, out->num_lut_u64);
     if (len != body_len + 8U) {
         return false;
     }
@@ -288,7 +237,7 @@ static inline bool flow_ir_load_bytes(flow_ir_prog_t *out, const uint8_t *buf, s
     for (uint32_t i = 0U; i < out->num_lut_u64; ++i) {
         out->lut_pool[i] = flow_ir__read_le64(buf + off + (size_t)i * 8U);
     }
-    return true;
+    return flow_ir_validate(out);
 }
 
 #define FLOW_IR_MAX_FILE_BYTES                                                                \
@@ -614,36 +563,47 @@ static inline bool flow_ir_analyze_dag(const flow_ir_prog_t *p, flow_ir_dag_stat
 }
 
 static inline void flow_ir__write_le16(uint8_t *p, uint16_t v) {
-    p[0] = (uint8_t)(v & 0xFFU);
-    p[1] = (uint8_t)((v >> 8U) & 0xFFU);
+    flow_ir_wire_write_le16(p, v);
 }
 
 static inline void flow_ir__write_le32(uint8_t *p, uint32_t v) {
-    p[0] = (uint8_t)(v & 0xFFU);
-    p[1] = (uint8_t)((v >> 8U) & 0xFFU);
-    p[2] = (uint8_t)((v >> 16U) & 0xFFU);
-    p[3] = (uint8_t)((v >> 24U) & 0xFFU);
+    flow_ir_wire_write_le32(p, v);
 }
 
 static inline void flow_ir__write_le64(uint8_t *p, uint64_t v) {
-    p[0] = (uint8_t)(v & 0xFFU);
-    p[1] = (uint8_t)((v >> 8U) & 0xFFU);
-    p[2] = (uint8_t)((v >> 16U) & 0xFFU);
-    p[3] = (uint8_t)((v >> 24U) & 0xFFU);
-    p[4] = (uint8_t)((v >> 32U) & 0xFFU);
-    p[5] = (uint8_t)((v >> 40U) & 0xFFU);
-    p[6] = (uint8_t)((v >> 48U) & 0xFFU);
-    p[7] = (uint8_t)((v >> 56U) & 0xFFU);
+    flow_ir_wire_write_le64(p, v);
 }
 
 static inline void flow_ir__write_name24(uint8_t dst[24], const char *src) {
-    flow_ir__zero(dst, 24U);
-    if (!src) {
-        return;
+    flow_ir_wire_write_name24(dst, src);
+}
+
+static inline bool flow_ir__op_arity_ok(const flow_ir_op_t *op) {
+    uint16_t k = op->kind;
+    if (k == FLOW_IR_OP_CONST_U64) {
+        return op->num_ins == 0U;
+    } else if (k == FLOW_IR_OP_SLICE || k == FLOW_IR_OP_NOT_VEC || k == FLOW_IR_OP_OR_REDUCE ||
+               k == FLOW_IR_OP_SQR_FXP || k == FLOW_IR_OP_EQ_ZERO) {
+        return op->num_ins == 1U;
+    } else if (k == FLOW_IR_OP_CONCAT) {
+        return op->num_ins >= 1U && op->num_ins <= FLOW_IR_MAX_INS;
+    } else if (k == FLOW_IR_OP_XOR_VEC || k == FLOW_IR_OP_AND_VEC || k == FLOW_IR_OP_ADD ||
+               k == FLOW_IR_OP_SUB || k == FLOW_IR_OP_MUL_FXP || k == FLOW_IR_OP_SHL_VAR ||
+               k == FLOW_IR_OP_SHR_VAR) {
+        return op->num_ins == 2U;
+    } else if (k == FLOW_IR_OP_GF2M_MUL) {
+        return op->num_ins == 2U && op->p0 >= UINT64_C(1) && op->p0 <= UINT64_C(32);
+    } else if (k == FLOW_IR_OP_GF2M_INV) {
+        return (op->num_ins == 1U || op->num_ins == 2U) && op->p0 >= UINT64_C(1) &&
+               op->p0 <= UINT64_C(32);
+    } else if (k == FLOW_IR_OP_LUT_ROM) {
+        return op->num_ins == 1U && op->lut_len > 0U;
+    } else if (k == FLOW_IR_OP_CTRL_SEL) {
+        return op->num_ins == 3U;
+    } else if (k == FLOW_IR_OP_STAGE_PIPE) {
+        return op->num_ins <= FLOW_IR_MAX_INS;
     }
-    for (size_t i = 0U; i < 23U && src[i] != '\0'; ++i) {
-        dst[i] = (uint8_t)src[i];
-    }
+    return false;
 }
 
 static inline bool flow_ir_validate(const flow_ir_prog_t *p) {
@@ -690,6 +650,9 @@ static inline bool flow_ir_validate(const flow_ir_prog_t *p) {
         if (op->out_val != p->num_inputs + i || op->num_ins > FLOW_IR_MAX_INS) {
             return false;
         }
+        if (!flow_ir__op_arity_ok(op)) {
+            return false;
+        }
         for (uint16_t j = 0U; j < op->num_ins; ++j) {
             if (op->ins[j] >= op->out_val) {
                 return false;
@@ -719,74 +682,49 @@ static inline bool flow_ir_encode_bytes(const flow_ir_prog_t *p, uint8_t *buf, s
         return false;
     }
 
-    size_t vals_b = (size_t)p->num_vals * FLOW_IR_VAL_WIRE_B;
-    size_t in_b = (((size_t)p->num_inputs + 1U) >> 1U) * 8U;
-    size_t out_b = (((size_t)p->num_outputs + 1U) >> 1U) * 8U;
-    size_t ops_b = (size_t)p->num_ops * FLOW_IR_OP_WIRE_B;
-    size_t lut_b = (size_t)lut_total * 8U;
-    size_t body_len = FLOW_IR_HEADER_BYTES + vals_b + in_b + out_b + ops_b + lut_b;
+    size_t in_b = FLOW_IR_WIRE_PAD8_U32_BYTES(p->num_inputs);
+    size_t out_b = FLOW_IR_WIRE_PAD8_U32_BYTES(p->num_outputs);
+    size_t body_len =
+        FLOW_IR_WIRE_BODY_BYTES(p->num_vals, p->num_inputs, p->num_outputs, p->num_ops, lut_total);
     if (body_len + 8U > cap) {
         return false;
     }
 
-    flow_ir__zero(buf, body_len + 8U);
-    flow_ir__write_le32(buf + 0U, FLOW_IR_MAGIC);
-    flow_ir__write_le32(buf + 4U, FLOW_IR_VERSION);
-    flow_ir__write_le32(buf + 8U, p->mult);
-    flow_ir__write_le32(buf + 12U, p->flags);
-    flow_ir__write_le32(buf + 16U, p->num_vals);
-    flow_ir__write_le32(buf + 20U, p->num_inputs);
-    flow_ir__write_le32(buf + 24U, p->num_outputs);
-    flow_ir__write_le32(buf + 28U, p->num_ops);
-    flow_ir__write_le32(buf + 32U, lut_total);
-    flow_ir__write_le32(buf + 36U, 0U);
-    flow_ir__write_name24(buf + 40U, p->name);
+    flow_ir_wire_zero(buf, body_len + 8U);
+    flow_ir_wire_write_header(buf, p->mult, p->flags, p->num_vals, p->num_inputs, p->num_outputs,
+                              p->num_ops, lut_total, p->name);
 
     size_t off = FLOW_IR_HEADER_BYTES;
     for (uint32_t i = 0U; i < p->num_vals; ++i) {
-        flow_ir__write_le16(buf + off + 0U, p->vals[i].width);
-        buf[off + 2U] = p->vals[i].is_classical;
-        flow_ir__write_name24(buf + off + 8U, p->vals[i].name);
+        flow_ir_wire_write_val(buf + off, p->vals[i].width, p->vals[i].is_classical,
+                               p->vals[i].name);
         off += FLOW_IR_VAL_WIRE_B;
     }
     for (uint32_t i = 0U; i < p->num_inputs; ++i) {
-        flow_ir__write_le32(buf + off + (size_t)i * 4U, p->inputs[i]);
+        flow_ir_wire_write_le32(buf + off + (size_t)i * 4U, p->inputs[i]);
     }
     off += in_b;
     for (uint32_t i = 0U; i < p->num_outputs; ++i) {
-        flow_ir__write_le32(buf + off + (size_t)i * 4U, p->outputs[i]);
+        flow_ir_wire_write_le32(buf + off + (size_t)i * 4U, p->outputs[i]);
     }
     off += out_b;
 
     uint32_t cur_lut_off = 0U;
     for (uint32_t i = 0U; i < p->num_ops; ++i) {
         const flow_ir_op_t *op = &p->ops[i];
-        flow_ir__write_le16(buf + off + 0U, op->kind);
-        flow_ir__write_le16(buf + off + 2U, op->num_ins);
-        flow_ir__write_le32(buf + off + 4U, op->out_val);
-        for (uint16_t k = 0U; k < FLOW_IR_MAX_INS; ++k) {
-            uint32_t iv = (k < op->num_ins) ? op->ins[k] : 0U;
-            flow_ir__write_le32(buf + off + 8U + (size_t)k * 4U, iv);
-        }
-        flow_ir__write_le32(buf + off + 32U, cur_lut_off);
-        flow_ir__write_le32(buf + off + 36U, op->lut_len);
-        flow_ir__write_le64(buf + off + 40U, op->p0);
-        flow_ir__write_le64(buf + off + 48U, op->p1);
-        flow_ir__write_le64(buf + off + 56U, op->p2);
-        flow_ir__write_le64(buf + off + 64U, op->p3);
+        flow_ir_wire_write_op(buf + off, op->kind, op->num_ins, op->out_val, op->ins, cur_lut_off,
+                              op->lut_len, op->p0, op->p1, op->p2, op->p3);
         cur_lut_off += op->lut_len;
         off += FLOW_IR_OP_WIRE_B;
     }
     for (uint32_t i = 0U; i < p->num_ops; ++i) {
         const flow_ir_op_t *op = &p->ops[i];
         for (uint32_t j = 0U; j < op->lut_len; ++j) {
-            flow_ir__write_le64(buf + off, p->lut_pool[op->lut_off + j]);
+            flow_ir_wire_write_le64(buf + off, p->lut_pool[op->lut_off + j]);
             off += 8U;
         }
     }
-    uint64_t h = flow_ir__fnv1a64(buf, body_len);
-    flow_ir__write_le64(buf + body_len, h);
-    *out_len = body_len + 8U;
+    *out_len = flow_ir_wire_seal_trailer(buf, body_len);
     return true;
 }
 

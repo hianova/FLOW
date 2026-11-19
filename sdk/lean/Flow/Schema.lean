@@ -257,13 +257,13 @@ private def renderFieldPackStmt (f : BitSliceField) : String :=
     let sh := f.bitOffset % 64
     match f.ty with
     | .cchar =>
-      s!"    \{ uint8_t raw = 0U; memcpy(&raw, &in->{f.name}, sizeof(raw)); out_cell[{w}U] |= ((uint64_t)raw) << {sh}U; }\n"
+      s!"    out_cell[{w}U] |= ((uint64_t)(uint8_t)in->{f.name}) << {sh}U;\n"
     | .i16 =>
-      s!"    \{ uint16_t raw = 0U; memcpy(&raw, &in->{f.name}, sizeof(raw)); out_cell[{w}U] |= ((uint64_t)raw) << {sh}U; }\n"
+      s!"    out_cell[{w}U] |= ((uint64_t)(uint16_t)in->{f.name}) << {sh}U;\n"
     | .i32 =>
-      s!"    \{ uint32_t raw = 0U; memcpy(&raw, &in->{f.name}, sizeof(raw)); out_cell[{w}U] |= ((uint64_t)raw) << {sh}U; }\n"
+      s!"    out_cell[{w}U] |= ((uint64_t)(uint32_t)in->{f.name}) << {sh}U;\n"
     | .i64 =>
-      s!"    \{ uint64_t raw = 0ULL; memcpy(&raw, &in->{f.name}, sizeof(raw)); out_cell[{w}U] = raw; }\n"
+      s!"    out_cell[{w}U] = (uint64_t)in->{f.name};\n"
     | .u64 =>
       s!"    out_cell[{w}U] = in->{f.name};\n"
     | _ =>
@@ -273,13 +273,13 @@ private def renderFieldPackStmt (f : BitSliceField) : String :=
     | .u64 =>
       s!"    for (size_t k = 0U; k < {f.count}U; ++k) \{ out_cell[{f.bitOffset / 64}U + k] = in->{f.name}[k]; }\n"
     | .i64 =>
-      s!"    for (size_t k = 0U; k < {f.count}U; ++k) \{ uint64_t raw = 0ULL; memcpy(&raw, &in->{f.name}[k], sizeof(raw)); out_cell[{f.bitOffset / 64}U + k] = raw; }\n"
+      s!"    for (size_t k = 0U; k < {f.count}U; ++k) \{ out_cell[{f.bitOffset / 64}U + k] = (uint64_t)in->{f.name}[k]; }\n"
     | .cchar =>
-      s!"    for (size_t k = 0U; k < {f.count}U; ++k) \{ size_t bit = {f.bitOffset}U + k * 8U; uint8_t raw = 0U; memcpy(&raw, &in->{f.name}[k], sizeof(raw)); out_cell[bit >> 6U] |= ((uint64_t)raw) << (bit & 63U); }\n"
+      s!"    for (size_t k = 0U; k < {f.count}U; ++k) \{ size_t bit = {f.bitOffset}U + k * 8U; out_cell[bit >> 6U] |= ((uint64_t)(uint8_t)in->{f.name}[k]) << (bit & 63U); }\n"
     | .i16 =>
-      s!"    for (size_t k = 0U; k < {f.count}U; ++k) \{ size_t bit = {f.bitOffset}U + k * 16U; uint16_t raw = 0U; memcpy(&raw, &in->{f.name}[k], sizeof(raw)); out_cell[bit >> 6U] |= ((uint64_t)raw) << (bit & 63U); }\n"
+      s!"    for (size_t k = 0U; k < {f.count}U; ++k) \{ size_t bit = {f.bitOffset}U + k * 16U; out_cell[bit >> 6U] |= ((uint64_t)(uint16_t)in->{f.name}[k]) << (bit & 63U); }\n"
     | .i32 =>
-      s!"    for (size_t k = 0U; k < {f.count}U; ++k) \{ size_t bit = {f.bitOffset}U + k * 32U; uint32_t raw = 0U; memcpy(&raw, &in->{f.name}[k], sizeof(raw)); out_cell[bit >> 6U] |= ((uint64_t)raw) << (bit & 63U); }\n"
+      s!"    for (size_t k = 0U; k < {f.count}U; ++k) \{ size_t bit = {f.bitOffset}U + k * 32U; out_cell[bit >> 6U] |= ((uint64_t)(uint32_t)in->{f.name}[k]) << (bit & 63U); }\n"
     | _ =>
       s!"    for (size_t k = 0U; k < {f.count}U; ++k) \{ size_t bit = {f.bitOffset}U + k * {f.ty.bitWidth}U; out_cell[bit >> 6U] |= (((uint64_t)in->{f.name}[k]) & {f.ty.maskExpr64}) << (bit & 63U); }\n"
 
@@ -289,35 +289,35 @@ private def renderFieldUnpackStmt (f : BitSliceField) : String :=
     let sh := f.bitOffset % 64
     match f.ty with
     | .cchar =>
-      s!"    \{ uint8_t raw = (uint8_t)((cell[{w}U] >> {sh}U) & UINT64_C(0xFF)); memcpy(&out->{f.name}, &raw, sizeof(raw)); }\n"
+      s!"    out->{f.name} = flow_schema__u8_to_cchar((uint8_t)((cell[{w}U] >> {sh}U) & UINT64_C(0xFF)));\n"
     | .u8  => s!"    out->{f.name} = (uint8_t)((cell[{w}U] >> {sh}U) & UINT64_C(0xFF));\n"
     | .u16 => s!"    out->{f.name} = (uint16_t)((cell[{w}U] >> {sh}U) & UINT64_C(0xFFFF));\n"
     | .i16 =>
-      s!"    \{ uint16_t raw = (uint16_t)((cell[{w}U] >> {sh}U) & UINT64_C(0xFFFF)); memcpy(&out->{f.name}, &raw, sizeof(raw)); }\n"
+      s!"    out->{f.name} = flow_schema__u16_to_i16((uint16_t)((cell[{w}U] >> {sh}U) & UINT64_C(0xFFFF)));\n"
     | .u32 => s!"    out->{f.name} = (uint32_t)((cell[{w}U] >> {sh}U) & UINT64_C(0xFFFFFFFF));\n"
     | .i32 =>
-      s!"    \{ uint32_t raw = (uint32_t)((cell[{w}U] >> {sh}U) & UINT64_C(0xFFFFFFFF)); memcpy(&out->{f.name}, &raw, sizeof(raw)); }\n"
+      s!"    out->{f.name} = flow_schema__u32_to_i32((uint32_t)((cell[{w}U] >> {sh}U) & UINT64_C(0xFFFFFFFF)));\n"
     | .u64 => s!"    out->{f.name} = cell[{w}U];\n"
     | .i64 =>
-      s!"    \{ uint64_t raw = cell[{w}U]; memcpy(&out->{f.name}, &raw, sizeof(raw)); }\n"
+      s!"    out->{f.name} = flow_schema__u64_to_i64(cell[{w}U]);\n"
   else
     match f.ty with
     | .cchar =>
-      s!"    for (size_t k = 0U; k < {f.count}U; ++k) \{ size_t bit = {f.bitOffset}U + k * 8U; uint8_t raw = (uint8_t)((cell[bit >> 6U] >> (bit & 63U)) & UINT64_C(0xFF)); memcpy(&out->{f.name}[k], &raw, sizeof(raw)); }\n"
+      s!"    for (size_t k = 0U; k < {f.count}U; ++k) \{ size_t bit = {f.bitOffset}U + k * 8U; out->{f.name}[k] = flow_schema__u8_to_cchar((uint8_t)((cell[bit >> 6U] >> (bit & 63U)) & UINT64_C(0xFF))); }\n"
     | .u8 =>
       s!"    for (size_t k = 0U; k < {f.count}U; ++k) \{ size_t bit = {f.bitOffset}U + k * 8U; out->{f.name}[k] = (uint8_t)((cell[bit >> 6U] >> (bit & 63U)) & UINT64_C(0xFF)); }\n"
     | .u16 =>
       s!"    for (size_t k = 0U; k < {f.count}U; ++k) \{ size_t bit = {f.bitOffset}U + k * 16U; out->{f.name}[k] = (uint16_t)((cell[bit >> 6U] >> (bit & 63U)) & UINT64_C(0xFFFF)); }\n"
     | .i16 =>
-      s!"    for (size_t k = 0U; k < {f.count}U; ++k) \{ size_t bit = {f.bitOffset}U + k * 16U; uint16_t raw = (uint16_t)((cell[bit >> 6U] >> (bit & 63U)) & UINT64_C(0xFFFF)); memcpy(&out->{f.name}[k], &raw, sizeof(raw)); }\n"
+      s!"    for (size_t k = 0U; k < {f.count}U; ++k) \{ size_t bit = {f.bitOffset}U + k * 16U; out->{f.name}[k] = flow_schema__u16_to_i16((uint16_t)((cell[bit >> 6U] >> (bit & 63U)) & UINT64_C(0xFFFF))); }\n"
     | .u32 =>
       s!"    for (size_t k = 0U; k < {f.count}U; ++k) \{ size_t bit = {f.bitOffset}U + k * 32U; out->{f.name}[k] = (uint32_t)((cell[bit >> 6U] >> (bit & 63U)) & UINT64_C(0xFFFFFFFF)); }\n"
     | .i32 =>
-      s!"    for (size_t k = 0U; k < {f.count}U; ++k) \{ size_t bit = {f.bitOffset}U + k * 32U; uint32_t raw = (uint32_t)((cell[bit >> 6U] >> (bit & 63U)) & UINT64_C(0xFFFFFFFF)); memcpy(&out->{f.name}[k], &raw, sizeof(raw)); }\n"
+      s!"    for (size_t k = 0U; k < {f.count}U; ++k) \{ size_t bit = {f.bitOffset}U + k * 32U; out->{f.name}[k] = flow_schema__u32_to_i32((uint32_t)((cell[bit >> 6U] >> (bit & 63U)) & UINT64_C(0xFFFFFFFF))); }\n"
     | .u64 =>
       s!"    for (size_t k = 0U; k < {f.count}U; ++k) \{ out->{f.name}[k] = cell[{f.bitOffset / 64}U + k]; }\n"
     | .i64 =>
-      s!"    for (size_t k = 0U; k < {f.count}U; ++k) \{ uint64_t raw = cell[{f.bitOffset / 64}U + k]; memcpy(&out->{f.name}[k], &raw, sizeof(raw)); }\n"
+      s!"    for (size_t k = 0U; k < {f.count}U; ++k) \{ out->{f.name}[k] = flow_schema__u64_to_i64(cell[{f.bitOffset / 64}U + k]); }\n"
 
 def CellLayout64.renderC17Codec (cPrefix : String) (L : CellLayout64) : String :=
   let fnPrefix := s!"{cPrefix}_{L.name}"
@@ -417,16 +417,32 @@ def ArenaSpec.renderC17Header (a : ArenaSpec) : Option String :=
       "#else\n" ++
       "#error \"FLOW_SCHEMA requires ISO C11+ or ISO C++11+\"\n" ++
       "#endif\n" ++
+      "static inline char flow_schema__u8_to_cchar(uint8_t u) {\n" ++
+      "#if CHAR_MIN < 0\n" ++
+      "    return (u <= (uint8_t)CHAR_MAX) ? (char)u : (char)(-(int32_t)((uint8_t)(~u)) - INT32_C(1));\n" ++
+      "#else\n" ++
+      "    return (char)u;\n" ++
+      "#endif\n" ++
+      "}\n" ++
+      "static inline int16_t flow_schema__u16_to_i16(uint16_t u) {\n" ++
+      "    return (u <= (uint16_t)INT16_MAX) ? (int16_t)u : (int16_t)(-(int32_t)((uint16_t)(~u)) - INT32_C(1));\n" ++
+      "}\n" ++
+      "static inline int32_t flow_schema__u32_to_i32(uint32_t u) {\n" ++
+      "    return (u <= (uint32_t)INT32_MAX) ? (int32_t)u : -(int32_t)(~u) - INT32_C(1);\n" ++
+      "}\n" ++
+      "static inline int64_t flow_schema__u64_to_i64(uint64_t u) {\n" ++
+      "    return (u <= (uint64_t)INT64_MAX) ? (int64_t)u : -(int64_t)(~u) - INT64_C(1);\n" ++
+      "}\n" ++
       "#endif /* FLOW_SCHEMA_ALIGN64 */\n\n"
     let hdr :=
       s!"/* AUTO-GENERATED BY `Flow.Schema.ArenaSpec.emitC17Header` (`Flow.Schema` v{Flow.version}). */\n" ++
       s!"#ifndef {a.headerGuard}\n" ++
       s!"#define {a.headerGuard}\n\n" ++
       "#include \"flow.h\"\n" ++
+      "#include <limits.h>\n" ++
       "#include <stdbool.h>\n" ++
       "#include <stddef.h>\n" ++
-      "#include <stdint.h>\n" ++
-      "#include <string.h>\n\n" ++
+      "#include <stdint.h>\n\n" ++
       alignMacros ++
       "#ifdef __cplusplus\n" ++
       "extern \"C\" {\n" ++
