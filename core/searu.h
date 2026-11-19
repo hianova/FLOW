@@ -174,6 +174,18 @@ FLOW_FORCE_INL uint32_t searu_clz64(uint64_t x) {
     return (uint32_t)flow_mux_u64(nz, c, UINT64_C(64));
 }
 
+FLOW_FORCE_INL uint32_t searu_ctz64(uint64_t x) {
+    uint64_t nz = flow_mask_bool(x != UINT64_C(0));
+    uint64_t sx = flow_mux_u64(nz, x, UINT64_C(1));
+#if defined(__GNUC__) || defined(__clang__)
+    uint64_t c = (uint64_t)(uint32_t)__builtin_ctzll(sx);
+#else
+    uint64_t v = sx & (UINT64_C(0) - sx);
+    uint64_t c = UINT64_C(63) - (uint64_t)searu_clz64(v);
+#endif
+    return (uint32_t)flow_mux_u64(nz, c, UINT64_C(64));
+}
+
 FLOW_FORCE_INL uint32_t searu_popcnt64(uint64_t x) {
     x -= (x >> 1U) & UINT64_C(0x5555555555555555);
     x = (x & UINT64_C(0x3333333333333333)) + ((x >> 2U) & UINT64_C(0x3333333333333333));

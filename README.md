@@ -2,37 +2,41 @@
   <img src="./assets/logo.svg?cb=20261114v7" alt="FLOW — Zero-Risk 2-Jet &amp; SEARU Symbiotic Manifold Substrate" width="100%" />
 </p>
 
-# FLOW — Zero-Risk 2-Jet, SEARU & Unified HoTT/QTT SSOT Substrate (`v8.0.0`)
+# FLOW — Layered Pure-Math Ring-0 Substrate (`core/`) & Toolchain (`sdk/`) (`v8.0.0`)
 
 > **Software Engineering as Silicon Physics.**  
 > **Zero structs.** **Zero control-flow branches in Ring-0 kernels.** **Zero SIMD/FPU instructions (`-mgeneral-regs-only`).** **Zero indirect calls (`0` `blr`).** **Zero overflow/zombie traps.** **Zero heap.** **Zero hand-tuned magic constants.**
 
-`FLOW` is the **Single Source of Truth (SSOT)** for pure verified mathematics, combinatorial optimization, typed 64-byte binary schemas (`Flow.Schema`), and QTT resource-typed morphism graphs (`Flow.Morphism` `.fir`) — containing **zero** downstream application/domain nouns:
+`FLOW` is strictly factored into two decoupled layers with unidirectional dependencies (`sdk/ -> core/`, **zero** domain-specific or domain-laundered identifiers):
 
-1. **Upstream Pure-Math SSOT ([`Flow.lean`](Flow.lean) + [`Flow/`](Flow/) $\to$ `.flow` / `*_abi.h` / `.wgsl` / `.fir`)**: Modular Lean 4 SSOT (`0` external imports beyond Lean `Std.Tactic.BVDecide`, `0 sorryAx`, `-DwarningAsError=true`, strictly enforced domain-purity gate) across [`Flow/Core.lean`](Flow/Core.lean), [`Flow/BitAlgebra.lean`](Flow/BitAlgebra.lean), [`Flow/Bundle.lean`](Flow/Bundle.lean), [`Flow/Interval.lean`](Flow/Interval.lean), [`Flow/Convex.lean`](Flow/Convex.lean), [`Flow/Schema.lean`](Flow/Schema.lean) (full-512-bit C17/C++20 `.h` + zero-`u64`/`i64` `.wgsl` co-generator & `.flow` bundle `Spec`), and [`Flow/Morphism.lean`](Flow/Morphism.lean) (QTT `.linear` | `.cartesian` SSA `Builder` & `.fir` IR encoder).
-2. **Unified Circuit IR Loader & GPR Evaluator (`flow_ir.h`)**: [`flow_ir.h`](flow_ir.h) is a zero-heap, zero-float, zero-jump-table C17/C++20 header decoding binary `.fir` graphs (`"FIR1"` + trailer FNV-1a), enforcing QTT linearity (`flow_ir_admits_unitary`), and evaluating exact `<= 64`-bit Pure-GPR semantics (`flow_ir_eval_u64`).
-3. **Continuous Local Operator (`flow.h`)**: [`flow.h`](flow.h) executes one total, branchless `8 × u64` General-Purpose Register (GPR) endomorphism with a **128-bit Guard-Bit Wide-Accumulator**, **odd-symmetric nearest-integer rounding**, and **lossless $2^{-49}$ sub-LSB autonomous fiber conservation**:
+1. **Layer 0 — Pure Mathematics & Ring-0 GPR Kernel ([`core/`](core/))**:
+   - **Verified Pure-Math Lean 4 SSOT ([`core/lean/`](core/lean/))**: `0` `IO`, `0` codegen, `0 sorryAx`, `-DwarningAsError=true` across [`Flow/Core.lean`](core/lean/Flow/Core.lean), [`Flow/BitAlgebra.lean`](core/lean/Flow/BitAlgebra.lean), [`Flow/Bundle.lean`](core/lean/Flow/Bundle.lean), [`Flow/Interval.lean`](core/lean/Flow/Interval.lean), [`Flow/Convex.lean`](core/lean/Flow/Convex.lean), and the pure-math umbrella [`Flow/Math.lean`](core/lean/Flow/Math.lean).
+   - **Continuous Local Operator ([`core/flow.h`](core/flow.h))**: Executes one total, branchless `8 × u64` General-Purpose Register (GPR) endomorphism with a **128-bit Guard-Bit Wide-Accumulator**, **odd-symmetric nearest-integer rounding**, and **lossless $2^{-49}$ sub-LSB autonomous fiber conservation**:
 
 $$\Phi_{\text{atlas}} : \mathcal{C}_{64}^{\text{state}} \times \mathcal{A}_{2^k}^{\text{chart}} \times (u_{\text{ext}}, m_{\text{req}}) \longrightarrow \mathcal{C}_{64}^{\text{state}}$$
 
-4. **Discrete Global Operator & Meta-Synthesizer (`searu.h` / `flow self-opt`)**: [`searu.h`](searu.h) couples 1-bit Chaos and hardware `CLZ` Zipf/Pareto Lévy-flight (`0` `powf`, `0` `udiv`, `0` `blr`) symbiotically with `flow.h` — waking only at `!CONVERGED && dt == 0` barriers to heal discrete topologies via lock-free `@swap`, and autonomously synthesizing `flow.h`'s `0-ULP` Horner seeds and its own Crucible schedules into [`flow_opt_params.h`](flow_opt_params.h) (`make self-opt`).
+   - **Discrete Global Operator ([`core/searu.h`](core/searu.h) + [`core/flow_opt_params.h`](core/flow_opt_params.h))**: Couples 1-bit Chaos and hardware `CLZ` Zipf/Pareto Lévy-flight (`0` `powf`, `0` `udiv`, `0` `blr`, zero `<stdio.h>`, zero circuit-synthesis baggage) symbiotically with `core/flow.h`.
+
+2. **Layer 1 — Software Engineering Toolchain & IR SDK ([`sdk/`](sdk/))**:
+   - **Lean 4 Codegen & Emitters ([`sdk/lean/`](sdk/lean/))**: File IO emitters ([`Flow/Emit.lean`](sdk/lean/Flow/Emit.lean)), full-512-bit C17/C++20 `.h` + zero-64b `.wgsl` + `.flow` bundle `Spec` ([`Flow/Schema.lean`](sdk/lean/Flow/Schema.lean)), QTT resource-typed `.fir` `Builder` ([`Flow/Morphism.lean`](sdk/lean/Flow/Morphism.lean)), [`Flow/Sdk.lean`](sdk/lean/Flow/Sdk.lean), and compatibility umbrella [`Flow.lean`](sdk/lean/Flow.lean).
+   - **Modular C17/C++20 IR Headers**: Freestanding zero-`<stdio.h>` `.fir` codec/evaluator ([`sdk/flow_ir.h`](sdk/flow_ir.h)), host `<stdio.h>` file wrapper ([`sdk/flow_ir_io.h`](sdk/flow_ir_io.h)), GF(2) multiplicative-complexity solver ([`sdk/searu_mc_gf2.h`](sdk/searu_mc_gf2.h)), `.fir` pass ([`sdk/flow_ir_synth.h`](sdk/flow_ir_synth.h)), and CLI ([`sdk/flow_cli.c`](sdk/flow_cli.c)).
 
 ---
 
 ## 1. Silicon & Algebraic Guarantees
 
 1. **Pure GPR Register Substrate (`-mgeneral-regs-only` Clean)**:
-   Every cell is a `64`-byte `uint64_t[8]` array (`flow_cell`). Zero `vector_size` SIMD cross-bank transfers, zero FPU instructions, and safe for direct Ring-0 / interrupt-handler / bare-metal execution across ARM64 and x86_64 without `kernel_neon_begin` / `kernel_fpu_begin`.
+   Every cell is a `64`-byte `uint64_t[8]` array (`flow_cell`). Zero `vector_size` SIMD cross-bank transfers, zero FPU instructions, and safe for direct Ring-0 / interrupt-handler execution without `kernel_neon_begin` / `kernel_fpu_begin`.
 2. **Total 128-Bit Guard-Bit Solver (Zero Overflow / Zero Zombie Traps)**:
-   Inputs normalize symmetrically into `[-0x7FFFFFFF, +0x7FFFFFFF]` (`Q16.16`, eliminating two's complement `INT32_MIN` negation asymmetry). Residuals evaluate exactly at $2^{-49}$ scale (`G0`) and tangents at $2^{-32}$ scale (`G1`), resolving Citardauq quadratic roots ($\Delta \ge 0$), $C^0$-continuous minimum-$|R|$ barrier vertices ($\Delta < 0$), and linear steps ($R_2 = 0$) through constant-time `0-ULP` `SEARU`-synthesized degree-3 Horner + `umulh` Newton-Raphson `isqrt` and 128-by-64 division (`0` `udiv`, `0` LUTs) with strict 128-bit Lyapunov monotonicity ($|R(x')| \le |R(x)|$).
+   Inputs normalize symmetrically into `[-0x7FFFFFFF, +0x7FFFFFFF]` (`Q16.16`). Residuals evaluate at $2^{-49}$ scale (`G0`) and tangents at $2^{-32}$ scale (`G1`) through constant-time `0-ULP` `SEARU`-synthesized degree-3 Horner + Newton `isqrt` and 128-by-64 division (`0` `udiv`, `0` LUTs) with strict 128-bit Lyapunov monotonicity.
 3. **Exact Gauge & Spatial Mirror Symmetry**:
-   Odd-symmetric rounding (`sym_shr(-v) == -sym_shr(v)`) and gauge-covariant branch selection ensure $\Delta x(-R) = \Delta x(R)$ everywhere and $\Delta x(-x, -b_1) = -\Delta x(x, b_1)$ across all asymmetric states.
+   Odd-symmetric rounding and gauge-covariant branch selection ensure exact sign & spatial mirror equivariance across all asymmetric states.
 4. **Lossless Autonomous 2-Jet Fiber Conservation**:
-   In autonomous mode (`b1 == 0 && b2 == 0`), `state[7]` carries the exact `[j1_sub16:16 | 0:15 | j0_sub33:33]` sub-LSB fractional phase, achieving `0` LSB secular drift across arbitrarily long trajectories.
+   In autonomous mode (`b1 == 0 && b2 == 0`), `state[7]` preserves sub-LSB fractional phase (`0` LSB secular drift).
 5. **Multi-Core Linearizable Branchless `@swap` & Tear-Guarded Reader (`ARMv8 Weak-Memory Clean`)**:
-   `flow_arena_try_swap` executes branchless `LDAPR + Stack-Sink Pointer Mux + LSE CASAL + STLR` using the 32-bit lock sentinel `FLOW_SWAP_LOCK_TAG` (`0x464C4F57`), guaranteeing `0` shared-arena bytes written on rejected or contended swaps and strict dual-writer mutual exclusion. `flow_step_atlas` pairs `LDAPR` (`w6_pre`), payload snapshot (`0..5`), `DMB ISHLD`, and post-check (`w6_post`) to enforce a branchless Coordinate-Hold Stutter during active `@swap` windows (`0` torn chart snapshots).
-6. **Autonomous Dual-Operator Self-Synthesis (`make self-opt`, Idempotent Fixed Point)**:
-   `flow self-opt` eliminates human magic constants by driving `SEARU × FLOW 2-Jet` in a closed 2-stage synthesis loop: Stage 1 synthesizes `0-ULP` degree-3 Minimax-Horner seeds for `isqrt` and `recip` verified exhaustively across all `65,536` bins (`0` LUT bytes), and Stage 2 meta-evolves decoupled per-solver `SEARU` schedules across 32 training + 32 held-out NP instances (`64 / 64 = 100%` convergence, `3.47×` speedup over baseline).
+   `flow_arena_try_swap` and `flow_step_atlas` coordinate-hold guarantee zero torn snapshots and strict dual-writer mutual exclusion.
+6. **Autonomous Dual-Operator Self-Synthesis (`make self-opt`)**:
+   Synthesizes `0-ULP` degree-3 Minimax-Horner seeds and evolved `SEARU` schedules into [`core/flow_opt_params.h`](core/flow_opt_params.h).
 
 ---
 
@@ -51,92 +55,36 @@ $$\Phi_{\text{atlas}} : \mathcal{C}_{64}^{\text{state}} \times \mathcal{A}_{2^k}
 
 ---
 
-## 3. Workflow
+## 3. Consuming `core/` vs `sdk/`
 
-### Step 1 — Emit `.flow` Manifold Atlas in Lean 4
-
-```lean
-import Flow
-
-def normalChart : Flow.Rule where
-  b0      := 0
-  b1      := Flow.q16One
-  b2      := 0
-  bExit   := -100 * Flow.q16One
-  bEnter  := 10 * Flow.q16One
-  dtMax   := 10 * Flow.q16One
-  uGain   := Flow.q16One
-  nextLo  := 0
-  nextHi  := 1
-  kanLock := 0
-
-def surgeChart : Flow.Rule where
-  b0      := 0
-  b1      := 0
-  b2      := 2 * Flow.q16One
-  bExit   := 2 * Flow.q16One
-  bEnter  := 50 * Flow.q16One
-  dtMax   := 10 * Flow.q16One
-  uGain   := Flow.q16One
-  nextLo  := 0
-  nextHi  := 1
-  kanLock := 0x0001
-
-def main : IO UInt32 := do
-  let s0 := Flow.mintState 1 0 (initChart := 0) (initMode := 0x0001)
-  Flow.emitBundle "surge.flow" 1 s0 [normalChart, surgeChart] normalChart
-  return 0
-```
+- **Pure-Math Lean (`IO`-free)**: `LEAN_PATH=/path/to/FLOW/build/lean` and `import Flow.Math` (or `Flow.Core`, `Flow.Bundle`, etc.).
+- **SDK Lean (Codegen / `.flow` / `.fir`)**: `import Flow.Schema`, `import Flow.Morphism`, `import Flow.Emit`, or convenience `import Flow`.
+- **Freestanding / Ring-0 C17**: `-I/path/to/FLOW/core` and `#include "flow.h"` / `#include "searu.h"` (or add `-I/path/to/FLOW/sdk` for freestanding `#include "flow_ir.h"` without `<stdio.h>`).
+- **Host / Synthesis C17**: `-I/path/to/FLOW/core -I/path/to/FLOW/sdk` and explicitly include [`flow_ir_io.h`](sdk/flow_ir_io.h), [`searu_mc_gf2.h`](sdk/searu_mc_gf2.h), or [`flow_ir_synth.h`](sdk/flow_ir_synth.h) as needed (include-order independent).
 
 ```bash
-LEAN_PATH=/path/to/FLOW/build/lean lean -DwarningAsError=true --run SurgeSpec.lean
-```
-
-### Step 2 — Verify, Stream & Self-Optimize
-
-```bash
-/path/to/FLOW/build/flow verify surge.flow
-printf "4.0\n12.0\n9.0 0x0000\n1.0\n" | /path/to/FLOW/build/flow run surge.flow
-/path/to/FLOW/build/flow searu-verify
-make -C /path/to/FLOW self-opt   # Autonomous SEARU x FLOW 2-Jet synthesis -> flow_opt_params.h
-```
-
-Bare-metal / Ring-0 & Application-Layer Dual-Operator C17 embedding (`-ffreestanding -nostdlib -mgeneral-regs-only`, `0` `blr` indirect calls):
-
-```c
-#include "flow.h"
-#include "searu.h"
-
-/* 1. Phase-gated continuous + discrete co-solver (0 noise during smooth 2-Jet descent;
- *    wakes SEARU + atomic @swap ONLY when trapped at !CONVERGED && dt == 0): */
-flow_step_atlas(state, state, chart_arena, cap_mask, u_ext_q16, mode_req_u16);
-searu_heal_and_swap(chart_arena, cap_mask, state, terms, num_terms, kan_bit_pin,
-                    u_ext_q16, target_x_q16, 6U, &rng_seed, &epoch, 4096U, NULL);
-
-/* 2. Zero-BLR inline custom discrete NP solver (KanLock pins + CLZ Zipf Sparse-k): */
-SEARU_SOLVE_INLINE(&res, num_vars, init_canvas, kan_pin, seed, max_iters,
-                   cand, frust, energy, {
-    /* Inline C17 objective computing `energy` and optional `frust[0..3]` mask */
-});
+make -C /path/to/FLOW test fmt-check
 ```
 
 ---
 
-## 4. Repository Structure & Build
+## 4. Repository Structure
 
-| File | Responsibility |
-| :--- | :--- |
-| [`Flow.lean`](Flow.lean) + [`Flow/`](Flow/) | Modular pure Lean 4 SSOT: 64B cells & Atlases (`Flow.Core`), `bv_decide` machine-word algebra (`Flow.BitAlgebra`), fiber-bundle duality (`Flow.Bundle`), intervals/lattices (`Flow.Interval`), discrete 2-Jet convex cone & Q16/cascade proofs (`Flow.Convex`), full-512-bit C17+WGSL Schema co-generator (`Flow.Schema`), and QTT `.fir` Builder/IR (`Flow.Morphism`). |
-| [`flow_opt_params.h`](flow_opt_params.h) | Auto-synthesized `0-ULP` degree-3 Horner seeds (`flow.h`) & meta-evolved `SEARU` schedules (`searu.h`) emitted by `make self-opt`. |
-| [`flow.h`](flow.h) | Freestanding GPR-only single-header 2-Jet arithmetic substrate (`flow_step`, `flow_step_atlas`, `flow_arena_try_swap`). |
-| [`searu.h`](searu.h) | Freestanding GPR-only 1-bit Chaos, `CLZ` Zipf Lévy-flight & symbiotic `SEARU × FLOW 2-Jet` NP co-solver (`searu_heal_and_swap`, `SEARU_SOLVE_INLINE`, `3-SAT`, `GraphColor`, `Bilevel 2-Jet + @swap`). |
-| [`flow_ir.h`](flow_ir.h) | Zero-heap, zero-jump-table C17/C++20 loader, QTT linearity gate & Pure-GPR evaluator (`flow_ir_eval_u64`) for binary `.fir` graphs. |
-| [`flow.c`](flow.c) | Universal zero-heap, zero-float C17 CLI & self-optimizing synthesizer (`flow verify`, `flow run`, `flow searu-verify`, `flow self-opt`, `@swap`). |
-| [`Makefile`](Makefile) | Self-contained `-Werror` build, freestanding ISA/ABI audit (`0` branches, `0` `udiv`, `0` `blr`, `0` FPU/SIMD), Gate 1–5 verification (including `Flow.lean` 0-`sorryAx` axiom audit, `Flow.Schema` ABI + `flow_ir.h` tests), and autonomous synthesis. |
-| [`docs/`](docs/) | Machine-checked Lean 4 duality proof ([`SymbioticDuality.lean`](docs/SymbioticDuality.lean)), formal paper ([`Symbiotic_Duality_Paper.md`](docs/Symbiotic_Duality_Paper.md)), and Traditional Chinese guide ([`Symbiotic_Duality_Guide_zh-TW.md`](docs/Symbiotic_Duality_Guide_zh-TW.md)). |
-| [`VERSION`](VERSION) | Release version (`8.0.0`). |
-
-*(Silicon-level bit-blasted SAT/temporal-induction proofs (`9x QED`) and `0-ULP` X-poisoned RTL co-simulation are paired in the companion `ELE` hardware repository.)*
+| Path | Layer | Responsibility |
+| :--- | :--- | :--- |
+| [`core/lean/Flow/`](core/lean/Flow/) | Core Math | Domain-free Lean 4 math & `bv_decide` theorems (`Core`, `BitAlgebra`, `Bundle`, `Interval`, `Convex`, `Math`) — zero `IO`, zero `sorryAx`. |
+| [`core/flow_opt_params.h`](core/flow_opt_params.h) | Core Ring-0 | Auto-synthesized `0-ULP` Horner seeds (`flow.h`) & evolved `SEARU` schedules (`searu.h`). |
+| [`core/flow.h`](core/flow.h) | Core Ring-0 | Freestanding GPR-only 2-Jet arithmetic substrate & lock-free `@swap`. |
+| [`core/searu.h`](core/searu.h) | Core Ring-0 | Freestanding GPR-only 1-bit Chaos, `CLZ` Zipf Lévy-flight & Bilevel 2-Jet co-solver. |
+| [`sdk/lean/`](sdk/lean/) | SDK Lean | IO emitters (`Flow.Emit`), 512b C17/WGSL Schema generator (`Flow.Schema`), QTT `.fir` Builder (`Flow.Morphism`), `Flow.Sdk`, `Flow`. |
+| [`sdk/flow_ir.h`](sdk/flow_ir.h) | SDK IR (Freestanding) | Zero-heap, zero-`<stdio.h>`, zero-jump-table C17/C++20 `.fir` codec, validator, QTT linearity gate & GPR evaluator. |
+| [`sdk/flow_ir_io.h`](sdk/flow_ir_io.h) | SDK Host IO | `<stdio.h>` `flow_ir_load_file` / `flow_ir_save_file` wrappers. |
+| [`sdk/searu_mc_gf2.h`](sdk/searu_mc_gf2.h) | SDK Synth | Standalone GF(2) ANF-RREF multiplicative-complexity synthesizer (`searu_solve_mc_gf2`). |
+| [`sdk/flow_ir_synth.h`](sdk/flow_ir_synth.h) | SDK Synth | `.fir` compositional & whole-graph multiplicative-complexity pass. |
+| [`sdk/flow_cli.c`](sdk/flow_cli.c) | SDK CLI | Zero-heap, zero-float CLI & `self-opt` / `fir-synth` driver (`build/flow`). |
+| [`Makefile`](Makefile) | Build & Gates | Enforces Gate 0 (layer isolation & anti-domain-laundering), Gate 1 (Ring-0 ISA), and Gates 2–5 (`lean`, `SymbioticDuality`, `C++20`, `.fir`). |
+| [`docs/`](docs/) | Theory & Witness | Thin [`SymbioticDuality.lean`](docs/SymbioticDuality.lean) executable witness importing `Flow.Bundle`, formal paper & zh-TW guide. |
+| [`VERSION`](VERSION) | Release | `8.0.0` |
 
 ---
 

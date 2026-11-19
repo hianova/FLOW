@@ -1,7 +1,7 @@
 /-
   Flow.Core — Canonical 64B Cell Layout, Wire Encoding & 2-Jet Schmitt Atlas
   ===========================================================================
-  Pure Lean 4 foundational definitions (zero external imports, zero `sorryAx`).
+  Pure Lean 4 foundational definitions (zero external imports, zero IO, zero `sorryAx`).
 -/
 
 namespace Flow
@@ -171,20 +171,6 @@ def mintArena (kExp : Nat) (specs : List Rule) (fallback : Rule) (epoch : UInt32
 def mintBundle (kExp : Nat) (initState : Cell64) (specs : List Rule) (fallback : Rule)
     (epoch : UInt32 := 1) : ByteArray :=
   initState.toBytes ++ mintArena kExp specs fallback epoch
-
-def emitCell (path : System.FilePath) (c : Cell64) : IO Unit :=
-  IO.FS.writeBinFile path c.toBytes
-
-def emitState (path : System.FilePath) (s : Cell64) : IO Unit :=
-  IO.FS.writeBinFile path s.toBytes
-
-def emitArena (path : System.FilePath) (kExp : Nat) (specs : List Rule) (fallback : Rule)
-    (epoch : UInt32 := 1) : IO Unit :=
-  IO.FS.writeBinFile path (mintArena kExp specs fallback epoch)
-
-def emitBundle (path : System.FilePath) (kExp : Nat) (initState : Cell64) (specs : List Rule)
-    (fallback : Rule) (epoch : UInt32 := 1) : IO Unit :=
-  IO.FS.writeBinFile path (mintBundle kExp initState specs fallback epoch)
 
 /-! ## 3. Canonical Piecewise-Linear & Tropical Synthesis Primitives -/
 

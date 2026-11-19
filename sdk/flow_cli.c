@@ -1,5 +1,8 @@
 #include "flow.h"
 #include "searu.h"
+#include "flow_ir.h"
+#include "flow_ir_io.h"
+#include "flow_ir_synth.h"
 
 #include <ctype.h>
 #include <limits.h>
@@ -8,6 +11,10 @@
 #include <time.h>
 
 static FLOW_ALIGN64 flow_cell g_arena[FLOW_ATLAS_MAX_CHARTS];
+static flow_ir_prog_t g_synth_in;
+static flow_ir_prog_t g_synth_out;
+static uint8_t g_synth_buf[FLOW_IR_MAX_FILE_BYTES];
+static flow_ir_synth_ws_t g_synth_ws;
 
 static void fmt_q16(int64_t v, char out[32]) {
     bool neg = (v < 0);
@@ -1751,6 +1758,79 @@ static int cmd_self_opt(const char *out_path) {
     return 0;
 }
 
+static int cmd_fir_synth(int argc, char **argv) {
+    if (argc < 4) {
+        fprintf(stderr, "Usage: flow fir-synth <in.fir> <out.fir> [--name <mod>] [--max-depth <D>] "
+                        "[--max-and <K>] [--iters <scale>] [--seed <u64>] [--op-wise]\n");
+        return 2;
+    }
+    const char *in_path = argv[2];
+    const char *out_path = argv[3];
+    flow_ir_synth_cfg_t cfg = {NULL, 0U, 12U, 1U, UINT64_C(0xF12574742026), false};
+
+    for (int i = 4; i < argc; ++i) {
+        if (strcmp(argv[i], "--name") == 0 && i + 1 < argc) {
+            cfg.override_name = argv[++i];
+        } else if (strcmp(argv[i], "--max-depth") == 0 && i + 1 < argc) {
+            uint64_t v = 0ULL;
+            if (!parse_u64_token(argv[++i], 64ULL, &v)) {
+                fprintf(stderr, "fir-synth: invalid --max-depth\n");
+                return 2;
+            }
+            cfg.max_depth = (uint32_t)v;
+        } else if (strcmp(argv[i], "--max-and") == 0 && i + 1 < argc) {
+            uint64_t v = 0ULL;
+            if (!parse_u64_token(argv[++i], (uint64_t)SEARU_MC_MAX_AND, &v)) {
+                fprintf(stderr, "fir-synth: invalid --max-and\n");
+                return 2;
+            }
+            cfg.max_and = (uint32_t)v;
+        } else if (strcmp(argv[i], "--iters") == 0 && i + 1 < argc) {
+            uint64_t v = 0ULL;
+            if (!parse_u64_token(argv[++i], 64ULL, &v) || v == 0ULL) {
+                fprintf(stderr, "fir-synth: invalid --iters\n");
+                return 2;
+            }
+            cfg.budget_scale = (uint32_t)v;
+        } else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) {
+            uint64_t v = 0ULL;
+            if (!parse_u64_token(argv[++i], UINT64_MAX, &v)) {
+                fprintf(stderr, "fir-synth: invalid --seed\n");
+                return 2;
+            }
+            cfg.seed = v;
+        } else if (strcmp(argv[i], "--op-wise") == 0) {
+            cfg.op_wise_only = true;
+        } else {
+            fprintf(stderr, "fir-synth: unknown or incomplete option '%s'\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!flow_ir_load_file(&g_synth_in, in_path, g_synth_buf, sizeof(g_synth_buf))) {
+        fprintf(stderr, "fir-synth: failed to load '%s'\n", in_path);
+        return 1;
+    }
+
+    flow_ir_synth_stats_t st;
+    if (!flow_ir_synth_prog(&g_synth_out, &g_synth_in, &cfg, &g_synth_ws, &st)) {
+        fprintf(stderr, "fir-synth: synthesis failed on '%s' (max_and=%u, max_depth=%u)\n", in_path,
+                cfg.max_and, cfg.max_depth);
+        return 1;
+    }
+    if (!flow_ir_save_file(&g_synth_out, out_path, g_synth_buf, sizeof(g_synth_buf))) {
+        fprintf(stderr, "fir-synth: failed to save '%s'\n", out_path);
+        return 1;
+    }
+
+    printf("  [FLOW-FIR-SYNTH] in=%s (ops=%u, mult_bits=%u, depth=%u) -> out=%s "
+           "(mod=%s, ops=%u, mult_bits=%u, depth=%u, sub=%u+%u, iters=%llu, verified=%u 0-ULP)\n",
+           in_path, st.in_ops, st.in_mult_bits, st.in_mult_depth, out_path, g_synth_out.name,
+           st.out_ops, st.out_mult_bits, st.out_mult_depth, st.sub_ops_synthesized, st.cache_hits,
+           (unsigned long long)st.total_searu_iters, st.verified_states);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc == 2 && (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-v") == 0)) {
         printf("FLOW %s\n", FLOW_VERSION_STRING);
@@ -1762,13 +1842,18 @@ int main(int argc, char **argv) {
     if ((argc == 2 || argc == 3) && strcmp(argv[1], "self-opt") == 0) {
         return cmd_self_opt((argc == 3) ? argv[2] : NULL);
     }
+    if (argc >= 4 && strcmp(argv[1], "fir-synth") == 0) {
+        return cmd_fir_synth(argc, argv);
+    }
     if (argc == 3 && strcmp(argv[1], "verify") == 0) {
         return cmd_verify(argv[2]);
     }
     if (argc == 3 && strcmp(argv[1], "run") == 0) {
         return cmd_run(argv[2]);
     }
-    fprintf(stderr, "Usage:\n  flow verify <bundle.flow>\n  flow run <bundle.flow>\n  flow "
-                    "searu-verify\n  flow self-opt [out_params.h]\n");
+    fprintf(stderr,
+            "Usage:\n  flow verify <bundle.flow>\n  flow run <bundle.flow>\n  flow "
+            "searu-verify\n  flow self-opt [out_params.h]\n  flow fir-synth <in.fir> <out.fir> "
+            "[--name <mod>] [--max-depth <D>] [--max-and <K>]\n");
     return 2;
 }
