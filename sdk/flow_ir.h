@@ -59,6 +59,19 @@ typedef struct {
     uint64_t fnv1a;
 } flow_ir_prog_t;
 
+typedef enum {
+    FLOW_IR_FIBER_COMMITTED = 0U,
+    FLOW_IR_FIBER_FALLBACK_NULL = 1U,
+    FLOW_IR_FIBER_FALLBACK_BOUNDS = 2U,
+    FLOW_IR_FIBER_FALLBACK_FORMAT = 3U,
+    FLOW_IR_FIBER_FALLBACK_MAC = 4U,
+    FLOW_IR_FIBER_FALLBACK_MULT = 5U,
+    FLOW_IR_FIBER_FALLBACK_WIDTH = 6U,
+    FLOW_IR_FIBER_FALLBACK_SSA = 7U,
+    FLOW_IR_FIBER_FALLBACK_ARITY = 8U,
+    FLOW_IR_FIBER_FALLBACK_LUT = 9U
+} flow_ir_fiber_t;
+
 static inline uint16_t flow_ir__read_le16(const uint8_t *p) {
     return flow_ir_wire_read_le16(p);
 }
@@ -117,23 +130,28 @@ static inline void flow_ir__copy_name24(char dst[24], const uint8_t src[24]) {
     dst[23] = '\0';
 }
 
+static inline flow_ir_fiber_t flow_ir_validate_fiber(const flow_ir_prog_t *p);
 static inline bool flow_ir_validate(const flow_ir_prog_t *p);
 
-static inline bool flow_ir_load_bytes(flow_ir_prog_t *out, const uint8_t *buf, size_t len) {
-    if (!out || !buf || len < FLOW_IR_HEADER_BYTES + 8U) {
-        return false;
+static inline flow_ir_fiber_t flow_ir_load_bytes_fiber(flow_ir_prog_t *out, const uint8_t *buf,
+                                                       size_t len) {
+    if (!out || !buf) {
+        return FLOW_IR_FIBER_FALLBACK_NULL;
+    }
+    if (len < FLOW_IR_HEADER_BYTES + 8U) {
+        return FLOW_IR_FIBER_FALLBACK_BOUNDS;
     }
     flow_ir__zero(out, sizeof(*out));
 
     if (flow_ir__read_le32(buf + 0U) != FLOW_IR_MAGIC) {
-        return false;
+        return FLOW_IR_FIBER_FALLBACK_FORMAT;
     }
     if (flow_ir__read_le32(buf + 4U) != FLOW_IR_VERSION) {
-        return false;
+        return FLOW_IR_FIBER_FALLBACK_FORMAT;
     }
     out->mult = flow_ir__read_le32(buf + 8U);
     if (out->mult != FLOW_IR_MULT_LINEAR && out->mult != FLOW_IR_MULT_CARTESIAN) {
-        return false;
+        return FLOW_IR_FIBER_FALLBACK_MULT;
     }
     out->flags = flow_ir__read_le32(buf + 12U);
     out->num_vals = flow_ir__read_le32(buf + 16U);
@@ -147,10 +165,10 @@ static inline bool flow_ir_load_bytes(flow_ir_prog_t *out, const uint8_t *buf, s
         out->num_inputs > FLOW_IR_MAX_IO || out->num_outputs == 0U ||
         out->num_outputs > FLOW_IR_MAX_IO || out->num_ops > FLOW_IR_MAX_OPS ||
         out->num_lut_u64 > FLOW_IR_MAX_LUT_U64) {
-        return false;
+        return FLOW_IR_FIBER_FALLBACK_BOUNDS;
     }
     if (out->num_inputs + out->num_ops != out->num_vals) {
-        return false;
+        return FLOW_IR_FIBER_FALLBACK_SSA;
     }
 
     size_t in_b = FLOW_IR_WIRE_PAD8_U32_BYTES(out->num_inputs);
@@ -158,13 +176,13 @@ static inline bool flow_ir_load_bytes(flow_ir_prog_t *out, const uint8_t *buf, s
     size_t body_len = FLOW_IR_WIRE_BODY_BYTES(out->num_vals, out->num_inputs, out->num_outputs,
                                               out->num_ops, out->num_lut_u64);
     if (len != body_len + 8U) {
-        return false;
+        return FLOW_IR_FIBER_FALLBACK_BOUNDS;
     }
 
     uint64_t expected_hash = flow_ir__read_le64(buf + body_len);
     uint64_t actual_hash = flow_ir__fnv1a64(buf, body_len);
     if (expected_hash != actual_hash) {
-        return false;
+        return FLOW_IR_FIBER_FALLBACK_MAC;
     }
     out->fnv1a = actual_hash;
 
@@ -174,7 +192,7 @@ static inline bool flow_ir_load_bytes(flow_ir_prog_t *out, const uint8_t *buf, s
         uint16_t w = flow_ir__read_le16(vr + 0U);
         uint16_t max_w = (out->mult == FLOW_IR_MULT_LINEAR) ? 256U : 512U;
         if (w == 0U || w > max_w) {
-            return false;
+            return FLOW_IR_FIBER_FALLBACK_WIDTH;
         }
         out->vals[i].width = w;
         out->vals[i].is_classical = vr[2];
@@ -185,7 +203,7 @@ static inline bool flow_ir_load_bytes(flow_ir_prog_t *out, const uint8_t *buf, s
     for (uint32_t i = 0U; i < out->num_inputs; ++i) {
         uint32_t vid = flow_ir__read_le32(buf + off + (size_t)i * 4U);
         if (vid != i) {
-            return false;
+            return FLOW_IR_FIBER_FALLBACK_SSA;
         }
         out->inputs[i] = vid;
     }
@@ -194,7 +212,7 @@ static inline bool flow_ir_load_bytes(flow_ir_prog_t *out, const uint8_t *buf, s
     for (uint32_t i = 0U; i < out->num_outputs; ++i) {
         uint32_t vid = flow_ir__read_le32(buf + off + (size_t)i * 4U);
         if (vid >= out->num_vals) {
-            return false;
+            return FLOW_IR_FIBER_FALLBACK_SSA;
         }
         out->outputs[i] = vid;
     }
@@ -207,25 +225,28 @@ static inline bool flow_ir_load_bytes(flow_ir_prog_t *out, const uint8_t *buf, s
         op->num_ins = flow_ir__read_le16(opr + 2U);
         op->out_val = flow_ir__read_le32(opr + 4U);
         if (op->kind < FLOW_IR_OP_CONST_U64 || op->kind > FLOW_IR_OP_STAGE_PIPE) {
-            return false;
+            return FLOW_IR_FIBER_FALLBACK_FORMAT;
         }
         if (out->mult == FLOW_IR_MULT_LINEAR && !flow_ir_op_is_linear_admissible(op->kind)) {
-            return false;
+            return FLOW_IR_FIBER_FALLBACK_MULT;
         }
-        if (op->num_ins > FLOW_IR_MAX_INS || op->out_val != out->num_inputs + i) {
-            return false;
+        if (op->num_ins > FLOW_IR_MAX_INS) {
+            return FLOW_IR_FIBER_FALLBACK_ARITY;
+        }
+        if (op->out_val != out->num_inputs + i) {
+            return FLOW_IR_FIBER_FALLBACK_SSA;
         }
         for (uint16_t k = 0U; k < FLOW_IR_MAX_INS; ++k) {
             uint32_t in_id = flow_ir__read_le32(opr + 8U + (size_t)k * 4U);
             op->ins[k] = in_id;
             if (k < op->num_ins && in_id >= op->out_val) {
-                return false;
+                return FLOW_IR_FIBER_FALLBACK_SSA;
             }
         }
         op->lut_off = flow_ir__read_le32(opr + 32U);
         op->lut_len = flow_ir__read_le32(opr + 36U);
         if ((uint64_t)op->lut_off + (uint64_t)op->lut_len > (uint64_t)out->num_lut_u64) {
-            return false;
+            return FLOW_IR_FIBER_FALLBACK_LUT;
         }
         op->p0 = flow_ir__read_le64(opr + 40U);
         op->p1 = flow_ir__read_le64(opr + 48U);
@@ -237,7 +258,11 @@ static inline bool flow_ir_load_bytes(flow_ir_prog_t *out, const uint8_t *buf, s
     for (uint32_t i = 0U; i < out->num_lut_u64; ++i) {
         out->lut_pool[i] = flow_ir__read_le64(buf + off + (size_t)i * 8U);
     }
-    return flow_ir_validate(out);
+    return flow_ir_validate_fiber(out);
+}
+
+static inline bool flow_ir_load_bytes(flow_ir_prog_t *out, const uint8_t *buf, size_t len) {
+    return flow_ir_load_bytes_fiber(out, buf, len) == FLOW_IR_FIBER_COMMITTED;
 }
 
 #define FLOW_IR_MAX_FILE_BYTES                                                                \
@@ -606,35 +631,38 @@ static inline bool flow_ir__op_arity_ok(const flow_ir_op_t *op) {
     return false;
 }
 
-static inline bool flow_ir_validate(const flow_ir_prog_t *p) {
-    if (!p || p->name[0] == '\0') {
-        return false;
+static inline flow_ir_fiber_t flow_ir_validate_fiber(const flow_ir_prog_t *p) {
+    if (!p) {
+        return FLOW_IR_FIBER_FALLBACK_NULL;
+    }
+    if (p->name[0] == '\0') {
+        return FLOW_IR_FIBER_FALLBACK_FORMAT;
     }
     if (p->mult != FLOW_IR_MULT_LINEAR && p->mult != FLOW_IR_MULT_CARTESIAN) {
-        return false;
+        return FLOW_IR_FIBER_FALLBACK_MULT;
     }
     if (p->num_inputs == 0U || p->num_inputs > FLOW_IR_MAX_IO || p->num_outputs == 0U ||
         p->num_outputs > FLOW_IR_MAX_IO || p->num_vals == 0U || p->num_vals > FLOW_IR_MAX_VALS ||
         p->num_ops > FLOW_IR_MAX_OPS || p->num_lut_u64 > FLOW_IR_MAX_LUT_U64) {
-        return false;
+        return FLOW_IR_FIBER_FALLBACK_BOUNDS;
     }
     if (p->num_inputs + p->num_ops != p->num_vals) {
-        return false;
+        return FLOW_IR_FIBER_FALLBACK_SSA;
     }
     uint16_t max_w = (p->mult == FLOW_IR_MULT_LINEAR) ? 256U : 512U;
     for (uint32_t i = 0U; i < p->num_vals; ++i) {
         if (p->vals[i].width == 0U || p->vals[i].width > max_w) {
-            return false;
+            return FLOW_IR_FIBER_FALLBACK_WIDTH;
         }
     }
     for (uint32_t i = 0U; i < p->num_inputs; ++i) {
         if (p->inputs[i] != i) {
-            return false;
+            return FLOW_IR_FIBER_FALLBACK_SSA;
         }
     }
     for (uint32_t i = 0U; i < p->num_outputs; ++i) {
         if (p->outputs[i] >= p->num_vals) {
-            return false;
+            return FLOW_IR_FIBER_FALLBACK_SSA;
         }
     }
     uint32_t lut_acc = 0U;
@@ -642,31 +670,35 @@ static inline bool flow_ir_validate(const flow_ir_prog_t *p) {
         const flow_ir_op_t *op = &p->ops[i];
         uint16_t k = op->kind;
         if (k < FLOW_IR_OP_CONST_U64 || k > FLOW_IR_OP_STAGE_PIPE) {
-            return false;
+            return FLOW_IR_FIBER_FALLBACK_FORMAT;
         }
         if (p->mult == FLOW_IR_MULT_LINEAR && !flow_ir_op_is_linear_admissible(k)) {
-            return false;
+            return FLOW_IR_FIBER_FALLBACK_MULT;
         }
-        if (op->out_val != p->num_inputs + i || op->num_ins > FLOW_IR_MAX_INS) {
-            return false;
+        if (op->out_val != p->num_inputs + i) {
+            return FLOW_IR_FIBER_FALLBACK_SSA;
         }
-        if (!flow_ir__op_arity_ok(op)) {
-            return false;
+        if (op->num_ins > FLOW_IR_MAX_INS || !flow_ir__op_arity_ok(op)) {
+            return FLOW_IR_FIBER_FALLBACK_ARITY;
         }
         for (uint16_t j = 0U; j < op->num_ins; ++j) {
             if (op->ins[j] >= op->out_val) {
-                return false;
+                return FLOW_IR_FIBER_FALLBACK_SSA;
             }
         }
         if ((uint64_t)op->lut_off + (uint64_t)op->lut_len > (uint64_t)p->num_lut_u64) {
-            return false;
+            return FLOW_IR_FIBER_FALLBACK_LUT;
         }
         lut_acc += op->lut_len;
         if (lut_acc > FLOW_IR_MAX_LUT_U64) {
-            return false;
+            return FLOW_IR_FIBER_FALLBACK_LUT;
         }
     }
-    return true;
+    return FLOW_IR_FIBER_COMMITTED;
+}
+
+static inline bool flow_ir_validate(const flow_ir_prog_t *p) {
+    return flow_ir_validate_fiber(p) == FLOW_IR_FIBER_COMMITTED;
 }
 
 static inline bool flow_ir_encode_bytes(const flow_ir_prog_t *p, uint8_t *buf, size_t cap,

@@ -142,6 +142,54 @@ static int check_negative_validate_cases(void) {
     return 0;
 }
 
+static int check_fiber_discrimination_cases(void) {
+    static uint8_t fir_raw[4096];
+    FILE *fp2 = fopen(IR_GATE_DIR "/synth_lin.fir", "rb");
+    if (!fp2) {
+        return 27;
+    }
+    size_t fir_sz = fread(fir_raw, 1U, sizeof(fir_raw), fp2);
+    fclose(fp2);
+    if (fir_sz <= FLOW_IR_HEADER_BYTES + 8U) {
+        return 28;
+    }
+    if (flow_ir_load_bytes_fiber(&g_p, fir_raw, fir_sz) != FLOW_IR_FIBER_COMMITTED) {
+        return 29;
+    }
+    fir_raw[fir_sz - 1U] ^= UINT8_C(0x01);
+    if (flow_ir_load_bytes_fiber(&g_p, fir_raw, fir_sz) != FLOW_IR_FIBER_FALLBACK_MAC) {
+        return 30;
+    }
+    fir_raw[fir_sz - 1U] ^= UINT8_C(0x01);
+    fir_raw[0] ^= UINT8_C(0x01);
+    if (flow_ir_load_bytes_fiber(&g_p, fir_raw, fir_sz) != FLOW_IR_FIBER_FALLBACK_FORMAT) {
+        return 31;
+    }
+    fir_raw[0] ^= UINT8_C(0x01);
+    if (flow_ir_load_bytes_fiber(&g_p, fir_raw, fir_sz) != FLOW_IR_FIBER_COMMITTED) {
+        return 32;
+    }
+    g_bad = g_p;
+    g_bad.ops[0].kind = FLOW_IR_OP_STAGE_PIPE;
+    g_bad.ops[0].num_ins = 2U;
+    if (flow_ir_validate_fiber(&g_bad) != FLOW_IR_FIBER_FALLBACK_MULT) {
+        return 33;
+    }
+    g_bad = g_p;
+    g_bad.ops[0].num_ins = 5U;
+    if (flow_ir_validate_fiber(&g_bad) != FLOW_IR_FIBER_FALLBACK_ARITY) {
+        return 34;
+    }
+    g_bad = g_p;
+    if (g_bad.num_ops > 0U && g_bad.ops[0].num_ins > 0U) {
+        g_bad.ops[0].ins[0] = g_bad.ops[0].out_val;
+        if (flow_ir_validate_fiber(&g_bad) != FLOW_IR_FIBER_FALLBACK_SSA) {
+            return 35;
+        }
+    }
+    return 0;
+}
+
 int main(void) {
     synth_pkt_t pkt_in = {0xABU,
                           0x01U,
@@ -291,6 +339,12 @@ int main(void) {
     /* Check 25: Negative flow_ir_validate arity & gf2m range enforcement */
     if (check_negative_validate_cases() != 0) {
         return 26;
+    }
+
+    /* Check 26: HoTT Fallback Fiber discrimination (flow_ir_load_bytes_fiber & validate_fiber) */
+    int rc_fiber = check_fiber_discrimination_cases();
+    if (rc_fiber != 0) {
+        return rc_fiber;
     }
     return 0;
 }
