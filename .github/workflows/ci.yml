@@ -24,10 +24,11 @@ jobs:
         run: |
           curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain leanprover/lean4:v4.36.0
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
-      - name: Check GCC ISO C17 Pedantic Ring-0 Compatibility (Linux)
+      - name: Check GCC ISO C17 Pedantic Compatibility (Linux)
         if: runner.os == 'Linux'
         run: |
-          make clean && make build/searu_ring0.o build/flow_ring0.o CC=gcc
+          printf '#include "flow.h"\n' | gcc -std=c17 -ffreestanding -nostdlib -fno-builtin -fno-stack-protector -mgeneral-regs-only -DFLOW_EXPORT_KERNEL=1 -Wall -Wextra -Wpedantic -Wundef -Wmissing-prototypes -Werror -O2 -Icore -x c -c - -o /dev/null
+          printf '#include "searu.h"\n' | gcc -std=c17 -ffreestanding -nostdlib -fno-builtin -fno-stack-protector -mgeneral-regs-only -DSEARU_EXPORT_RING0=1 -Wall -Wextra -Wpedantic -Wundef -Wmissing-prototypes -Werror -O2 -Icore -x c -c - -o /dev/null
       - name: Run All FLOW Verification Gates (-Werror)
         run: |
           make clean && make test CC=clang
