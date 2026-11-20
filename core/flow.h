@@ -141,7 +141,7 @@ FLOW_FORCE_INL flow_i128 flow_sel_i128(bool cond, flow_i128 tr, flow_i128 fa) {
 
 FLOW_FORCE_INL uint64_t flow_abs_i64(int64_t x) {
     uint64_t ux = (uint64_t)x;
-    return (x < 0) ? (UINT64_C(0) - ux) : ux;
+    return flow_sel_u64(x < 0, UINT64_C(0) - ux, ux);
 }
 
 FLOW_FORCE_INL bool flow_neg_i128(flow_i128 x) {
@@ -150,7 +150,7 @@ FLOW_FORCE_INL bool flow_neg_i128(flow_i128 x) {
 
 FLOW_FORCE_INL flow_u128 flow_abs_i128(flow_i128 x) {
     flow_u128 ux = (flow_u128)x;
-    return flow_neg_i128(x) ? ((flow_u128)0ULL - ux) : ux;
+    return flow_sel_u128(flow_neg_i128(x), (flow_u128)0ULL - ux, ux);
 }
 
 FLOW_FORCE_INL int64_t flow_clamp_sym(int64_t v, int64_t lim) {
@@ -186,14 +186,14 @@ FLOW_FORCE_INL int64_t flow_sym_shr_i128(flow_i128 x, uint32_t sh) {
     flow_u128 ax = flow_abs_i128(x);
     flow_u128 half = (flow_u128)1ULL << (sh - 1U);
     uint64_t mag = (uint64_t)((ax + half) >> sh);
-    return flow_neg_i128(x) ? -(int64_t)mag : (int64_t)mag;
+    return flow_sel_i64(flow_neg_i128(x), -(int64_t)mag, (int64_t)mag);
 }
 
 FLOW_FORCE_INL int64_t flow_sym_shr_i64(int64_t x, uint32_t sh) {
     uint64_t ax = flow_abs_i64(x);
     uint64_t half = UINT64_C(1) << (sh - 1U);
     uint64_t mag = (ax + half) >> sh;
-    return (x < 0) ? -(int64_t)mag : (int64_t)mag;
+    return flow_sel_i64(x < 0, -(int64_t)mag, (int64_t)mag);
 }
 
 /* --- SEARU-Synthesized Degree-3 Minimax Horner Seeds (0 LUT, 0 Cache Side-Channel) --- */
@@ -263,9 +263,9 @@ FLOW_FORCE_INL uint64_t flow_isqrt_round_u128(flow_u128 x) {
     flow_u128 wf = ((flow_u128)w << 64U) | (flow_u128)f;
     flow_u128 rem_u = wf - ((flow_u128)y0 * (flow_u128)y0);
     bool r_neg = flow_neg_i128((flow_i128)rem_u);
-    uint64_t rem_abs_hi = (uint64_t)((r_neg ? ((flow_u128)0ULL - rem_u) : rem_u) >> 32U);
+    uint64_t rem_abs_hi = (uint64_t)(flow_sel_u128(r_neg, (flow_u128)0ULL - rem_u, rem_u) >> 32U);
     uint64_t corr = (uint64_t)(((flow_u128)rem_abs_hi * (flow_u128)z_m) >> 96U);
-    uint64_t y = r_neg ? (y0 - corr) : (y0 + corr);
+    uint64_t y = flow_sel_u64(r_neg, y0 - corr, y0 + corr);
 
     uint64_t q = (uint64_t)(((flow_u128)y * (flow_u128)scale) >> 64U);
 
@@ -321,10 +321,10 @@ FLOW_FORCE_INL int64_t flow_sym_div128_clamped(flow_i128 num, flow_i128 den, int
     uint64_t h0 = (UINT64_C(1) << 32U) - p0;
     uint64_t r = ((r0 * h0) >> 31U) << 32U;
 
-    for (uint32_t it = 0U; it < 2U; ++it) {
-        uint64_t p_hi = (uint64_t)(((flow_u128)r * (flow_u128)d) >> 64U);
-        r = (uint64_t)(((flow_u128)r * (flow_u128)(~p_hi)) >> 63U);
-    }
+    uint64_t p_hi0 = (uint64_t)(((flow_u128)r * (flow_u128)d) >> 64U);
+    r = (uint64_t)(((flow_u128)r * (flow_u128)(~p_hi0)) >> 63U);
+    uint64_t p_hi1 = (uint64_t)(((flow_u128)r * (flow_u128)d) >> 64U);
+    r = (uint64_t)(((flow_u128)r * (flow_u128)(~p_hi1)) >> 63U);
 
     uint64_t u0_r_hi = (uint64_t)(((flow_u128)u0 * (flow_u128)r) >> 64U);
     flow_u128 q_scaled = (flow_u128)u1 * (flow_u128)r + (flow_u128)u0_r_hi;
@@ -334,16 +334,16 @@ FLOW_FORCE_INL int64_t flow_sym_div128_clamped(flow_i128 num, flow_i128 den, int
     flow_u128 rem128_u = u_norm - ((flow_u128)q * (flow_u128)d);
     bool neg1 = flow_neg_i128((flow_i128)rem128_u);
     q -= (uint64_t)neg1;
-    rem128_u += neg1 ? (flow_u128)d : (flow_u128)0ULL;
+    rem128_u += flow_sel_u128(neg1, (flow_u128)d, (flow_u128)0ULL);
 
     bool ge1 = (rem128_u >= (flow_u128)d);
     q += (uint64_t)ge1;
-    rem128_u -= ge1 ? (flow_u128)d : (flow_u128)0ULL;
+    rem128_u -= flow_sel_u128(ge1, (flow_u128)d, (flow_u128)0ULL);
 
     uint64_t rem = (uint64_t)rem128_u;
     uint64_t round_up = (uint64_t)(rem >= (d - rem));
     uint64_t mag = flow_sel_u64(q >= cap, cap, q + round_up);
-    return neg ? -(int64_t)mag : (int64_t)mag;
+    return flow_sel_i64(neg, -(int64_t)mag, (int64_t)mag);
 }
 
 /* --- Little-Endian 64B Wire Serialization & Lock-Free Arena Primitives --- */
@@ -529,7 +529,7 @@ FLOW_FORCE_INL void flow__step_chart_core(uint64_t out[8], const uint64_t state[
 
     /* Gauge-invariant branch sign: flips under (G0, G1, R2) -> (-G0, -G1, -R2) even at G1 == 0 */
     bool d_neg = (G1 < 0) | ((G1 == 0) & (R2 < 0));
-    int64_t signed_d = d_neg ? -d_mag : d_mag;
+    int64_t signed_d = flow_sel_i64(d_neg, -d_mag, d_mag);
     flow_i128 Q_cit = (flow_i128)G1 + (flow_i128)signed_d;
 
     bool has_r2 = (R2 != 0);

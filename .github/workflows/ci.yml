@@ -19,16 +19,24 @@ jobs:
       matrix:
         os: [ ubuntu-latest, macos-latest ]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+      - name: Cache Lean 4 Toolchain
+        uses: actions/cache@v5
+        with:
+          path: ~/.elan
+          key: ${{ runner.os }}-${{ runner.arch }}-elan-lean-4.36.0
       - name: Install Lean 4 Toolchain
         run: |
-          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain leanprover/lean4:v4.36.0
+          set -euo pipefail
+          if ! "$HOME/.elan/bin/lean" --version >/dev/null 2>&1; then
+            curl --retry 5 -sSfL https://elan.lean-lang.org/elan-init.sh -o /tmp/elan-init.sh
+            sh /tmp/elan-init.sh -y --default-toolchain leanprover/lean4:v4.36.0
+          fi
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
-      - name: Check GCC ISO C17 Pedantic Compatibility (Linux)
+      - name: Verify GCC Freestanding 0-Branch Ring-0 Kernels (Linux)
         if: runner.os == 'Linux'
         run: |
-          printf '#include "flow.h"\n' | gcc -std=c17 -ffreestanding -nostdlib -fno-builtin -fno-stack-protector -mgeneral-regs-only -DFLOW_EXPORT_KERNEL=1 -Wall -Wextra -Wpedantic -Wundef -Wmissing-prototypes -Werror -O2 -Icore -x c -c - -o /dev/null
-          printf '#include "searu.h"\n' | gcc -std=c17 -ffreestanding -nostdlib -fno-builtin -fno-stack-protector -mgeneral-regs-only -DSEARU_EXPORT_RING0=1 -Wall -Wextra -Wpedantic -Wundef -Wmissing-prototypes -Werror -O2 -Icore -x c -c - -o /dev/null
+          make clean && make build/flow_ring0.o build/searu_ring0.o CC=gcc
       - name: Run All FLOW Verification Gates (-Werror)
         run: |
           make clean && make test CC=clang

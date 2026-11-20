@@ -331,13 +331,19 @@ SEARU_RING0_API uint64_t searu_ring0_bilevel_step(uint64_t out_state[8],
     int64_t b2 = (int64_t)base_bound[2];
     uint64_t w_cost = UINT64_C(0);
 
-    for (uint32_t i = 0U; i < 4U; ++i) {
-        uint64_t m = flow_mask_bool(((cand_bits >> i) & UINT64_C(1)) != UINT64_C(0));
-        b0 += (int64_t)((uint64_t)terms[i].db0_q16 & m);
-        b1 += (int64_t)((uint64_t)terms[i].db1_q16 & m);
-        b2 += (int64_t)((uint64_t)terms[i].db2_q16 & m);
-        w_cost += terms[i].weight_cost & m;
-    }
+#define SEARU_BILEVEL_TERM_ACC(IDX)                                                       \
+    do {                                                                                  \
+        uint64_t m = flow_mask_bool(((cand_bits >> (IDX)) & UINT64_C(1)) != UINT64_C(0)); \
+        b0 += (int64_t)((uint64_t)terms[(IDX)].db0_q16 & m);                              \
+        b1 += (int64_t)((uint64_t)terms[(IDX)].db1_q16 & m);                              \
+        b2 += (int64_t)((uint64_t)terms[(IDX)].db2_q16 & m);                              \
+        w_cost += terms[(IDX)].weight_cost & m;                                           \
+    } while (0)
+    SEARU_BILEVEL_TERM_ACC(0U);
+    SEARU_BILEVEL_TERM_ACC(1U);
+    SEARU_BILEVEL_TERM_ACC(2U);
+    SEARU_BILEVEL_TERM_ACC(3U);
+#undef SEARU_BILEVEL_TERM_ACC
 
     uint64_t chart[8];
     chart[0] = (uint64_t)flow_clamp_sym(b0, FLOW_MAX_Q16);
