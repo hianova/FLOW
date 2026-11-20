@@ -814,7 +814,7 @@ FLOW_FORCE_INL uint64_t searu_eval_bilevel_2jet(uint64_t bits, const uint64_t ba
     uint16_t mode_req = (uint16_t)(st[5] & UINT64_C(0xFFFF));
     uint32_t steps = (jet_steps == 0U) ? 1U : jet_steps;
     for (uint32_t s = 0U; s < steps; ++s) {
-        flow_step_atlas(st, st, arena, UINT64_C(0), u_ext_q16, mode_req);
+        flow_step_atlas(st, st, (const flow_cell *)arena, UINT64_C(0), u_ext_q16, mode_req);
     }
 
     int64_t j0_post = (int64_t)st[0];
@@ -1022,7 +1022,7 @@ SEARU_SOLVER_API bool searu_heal_and_swap(flow_cell *arena, uint64_t cap_mask,
 
     uint64_t slot = (state[5] >> 16U) & cap_mask;
     uint64_t base_bound[8];
-    flow_arena_load_acq(base_bound, arena, slot, cap_mask);
+    flow_arena_load_acq(base_bound, (const flow_cell *)arena, slot, cap_mask);
     if ((uint32_t)(base_bound[6] & UINT64_C(0xFFFFFFFF)) == FLOW_SWAP_LOCK_TAG) {
         return false;
     }

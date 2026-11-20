@@ -1,5 +1,8 @@
 name: CI
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   push:
     branches: [ main, "feat/**", "refactor/**" ]
@@ -21,6 +24,10 @@ jobs:
         run: |
           curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain leanprover/lean4:v4.36.0
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Check GCC ISO C17 Pedantic Ring-0 Compatibility (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          make clean && make build/searu_ring0.o build/flow_ring0.o CC=gcc
       - name: Run All FLOW Verification Gates (-Werror)
         run: |
           make clean && make test CC=clang

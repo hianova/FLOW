@@ -1,7 +1,11 @@
 export PATH := $(HOME)/.elan/bin:/opt/homebrew/opt/llvm/bin:/opt/homebrew/bin:/usr/local/bin:$(PATH)
 
-CC ?= clang
-CXX ?= clang++
+ifeq ($(origin CC),default)
+CC := clang
+endif
+ifeq ($(origin CXX),default)
+CXX := clang++
+endif
 LEAN ?= lean
 LEANCHECKER ?= leanchecker
 CLANG_FORMAT ?= clang-format
@@ -216,8 +220,9 @@ test: $(OLEAN_DIR)/Flow.olean ring0 $(BUILD_DIR)/flow
 	@echo "=== [Gate 4] Symbiotic Duality Executable Witness (Flow.Bundle SSOT) ==="
 	@LEAN_PATH=$(OLEAN_DIR) $(LEAN) -DwarningAsError=true --run docs/SymbioticDuality.lean
 	@echo "=== [Gate 5] leanchecker + 0-sorryAx Audit, Flow.Math, C++20/Ring-0 Schema & FLOW_IR Gate ==="
-	@LEAN_PATH=$(OLEAN_DIR) $(LEANCHECKER) Flow.Math
-	@LEAN_PATH=$(OLEAN_DIR) $(LEANCHECKER) Flow
+	@for m in $(patsubst %,Flow.%,$(CORE_LEAN_NAMES) $(SDK_LEAN_NAMES)); do \
+		LEAN_PATH=$(OLEAN_DIR) $(LEANCHECKER) $$m || exit 1; \
+	done
 	@awk 'index($$0,"sorry") && !index($$0,"sorryAx") {print "ERROR: sorry found in " FILENAME " at line " NR > "/dev/stderr"; bad=1} END {exit bad}' $(ALL_LEAN_SRCS)
 	@printf 'import Flow.Math\n#check @Flow.Bundle.symbiotic_duality_complete\n' | \
 		LEAN_PATH=$(OLEAN_DIR) $(LEAN) -DwarningAsError=true --stdin > /dev/null

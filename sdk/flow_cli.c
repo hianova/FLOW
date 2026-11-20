@@ -363,7 +363,7 @@ static int cmd_run(const char *bundle_path) {
             }
         }
 
-        flow_step_atlas(state, state, g_arena, cap_mask, u_ext, mode_req);
+        flow_step_atlas(state, state, (const flow_cell *)g_arena, cap_mask, u_ext, mode_req);
         ++step_idx;
 
         char x_s[32];
@@ -647,7 +647,7 @@ static int cmd_searu_verify(void) {
     }
     FLOW_ALIGN64 flow_cell live_st = {0ULL, 0ULL, 0ULL, 0ULL, 0ULL, 0ULL, 0ULL, 0ULL};
     for (uint32_t s = 0U; s < 6U; ++s) {
-        flow_step_atlas(live_st, live_st, g_arena, UINT64_C(0), INT64_C(0), 0U);
+        flow_step_atlas(live_st, live_st, (const flow_cell *)g_arena, UINT64_C(0), INT64_C(0), 0U);
     }
     if ((int64_t)live_st[3] != target_x_q16 || (int64_t)live_st[0] != INT64_C(0) ||
         (live_st[6] & (uint64_t)FLOW_STATUS_CONVERGED) == UINT64_C(0)) {
@@ -697,7 +697,8 @@ static int cmd_searu_verify(void) {
     uint64_t app_seed = UINT64_C(0x7777);
     uint32_t app_epoch = 1U;
     for (uint32_t s = 0U; s < 6U; ++s) {
-        flow_step_atlas(app_st, app_st, g_arena, UINT64_C(0), INT64_C(6) * FLOW_Q16_ONE, 0U);
+        flow_step_atlas(app_st, app_st, (const flow_cell *)g_arena, UINT64_C(0),
+                        INT64_C(6) * FLOW_Q16_ONE, 0U);
         if (searu_heal_and_swap(g_arena, UINT64_C(0), app_st, terms, 24U, UINT64_C(0), INT64_C(0),
                                 target_x_q16, 6U, &app_seed, &app_epoch, 8192U, NULL)) {
             fprintf(stderr, "searu-verify: searu_heal_and_swap fired during smooth regime!\n");
@@ -713,7 +714,7 @@ static int cmd_searu_verify(void) {
      * SEARU! */
     flow_arena_publish_bound(g_arena, UINT64_C(0), UINT64_C(0), 2U, base_bound);
     app_st[3] = UINT64_C(0);
-    flow_step_atlas(app_st, app_st, g_arena, UINT64_C(0), INT64_C(0), 0U);
+    flow_step_atlas(app_st, app_st, (const flow_cell *)g_arena, UINT64_C(0), INT64_C(0), 0U);
     searu_result heal_res;
     if (!searu_heal_and_swap(g_arena, UINT64_C(0), app_st, terms, 24U, UINT64_C(0), INT64_C(0),
                              target_x_q16, 6U, &app_seed, &app_epoch, 8192U, &heal_res) ||
@@ -722,7 +723,7 @@ static int cmd_searu_verify(void) {
         return 1;
     }
     for (uint32_t s = 0U; s < 6U; ++s) {
-        flow_step_atlas(app_st, app_st, g_arena, UINT64_C(0), INT64_C(0), 0U);
+        flow_step_atlas(app_st, app_st, (const flow_cell *)g_arena, UINT64_C(0), INT64_C(0), 0U);
     }
     if ((int64_t)app_st[3] != target_x_q16 ||
         (app_st[6] & (uint64_t)FLOW_STATUS_CONVERGED) == UINT64_C(0)) {

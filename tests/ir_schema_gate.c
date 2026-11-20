@@ -227,14 +227,15 @@ int main(void) {
         flow_cell_from_bytes(g_arena[i], g_raw + (i + 1) * 64U);
     }
     synth_bundle_abi_t b_out;
-    if (!synth_bundle_abi_unpack(g_arena, SYNTH_BUNDLE_ABI_CHART_COUNT, &b_out)) {
+    if (!synth_bundle_abi_unpack((const flow_cell *)g_arena, SYNTH_BUNDLE_ABI_CHART_COUNT,
+                                 &b_out)) {
         return 3;
     }
     if (b_out.alpha != 42 || b_out.beta != -123 || b_out.gamma != 777) {
         return 4;
     }
     g_arena[SYNTH_BUNDLE_ABI_TAG_CHART][7] ^= 1ULL;
-    if (synth_bundle_abi_unpack(g_arena, SYNTH_BUNDLE_ABI_CHART_COUNT, &b_out)) {
+    if (synth_bundle_abi_unpack((const flow_cell *)g_arena, SYNTH_BUNDLE_ABI_CHART_COUNT, &b_out)) {
         return 5;
     }
     if (!flow_ir_load_file(&g_p, IR_GATE_DIR "/synth_cart.fir", g_buf, sizeof(g_buf))) {
