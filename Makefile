@@ -37,7 +37,7 @@ C_SOURCES := $(CORE_DIR)/flow_opt_params.h $(CORE_DIR)/flow.h $(CORE_DIR)/searu.
              $(SDK_DIR)/searu_mc_gf2.h $(SDK_DIR)/flow_ir_synth.h $(SDK_DIR)/flow_cli.c \
              tests/ir_schema_gate.c
 
-CORE_LEAN_NAMES := Core BitAlgebra Bundle Interval Math
+CORE_LEAN_NAMES := Core BitAlgebra Bundle GaugeBundle ProjectiveBundle YangMillsBundle ConstructiveQFT Interval LatticeBootstrap ColorGaugeBundle FermionBundle GravityBundle UnifiedBundle MolecularBundle Math
 SDK_LEAN_NAMES := Emit Schema Morphism Canonical Sdk
 
 CORE_LEAN_SRCS := $(patsubst %,$(CORE_LEAN_DIR)/Flow/%.lean,$(CORE_LEAN_NAMES))
@@ -76,10 +76,40 @@ $(OLEAN_DIR)/Flow/BitAlgebra.olean: $(CORE_LEAN_DIR)/Flow/BitAlgebra.lean $(OLEA
 $(OLEAN_DIR)/Flow/Bundle.olean: $(CORE_LEAN_DIR)/Flow/Bundle.lean $(OLEAN_DIR)/Flow/Core.olean | $(OLEAN_DIR)/Flow
 	LEAN_PATH=$(OLEAN_DIR) $(LEAN) -DwarningAsError=true --root=$(CORE_LEAN_DIR) -o $@ $<
 
+$(OLEAN_DIR)/Flow/GaugeBundle.olean: $(CORE_LEAN_DIR)/Flow/GaugeBundle.lean $(OLEAN_DIR)/Flow/Core.olean | $(OLEAN_DIR)/Flow
+	LEAN_PATH=$(OLEAN_DIR) $(LEAN) -DwarningAsError=true --root=$(CORE_LEAN_DIR) -o $@ $<
+
+$(OLEAN_DIR)/Flow/ProjectiveBundle.olean: $(CORE_LEAN_DIR)/Flow/ProjectiveBundle.lean $(OLEAN_DIR)/Flow/GaugeBundle.olean | $(OLEAN_DIR)/Flow
+	LEAN_PATH=$(OLEAN_DIR) $(LEAN) -DwarningAsError=true --root=$(CORE_LEAN_DIR) -o $@ $<
+
+$(OLEAN_DIR)/Flow/YangMillsBundle.olean: $(CORE_LEAN_DIR)/Flow/YangMillsBundle.lean $(OLEAN_DIR)/Flow/ProjectiveBundle.olean | $(OLEAN_DIR)/Flow
+	LEAN_PATH=$(OLEAN_DIR) $(LEAN) -DwarningAsError=true --root=$(CORE_LEAN_DIR) -o $@ $<
+
+$(OLEAN_DIR)/Flow/ConstructiveQFT.olean: $(CORE_LEAN_DIR)/Flow/ConstructiveQFT.lean $(OLEAN_DIR)/Flow/YangMillsBundle.olean | $(OLEAN_DIR)/Flow
+	LEAN_PATH=$(OLEAN_DIR) $(LEAN) -DwarningAsError=true --root=$(CORE_LEAN_DIR) -o $@ $<
+
 $(OLEAN_DIR)/Flow/Interval.olean: $(CORE_LEAN_DIR)/Flow/Interval.lean $(OLEAN_DIR)/Flow/Core.olean | $(OLEAN_DIR)/Flow
 	LEAN_PATH=$(OLEAN_DIR) $(LEAN) -DwarningAsError=true --root=$(CORE_LEAN_DIR) -o $@ $<
 
-$(OLEAN_DIR)/Flow/Math.olean: $(CORE_LEAN_DIR)/Flow/Math.lean $(OLEAN_DIR)/Flow/Core.olean $(OLEAN_DIR)/Flow/BitAlgebra.olean $(OLEAN_DIR)/Flow/Bundle.olean $(OLEAN_DIR)/Flow/Interval.olean | $(OLEAN_DIR)/Flow
+$(OLEAN_DIR)/Flow/LatticeBootstrap.olean: $(CORE_LEAN_DIR)/Flow/LatticeBootstrap.lean $(OLEAN_DIR)/Flow/ConstructiveQFT.olean $(OLEAN_DIR)/Flow/Interval.olean | $(OLEAN_DIR)/Flow
+	LEAN_PATH=$(OLEAN_DIR) $(LEAN) -DwarningAsError=true --root=$(CORE_LEAN_DIR) -o $@ $<
+
+$(OLEAN_DIR)/Flow/ColorGaugeBundle.olean: $(CORE_LEAN_DIR)/Flow/ColorGaugeBundle.lean $(OLEAN_DIR)/Flow/YangMillsBundle.olean | $(OLEAN_DIR)/Flow
+	LEAN_PATH=$(OLEAN_DIR) $(LEAN) -DwarningAsError=true --root=$(CORE_LEAN_DIR) -o $@ $<
+
+$(OLEAN_DIR)/Flow/FermionBundle.olean: $(CORE_LEAN_DIR)/Flow/FermionBundle.lean $(OLEAN_DIR)/Flow/ColorGaugeBundle.olean | $(OLEAN_DIR)/Flow
+	LEAN_PATH=$(OLEAN_DIR) $(LEAN) -DwarningAsError=true --root=$(CORE_LEAN_DIR) -o $@ $<
+
+$(OLEAN_DIR)/Flow/GravityBundle.olean: $(CORE_LEAN_DIR)/Flow/GravityBundle.lean $(OLEAN_DIR)/Flow/FermionBundle.olean | $(OLEAN_DIR)/Flow
+	LEAN_PATH=$(OLEAN_DIR) $(LEAN) -DwarningAsError=true --root=$(CORE_LEAN_DIR) -o $@ $<
+
+$(OLEAN_DIR)/Flow/UnifiedBundle.olean: $(CORE_LEAN_DIR)/Flow/UnifiedBundle.lean $(OLEAN_DIR)/Flow/GravityBundle.olean | $(OLEAN_DIR)/Flow
+	LEAN_PATH=$(OLEAN_DIR) $(LEAN) -DwarningAsError=true --root=$(CORE_LEAN_DIR) -o $@ $<
+
+$(OLEAN_DIR)/Flow/MolecularBundle.olean: $(CORE_LEAN_DIR)/Flow/MolecularBundle.lean $(OLEAN_DIR)/Flow/Bundle.olean $(OLEAN_DIR)/Flow/Interval.olean $(OLEAN_DIR)/Flow/ConstructiveQFT.olean $(OLEAN_DIR)/Flow/UnifiedBundle.olean | $(OLEAN_DIR)/Flow
+	LEAN_PATH=$(OLEAN_DIR) $(LEAN) -DwarningAsError=true --root=$(CORE_LEAN_DIR) -o $@ $<
+
+$(OLEAN_DIR)/Flow/Math.olean: $(CORE_LEAN_DIR)/Flow/Math.lean $(OLEAN_DIR)/Flow/Core.olean $(OLEAN_DIR)/Flow/BitAlgebra.olean $(OLEAN_DIR)/Flow/Bundle.olean $(OLEAN_DIR)/Flow/GaugeBundle.olean $(OLEAN_DIR)/Flow/ProjectiveBundle.olean $(OLEAN_DIR)/Flow/YangMillsBundle.olean $(OLEAN_DIR)/Flow/ConstructiveQFT.olean $(OLEAN_DIR)/Flow/Interval.olean $(OLEAN_DIR)/Flow/LatticeBootstrap.olean $(OLEAN_DIR)/Flow/ColorGaugeBundle.olean $(OLEAN_DIR)/Flow/FermionBundle.olean $(OLEAN_DIR)/Flow/GravityBundle.olean $(OLEAN_DIR)/Flow/UnifiedBundle.olean $(OLEAN_DIR)/Flow/MolecularBundle.olean | $(OLEAN_DIR)/Flow
 	LEAN_PATH=$(OLEAN_DIR) $(LEAN) -DwarningAsError=true --root=$(CORE_LEAN_DIR) -o $@ $<
 
 # --- Layer 1 (`sdk/lean`): Engineering Emitters, 512b Schema ABI & Morphism IR ---

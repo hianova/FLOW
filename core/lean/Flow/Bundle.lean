@@ -369,4 +369,221 @@ theorem unrelaxed_local_min_strictly_above_global :
     bundleEnergy2 0 100 < bundleEnergy2 1 100 ∧ bundleEnergy2 1 256 = 0 := by
   decide
 
+/-! ## Multi-Scale Projection Obstruction, Parameter-Shift Variance & Schmitt Hysteresis -/
+
+/-- Decomposed total objective combining an irreducible stochastic floor and a relaxable coherent strain. -/
+def coupledLoss (stochasticFloor coherentStrain : Nat) : Nat :=
+  stochasticFloor + coherentStrain
+
+/-- Theorem 6A: Whenever coherent strain strictly drops, coupled total loss drops strictly regardless of the stochastic floor. -/
+theorem scale_mismatch_strict_drop
+    (stochasticFloor strainPost strainPre : Nat) (hDrop : strainPost < strainPre) :
+    coupledLoss stochasticFloor strainPost < coupledLoss stochasticFloor strainPre := by
+  unfold coupledLoss
+  omega
+
+/-- Theorem 6B: When coherent strain is zero (pure stochastic noise floor), any strain-only projector leaves total loss unchanged. -/
+theorem stochastic_floor_invariance (stochasticFloor : Nat) :
+    coupledLoss stochasticFloor 0 = stochasticFloor := by
+  unfold coupledLoss
+  omega
+
+/-- Theorem 7: On non-quadratic fibers inside the sub-unit convergence radius (`d < S`) with cubic remainder bound `3 * r * S^2 ≤ d^3`, one `2-Jet` curvature step strictly contracts displacement and quadratic strain (`r < d` and `r^2 < d^2`). -/
+theorem nonquad_2jet_contraction
+    (S d r : Nat) (hS : 0 < S) (hdPos : 0 < d) (hdLt : d < S)
+    (hCubic : 3 * S * S * r ≤ d * d * d) :
+    r < d ∧ r * r < d * d := by
+  have hS_pos_le : d ≤ S := Nat.le_of_lt hdLt
+  have hd2_le_dS : d * d ≤ d * S := Nat.mul_le_mul_left d hS_pos_le
+  have hdS_lt_S2 : d * S < S * S := Nat.mul_lt_mul_of_pos_right hdLt hS
+  have hd2_lt_S2 : d * d < S * S := Nat.lt_of_le_of_lt hd2_le_dS hdS_lt_S2
+  have hd3_lt_S2d : d * d * d < S * S * d := Nat.mul_lt_mul_of_pos_right hd2_lt_S2 hdPos
+  have h1mul : S * S * r ≤ 3 * (S * S * r) := by
+    simpa [Nat.one_mul] using Nat.mul_le_mul_right (S * S * r) (by decide : 1 ≤ 3)
+  have hAssoc : 3 * S * S * r = 3 * (S * S * r) := by
+    rw [Nat.mul_assoc 3 S S, Nat.mul_assoc]
+  have hS2r_lt_S2d : S * S * r < S * S * d := by
+    have hCubic' : 3 * (S * S * r) ≤ d * d * d := hAssoc ▸ hCubic
+    exact Nat.lt_of_le_of_lt (Nat.le_trans h1mul hCubic') hd3_lt_S2d
+  have hrLt : r < d := by
+    by_cases h : r < d
+    · exact h
+    · have hGe : d ≤ r := Nat.le_of_not_lt h
+      have hMul : S * S * d ≤ S * S * r := Nat.mul_le_mul_left (S * S) hGe
+      omega
+  have hr2_le_rd : r * r ≤ r * d := Nat.mul_le_mul_left r (Nat.le_of_lt hrLt)
+  have hrd_lt_d2 : r * d < d * d := Nat.mul_lt_mul_of_pos_right hrLt hdPos
+  exact ⟨hrLt, Nat.lt_of_le_of_lt hr2_le_rd hrd_lt_d2⟩
+
+/-- Theorem 8: Finite-difference step magnification `K ≥ 2` strictly inflates probe curvature variance quadratically (`v < K^2 * v` and `4 * v ≤ K^2 * v`) relative to the unamplified parameter-shift probe. -/
+theorem shift_rule_curv_var_strictly_better
+    (K v : Nat) (hK : 2 ≤ K) (hv : 0 < v) :
+    v < K * K * v ∧ 4 * v ≤ K * K * v := by
+  have h4_le_2K : 4 ≤ 2 * K := Nat.mul_le_mul_left 2 hK
+  have h2K_le_K2 : 2 * K ≤ K * K := Nat.mul_le_mul_right K hK
+  have h4_le_K2 : 4 ≤ K * K := Nat.le_trans h4_le_2K h2K_le_K2
+  have h4v : 4 * v ≤ K * K * v := Nat.mul_le_mul_right v h4_le_K2
+  exact ⟨by omega, h4v⟩
+
+/-- Two-threshold Schmitt-trigger hysteresis gatekeeper over integer SNR counts. -/
+def stepSchmitt (zExit zEnter snr : Nat) (active : Bool) : Bool :=
+  if active then decide (zExit ≤ snr) else decide (zEnter ≤ snr)
+
+/-- Theorem 9A: When asleep (`active = false`), any sub-entry probe `snr < zEnter` remains asleep, preventing low-SNR noise actuation. -/
+theorem schmitt_sleep_blocks_subthreshold
+    (zExit zEnter snr : Nat) (hLow : snr < zEnter) :
+    stepSchmitt zExit zEnter snr false = false := by
+  unfold stepSchmitt
+  exact decide_eq_false (by omega)
+
+/-- Theorem 9B: Inside the hysteresis deadband `[zExit, zEnter)`, state transitions are completely suppressed (`stepSchmitt ... active = active`). -/
+theorem schmitt_deadband_preserves_state
+    (zExit zEnter snr : Nat) (active : Bool) (hGe : zExit ≤ snr) (hLt : snr < zEnter) :
+    stepSchmitt zExit zEnter snr active = active := by
+  unfold stepSchmitt
+  cases active
+  · dsimp; exact decide_eq_false (by omega)
+  · dsimp; exact decide_eq_true (by omega)
+
+/-- Theorem 9C: Whenever `snr` crosses `zEnter` (with `zExit ≤ zEnter`), the gatekeeper activates unconditionally. -/
+theorem schmitt_wakes_above_enter
+    (zExit zEnter snr : Nat) (active : Bool) (hOrd : zExit ≤ zEnter) (hHigh : zEnter ≤ snr) :
+    stepSchmitt zExit zEnter snr active = true := by
+  unfold stepSchmitt
+  cases active
+  · dsimp; exact decide_eq_true (by omega)
+  · dsimp; exact decide_eq_true (by omega)
+
+/-- Theorem 9D: Whenever `snr` drops below `zExit` (with `zExit ≤ zEnter`), the gatekeeper returns to sleep unconditionally. -/
+theorem schmitt_sleeps_below_exit
+    (zExit zEnter snr : Nat) (active : Bool) (hOrd : zExit ≤ zEnter) (hQuiet : snr < zExit) :
+    stepSchmitt zExit zEnter snr active = false := by
+  unfold stepSchmitt
+  cases active
+  · dsimp; exact decide_eq_false (by omega)
+  · dsimp; exact decide_eq_false (by omega)
+
+/-- Theorem 10: Replacing true residual `d` with estimation noise `e > d` strictly increases both squared strain and coupled loss whenever curvature `κ > 0`. -/
+theorem noisy_update_hurts_below_noise_floor
+    (stochasticFloor κ d e : Nat) (hκ : 0 < κ) (hNoise : d < e) :
+    d * d < e * e ∧
+    coupledLoss stochasticFloor (κ * (d * d)) < coupledLoss stochasticFloor (κ * (e * e)) := by
+  have hd_le_e : d ≤ e := Nat.le_of_lt hNoise
+  have h1 : d * d ≤ d * e := Nat.mul_le_mul_left d hd_le_e
+  have h2 : d * e < e * e := Nat.mul_lt_mul_of_pos_right hNoise (by omega)
+  have hsq : d * d < e * e := Nat.lt_of_le_of_lt h1 h2
+  have hmul : κ * (d * d) < κ * (e * e) := Nat.mul_lt_mul_of_pos_left hsq hκ
+  exact ⟨hsq, scale_mismatch_strict_drop stochasticFloor _ _ hmul⟩
+
+/-! ## Affine Channel Invariance, Huber-Clipped Outlier Persistence & Post-Selection De-Biasing -/
+
+/-- Affine readout distortion channel `y ↦ b + η * y` combining additive baseline bias `b` and multiplicative contrast `η`. -/
+def affineChannel (b η y : Int) : Int :=
+  b + η * y
+
+/-- Symmetric shift-rule first jet (doubled slope). -/
+def shiftSlope (fm fp : Int) : Int :=
+  fp - fm
+
+/-- Symmetric shift-rule second jet (doubled curvature). -/
+def shiftCurv (fm f0 fp : Int) : Int :=
+  fp + fm - 2 * f0
+
+/-- Theorem 11A: Symmetric shift slope cancels additive channel offset `b` identically and scales linearly by `η`. -/
+theorem affine_shift_slope_exact (b η fm fp : Int) :
+    shiftSlope (affineChannel b η fm) (affineChannel b η fp) = η * shiftSlope fm fp := by
+  unfold shiftSlope affineChannel
+  rw [Int.mul_sub]
+  omega
+
+/-- Theorem 11B: Symmetric shift curvature cancels additive channel offset `b` identically and scales linearly by `η`. -/
+theorem affine_shift_curv_exact (b η fm f0 fp : Int) :
+    shiftCurv (affineChannel b η fm) (affineChannel b η f0) (affineChannel b η fp) =
+      η * shiftCurv fm f0 fp := by
+  unfold shiftCurv affineChannel
+  rw [Int.mul_sub η (fp + fm) (2 * f0), Int.mul_add η fp fm, Int.mul_add 2 b (η * f0)]
+  have hcomm : η * (2 * f0) = 2 * (η * f0) := by
+    rw [Int.mul_left_comm]
+  rw [hcomm]
+  omega
+
+/-- Theorem 11C: Under any affine readout distortion `b + η * y`, the Newton quotient cross-product `slope' * curv = slope * curv'` is identically invariant (both `b` and `η` cancel). -/
+theorem affine_2jet_ratio_invariant (b η fm f0 fp : Int) :
+    shiftSlope (affineChannel b η fm) (affineChannel b η fp) * shiftCurv fm f0 fp =
+      shiftSlope fm fp * shiftCurv (affineChannel b η fm) (affineChannel b η f0) (affineChannel b η fp) := by
+  rw [affine_shift_slope_exact, affine_shift_curv_exact]
+  rw [Int.mul_assoc, Int.mul_left_comm η (shiftSlope fm fp)]
+
+/-- Theorem 11D: Any nonzero axis-dependent asymmetry `deltaBias ≠ 0` between shift branches breaks exact cancellation linearly. -/
+theorem axis_bias_breaks_shift_invariance (b η fm fp deltaBias : Int) (hBias : deltaBias ≠ 0) :
+    shiftSlope (affineChannel b η fm) (affineChannel b η fp + deltaBias) =
+        η * shiftSlope fm fp + deltaBias ∧
+      shiftSlope (affineChannel b η fm) (affineChannel b η fp + deltaBias) ≠ η * shiftSlope fm fp := by
+  unfold shiftSlope affineChannel
+  rw [Int.mul_sub]
+  omega
+
+/-- Symmetric Huber-style saturation clipping `z` into `[-bound, bound]`. -/
+def huberClip (bound z : Int) : Int :=
+  if z > bound then bound else if z < -bound then -bound else z
+
+/-- Clipped sequential running accumulator over a finite probe stream. -/
+def accumClipped (bound : Int) : Int → List Int → Int
+  | acc, [] => acc
+  | acc, z :: rest => accumClipped bound (acc + huberClip bound z) rest
+
+/-- Per-step bound of `huberClip` for any non-negative ceiling `bound ≥ 0`. -/
+theorem huberClip_bounds (bound z : Int) (hB : 0 ≤ bound) :
+    -bound ≤ huberClip bound z ∧ huberClip bound z ≤ bound := by
+  unfold huberClip
+  split
+  · constructor <;> omega
+  · split
+    · constructor <;> omega
+    · constructor <;> omega
+
+/-- Theorem 12A: For any `bound < thresh`, an arbitrarily large single-epoch outlier `z` clipped by `huberClip` can never breach `±thresh`. -/
+theorem huber_single_glitch_cannot_trigger (bound thresh z : Int) (hB : 0 ≤ bound) (hGap : bound < thresh) :
+    -thresh < huberClip bound z ∧ huberClip bound z < thresh := by
+  have hb := huberClip_bounds bound z hB
+  omega
+
+/-- Inductive envelope for `accumClipped` over a list of arbitrary (possibly infinite-spike) inputs. -/
+theorem huber_accum_bound (bound : Int) (hB : 0 ≤ bound) (zs : List Int) (acc : Int) :
+    acc - bound * (zs.length : Int) ≤ accumClipped bound acc zs ∧
+      accumClipped bound acc zs ≤ acc + bound * (zs.length : Int) := by
+  induction zs generalizing acc with
+  | nil =>
+    simp [accumClipped]
+  | cons z rest ih =>
+    unfold accumClipped
+    have hb := huberClip_bounds bound z hB
+    have hrec := ih (acc + huberClip bound z)
+    have hnat : ((z :: rest).length : Int) = (rest.length : Int) + 1 := by
+      simp only [List.length_cons]
+      omega
+    have hlen : bound * ((z :: rest).length : Int) = bound * (rest.length : Int) + bound := by
+      rw [hnat, Int.mul_add, Int.mul_one]
+    rw [hlen]
+    omega
+
+/-- Theorem 12B: Crossing `thresh` from rest requires persistent multi-epoch evidence (`thresh ≤ bound * len`); any short burst (`bound * len < thresh`) cannot trigger regardless of spike magnitude. -/
+theorem huber_requires_multi_epoch_persistence
+    (bound thresh : Int) (hB : 0 ≤ bound) (zs : List Int)
+    (hShort : bound * (zs.length : Int) < thresh) :
+    -thresh < accumClipped bound 0 zs ∧ accumClipped bound 0 zs < thresh := by
+  have h := huber_accum_bound bound hB zs 0
+  omega
+
+/-- Theorem 13A (Post-Selection Winner's Curse): Whenever selection bias pushes estimate `est > 2 * μ`, applying it strictly increases error above doing nothing (`μ < |μ - est|`). -/
+theorem winners_curse_overshoot_hurts (μ est : Nat) (hOver : 2 * μ < est) :
+    μ < Int.natAbs ((μ : Int) - (est : Int)) := by
+  omega
+
+/-- Theorem 13B (Soft-Threshold De-Biasing): Subtracting post-selection bias `zSoft` (`zSoft < est < 2 * μ + zSoft`) strictly reduces error below the uncalibrated baseline (`|μ - (est - zSoft)| < μ`). -/
+theorem soft_threshold_strict_improvement
+    (μ est zSoft : Nat) (hTrigger : zSoft < est) (hBound : est < 2 * μ + zSoft) :
+    Int.natAbs ((μ : Int) - ((est - zSoft : Nat) : Int)) < μ := by
+  omega
+
 end Flow.Bundle
